@@ -93,22 +93,46 @@ nodes:
         TITLE=$(printf '%s' "$ISSUE_JSON" | jq -r '.title // empty' 2>/dev/null || true)
         BODY=$(printf '%s' "$ISSUE_JSON" | jq -r '.body // empty' 2>/dev/null || true)
         CRITERIA=$(printf '%s\n' "$BODY" | awk '
-          BEGIN{f=0; buf=""}
-          function flush(){if(buf!=""){print buf; buf=""}}
-          tolower($0) ~ /^#{1,6}[[:space:]]+(acceptance criteria|requirements|definition of done|success criteria|what did you expect\??|expected behaviou?r)[[:space:]]*:?[[:space:]]*/{f=1; next}
-          /^#{1,6}[[:space:]]/{if(f)exit}
-          f && /^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+/{
+          {lines[NR]=$0}
+          END{
+            fb=0; ft=0; fbs=0; fts=0; fbn=0; ftn=0;
+            for(i=1;i<=NR;i++){
+              L=lines[i];
+              nb=run(L,"`"); nt=run(L,"~");
+              if(!ft && nb>=3){
+                if(!fb){fb=1; fbs=i; fbn=nb}
+                else if(nb>=fbn && after(L,"`") ~ /^[[:space:]]*$/){fb=0; for(j=fbs;j<=i;j++) fence[j]=1}
+                continue
+              }
+              if(!fb && nt>=3){
+                if(!ft){ft=1; fts=i; ftn=nt}
+                else if(nt>=ftn && after(L,"~") ~ /^[[:space:]]*$/){ft=0; for(j=fts;j<=i;j++) fence[j]=1}
+                continue
+              }
+            }
+            f=0; buf="";
+            for(i=1;i<=NR;i++){
+              if(fence[i]) continue;
+              $0=lines[i];
+              if(tolower($0) ~ /^#{1,6}[[:space:]]+(acceptance criteria|requirements|definition of done|success criteria|what did you expect\??|expected behaviou?r)[[:space:]]*:?[[:space:]]*/){f=1; continue}
+              if($0 ~ /^#{1,6}[[:space:]]/){if(f)break; continue}
+              if(f && $0 ~ /^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+/){
+                flush();
+                line=$0; sub(/^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+(\[[ xX]\][[:space:]]*)?/,"",line);
+                sub(/[[:space:]]+$/,"",line);
+                buf=line; continue
+              }
+              if(f && $0 ~ /^[[:space:]]*$/){flush(); continue}
+              if(f && buf!="" && $0 ~ /^[[:space:]]/){
+                cont=$0; sub(/^[[:space:]]+/,"",cont); sub(/[[:space:]]+$/,"",cont);
+                if(cont!="") buf=buf " " cont; continue
+              }
+            }
             flush();
-            line=$0; sub(/^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+(\[[ xX]\][[:space:]]*)?/,"",line);
-            sub(/[[:space:]]+$/,"",line);
-            buf=line; next
           }
-          f && /^[[:space:]]*$/{flush(); next}
-          f && buf!="" && /^[[:space:]]/{
-            cont=$0; sub(/^[[:space:]]+/,"",cont); sub(/[[:space:]]+$/,"",cont);
-            if(cont!="") buf=buf " " cont; next
-          }
-          END{flush()}' | jq -R -s -c 'split("\n") | map(select(length>0))' 2>/dev/null || printf '[]')
+          function flush(){if(buf!=""){print buf; buf=""}}
+          function run(s,ch,   t,n){t=s; sub(/^[[:space:]]*/,"",t); n=0; while(substr(t,n+1,1)==ch) n++; return n}
+          function after(s,ch,   t,n){t=s; sub(/^[[:space:]]*/,"",t); n=run(s,ch); return substr(t,n+1)}' | jq -R -s -c 'split("\n") | map(select(length>0))' 2>/dev/null || printf '[]')
         case "$CRITERIA" in
           \[*\]) ;;
           *) CRITERIA="[]" ;;
