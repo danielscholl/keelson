@@ -14,6 +14,7 @@ import type {
   MessageChunk,
   ModelInfo,
   ProviderCapabilities,
+  ProviderFinishReason,
   SendQueryOptions,
 } from "../types.ts";
 import { buildFriendlyCopilotError, isCopilotConnectionError } from "./errors.ts";
@@ -651,17 +652,23 @@ export class CopilotProvider implements IAgentProvider {
       // requested alias. Sub-agent calls (top-level agentId set) are skipped so
       // a helper's model can't masquerade as the turn's.
       let reportedModel: string | undefined;
+      let lastFinishReason: ProviderFinishReason | undefined;
+      let finishReasonReported = false;
       unsubs.push(
         session.on("assistant.usage", (event: unknown) => {
+          const isRootAgent = readTopLevelString(event, "agentId") === undefined;
           const servedModel = readString(event, "model");
           if (
             servedModel !== undefined &&
             servedModel.length > 0 &&
             servedModel !== reportedModel &&
-            readTopLevelString(event, "agentId") === undefined
+            isRootAgent
           ) {
             reportedModel = servedModel;
             queue.push({ type: "model", model: servedModel });
+          }
+          if (isRootAgent) {
+            lastFinishReason = mapCopilotFinishReason(readString(event, "finishReason"));
           }
           const input = readCount(event, "inputTokens");
           const output = readCount(event, "outputTokens");
@@ -698,6 +705,12 @@ export class CopilotProvider implements IAgentProvider {
       );
       unsubs.push(
         session.on("session.idle", () => {
+          if (!finishReasonReported) {
+            finishReasonReported = true;
+            if (lastFinishReason !== undefined) {
+              options?.onFinishReason?.(lastFinishReason);
+            }
+          }
           queue.close();
         }),
       );
@@ -903,6 +916,13 @@ function filterToolsByRail<T extends { name: string }>(
     result = result.filter((t) => !deny.has(stripMcpPrefix(t.name)));
   }
   return result;
+}
+
+function mapCopilotFinishReason(reason: string | undefined): ProviderFinishReason | undefined {
+  if (reason === "stop") return "end";
+  if (reason === "length") return "max_tokens";
+  if (reason === "tool_calls" || reason === "content_filter") return reason;
+  return undefined;
 }
 
 function readString(event: unknown, key: string): string | undefined {
