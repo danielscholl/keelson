@@ -751,8 +751,35 @@ nodes:
       [ -z "$MODE" ] && MODE=local
       if [ "$MODE" = "delegate" ]; then ACT="delegate (GitHub Copilot coding agent)"; else ACT="local (harness)"; fi
 
-      # Goal: the plan's `## Goal` section, verbatim (no inference).
-      GOAL=$(awk '/^## Goal/{f=1;next} /^## /{f=0} f' "$ART/plan.md" 2>/dev/null \
+      # Goal: the plan's `## Goal` section. Fenced blocks are skipped so a
+      # `## ` inside one neither ends the section nor reaches the summary.
+      GOAL=$(awk '
+        function run(s,ch,   t,n){ t=s; sub(/^[[:space:]]*/,"",t); n=0; while(substr(t,n+1,1)==ch) n++; return n }
+        function after(s,ch,   t,n){ t=s; sub(/^[[:space:]]*/,"",t); n=run(s,ch); return substr(t,n+1) }
+        { lines[NR]=$0 }
+        END{
+          for(i=1;i<=NR;i++){
+            L=lines[i]
+            nb=run(L,"`"); nt=run(L,"~")
+            if(!ft && nb>=3){
+              if(!fb){ fb=1; fbs=i; fbn=nb }
+              else if(nb>=fbn && after(L,"`") ~ /^[[:space:]]*$/){ fb=0; for(j=fbs;j<=i;j++) fence[j]=1 }
+              continue
+            }
+            if(!fb && nt>=3){
+              if(!ft){ ft=1; fts=i; ftn=nt }
+              else if(nt>=ftn && after(L,"~") ~ /^[[:space:]]*$/){ ft=0; for(j=fts;j<=i;j++) fence[j]=1 }
+              continue
+            }
+          }
+          for(i=1;i<=NR;i++){
+            if(fence[i]) continue
+            L=lines[i]
+            if(L ~ /^## Goal/){f=1; continue}
+            if(L ~ /^## /){ if(f) break; continue }
+            if(f) print L
+          }
+        }' "$ART/plan.md" 2>/dev/null \
         | sed '/^[[:space:]]*$/d' | head -3)
       [ -z "$GOAL" ] && GOAL="(see plan: $ISSUE_URL)"
 
