@@ -133,6 +133,80 @@ shellDescribe("plan-act-evaluate report goal extraction", () => {
     expect(goal).not.toContain("Hidden.");
   });
 
+  test("a longer opening fence is not closed by a shorter interior one", () => {
+    const plan = [
+      "## Goal",
+      "",
+      "Render nested fences correctly, e.g.:",
+      "",
+      "````markdown",
+      "```json",
+      '{"x":1}',
+      "```",
+      "",
+      "## Overview",
+      "````",
+      "",
+      "Keep the trailing prose.",
+      "",
+      "## Constraints",
+      "",
+      "Hidden.",
+      "",
+    ].join("\n");
+    expect(reportGoal(plan)).toEqual([
+      "Render nested fences correctly, e.g.:",
+      "Keep the trailing prose.",
+    ]);
+  });
+
+  test("a longer opening tilde fence is not closed by a shorter interior one", () => {
+    const plan = [
+      "## Goal",
+      "",
+      "Normalize nested tilde fences:",
+      "",
+      "~~~~markdown",
+      "~~~text",
+      "LEAK-MARKER",
+      "~~~",
+      "~~~~",
+      "",
+      "Keep the trailing prose.",
+      "",
+      "## Constraints",
+      "",
+      "Hidden.",
+      "",
+    ].join("\n");
+    expect(reportGoal(plan)).toEqual([
+      "Normalize nested tilde fences:",
+      "Keep the trailing prose.",
+    ]);
+  });
+
+  test("a run carrying an info string does not close the fence", () => {
+    const plan = [
+      "## Goal",
+      "",
+      "Show a sample:",
+      "",
+      "```text",
+      "sample",
+      "```markdown",
+      "LEAK-MARKER",
+      "```",
+      "",
+      "Keep the trailing prose.",
+      "",
+      "## Constraints",
+      "",
+      "Hidden.",
+      "",
+    ].join("\n");
+    expect(reportGoal(plan)).toEqual(["Show a sample:", "Keep the trailing prose."]);
+  });
+
   test("goal stays capped at three lines", () => {
     const plan = ["## Goal", "", "one", "two", "three", "four", ""].join("\n");
     expect(reportGoal(plan)).toEqual(["one", "two", "three"]);

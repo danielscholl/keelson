@@ -754,12 +754,23 @@ nodes:
       # Goal: the plan's `## Goal` section. Fenced blocks are skipped so a
       # `## ` inside one neither ends the section nor reaches the summary.
       GOAL=$(awk '
+        function run(s,ch,   t,n){ t=s; sub(/^[[:space:]]*/,"",t); n=0; while(substr(t,n+1,1)==ch) n++; return n }
+        function after(s,ch,   t,n){ t=s; sub(/^[[:space:]]*/,"",t); n=run(s,ch); return substr(t,n+1) }
         { lines[NR]=$0 }
         END{
           for(i=1;i<=NR;i++){
             L=lines[i]
-            if(!ft && L ~ /^[[:space:]]*`{3,}/){ if(!fb){fb=1; fbs=i} else {fb=0; for(j=fbs;j<=i;j++) fence[j]=1} continue }
-            if(!fb && L ~ /^[[:space:]]*~{3,}/){ if(!ft){ft=1; fts=i} else {ft=0; for(j=fts;j<=i;j++) fence[j]=1} continue }
+            nb=run(L,"`"); nt=run(L,"~")
+            if(!ft && nb>=3){
+              if(!fb){ fb=1; fbs=i; fbn=nb }
+              else if(nb>=fbn && after(L,"`") ~ /^[[:space:]]*$/){ fb=0; for(j=fbs;j<=i;j++) fence[j]=1 }
+              continue
+            }
+            if(!fb && nt>=3){
+              if(!ft){ ft=1; fts=i; ftn=nt }
+              else if(nt>=ftn && after(L,"~") ~ /^[[:space:]]*$/){ ft=0; for(j=fts;j<=i;j++) fence[j]=1 }
+              continue
+            }
           }
           for(i=1;i<=NR;i++){
             if(fence[i]) continue
