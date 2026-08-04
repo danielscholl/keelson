@@ -375,6 +375,15 @@ describe("makeRibAgentTurn — stop reasons and session resume", () => {
     expect(result.stopReason).toBe("end");
   });
 
+  for (const finishReason of ["tool_calls", "content_filter"] as const) {
+    it(`does not expose provider-internal '${finishReason}' through the public result`, async () => {
+      const run = makeRun(fakeProvider({ finishReason }));
+      const result = await run("chamber", { prompt: "hi" }).result;
+      expect(result.status).toBe("ok");
+      expect(result.stopReason).toBeUndefined();
+    });
+  }
+
   it("does not fabricate a stop reason when the provider reports none", async () => {
     const run = makeRun(fakeProvider());
     const result = await run("chamber", { prompt: "hi" }).result;

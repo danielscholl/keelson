@@ -12,6 +12,7 @@ import {
   getProviderInfoList,
   type IAgentProvider,
   isRegisteredProvider as registryHasProvider,
+  type ProviderFinishReason,
   type SendQueryOptions,
 } from "@keelson/providers";
 import {
@@ -241,7 +242,7 @@ async function runTurn(
       : undefined;
 
   let capturedSessionId: string | undefined;
-  let reportedFinish: "end" | "max_tokens" | undefined;
+  let reportedFinish: ProviderFinishReason | undefined;
   const options: SendQueryOptions = {
     abortSignal: controller.signal,
     ...(req.system ? { systemPrompt: req.system } : {}),
@@ -287,7 +288,9 @@ async function runTurn(
         ribId,
       });
     }
-    const stopReason = result.status === "ok" ? reportedFinish : result.status;
+    const publicProviderStopReason =
+      reportedFinish === "end" || reportedFinish === "max_tokens" ? reportedFinish : undefined;
+    const stopReason = result.status === "ok" ? publicProviderStopReason : result.status;
     return {
       ...result,
       ...(turnUsage !== undefined ? { usage: turnUsage } : {}),
