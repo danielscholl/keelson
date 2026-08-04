@@ -167,6 +167,75 @@ Prose that is not a criterion.
     expect(extractBrief(body).criteria).toEqual(["Final criterion wrapped to a second line"]);
   });
 
+  test.each([
+    [
+      "backtick-fenced criteria quote",
+      [
+        "## Evidence",
+        "",
+        "Reproduced directly against the extractor with an issue-shaped body:",
+        "",
+        "```markdown",
+        "## Acceptance criteria",
+        "",
+        "- `errors.py` defines `EXIT_ENV_NOT_READY = 6`",
+        "- Unit tests cover ready and malformed payload handling",
+        "```",
+        "",
+      ].join("\n"),
+      [],
+    ],
+    [
+      "tilde-fenced criteria quote",
+      [
+        "## Evidence",
+        "",
+        "~~~markdown",
+        "## Acceptance criteria",
+        "",
+        "- Ignore this example criterion",
+        "~~~",
+        "",
+      ].join("\n"),
+      [],
+    ],
+    [
+      "real criteria followed by a fenced quote",
+      [
+        "## Acceptance criteria",
+        "",
+        "- Keep the real criterion",
+        "",
+        "## Evidence",
+        "",
+        "```markdown",
+        "## Acceptance criteria",
+        "",
+        "- Ignore this quoted criterion",
+        "```",
+        "",
+      ].join("\n"),
+      ["Keep the real criterion"],
+    ],
+    [
+      "real criteria after an unclosed fence",
+      [
+        "## Evidence",
+        "",
+        "```markdown",
+        "Example output with a missing closing fence.",
+        "",
+        "## Acceptance criteria",
+        "",
+        "- Keep criteria after the unclosed fence",
+        "",
+      ].join("\n"),
+      ["Keep criteria after the unclosed fence"],
+    ],
+  ])("handles a %s", (_name, body, criteria) => {
+    expect(extractBrief(body).criteria).toEqual(criteria);
+  });
+
   test("leaves a bug-report-shaped prose expectation for fallback extraction", () => {
     const body = `## What happened?
 
