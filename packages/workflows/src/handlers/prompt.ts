@@ -30,6 +30,7 @@ import type { NodeHandler, NodeResult, NodeTokenUsage } from "../executor.ts";
 import { buildOutputFormatSuffix, extractJsonValue } from "./output-format.ts";
 
 type ModelClassName = "fast" | "balanced" | "deep";
+type PromptFinishReason = NonNullable<NodeResult["finishReason"]>;
 
 const MODEL_CLASS_NAMES: ReadonlySet<string> = new Set(["fast", "balanced", "deep"]);
 
@@ -91,6 +92,7 @@ export interface PromptHandlerSendOptions {
   // can correctly identify MCP names even when one was filtered out by
   // the global denylist.
   registeredMcpToolNames?: readonly string[];
+  onFinishReason?: (reason: PromptFinishReason) => void;
   // Per-node hook matchers from the vendored schema. Forwarded verbatim
   // to the provider, which projects them into the SDK's hook protocol.
   hooks?: Readonly<
@@ -547,6 +549,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // The provider's end-of-turn usage chunk; rides NodeResult → node_done
       // rather than the node_chunk channel.
       let nodeUsage: NodeTokenUsage | undefined;
+      let finishReason: PromptFinishReason | undefined;
 
       let iterator: AsyncIterator<unknown> | undefined;
       let iteratorReturned = false;
@@ -680,6 +683,9 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             ...(boundToolResultGate !== undefined
               ? { evaluateToolResult: boundToolResultGate }
               : {}),
+            onFinishReason: (reason) => {
+              finishReason = reason;
+            },
             // Forward the UNFILTERED catalog so the claude provider
             // can detect MCP names even when one was filtered out
             // by the global denylist.
@@ -870,6 +876,12 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           output: { kind: "text", text: assistantText },
           error: `node required a successful call to '${missingRequiredTool}' but the turn produced none`,
         };
+      } else if (finishReason !== undefined && finishReason !== "end") {
+        result = {
+          status: "failed",
+          output: { kind: "text", text: assistantText },
+          error: `prompt node did not finish cleanly (provider finish reason: '${finishReason}')`,
+        };
       } else if (nodeOutputFormat !== undefined) {
         // output_format → structured output only when the reply yields a JSON
         // object or array. A bare scalar (null/true/42/"x") or a non-JSON reply
@@ -902,6 +914,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // spent whatever the provider reported before the cut, and still ran on a
       // resolved provider/model worth surfacing in the trace.
       if (nodeUsage !== undefined) result.usage = nodeUsage;
+      if (finishReason !== undefined) result.finishReason = finishReason;
       // Only stamp provenance when a provider was actually resolved — a node that
       // failed on an unknown `provider:` never ran on the requested provider/model.
       if (providerResolved) {
