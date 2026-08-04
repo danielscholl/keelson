@@ -124,6 +124,24 @@ shellDescribe("fix-issue brief extraction", () => {
     expect(extractBrief(body).criteria).toEqual(criteria);
   });
 
+  test("folds wrapped criteria continuation lines", () => {
+    const body = `## Acceptance Criteria
+
+- \`errors.py\` defines \`EXIT_ENV_NOT_READY = 6\`; \`aggregate_exit_code\` covers it;
+  callers preserve the not-ready envelope
+  without converting it to a generic failure.
+- Unit tests cover: ready envelope, each not-ready reason, apiVersion mismatch,
+  and malformed payload handling.
+- Existing exit codes remain unchanged.
+`;
+
+    expect(extractBrief(body).criteria).toEqual([
+      "`errors.py` defines `EXIT_ENV_NOT_READY = 6`; `aggregate_exit_code` covers it; callers preserve the not-ready envelope without converting it to a generic failure.",
+      "Unit tests cover: ready envelope, each not-ready reason, apiVersion mismatch, and malformed payload handling.",
+      "Existing exit codes remain unchanged.",
+    ]);
+  });
+
   test("leaves a bug-report-shaped prose expectation for fallback extraction", () => {
     const body = `## What happened?
 
