@@ -26,6 +26,7 @@ interface SpyCall {
 
 interface SpyProviderOptions {
   chunks?: unknown[];
+  finishReason?: "end" | "max_tokens" | "tool_calls" | "content_filter";
   throwAt?: number;
   throwError?: Error;
   chunkDelayMs?: number;
@@ -81,6 +82,9 @@ function makeSpyProvider(opts: SpyProviderOptions = {}): {
           throw new DOMException("aborted", "AbortError");
         }
         yield chunks[i];
+      }
+      if (opts.finishReason !== undefined) {
+        options?.onFinishReason?.(opts.finishReason);
       }
     },
   };
@@ -208,6 +212,43 @@ describe("makePromptHandler", () => {
     });
     const result = await handler.handle(stubNode, buildCtx());
     expect(result.status).toBe("succeeded");
+    expect(result.finishReason).toBeUndefined();
+  });
+
+  for (const finishReason of ["max_tokens", "tool_calls", "content_filter"] as const) {
+    test(`fails when the provider finishes with '${finishReason}'`, async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "partial answer" }, { type: "done" }],
+        finishReason,
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+
+      const result = await handler.handle(stubNode, buildCtx());
+
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain(finishReason);
+      expect(result.finishReason).toBe(finishReason);
+      expect(result.output).toEqual({ kind: "text", text: "partial answer" });
+    });
+  }
+
+  test("keeps a clean provider finish successful and records it", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "answer" }, { type: "done" }],
+      finishReason: "end",
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+
+    const result = await handler.handle(stubNode, buildCtx());
+
+    expect(result.status).toBe("succeeded");
+    expect(result.finishReason).toBe("end");
   });
 
   test("separates text blocks without splitting contiguous deltas", async () => {

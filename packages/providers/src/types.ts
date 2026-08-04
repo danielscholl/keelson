@@ -59,7 +59,7 @@ export type ToolResultGate = (result: {
   result: unknown;
 }) => Promise<{ outcome: "allow"; data?: string } | { outcome: "deny"; reason: string }>;
 
-export type ProviderFinishReason = "end" | "max_tokens";
+export type ProviderFinishReason = "end" | "max_tokens" | "tool_calls" | "content_filter";
 
 export interface SendQueryOptions {
   model?: string;

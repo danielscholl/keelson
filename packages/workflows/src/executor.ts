@@ -143,6 +143,8 @@ export interface NodeResult {
   model?: string;
   /** Effective reasoning tier the node ran at, normalized to the provider spelling (`max` → `xhigh`). Absent for non-LLM nodes and when neither node nor workflow declared one. */
   effort?: string;
+  /** Provider-reported finish reason for LLM-backed nodes; absent when the provider reports none. */
+  finishReason?: "end" | "max_tokens" | "tool_calls" | "content_filter";
 }
 
 export interface NodeHandler {

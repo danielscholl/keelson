@@ -12,6 +12,7 @@ import type {
   CopilotSdkModule,
   CopilotSessionLike,
   MessageChunk,
+  ProviderFinishReason,
 } from "../src/index.ts";
 import {
   buildFriendlyCopilotError,
@@ -2750,6 +2751,86 @@ describe("CopilotProvider — token usage (chat/workflow usage feedback)", () =>
     const chunks = await drain(provider.sendQuery("hi", "/tmp"));
 
     expect(chunks.filter((c) => c.type === "usage")).toHaveLength(0);
+  });
+});
+
+describe("CopilotProvider — finish-reason reporting", () => {
+  const collectReasons = async (
+    scenario: NonNullable<MockSdkOptions["scenario"]>,
+  ): Promise<ProviderFinishReason[]> => {
+    const sdk = makeMockSdk({ scenario });
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+    const reasons: ProviderFinishReason[] = [];
+
+    await drain(
+      provider.sendQuery("hi", "/tmp", undefined, {
+        onFinishReason: (reason) => reasons.push(reason),
+      }),
+    );
+
+    return reasons;
+  };
+
+  const cases = [
+    ["stop", "end"],
+    ["length", "max_tokens"],
+    ["tool_calls", "tool_calls"],
+    ["content_filter", "content_filter"],
+  ] as const;
+
+  for (const [sdkReason, expected] of cases) {
+    it(`maps SDK reason '${sdkReason}' to '${expected}'`, async () => {
+      const reasons = await collectReasons((session) => {
+        session.emit("assistant.usage", { finishReason: sdkReason });
+        session.emit("session.idle");
+      });
+
+      expect(reasons).toEqual([expected]);
+    });
+  }
+
+  it("does not report a reason when the final root usage event has none", async () => {
+    const reasons = await collectReasons((session) => {
+      session.emit("assistant.usage", { finishReason: "tool_calls" });
+      session.emit("assistant.usage", { inputTokens: 1, outputTokens: 1 });
+      session.emit("session.idle");
+    });
+
+    expect(reasons).toEqual([]);
+  });
+
+  it("uses the last root usage reason when an agentic turn ends cleanly", async () => {
+    const reasons = await collectReasons((session) => {
+      session.emit("assistant.usage", { finishReason: "tool_calls" });
+      session.emit("assistant.usage", { finishReason: "stop" });
+      session.emit("session.idle");
+      session.emit("session.idle");
+    });
+
+    expect(reasons).toEqual(["end"]);
+  });
+
+  it("uses the last root usage reason when an agentic turn stops on tool calls", async () => {
+    const reasons = await collectReasons((session) => {
+      session.emit("assistant.usage", { finishReason: "stop" });
+      session.emit("assistant.usage", { finishReason: "tool_calls" });
+      session.emit("session.idle");
+    });
+
+    expect(reasons).toEqual(["tool_calls"]);
+  });
+
+  it("uses the last usage reason even when the event carries an agent id", async () => {
+    const reasons = await collectReasons((session) => {
+      session.emit("assistant.usage", { finishReason: "stop" });
+      session.emit("assistant.usage", { finishReason: "content_filter" }, { agentId: "sub-agent" });
+      session.emit("session.idle");
+    });
+
+    expect(reasons).toEqual(["content_filter"]);
   });
 });
 
