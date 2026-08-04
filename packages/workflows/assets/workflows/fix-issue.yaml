@@ -95,17 +95,18 @@ nodes:
         CRITERIA=$(printf '%s\n' "$BODY" | awk '
           {lines[NR]=$0}
           END{
-            fb=0; ft=0; fbs=0; fts=0;
+            fb=0; ft=0; fbs=0; fts=0; fbn=0; ftn=0;
             for(i=1;i<=NR;i++){
               L=lines[i];
-              if(!ft && L ~ /^[[:space:]]*`{3,}/){
-                if(!fb){fb=1; fbs=i}
-                else{fb=0; for(j=fbs;j<=i;j++) fence[j]=1}
+              nb=run(L,"`"); nt=run(L,"~");
+              if(!ft && nb>=3){
+                if(!fb){fb=1; fbs=i; fbn=nb}
+                else if(nb>=fbn && after(L,"`") ~ /^[[:space:]]*$/){fb=0; for(j=fbs;j<=i;j++) fence[j]=1}
                 continue
               }
-              if(!fb && L ~ /^[[:space:]]*~{3,}/){
-                if(!ft){ft=1; fts=i}
-                else{ft=0; for(j=fts;j<=i;j++) fence[j]=1}
+              if(!fb && nt>=3){
+                if(!ft){ft=1; fts=i; ftn=nt}
+                else if(nt>=ftn && after(L,"~") ~ /^[[:space:]]*$/){ft=0; for(j=fts;j<=i;j++) fence[j]=1}
                 continue
               }
             }
@@ -129,7 +130,9 @@ nodes:
             }
             flush();
           }
-          function flush(){if(buf!=""){print buf; buf=""}}' | jq -R -s -c 'split("\n") | map(select(length>0))' 2>/dev/null || printf '[]')
+          function flush(){if(buf!=""){print buf; buf=""}}
+          function run(s,ch,   t,n){t=s; sub(/^[[:space:]]*/,"",t); n=0; while(substr(t,n+1,1)==ch) n++; return n}
+          function after(s,ch,   t,n){t=s; sub(/^[[:space:]]*/,"",t); n=run(s,ch); return substr(t,n+1)}' | jq -R -s -c 'split("\n") | map(select(length>0))' 2>/dev/null || printf '[]')
         case "$CRITERIA" in
           \[*\]) ;;
           *) CRITERIA="[]" ;;
