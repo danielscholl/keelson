@@ -11,8 +11,8 @@ import {
   getAgentProvider,
   getProviderInfoList,
   type IAgentProvider,
-  isRegisteredProvider as registryHasProvider,
   type ProviderFinishReason,
+  isRegisteredProvider as registryHasProvider,
   type SendQueryOptions,
 } from "@keelson/providers";
 import {

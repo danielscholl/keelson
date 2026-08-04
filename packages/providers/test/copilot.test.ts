@@ -2826,11 +2826,7 @@ describe("CopilotProvider — finish-reason reporting", () => {
   it("uses the last usage reason even when the event carries an agent id", async () => {
     const reasons = await collectReasons((session) => {
       session.emit("assistant.usage", { finishReason: "stop" });
-      session.emit(
-        "assistant.usage",
-        { finishReason: "content_filter" },
-        { agentId: "sub-agent" },
-      );
+      session.emit("assistant.usage", { finishReason: "content_filter" }, { agentId: "sub-agent" });
       session.emit("session.idle");
     });
 
