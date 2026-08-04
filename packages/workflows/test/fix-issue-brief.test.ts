@@ -124,6 +124,49 @@ shellDescribe("fix-issue brief extraction", () => {
     expect(extractBrief(body).criteria).toEqual(criteria);
   });
 
+  test("folds wrapped criteria continuation lines", () => {
+    const body = `## Acceptance Criteria
+
+- \`errors.py\` defines \`EXIT_ENV_NOT_READY = 6\`; \`aggregate_exit_code\` covers it;
+  callers preserve the not-ready envelope
+  without converting it to a generic failure.
+- Unit tests cover: ready envelope, each not-ready reason, apiVersion mismatch,
+  and malformed payload handling.
+- Existing exit codes remain unchanged.
+`;
+
+    expect(extractBrief(body).criteria).toEqual([
+      "`errors.py` defines `EXIT_ENV_NOT_READY = 6`; `aggregate_exit_code` covers it; callers preserve the not-ready envelope without converting it to a generic failure.",
+      "Unit tests cover: ready envelope, each not-ready reason, apiVersion mismatch, and malformed payload handling.",
+      "Existing exit codes remain unchanged.",
+    ]);
+  });
+
+  test("keeps a wrapped criterion the body ends on without a trailing newline", () => {
+    const body = "## Acceptance Criteria\n\n- Final criterion\n  wrapped to a second line";
+
+    expect(extractBrief(body).criteria).toEqual(["Final criterion wrapped to a second line"]);
+  });
+
+  test("keeps a wrapped criterion the next heading terminates", () => {
+    const body = `## Acceptance Criteria
+
+- Final criterion
+  wrapped to a second line
+## Notes
+
+Prose that is not a criterion.
+`;
+
+    expect(extractBrief(body).criteria).toEqual(["Final criterion wrapped to a second line"]);
+  });
+
+  test("folds a criterion wrapped on a Markdown hard break without doubling spaces", () => {
+    const body = "## Acceptance Criteria\n\n- Final criterion  \n  wrapped to a second line\n";
+
+    expect(extractBrief(body).criteria).toEqual(["Final criterion wrapped to a second line"]);
+  });
+
   test("leaves a bug-report-shaped prose expectation for fallback extraction", () => {
     const body = `## What happened?
 
