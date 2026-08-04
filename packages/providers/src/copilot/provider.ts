@@ -667,9 +667,7 @@ export class CopilotProvider implements IAgentProvider {
             reportedModel = servedModel;
             queue.push({ type: "model", model: servedModel });
           }
-          if (isRootAgent) {
-            lastFinishReason = mapCopilotFinishReason(readString(event, "finishReason"));
-          }
+          lastFinishReason = mapCopilotFinishReason(readString(event, "finishReason"));
           const input = readCount(event, "inputTokens");
           const output = readCount(event, "outputTokens");
           const cacheRead = readCount(event, "cacheReadTokens");
