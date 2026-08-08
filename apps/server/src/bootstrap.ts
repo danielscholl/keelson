@@ -952,9 +952,8 @@ export interface BootstrapWorkflowsOptions {
   // Rib id → display name, from the activated manifests, so a rib-sourced entry
   // carries a human label for the UI badge.
   ribNames?: ReadonlyMap<string, string>;
-  // Boot-time rib workflow notices (folder load errors, rejected or duplicate
-  // contributions) folded into discoveryNotices so they surface in the UI, not
-  // only in server logs. Static per process, unlike the rescanning file set.
+  // Rib workflow notices (folder load errors, rejected or duplicate
+  // contributions) folded into discoveryNotices so they surface in the UI.
   ribNotices?: readonly WorkflowDiscoveryNotice[];
 }
 
@@ -989,6 +988,12 @@ export interface WorkflowCatalog {
   // wire schema. The SPA toasts these once on first Workflows-tab load.
   // Project-dir notices surface only under that project's scope.
   discoveryNotices(scope?: WorkflowScopeContext): WorkflowDiscoveryNotice[];
+  setRibWorkflows(next: {
+    definitions: readonly WorkflowDefinition[];
+    provenance: ReadonlyMap<string, RibWorkflowProvenance>;
+    ribNames: ReadonlyMap<string, string>;
+    notices: readonly WorkflowDiscoveryNotice[];
+  }): void;
 }
 
 interface ProjectScopeSnapshot {
@@ -1046,9 +1051,13 @@ function catalogSignature(dir: string): string {
 export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCatalog {
   const dir = opts.workflowDir;
   const bundledDir = opts.bundledDir;
-  const extra = opts.extra ?? [];
-  const ribProvenance = opts.ribProvenance;
-  const ribNames = opts.ribNames;
+  let ribOverlay = {
+    definitions: opts.extra ?? [],
+    provenance: opts.ribProvenance ?? new Map<string, RibWorkflowProvenance>(),
+    ribNames: opts.ribNames ?? new Map<string, string>(),
+    notices: opts.ribNotices ?? [],
+  };
+  let ribGeneration = 0;
   let cached: CatalogSnapshot | undefined;
 
   // In the monorepo dev layout the global dir already lives under a project
@@ -1082,6 +1091,7 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
         (p) =>
           `${p.id}:${p.name}:${p.rootPath}:${catalogSignature(projectWorkflowsDir(p.rootPath))}`,
       ),
+      `ribgen:${ribGeneration}`,
     ].join("\n");
     if (cached && cached.signature === signature) return cached;
     // Bundled first so a same-named global file overrides it (later roots win).
@@ -1089,7 +1099,7 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
       ...(bundledDir ? [{ dir: bundledDir, source: "bundled" as const }] : []),
       { dir, source: "global" },
     ]);
-    const notices: WorkflowDiscoveryNotice[] = [...(opts.ribNotices ?? [])];
+    const notices: WorkflowDiscoveryNotice[] = [...ribOverlay.notices];
     for (const error of result.errors) {
       console.warn(`[workflows] failed to load ${error.filename}: ${error.error}`);
       notices.push({
@@ -1113,7 +1123,7 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
     }
     // Rib-contributed workflows fill in around the filesystem set; a name
     // collision keeps the filesystem definition so an operator can override.
-    for (const definition of extra) {
+    for (const definition of ribOverlay.definitions) {
       if (byName.has(definition.name)) {
         console.warn(
           `[workflows] rib workflow '${definition.name}' shadowed by a global workflow file of the same name`,
@@ -1126,9 +1136,9 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
         continue;
       }
       byName.set(definition.name, definition);
-      const prov = ribProvenance?.get(definition.name);
+      const prov = ribOverlay.provenance.get(definition.name);
       const ribId = prov?.ribId;
-      const ribName = ribId !== undefined ? ribNames?.get(ribId) : undefined;
+      const ribName = ribId !== undefined ? ribOverlay.ribNames.get(ribId) : undefined;
       provenance.set(definition.name, {
         source: {
           kind: "rib",
@@ -1226,6 +1236,11 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
     discoveryNotices: (scope) => {
       const { snapshot, project } = projectView(scope);
       return project ? [...snapshot.notices, ...project.notices] : snapshot.notices;
+    },
+    setRibWorkflows: (next) => {
+      ribOverlay = next;
+      ribGeneration += 1;
+      cached = undefined;
     },
   };
 }
