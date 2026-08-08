@@ -209,6 +209,7 @@ const resumeInputSchema = z.object({
 
 const statusInputSchema = z.object({
   runId: z.string().optional(),
+  brief: z.boolean().optional(),
 });
 
 const REPO_MISSING_HINT_RE = /(?:failed to run git|not a git repository)/i;
