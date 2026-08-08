@@ -122,6 +122,7 @@ export interface ApplyRibsResult {
     (name: string, prefix: string) => Promise<readonly CommandCompletion[]>
   >;
   readonly workflowContributions: RibWorkflowContribution[];
+  readonly recollectWorkflowContributions: () => RibWorkflowContribution[];
   // Docs sources each active rib contributed (Rib.contributeDocs), tagged with
   // the owning rib id. The composition root folds these into the DocsCatalog.
   readonly docsContributions: RibDocsContribution[];
@@ -280,6 +281,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     (name: string, prefix: string) => Promise<readonly CommandCompletion[]>
   >();
   const workflowContributions: RibWorkflowContribution[] = [];
+  const workflowContributors: Array<{ rib: Rib; ribCtx: RibContext }> = [];
   const docsContributions: RibDocsContribution[] = [];
   const policies: RibPolicyContribution[] = [];
   const tools: ToolDefinition[] = [];
@@ -479,6 +481,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     }
 
     if (rib.contributeWorkflows) {
+      workflowContributors.push({ rib, ribCtx });
       for (const contribution of rib.contributeWorkflows(ribCtx)) {
         const bindKey = contribution.bindSnapshotKey;
         let publish: ((value: unknown) => void) | undefined;
@@ -575,6 +578,25 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       disposers.push({ id: rib.id, dispose: rib.dispose.bind(rib) });
     }
   }
+  const recollectWorkflowContributions = (): RibWorkflowContribution[] => {
+    const contributions: RibWorkflowContribution[] = [];
+    for (const { rib, ribCtx } of workflowContributors) {
+      try {
+        for (const contribution of rib.contributeWorkflows!(ribCtx)) {
+          const bindKey = contribution.bindSnapshotKey;
+          contributions.push({
+            ribId: rib.id,
+            definition: contribution.definition,
+            ...(bindKey !== undefined ? { bindSnapshotKey: bindKey } : {}),
+          });
+        }
+      } catch {
+        console.warn(`[keelson] rib '${rib.id}' contributeWorkflows failed during reload; skipping`);
+      }
+    }
+    return contributions;
+  };
+
   return {
     manifests,
     disposers,
@@ -587,6 +609,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     commandInvokers,
     commandCompleters,
     workflowContributions,
+    recollectWorkflowContributions,
     docsContributions,
     policies,
     tools,

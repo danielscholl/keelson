@@ -1001,6 +1001,55 @@ describe("bootstrapRibs", () => {
     expect(await actionHandlers.get("alpha")?.({ type: "go" })).toEqual({ ok: true });
   });
 
+  test("recollects current workflow contributions and skips a rib that throws", () => {
+    let revision = "first";
+    let shouldThrow = false;
+    const result = applyRibs({
+      active: ["alpha"],
+      available: {
+        alpha: {
+          id: "alpha",
+          displayName: "alpha",
+          contributeWorkflows: () => {
+            if (shouldThrow) throw new Error("reload failed");
+            return [
+              {
+                definition: {
+                  name: "alpha-workflow",
+                  description: revision,
+                  nodes: [{ id: "step", bash: "echo hi" }],
+                },
+                bindSnapshotKey: "rib:alpha:result",
+              },
+            ];
+          },
+        },
+      },
+      ctx: {
+        getExec: () => ({
+          runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+          runText: async () => ({ ok: true as const, data: "" }),
+        }),
+      },
+    });
+
+    revision = "second";
+    expect(result.recollectWorkflowContributions()).toEqual([
+      {
+        ribId: "alpha",
+        definition: {
+          name: "alpha-workflow",
+          description: "second",
+          nodes: [{ id: "step", bash: "echo hi" }],
+        },
+        bindSnapshotKey: "rib:alpha:result",
+      },
+    ]);
+
+    shouldThrow = true;
+    expect(result.recollectWorkflowContributions()).toEqual([]);
+  });
+
   describe("tool registration", () => {
     beforeEach(() => clearRegistry());
     afterEach(() => clearRegistry());
