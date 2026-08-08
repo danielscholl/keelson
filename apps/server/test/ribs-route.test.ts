@@ -552,6 +552,38 @@ describe("rib workflow contribution + binding", () => {
     expect(resolved()).toBeDefined();
   });
 
+  test("a rib workflow reload retains a boot-bound definition and its binding", async () => {
+    const { ribs } = await makeRig();
+    const boot = prepareRibWorkflows(ribs.workflowContributions);
+    const bootDefinition = boot.definitions.find((definition) => definition.name === "v2-live");
+    if (!bootDefinition) throw new Error("fixture workflow missing");
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      extra: boot.definitions,
+      ribProvenance: boot.provenance,
+    });
+
+    const recollected = ribs.recollectWorkflows();
+    const fresh = prepareRibWorkflows(recollected.contributions);
+    const nextDefinitions = fresh.definitions.map((definition) =>
+      boot.boundKeys.has(definition.name) ? bootDefinition : definition,
+    );
+    const nextProvenance = new Map(fresh.provenance);
+    const bootSource = boot.provenance.get(bootDefinition.name);
+    if (!bootSource) throw new Error("fixture workflow provenance missing");
+    nextProvenance.set(bootDefinition.name, bootSource);
+    catalog.setRibWorkflows({
+      definitions: nextDefinitions,
+      provenance: nextProvenance,
+      ribNames: new Map([["v2", "V2 Rib"]]),
+      notices: [...recollected.notices, ...fresh.notices],
+    });
+
+    const resolved = catalog.get("v2-live");
+    expect(resolved).toBe(bootDefinition);
+    expect(boot.bindings.has(resolved!)).toBe(true);
+  });
+
   test("two ribs contributing the same workflow name keep the accepted def's binding", async () => {
     const contributions = [
       {
