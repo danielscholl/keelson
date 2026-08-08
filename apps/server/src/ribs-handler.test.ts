@@ -8,8 +8,9 @@
 
 import { describe, expect, it } from "bun:test";
 import type { RibSurfaceDescriptor, RibViewDescriptor } from "@keelson/shared";
+import { Hono } from "hono";
 import { allRegions, type RibManifest } from "./ribs.ts";
-import { ownedSurfaces, ownedViews } from "./ribs-handler.ts";
+import { ownedSurfaces, ownedViews, type RibsRoutesDeps, ribsRoutes } from "./ribs-handler.ts";
 
 function manifest(over: Partial<RibManifest> = {}): RibManifest {
   return {
@@ -31,6 +32,80 @@ function surface(id: string, regionKey: string): RibSurfaceDescriptor {
     layout: { rows: [{ columns: [{ key: regionKey }] }] },
   } as RibSurfaceDescriptor;
 }
+
+function reloadApp(reloadWorkflows?: RibsRoutesDeps["reloadWorkflows"]): Hono {
+  const app = new Hono();
+  ribsRoutes(app, {
+    manifests: [],
+    probes: new Map(),
+    actionHandlers: new Map(),
+    ...(reloadWorkflows ? { reloadWorkflows } : {}),
+  });
+  return app;
+}
+
+function reloadRequest(origin = "http://127.0.0.1:5173"): Request {
+  return new Request("http://test/api/ribs/reload-workflows", {
+    method: "POST",
+    headers: { origin },
+  });
+}
+
+describe("POST /api/ribs/reload-workflows", () => {
+  it("returns the validated reload result", async () => {
+    const app = reloadApp(() => ({
+      count: 2,
+      notices: [
+        {
+          level: "warning",
+          filename: "<rib:alpha>",
+          message: "duplicate workflow",
+        },
+      ],
+    }));
+
+    const response = await app.fetch(reloadRequest());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      count: 2,
+      notices: [
+        {
+          level: "warning",
+          filename: "<rib:alpha>",
+          message: "duplicate workflow",
+        },
+      ],
+    });
+  });
+
+  it("rejects a malformed reload result", async () => {
+    const app = reloadApp(() => ({ count: -1, notices: [] }));
+    const response = await app.fetch(reloadRequest());
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "reload returned a malformed response" });
+  });
+
+  it("rejects a foreign origin", async () => {
+    const app = reloadApp(() => ({ count: 0, notices: [] }));
+    const response = await app.fetch(reloadRequest("https://example.com"));
+    expect(response.status).toBe(403);
+  });
+
+  it("reports unavailable when the reload thunk is absent", async () => {
+    const response = await reloadApp().fetch(reloadRequest());
+    expect(response.status).toBe(501);
+    expect(await response.json()).toEqual({ error: "reload unavailable" });
+  });
+
+  it("returns a reload failure as an error response", async () => {
+    const app = reloadApp(() => {
+      throw new Error("reload failed");
+    });
+    const response = await app.fetch(reloadRequest());
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "reload failed" });
+  });
+});
 
 describe("GET /api/ribs — descriptor ownership is re-checked per request", () => {
   it("serves a rib's own views", () => {
