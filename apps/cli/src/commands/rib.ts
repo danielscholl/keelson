@@ -17,7 +17,7 @@ import {
   restoreHome,
   snapshotHome,
 } from "../home.ts";
-import { listRibs } from "../http/ribs-client.ts";
+import { listRibs, reloadRibWorkflows } from "../http/ribs-client.ts";
 import { HttpError, isServerDownError } from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
 import {
@@ -244,6 +244,20 @@ export async function runRibList(opts: RibListOptions): Promise<never> {
     process.exit(EXIT_OK);
   } catch (err) {
     failHttp(err, opts, "list ribs");
+  }
+}
+
+export async function runRibReload(opts: BaseOptions): Promise<never> {
+  const baseUrl = effectiveBaseUrl(opts);
+  try {
+    const result = await reloadRibWorkflows(baseUrl);
+    emit(
+      { data: { reloaded: result.count, notices: result.notices } },
+      { json: opts.json },
+    );
+    process.exit(EXIT_OK);
+  } catch (err) {
+    failHttp(err, opts, "reload rib workflows");
   }
 }
 

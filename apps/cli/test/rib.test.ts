@@ -61,7 +61,20 @@ beforeAll(() => {
   server = Bun.serve({
     port: 0,
     fetch(req) {
-      if (new URL(req.url).pathname === "/api/ribs") return Response.json({ ribs: RIBS });
+      const pathname = new URL(req.url).pathname;
+      if (pathname === "/api/ribs") return Response.json({ ribs: RIBS });
+      if (pathname === "/api/ribs/reload-workflows" && req.method === "POST") {
+        return Response.json({
+          count: 2,
+          notices: [
+            {
+              level: "warning",
+              filename: "<rib:demo>",
+              message: "duplicate workflow",
+            },
+          ],
+        });
+      }
       return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
     },
   });
@@ -127,6 +140,37 @@ describe("keelson rib (HTTP)", () => {
       "--json",
       "rib",
       "list",
+      "--base-url",
+      "http://127.0.0.1:1",
+    ]);
+    expect(exitCode).toBe(3);
+    const env = JSON.parse(stdout.trim());
+    expect(env.ok).toBe(false);
+    expect(env.code).toBe("NO_SERVER");
+  });
+
+  test("rib reload --json reports the refreshed workflow count and notices", async () => {
+    const { stdout, exitCode } = await runCli(["--json", "rib", "reload", "--base-url", baseUrl]);
+    expect(exitCode).toBe(0);
+    const env = JSON.parse(stdout.trim());
+    expect(env.ok).toBe(true);
+    expect(env.data).toEqual({
+      reloaded: 2,
+      notices: [
+        {
+          level: "warning",
+          filename: "<rib:demo>",
+          message: "duplicate workflow",
+        },
+      ],
+    });
+  });
+
+  test("rib reload without a server exits 3 with NO_SERVER", async () => {
+    const { stdout, exitCode } = await runCli([
+      "--json",
+      "rib",
+      "reload",
       "--base-url",
       "http://127.0.0.1:1",
     ]);

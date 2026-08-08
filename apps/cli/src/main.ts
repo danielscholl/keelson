@@ -20,7 +20,7 @@ import { runGatewayAdd, runGatewayList, runGatewayRemove } from "./commands/gate
 import { runMcpBridge } from "./commands/mcp.ts";
 import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/project.ts";
 import { runProviderAdd, runProviderList, runProviderRemove } from "./commands/provider.ts";
-import { runRibAdd, runRibList, runRibRemove, runRibShow } from "./commands/rib.ts";
+import { runRibAdd, runRibList, runRibReload, runRibRemove, runRibShow } from "./commands/rib.ts";
 import { runRibUpdate } from "./commands/rib-update.ts";
 import {
   runServe,
@@ -504,7 +504,7 @@ export function buildProgram(): Command {
 
   const rib = program
     .command("rib")
-    .description("rib operations (add, remove, list, show) — manage and inspect extensions");
+    .description("rib operations (add, remove, list, reload, show) — manage extensions");
 
   rib
     .command("list")
@@ -564,6 +564,16 @@ export function buildProgram(): Command {
         ...(to ? { to } : {}),
         ...(baseUrl ? { baseUrl } : {}),
       });
+    });
+
+  rib
+    .command("reload")
+    .description("re-collect rib workflow contributions without a restart (server-required)")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function ribReloadAction(this: Command, reloadOpts: { baseUrl?: string }) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", reloadOpts.baseUrl);
+      await runRibReload({ json, ...(baseUrl ? { baseUrl } : {}) });
     });
 
   rib
