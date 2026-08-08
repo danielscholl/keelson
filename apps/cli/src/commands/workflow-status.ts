@@ -80,13 +80,10 @@ export async function runWorkflowStatus(
       emit({ data: runs }, { json: opts.json });
       process.exit(EXIT_OK);
     }
-    // Default surface: every active run, running and paused alike, matching
-    // the MCP listing. Querying only paused runs made a live fleet render as
-    // an empty "runs:", which reads as "nothing is running".
+    // Membership here must match the MCP workflow_status listing, or the two
+    // surfaces disagree about what is active.
     const runs = await listActiveRuns(baseUrl);
     if (!opts.json && runs.runs.length === 0) {
-      // "runs:" with nothing under it reads as a rendering artifact; say the
-      // absence out loud so it cannot be mistaken for a failed lookup.
       emit({ data: "no active runs" }, { json: false });
       process.exit(EXIT_OK);
     }

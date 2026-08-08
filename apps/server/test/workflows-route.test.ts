@@ -3070,6 +3070,21 @@ nodes:
       const res = await app.fetch(new Request(`http://test/api/workflows/runs?${q}`));
       expect(res.status).toBe(400);
     }
+    // Several statuses resolve in one query, so a caller polling for active
+    // runs cannot miss one that transitions between two separate requests.
+    const active = await app.fetch(
+      new Request("http://test/api/workflows/runs?status=running,paused"),
+    );
+    expect(active.status).toBe(200);
+    expect((await active.json()).runs).toEqual([]);
+    const spaced = await app.fetch(
+      new Request("http://test/api/workflows/runs?status=running,%20paused"),
+    );
+    expect(spaced.status).toBe(200);
+    const partlyBogus = await app.fetch(
+      new Request("http://test/api/workflows/runs?status=running,bogus"),
+    );
+    expect(partlyBogus.status).toBe(400);
   });
 
   test("GET /api/workflows tags source + background from rib provenance", async () => {

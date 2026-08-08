@@ -1985,11 +1985,18 @@ export function workflowsRoutes(
 
     const statusParam = c.req.query("status");
     if (statusParam !== undefined && statusParam !== "all") {
-      const parsed = workflowRunStatusSchema.safeParse(statusParam);
-      if (!parsed.success) {
-        return c.json({ error: `invalid status '${statusParam}'` }, 400);
+      // Comma-separated statuses resolve in one query, so a caller asking for
+      // several cannot miss a run that transitions between two separate reads.
+      const requested = statusParam.split(",").map((value) => value.trim());
+      const statuses: WorkflowRunStatus[] = [];
+      for (const value of requested) {
+        const parsed = workflowRunStatusSchema.safeParse(value);
+        if (!parsed.success) {
+          return c.json({ error: `invalid status '${value}'` }, 400);
+        }
+        if (!statuses.includes(parsed.data)) statuses.push(parsed.data);
       }
-      filter.statuses = [parsed.data];
+      filter.statuses = statuses;
     }
 
     const originParam = c.req.query("origin");

@@ -620,9 +620,10 @@ describe("keelson CLI smoke", () => {
         }
         const status = requested.searchParams.get("status");
         queried.push(status ?? "none");
-        if (status === "running") return Response.json({ runs: [runningRun] });
-        if (status === "paused") return Response.json({ runs: [pausedRun] });
-        return Response.json({ runs: [] });
+        const wanted = (status ?? "").split(",");
+        return Response.json({
+          runs: [runningRun, pausedRun].filter((run) => wanted.includes(run.status)),
+        });
       },
     });
     const baseUrl = `http://${server.hostname}:${server.port}`;
@@ -631,13 +632,39 @@ describe("keelson CLI smoke", () => {
       const listing = await runCli(["--json", "workflow", "status", "--base-url", baseUrl]);
       expect(listing.exitCode).toBe(0);
       const runs = JSON.parse(listing.stdout.trim()).data.runs;
-      // The running run is the regression: the listing used to query only
-      // ?status=paused, so a live fleet rendered as an empty list.
       expect(runs.map((r: { runId: string }) => r.runId)).toEqual([
         runningRun.runId,
         pausedRun.runId,
       ]);
-      expect([...queried].sort()).toEqual(["paused", "running"]);
+      // A single request: two status queries would be two snapshots, and a run
+      // transitioning between them could be missing from both.
+      expect(queried).toEqual(["running,paused"]);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("workflow status names the remedy when the server predates multi-status filtering", async () => {
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () => Response.json({ error: "invalid status 'running,paused'" }, { status: 400 }),
+    });
+    const baseUrl = `http://${server.hostname}:${server.port}`;
+
+    try {
+      const { stdout, exitCode } = await runCli([
+        "--json",
+        "workflow",
+        "status",
+        "--base-url",
+        baseUrl,
+      ]);
+      expect(exitCode).not.toBe(0);
+      const envelope = JSON.parse(stdout.trim());
+      expect(envelope.ok).toBe(false);
+      expect(envelope.error).toContain("older than this CLI");
+      expect(envelope.error).toContain("keelson restart");
     } finally {
       server.stop(true);
     }
