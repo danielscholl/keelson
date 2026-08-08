@@ -320,6 +320,10 @@ export interface RibBootstrap {
   >;
   // Raw workflow contributions, narrowed + merged into the catalog separately.
   readonly workflowContributions: RibWorkflowContribution[];
+  readonly recollectWorkflows: () => {
+    contributions: RibWorkflowContribution[];
+    notices: WorkflowDiscoveryNotice[];
+  };
   // Load errors/warnings from each activated rib's `workflows/` folder, in the
   // catalog's notice shape so the composition root can merge them into
   // WorkflowCatalog.discoveryNotices() — a broken packaged workflow must
@@ -658,6 +662,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     commandInvokers,
     commandCompleters,
     workflowContributions,
+    recollectWorkflowContributions,
     docsContributions,
     policies,
     tools,
@@ -699,6 +704,21 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     }
     collectRibFolderWorkflows(manifest, ribDirs, orderedContributions, workflowNotices);
   }
+  const recollectWorkflows = (): {
+    contributions: RibWorkflowContribution[];
+    notices: WorkflowDiscoveryNotice[];
+  } => {
+    const freshCodeContributions = recollectWorkflowContributions();
+    const contributions: RibWorkflowContribution[] = [];
+    const notices: WorkflowDiscoveryNotice[] = [];
+    for (const manifest of manifests) {
+      for (const contribution of freshCodeContributions) {
+        if (contribution.ribId === manifest.id) contributions.push(contribution);
+      }
+      collectRibFolderWorkflows(manifest, ribDirs, contributions, notices);
+    }
+    return { contributions, notices };
+  };
   return {
     manifests,
     probes,
@@ -711,6 +731,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     commandCompleters,
     workflowContributions: orderedContributions,
     workflowNotices,
+    recollectWorkflows,
     docsContributions,
     policies,
     tools,
@@ -728,10 +749,8 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   };
 }
 
-// Boot-time only, unlike the hot-reloading file catalog: a YAML edit inside a
-// rib package lands on restart, like the rest of rib activation. Parses per
-// file rather than through discoverWorkflows, whose by-name map would silently
-// keep the last of two same-named files — every file must reach
+// Parse per file rather than through discoverWorkflows, whose by-name map would
+// silently keep the last of two same-named files; every file must reach
 // prepareRibWorkflows so its first-wins dedupe can warn on the collision.
 function collectRibFolderWorkflows(
   manifest: RibManifest,

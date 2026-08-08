@@ -1184,6 +1184,52 @@ describe("bootstrapRibs", () => {
       expect(prepared.provenance.get("rib-hello")).toEqual({ ribId: "test", background: false });
     });
 
+    test("recollects current code contributions and rescans folder workflows", async () => {
+      process.env.KEELSON_RIBS = "wf";
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
+      try {
+        const workflowsDir = join(tempDir, "workflows");
+        await mkdir(workflowsDir);
+        const initialPath = join(workflowsDir, "initial.yaml");
+        await writeFile(initialPath, workflowYaml("folder-initial"));
+        let codeName = "code-initial";
+        const rib: Rib = {
+          id: "wf",
+          displayName: "wf",
+          contributeWorkflows: () => [
+            {
+              definition: {
+                name: codeName,
+                description: "from-code",
+                nodes: [{ id: "step", bash: "echo code" }],
+              },
+            },
+          ],
+        };
+        const boot = await bootstrapRibs({ available: { wf: rib }, ribDirs: { wf: tempDir } });
+
+        codeName = "code-current";
+        await rm(initialPath);
+        await writeFile(join(workflowsDir, "current.yaml"), workflowYaml("folder-current"));
+        await writeFile(join(workflowsDir, "broken.yaml"), "name: [unclosed\n");
+
+        const recollected = boot.recollectWorkflows();
+        expect(
+          recollected.contributions.map((contribution) => ({
+            ribId: contribution.ribId,
+            name: z.object({ name: z.string() }).parse(contribution.definition).name,
+          })),
+        ).toEqual([
+          { ribId: "wf", name: "code-current" },
+          { ribId: "wf", name: "folder-current" },
+        ]);
+        expect(recollected.notices).toHaveLength(1);
+        expect(recollected.notices[0]?.filename).toContain("broken.yaml");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
     test("a broken YAML file is skipped while a valid sibling still loads", async () => {
       process.env.KEELSON_RIBS = "wf";
       const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
