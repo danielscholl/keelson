@@ -169,7 +169,12 @@ describe("bootstrapWorkflows rib overlay reload", () => {
     expect(catalog.get("edited")?.description).toBe("after");
     expect(catalog.get("removed")).toBeUndefined();
     expect(catalog.get("added")).toBe(added);
-    expect(catalog.list().map((definition) => definition.name).sort()).toEqual(["added", "edited"]);
+    expect(
+      catalog
+        .list()
+        .map((definition) => definition.name)
+        .sort(),
+    ).toEqual(["added", "edited"]);
     expect(catalog.provenance("added")).toEqual({
       source: { kind: "rib", ribId: "beta", ribName: "Beta" },
       background: true,

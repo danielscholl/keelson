@@ -8,13 +8,13 @@
 
 import {
   listRibsResponseSchema,
-  reloadRibWorkflowsResponseSchema,
   type RibAction,
   type RibActionResult,
   type RibAuthStatus,
   type RibSummary,
   type RibSurfaceDescriptor,
   type RibViewDescriptor,
+  reloadRibWorkflowsResponseSchema,
   ribActionResponseSchema,
   ribActionSchema,
   ribAuthStatusSchema,
@@ -96,14 +96,8 @@ export interface RibsRoutesDeps {
 // inbound half of the rib back-channel — loopback-trusted (guarded by the
 // /api/* CORS gate); there is no capability-token enforcement yet.
 export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
-  const {
-    manifests,
-    probes,
-    actionHandlers,
-    dynamicRegionStore,
-    crossRibGrants,
-    reloadWorkflows,
-  } = deps;
+  const { manifests, probes, actionHandlers, dynamicRegionStore, crossRibGrants, reloadWorkflows } =
+    deps;
 
   app.get("/api/ribs", async (c) => {
     const ribs: RibSummary[] = await Promise.all(

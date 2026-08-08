@@ -251,10 +251,7 @@ export async function runRibReload(opts: BaseOptions): Promise<never> {
   const baseUrl = effectiveBaseUrl(opts);
   try {
     const result = await reloadRibWorkflows(baseUrl);
-    emit(
-      { data: { reloaded: result.count, notices: result.notices } },
-      { json: opts.json },
-    );
+    emit({ data: { reloaded: result.count, notices: result.notices } }, { json: opts.json });
     process.exit(EXIT_OK);
   } catch (err) {
     failHttp(err, opts, "reload rib workflows");

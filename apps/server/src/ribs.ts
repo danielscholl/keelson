@@ -591,7 +591,9 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
           });
         }
       } catch {
-        console.warn(`[keelson] rib '${rib.id}' contributeWorkflows failed during reload; skipping`);
+        console.warn(
+          `[keelson] rib '${rib.id}' contributeWorkflows failed during reload; skipping`,
+        );
       }
     }
     return contributions;

@@ -36,18 +36,13 @@ export async function listRibs(baseUrl: string): Promise<RibSummary[]> {
   return (await fetchRibs(baseUrl)).ribs;
 }
 
-export async function reloadRibWorkflows(
-  baseUrl: string,
-): Promise<ReloadRibWorkflowsResponse> {
+export async function reloadRibWorkflows(baseUrl: string): Promise<ReloadRibWorkflowsResponse> {
   const res = await fetch(`${normalizeBase(baseUrl)}/api/ribs/reload-workflows`, {
     method: "POST",
     headers: defaultHeaders(baseUrl),
   });
   if (!res.ok) {
-    throw new HttpError(
-      res.status,
-      await errorMessage(res, "POST /api/ribs/reload-workflows"),
-    );
+    throw new HttpError(res.status, await errorMessage(res, "POST /api/ribs/reload-workflows"));
   }
   return (await res.json()) as ReloadRibWorkflowsResponse;
 }
