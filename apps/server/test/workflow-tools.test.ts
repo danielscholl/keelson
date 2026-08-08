@@ -18,7 +18,7 @@ import type { MessageChunk, ToolContext, ToolDefinition } from "@keelson/shared"
 import { bootstrapWorkflows } from "../src/bootstrap.ts";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
-import { createProjectsStore } from "../src/projects-store.ts";
+import { canonicalPath, createProjectsStore } from "../src/projects-store.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import { createWorkflowChatTools } from "../src/workflow-tools.ts";
 import {
@@ -96,12 +96,16 @@ function toolByName(tools: ToolDefinition[], name: string): ToolDefinition {
   return tool;
 }
 
-function makeCtx(cwd: string): { ctx: ToolContext; chunks: MessageChunk[] } {
+function makeCtx(
+  cwd: string,
+  turnContext?: Readonly<Record<string, unknown>>,
+): { ctx: ToolContext; chunks: MessageChunk[] } {
   const chunks: MessageChunk[] = [];
   const ctx: ToolContext = {
     cwd,
     emit: (chunk) => chunks.push(chunk),
     abortSignal: new AbortController().signal,
+    ...(turnContext !== undefined ? { turnContext } : {}),
   };
   return { ctx, chunks };
 }
@@ -593,7 +597,7 @@ nodes:
       (c) => c.type === "text" && c.content.includes("Started workflow"),
     );
     expect(startedLine && startedLine.type === "text" ? startedLine.content : "").toContain(
-      `in "${cwd}"`,
+      `in "${canonicalPath(cwd)}"`,
     );
   });
 
@@ -813,6 +817,106 @@ nodes:
     expect(result.isError).toBe(false);
     expect(result.content).toContain("completed successfully");
     expect(result.content).toContain("project-sentinel-456");
+    expect(
+      outside.chunks.some(
+        (chunk) =>
+          chunk.type === "text" &&
+          chunk.content.includes(
+            `Started workflow "proj-flow" in "${canonicalPath(rig.projectRoot)}"`,
+          ),
+      ),
+    ).toBe(true);
+  });
+
+  // Starts a real parent run so inheritance is exercised through the same
+  // persisted record the tool reads — a synthetic turnContext would assert
+  // nothing about identity, which is the whole guard.
+  function startParentRun(
+    rig: ReturnType<typeof makeScopedRig>,
+    projectName: string,
+    workingDir: string,
+  ): string {
+    const project = rig.projectsStore.getByName(projectName);
+    if (!project) throw new Error(`test project '${projectName}' was not created`);
+    const started = rig.controller.startRun({
+      name: "done",
+      inputs: {},
+      workingDir,
+      project: { id: project.id, rootPath: project.rootPath },
+    });
+    if (!started.ok) throw new Error(`parent run did not start: ${started.message}`);
+    return started.runId;
+  }
+
+  test("workflow_run inherits a nested run's worktree for the same project", async () => {
+    const rig = makeScopedRig();
+    writeWorkflow("done.yaml", NO_APPROVAL_WF);
+    const worktreeDir = join(rig.projectRoot, ".worktrees", "nested");
+    mkdirSync(worktreeDir, { recursive: true });
+    const parentRunId = startParentRun(rig, "scoped", worktreeDir);
+
+    const nested = makeCtx(rig.projectRoot, {
+      workflowRunId: parentRunId,
+      workflowWorkingDir: worktreeDir,
+    });
+    await toolByName(rig.tools, "workflow_run").execute(
+      { name: "proj-flow", project: "scoped" },
+      nested.ctx,
+    );
+
+    const detail = rig.controller.getRun(extractRunId(nested.chunks));
+    expect(detail?.workingDir).toBe(canonicalPath(worktreeDir));
+    expect(detail?.workingDir).not.toBe(canonicalPath(rig.projectRoot));
+  });
+
+  test("workflow_run keeps a different named project's root", async () => {
+    const rig = makeScopedRig();
+    writeWorkflow("done.yaml", NO_APPROVAL_WF);
+    const worktreeDir = join(rig.projectRoot, ".worktrees", "nested");
+    const otherRoot = join(tmpDir, "other-project");
+    mkdirSync(worktreeDir, { recursive: true });
+    mkdirSync(otherRoot, { recursive: true });
+    rig.projectsStore.create({ name: "other", rootPath: otherRoot });
+    const parentRunId = startParentRun(rig, "scoped", worktreeDir);
+
+    const nested = makeCtx(rig.projectRoot, {
+      workflowRunId: parentRunId,
+      workflowWorkingDir: worktreeDir,
+    });
+    await toolByName(rig.tools, "workflow_run").execute(
+      { name: "done", project: "other" },
+      nested.ctx,
+    );
+
+    const detail = rig.controller.getRun(extractRunId(nested.chunks));
+    expect(detail?.workingDir).toBe(canonicalPath(otherRoot));
+  });
+
+  // Projects may nest, and findByPathPrefix resolves the longest matching root.
+  // A containment test would call the inner project's worktree "inside" the
+  // outer project and hand the outer run the inner tree; identity by parent
+  // projectId is what rules that out.
+  test("workflow_run does not inherit an inner project's worktree for a named outer project", async () => {
+    const rig = makeScopedRig();
+    writeWorkflow("done.yaml", NO_APPROVAL_WF);
+    const innerRoot = join(rig.projectRoot, "inner");
+    const innerWorktree = join(innerRoot, ".worktrees", "nested");
+    mkdirSync(innerWorktree, { recursive: true });
+    rig.projectsStore.create({ name: "inner", rootPath: innerRoot });
+    const parentRunId = startParentRun(rig, "inner", innerWorktree);
+
+    const nested = makeCtx(rig.projectRoot, {
+      workflowRunId: parentRunId,
+      workflowWorkingDir: innerWorktree,
+    });
+    await toolByName(rig.tools, "workflow_run").execute(
+      { name: "proj-flow", project: "scoped" },
+      nested.ctx,
+    );
+
+    const detail = rig.controller.getRun(extractRunId(nested.chunks));
+    expect(detail?.workingDir).toBe(canonicalPath(rig.projectRoot));
+    expect(detail?.workingDir).not.toBe(canonicalPath(innerWorktree));
   });
 
   test("workflow_run rejects an unknown project selector", async () => {

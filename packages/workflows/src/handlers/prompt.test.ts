@@ -334,6 +334,24 @@ describe("makePromptHandler", () => {
     expect(seen).toEqual({ runId: "test-run", model: "claude-sonnet-4-6", provider: "claude" });
   });
 
+  test("forwards the workflow run context to the provider", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+
+    const result = await handler.handle(stubNode, buildCtx({ runId: "parent-run" }));
+
+    expect(result.status).toBe("succeeded");
+    expect(calls[0]?.options?.turnContext).toEqual({
+      workflowRunId: "parent-run",
+      workflowWorkingDir: process.cwd(),
+    });
+  });
+
   test("forwards a node's effort to the provider as reasoningEffort", async () => {
     const { provider, calls } = makeSpyProvider({
       chunks: [{ type: "text", content: "ok" }, { type: "done" }],

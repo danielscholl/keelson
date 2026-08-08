@@ -76,6 +76,7 @@ export interface PromptHandlerProvider {
 
 export interface PromptHandlerSendOptions {
   abortSignal?: AbortSignal;
+  turnContext?: Readonly<Record<string, unknown>>;
   tools?: readonly { name: string; [k: string]: unknown }[];
   model?: string;
   // Reasoning tier (structural mirror of @keelson/providers `reasoningEffort`).
@@ -672,6 +673,10 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           }
           const stream = provider.sendQuery(promptBody, ctx.cwd, undefined, {
             abortSignal: handlerExit.signal,
+            turnContext: {
+              workflowRunId: ctx.runId,
+              workflowWorkingDir: ctx.cwd,
+            },
             ...(filteredTools.length > 0 ? { tools: filteredTools } : {}),
             ...(model !== undefined ? { model } : {}),
             ...(effort !== undefined ? { reasoningEffort: effort } : {}),
