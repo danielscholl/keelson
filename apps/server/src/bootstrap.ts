@@ -708,11 +708,14 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     contributions: RibWorkflowContribution[];
     notices: WorkflowDiscoveryNotice[];
   } => {
-    const freshCodeContributions = recollectWorkflowContributions();
+    const fresh = recollectWorkflowContributions();
     const contributions: RibWorkflowContribution[] = [];
-    const notices: WorkflowDiscoveryNotice[] = [];
+    // Seeded with the re-collection's own notices so a rib that failed, or a
+    // newly bound producer that was held back, reaches the reload response
+    // rather than only the server log.
+    const notices: WorkflowDiscoveryNotice[] = [...fresh.notices];
     for (const manifest of manifests) {
-      for (const contribution of freshCodeContributions) {
+      for (const contribution of fresh.contributions) {
         if (contribution.ribId === manifest.id) contributions.push(contribution);
       }
       collectRibFolderWorkflows(manifest, ribDirs, contributions, notices);

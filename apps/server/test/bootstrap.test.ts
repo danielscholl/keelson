@@ -1034,7 +1034,8 @@ describe("bootstrapRibs", () => {
     });
 
     revision = "second";
-    expect(result.recollectWorkflowContributions()).toEqual([
+    const reloaded = result.recollectWorkflowContributions();
+    expect(reloaded.contributions).toEqual([
       {
         ribId: "alpha",
         definition: {
@@ -1045,9 +1046,78 @@ describe("bootstrapRibs", () => {
         bindSnapshotKey: "rib:alpha:result",
       },
     ]);
+    expect(reloaded.notices).toEqual([]);
 
+    // A throwing rib must not silently empty its slice of the overlay: the
+    // catalog would lose those workflows while the reload reported success.
     shouldThrow = true;
-    expect(result.recollectWorkflowContributions()).toEqual([]);
+    const failed = result.recollectWorkflowContributions();
+    expect(failed.contributions).toEqual([
+      {
+        ribId: "alpha",
+        definition: {
+          name: "alpha-workflow",
+          description: "first",
+          nodes: [{ id: "step", bash: "echo hi" }],
+        },
+        bindSnapshotKey: "rib:alpha:result",
+      },
+    ]);
+    expect(failed.notices).toHaveLength(1);
+    expect(failed.notices[0]?.level).toBe("error");
+    expect(failed.notices[0]?.message).toContain("reload failed");
+    expect(failed.notices[0]?.message).toContain("keeping the workflows collected at startup");
+  });
+
+  test("recollectWorkflowContributions holds back a newly bound producer", () => {
+    let bindNew = false;
+    const result = applyRibs({
+      active: ["alpha"],
+      available: {
+        alpha: {
+          id: "alpha",
+          displayName: "alpha",
+          contributeWorkflows: () => {
+            const contributions = [
+              {
+                definition: {
+                  name: "alpha-plain",
+                  description: "plain",
+                  nodes: [{ id: "step", bash: "echo hi" }],
+                },
+              },
+            ];
+            if (bindNew) {
+              contributions.push({
+                definition: {
+                  name: "alpha-fresh",
+                  description: "fresh",
+                  nodes: [{ id: "step", bash: "echo hi" }],
+                },
+                bindSnapshotKey: "rib:alpha:fresh",
+              } as (typeof contributions)[number]);
+            }
+            return contributions;
+          },
+        },
+      },
+      ctx: {
+        getExec: () => ({
+          runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+          runText: async () => ({ ok: true as const, data: "" }),
+        }),
+      },
+    });
+
+    // Its publish holder is registered at activation, so a key first seen on a
+    // reload would be catalogued as an ordinary workflow that never publishes.
+    bindNew = true;
+    const reloaded = result.recollectWorkflowContributions();
+    expect(reloaded.contributions.map((c) => c.definition.name)).toEqual(["alpha-plain"]);
+    expect(reloaded.notices).toHaveLength(1);
+    expect(reloaded.notices[0]?.level).toBe("warning");
+    expect(reloaded.notices[0]?.message).toContain("alpha-fresh");
+    expect(reloaded.notices[0]?.message).toContain("restart");
   });
 
   describe("tool registration", () => {
