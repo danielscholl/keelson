@@ -108,7 +108,7 @@ const INSERT_MEMORY_SQL = `
 `;
 
 function insertMemory(db: Database, row: MemoryRow): void {
-  const params: Record<string, unknown> = {};
+  const params: Record<string, string | number | null> = {};
   for (const [k, v] of Object.entries(row)) {
     params[`$${k}`] = v;
   }

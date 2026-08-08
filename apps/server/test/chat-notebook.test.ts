@@ -32,6 +32,7 @@ function registerSpy(id: string, capture: (opts: SendQueryOptions | undefined) =
     sessionResume: false,
     streaming: true,
     tools: false,
+    reasoningEffort: false,
     models: ["spy-model"],
     defaultModel: "spy-model",
   };

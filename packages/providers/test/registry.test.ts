@@ -16,6 +16,7 @@ const FAKE_CAPABILITIES: ProviderCapabilities = {
   sessionResume: false,
   streaming: false,
   tools: false,
+  reasoningEffort: false,
   models: [],
   defaultModel: "",
 };
@@ -152,6 +153,7 @@ describe("getProviderInfoList", () => {
         sessionResume: false,
         streaming: false,
         tools: false,
+        reasoningEffort: false,
         models: ["alpha", "beta"],
         defaultModel: "alpha",
       },

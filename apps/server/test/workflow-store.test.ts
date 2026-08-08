@@ -15,11 +15,39 @@ import { join } from "node:path";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { createUsageStore } from "../src/usage-store.ts";
-import { createWorkflowStore } from "../src/workflow-store.ts";
+import {
+  type CreateRunInput,
+  createWorkflowStore as createProductionWorkflowStore,
+  type UpsertNodeOutputInput,
+  type WorkflowStore,
+} from "../src/workflow-store.ts";
 import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
 let dbPath: string;
+
+type TestCreateRunInput = Omit<CreateRunInput, "workingDir"> & { workingDir?: string };
+type TestNodeOutputInput = Omit<UpsertNodeOutputInput, "usage" | "provider" | "model" | "effort"> &
+  Partial<Pick<UpsertNodeOutputInput, "usage" | "provider" | "model" | "effort">>;
+
+function createWorkflowStore(db: import("bun:sqlite").Database) {
+  const store = createProductionWorkflowStore(db);
+  return {
+    ...store,
+    createRun(input: TestCreateRunInput): void {
+      store.createRun({ ...input, workingDir: input.workingDir ?? "/repo" });
+    },
+    upsertNodeOutput(input: TestNodeOutputInput): void {
+      store.upsertNodeOutput({
+        usage: null,
+        provider: null,
+        model: null,
+        effort: null,
+        ...input,
+      });
+    },
+  } satisfies WorkflowStore;
+}
 
 // Helper: every workflow_runs row needs a conversation_id FK target. Mints a
 // throwaway workflow-provider conversation on the same db handle.

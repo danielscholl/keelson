@@ -72,7 +72,7 @@ describe("SQLite ConversationStore", () => {
 
     const all = store.list();
     expect(all.map((c) => c.id)).toEqual([a.id, b.id]);
-    expect(all[1].model).toBeUndefined();
+    expect(all[1]!.model).toBeUndefined();
 
     db.close();
   });
@@ -133,7 +133,7 @@ describe("SQLite ConversationStore", () => {
 
     const stored = store.get(conv.id)!;
     expect(stored.messages.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
-    expect(stored.messages[1].role).toBe("assistant");
+    expect(stored.messages[1]!.role).toBe("assistant");
     // updatedAt is monotonic but may equal createdAt when appends land in
     // the same millisecond as create (very fast tests).
     expect(stored.updatedAt!.localeCompare(stored.createdAt)).toBeGreaterThanOrEqual(0);
@@ -198,12 +198,12 @@ describe("SQLite ConversationStore", () => {
     const s2 = createConversationStore(db2);
     const all = s2.list();
     expect(all).toHaveLength(1);
-    expect(all[0].id).toBe(convId);
-    expect(all[0].providerId).toBe("stub");
-    expect(all[0].model).toBe("gpt-x");
-    expect(all[0].providerSessionId).toBe("sess-xyz");
-    expect(all[0].messages.map((m) => m.id)).toEqual(["m1", "m2"]);
-    expect(all[0].messages[1].content).toBe("yo");
+    expect(all[0]!.id).toBe(convId);
+    expect(all[0]!.providerId).toBe("stub");
+    expect(all[0]!.model).toBe("gpt-x");
+    expect(all[0]!.providerSessionId).toBe("sess-xyz");
+    expect(all[0]!.messages.map((m) => m.id)).toEqual(["m1", "m2"]);
+    expect(all[0]!.messages[1]!.content).toBe("yo");
     db2.close();
   });
 
@@ -452,7 +452,7 @@ describe("SQLite ConversationStore", () => {
 
     const stored = store.get(conv.id)!;
     expect(stored.messages).toHaveLength(1);
-    const m = stored.messages[0];
+    const m = stored.messages[0]!;
     expect(m.content).toBe("Reading /foo.ts then summarizing.");
     expect(m.contentParts).toHaveLength(3);
     expect(m.contentParts?.[1]?.type).toBe("tool_use");
@@ -469,8 +469,8 @@ describe("SQLite ConversationStore", () => {
     store.appendMessage(conv.id, makeMessage({ id: "m1", content: "plain text" }));
 
     const stored = store.get(conv.id)!;
-    expect(stored.messages[0].content).toBe("plain text");
-    expect(stored.messages[0].contentParts).toBeUndefined();
+    expect(stored.messages[0]!.content).toBe("plain text");
+    expect(stored.messages[0]!.contentParts).toBeUndefined();
     db.close();
   });
 
@@ -486,8 +486,8 @@ describe("SQLite ConversationStore", () => {
 
     const stored = store.get(conv.id)!;
     expect(stored.messages).toHaveLength(1);
-    expect(stored.messages[0].content).toBe("fallback");
-    expect(stored.messages[0].contentParts).toBeUndefined();
+    expect(stored.messages[0]!.content).toBe("fallback");
+    expect(stored.messages[0]!.contentParts).toBeUndefined();
     db.close();
   });
 
@@ -506,7 +506,7 @@ describe("SQLite ConversationStore", () => {
       new Date().toISOString(),
     );
     const stored = store.get(conv.id)!;
-    expect(stored.messages[0].contentParts).toBeUndefined();
+    expect(stored.messages[0]!.contentParts).toBeUndefined();
     db.close();
   });
 
@@ -521,8 +521,8 @@ describe("SQLite ConversationStore", () => {
     store.appendMessage(conv.id, makeMessage({ id: "m2", role: "assistant", content: "complete" }));
 
     const stored = store.get(conv.id)!;
-    expect(stored.messages[0].truncated).toBe(true);
-    expect(stored.messages[1].truncated).toBeUndefined();
+    expect(stored.messages[0]!.truncated).toBe(true);
+    expect(stored.messages[1]!.truncated).toBeUndefined();
     db.close();
   });
 
@@ -539,8 +539,8 @@ describe("SQLite ConversationStore", () => {
     ).run("legacy-1", conv.id, "assistant", "old turn", null, new Date().toISOString());
 
     const stored = store.get(conv.id)!;
-    expect(stored.messages[0].content).toBe("old turn");
-    expect(stored.messages[0].truncated).toBeUndefined();
+    expect(stored.messages[0]!.content).toBe("old turn");
+    expect(stored.messages[0]!.truncated).toBeUndefined();
     db.close();
   });
 });

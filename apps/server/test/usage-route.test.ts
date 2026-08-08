@@ -229,7 +229,7 @@ describe("GET /api/usage/events", () => {
     expect(res.status).toBe(200);
     const parsed = usageEventsResponseSchema.parse(await res.json());
     expect(parsed).toHaveLength(1);
-    expect(parsed[0].workflowName).toBe("smoke-test");
+    expect(parsed[0]!.workflowName).toBe("smoke-test");
   });
 
   test("200 at the limit cap boundary", async () => {
@@ -253,7 +253,7 @@ describe("GET /api/usage/events", () => {
     });
     const res = await app.fetch(new Request("http://test/api/usage/events"));
     expect(res.status).toBe(200);
-    const rows = await res.json();
+    const rows = usageEventsResponseSchema.parse(await res.json());
     expect(rows.some((r) => r.status === "succeeded")).toBe(true);
   });
 
