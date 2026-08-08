@@ -18,6 +18,7 @@ export interface WorkflowStatusOptions {
   json: boolean;
   baseUrl?: string;
   workflow?: string;
+  brief?: boolean;
 }
 
 export async function runWorkflowStatus(
