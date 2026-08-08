@@ -92,6 +92,29 @@ function renderNodes(detail: WorkflowRunDetail): string {
   return blocks.join("\n\n");
 }
 
+function renderBriefStatus(
+  detail: WorkflowRunDetail,
+  opts: { current: string[]; pauseId?: string; awaitingNodeId?: string },
+): string {
+  const lines = [
+    `Run ${detail.runId} — workflow "${detail.workflowName}" — status ${detail.status} — started ${detail.startedAt}.`,
+  ];
+  if (opts.current.length > 0) {
+    lines.push(`current: ${opts.current.join(", ")}`);
+  }
+  if (opts.awaitingNodeId) {
+    lines.push(`Awaiting approval at "${opts.awaitingNodeId}"`);
+    if (opts.pauseId !== undefined) {
+      lines.push(resumeInstructions(detail.runId, opts.awaitingNodeId, opts.pauseId));
+    }
+  }
+  lines.push(
+    "nodes:",
+    ...detail.nodes.map((node) => `  [${node.nodeId}] ${node.status}`),
+  );
+  return lines.join("\n");
+}
+
 // Shared resume guidance so workflow_run (live pause) and workflow_status
 // (status-polled pause) hand the model the SAME runId/nodeId/pauseId protocol.
 // pauseId may be absent only for a paused-but-reconciled run after a restart.
