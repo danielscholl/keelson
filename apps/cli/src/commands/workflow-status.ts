@@ -65,9 +65,7 @@ export async function runWorkflowStatus(
               nodes: detail.nodes.map((node) => ({ id: node.nodeId, status: node.status })),
               current: awaitingNode?.nodeId ?? null,
               awaiting:
-                detail.status === "paused" && awaitingNode
-                  ? { nodeId: awaitingNode.nodeId }
-                  : null,
+                detail.status === "paused" && awaitingNode ? { nodeId: awaitingNode.nodeId } : null,
             },
           },
           { json: opts.json },

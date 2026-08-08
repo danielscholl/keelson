@@ -108,10 +108,7 @@ function renderBriefStatus(
       lines.push(resumeInstructions(detail.runId, opts.awaitingNodeId, opts.pauseId));
     }
   }
-  lines.push(
-    "nodes:",
-    ...detail.nodes.map((node) => `  [${node.nodeId}] ${node.status}`),
-  );
+  lines.push("nodes:", ...detail.nodes.map((node) => `  [${node.nodeId}] ${node.status}`));
   return lines.join("\n");
 }
 

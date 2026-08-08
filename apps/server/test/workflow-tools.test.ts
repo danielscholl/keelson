@@ -712,7 +712,7 @@ nodes:
     expect(brief.isError).toBe(false);
     expect(brief.content).toContain("[prepare] succeeded");
     expect(brief.content).toContain("[review] awaiting");
-    expect(brief.content).toContain('current: review');
+    expect(brief.content).toContain("current: review");
     expect(brief.content).toContain('Awaiting approval at "review"');
     expect(brief.content).toContain(`pauseId="${refs.pauseId}"`);
     expect(brief.content).not.toContain("brief-output-sentinel-789");

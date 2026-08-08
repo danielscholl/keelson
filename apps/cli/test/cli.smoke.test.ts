@@ -586,14 +586,7 @@ describe("keelson CLI smoke", () => {
       expect(briefEnvelope.data.awaiting).toBeNull();
       expect(brief.stdout).not.toContain("cli-status-output-sentinel");
 
-      const full = await runCli([
-        "--json",
-        "workflow",
-        "status",
-        runId,
-        "--base-url",
-        baseUrl,
-      ]);
+      const full = await runCli(["--json", "workflow", "status", runId, "--base-url", baseUrl]);
       expect(full.exitCode).toBe(0);
       expect(JSON.parse(full.stdout.trim()).data.run.nodes[0].outputText).toBe(
         "cli-status-output-sentinel",
