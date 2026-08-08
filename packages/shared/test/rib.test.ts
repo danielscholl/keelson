@@ -3,6 +3,7 @@ import type { Rib, RibContext } from "../src/rib.ts";
 import {
   listRibsResponseSchema,
   openChatSeedSchema,
+  reloadRibWorkflowsResponseSchema,
   ribActionResponseSchema,
   ribActionSchema,
   ribAuthStatusSchema,
@@ -111,6 +112,33 @@ describe("rib v2 wire schemas", () => {
       hasOnAction: false,
     });
     expect(summary.acceptsIngest ?? false).toBe(false);
+  });
+
+  it("validates rib workflow reload responses", () => {
+    expect(
+      reloadRibWorkflowsResponseSchema.parse({
+        count: 2,
+        notices: [
+          {
+            level: "warning",
+            filename: "<rib:alpha>",
+            message: "duplicate workflow",
+          },
+        ],
+      }),
+    ).toEqual({
+      count: 2,
+      notices: [
+        {
+          level: "warning",
+          filename: "<rib:alpha>",
+          message: "duplicate workflow",
+        },
+      ],
+    });
+    expect(reloadRibWorkflowsResponseSchema.safeParse({ count: -1, notices: [] }).success).toBe(
+      false,
+    );
   });
 });
 

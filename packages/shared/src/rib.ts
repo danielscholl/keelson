@@ -16,6 +16,7 @@ import type { MemoryTools } from "./memory.ts";
 import type { Policy } from "./policy.ts";
 import type { Project } from "./projects.ts";
 import type { ToolDefinition } from "./tools.ts";
+import { workflowDiscoveryNoticeSchema } from "./workflows.ts";
 
 /**
  * Rib — Keelson's extension contract.
@@ -746,6 +747,14 @@ export const listRibsResponseSchema = z
   })
   .strict();
 export type ListRibsResponse = z.infer<typeof listRibsResponseSchema>;
+
+export const reloadRibWorkflowsResponseSchema = z
+  .object({
+    count: z.number().int().nonnegative(),
+    notices: z.array(workflowDiscoveryNoticeSchema),
+  })
+  .strict();
+export type ReloadRibWorkflowsResponse = z.infer<typeof reloadRibWorkflowsResponseSchema>;
 
 // Wire shape for the POST /api/ribs/:id/action response — the discriminated
 // RibActionResult the rib's onAction returns.
