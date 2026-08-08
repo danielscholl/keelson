@@ -368,12 +368,12 @@ describe("WorkspaceManager", () => {
   test("release refuses a lease whose acquisition is still in flight", async () => {
     await initRepo(repoDir);
     const project = projectsStore.create({ name: "repo", rootPath: repoDir });
-    let releaseError: Error | null = null;
+    const releaseError: { value?: Error } = {};
     manager.prepareWorktree = async (req) => {
       const pending = leaseStore.list()[0];
       if (pending) {
         await manager.release(pending.id).catch((err) => {
-          releaseError = err as Error;
+          releaseError.value = err instanceof Error ? err : new Error(String(err));
         });
       }
       return {
@@ -394,7 +394,7 @@ describe("WorkspaceManager", () => {
 
     await manager.acquire({ projectId: project.id, purpose: "inflight", owner: "tool" });
 
-    expect(releaseError?.message ?? "").toContain("acquisition still in progress");
+    expect(releaseError.value?.message ?? "").toContain("acquisition still in progress");
     expect(leaseStore.list()).toHaveLength(1);
   });
 

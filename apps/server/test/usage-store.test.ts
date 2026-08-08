@@ -66,8 +66,8 @@ describe("SQLite UsageStore", () => {
       ribId: null,
       projectId: null,
     });
-    expect(typeof events[0].id).toBe("number");
-    expect(typeof events[0].ts).toBe("string");
+    expect(typeof events[0]!.id).toBe("number");
+    expect(typeof events[0]!.ts).toBe("string");
   });
 
   test("record omits ts and status → defaults to now and 'ok'", () => {
@@ -79,7 +79,7 @@ describe("SQLite UsageStore", () => {
       inputTokens: 1,
       outputTokens: 1,
     });
-    const [event] = store.listEvents();
+    const event = store.listEvents()[0]!;
     expect(event.status).toBe("ok");
     expect(event.ts >= before).toBe(true);
   });
@@ -102,7 +102,7 @@ describe("SQLite UsageStore", () => {
     store.record({ source: "rib", provider: "pi", model: "pi-1", inputTokens: 3, outputTokens: 3 });
 
     expect(store.listEvents({ source: "workflow" })).toHaveLength(1);
-    expect(store.listEvents({ source: "workflow" })[0].provider).toBe("codex");
+    expect(store.listEvents({ source: "workflow" })[0]!.provider).toBe("codex");
     expect(store.listEvents()).toHaveLength(3);
   });
 
@@ -119,8 +119,8 @@ describe("SQLite UsageStore", () => {
     const limited = store.listEvents({ limit: 2 });
     expect(limited).toHaveLength(2);
     // Insertion order within the same instant is id DESC.
-    expect(limited[0].inputTokens).toBe(4);
-    expect(limited[1].inputTokens).toBe(3);
+    expect(limited[0]!.inputTokens).toBe(4);
+    expect(limited[1]!.inputTokens).toBe(3);
   });
 
   test("totals sums input/output tokens across all events", () => {
@@ -174,7 +174,7 @@ describe("SQLite UsageStore", () => {
         inputTokens: 10.9,
         outputTokens: 5.4,
       });
-      const [event] = store.listEvents();
+      const event = store.listEvents()[0]!;
       expect(event.inputTokens).toBe(10);
       expect(event.outputTokens).toBe(5);
     });
@@ -187,7 +187,7 @@ describe("SQLite UsageStore", () => {
         inputTokens: -5,
         outputTokens: Number.NaN,
       });
-      const [event] = store.listEvents();
+      const event = store.listEvents()[0]!;
       expect(event.inputTokens).toBe(0);
       expect(event.outputTokens).toBe(0);
     });
@@ -203,7 +203,7 @@ describe("SQLite UsageStore", () => {
         cacheWriteTokens: 3.2,
         durationMs: 999.9,
       });
-      const [event] = store.listEvents();
+      const event = store.listEvents()[0]!;
       expect(event.cacheReadTokens).toBe(2);
       expect(event.cacheWriteTokens).toBe(3);
       expect(event.durationMs).toBe(999);
@@ -219,7 +219,7 @@ describe("SQLite UsageStore", () => {
         cacheReadTokens: -1,
         durationMs: -100,
       });
-      const [event] = store.listEvents();
+      const event = store.listEvents()[0]!;
       expect(event.cacheReadTokens).toBeNull();
       expect(event.durationMs).toBeNull();
     });
@@ -234,7 +234,7 @@ describe("SQLite UsageStore", () => {
         inputTokens: 1,
         outputTokens: 1,
       });
-      const [event] = store.listEvents();
+      const event = store.listEvents()[0]!;
       expect(event.conversationId).toBeNull();
       expect(event.runId).toBeNull();
       expect(event.nodeId).toBeNull();
@@ -257,7 +257,7 @@ describe("SQLite UsageStore", () => {
         ribId: null,
         projectId: null,
       });
-      const [event] = store.listEvents();
+      const event = store.listEvents()[0]!;
       expect(event.conversationId).toBeNull();
       expect(event.runId).toBeNull();
       expect(event.nodeId).toBeNull();
@@ -280,7 +280,7 @@ describe("SQLite UsageStore", () => {
         ribId: "osdu",
         projectId: "proj-1",
       });
-      const [event] = store.listEvents();
+      const event = store.listEvents()[0]!;
       expect(event.conversationId).toBe("conv-1");
       expect(event.runId).toBe("run-1");
       expect(event.nodeId).toBe("node-1");
@@ -772,8 +772,8 @@ describe("SQLite UsageStore", () => {
       }
       const limited = store.events({ limit: 2 });
       expect(limited).toHaveLength(2);
-      expect(limited[0].inputTokens).toBe(4);
-      expect(limited[1].inputTokens).toBe(3);
+      expect(limited[0]!.inputTokens).toBe(4);
+      expect(limited[1]!.inputTokens).toBe(3);
     });
   });
 
@@ -787,8 +787,8 @@ describe("SQLite UsageStore", () => {
       expect(minuteSeries).toHaveLength(60);
       expect(minuteSeries.every((m) => m.inputTokens === 0 && m.outputTokens === 0)).toBe(true);
       // Oldest bucket first, newest (current minute) last.
-      const first = new Date(minuteSeries[0].minuteIso);
-      const last = new Date(minuteSeries[59].minuteIso);
+      const first = new Date(minuteSeries[0]!.minuteIso);
+      const last = new Date(minuteSeries[59]!.minuteIso);
       expect(last.getTime() - first.getTime()).toBe(59 * 60_000);
     });
 

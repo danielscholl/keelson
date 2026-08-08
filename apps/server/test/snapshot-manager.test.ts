@@ -9,6 +9,7 @@
 import "./test-setup.ts";
 import { describe, expect, test } from "bun:test";
 import type { SnapshotFrame } from "@keelson/shared";
+import { z } from "zod";
 import { createSnapshotManager } from "../src/snapshot-manager.ts";
 import type { SnapshotSubscribers } from "../src/snapshot-subscribers.ts";
 
@@ -234,8 +235,8 @@ describe("SnapshotManager", () => {
     test("caches and broadcasts the validator's parsed return", async () => {
       const rec = recordingSubscribers();
       const mgr = createSnapshotManager(rec.subscribers);
-      mgr.register("k", () => ({ n: "7" }), {
-        validate: (d) => ({ n: Number((d as { n: string }).n) }),
+      mgr.register<{ n: number }>("k", () => ({ n: 7.9 }), {
+        validate: (d) => ({ n: Math.floor(z.object({ n: z.number() }).parse(d).n) }),
       });
       const frame = await mgr.recompose("k");
       expect(frame?.data).toEqual({ n: 7 });

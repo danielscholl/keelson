@@ -95,7 +95,7 @@ describe("MemoryStore — writeback → recall round-trip", () => {
     const rr = store.recall(makeRecallRequest({ query: "alpha" }));
     expect(rr.schemaVersion).toBe(RECALL_RESPONSE_SCHEMA_VERSION);
     expect(rr.items).toHaveLength(1);
-    expect(rr.items[0].memoryId).toBe(wb.written[0].memoryId);
+    expect(rr.items[0]!.memoryId).toBe(wb.written[0]!.memoryId);
     expect(recallResponseSchema.safeParse(rr).success).toBe(true);
   });
 
@@ -160,7 +160,7 @@ describe("MemoryStore — recall filters", () => {
   test("excludes rows with do_not_inject_automatically = 1", () => {
     const wb = store.writeback(makeWritebackRequest([makeDraft()]));
     db.prepare("UPDATE memories SET use_policy_do_not_inject_automatically = 1 WHERE id = ?").run(
-      wb.written[0].memoryId,
+      wb.written[0]!.memoryId,
     );
     const rr = store.recall(makeRecallRequest({ query: "alpha" }));
     expect(rr.items).toEqual([]);
@@ -168,7 +168,7 @@ describe("MemoryStore — recall filters", () => {
 
   test("excludes non-active lifecycles", () => {
     const wb = store.writeback(makeWritebackRequest([makeDraft()]));
-    db.prepare("UPDATE memories SET lifecycle = 'stale' WHERE id = ?").run(wb.written[0].memoryId);
+    db.prepare("UPDATE memories SET lifecycle = 'stale' WHERE id = ?").run(wb.written[0]!.memoryId);
     const rr = store.recall(makeRecallRequest({ query: "alpha" }));
     expect(rr.items).toEqual([]);
   });
@@ -194,7 +194,7 @@ describe("MemoryStore — recall filters", () => {
     const oldDate = new Date(Date.now() - 100 * 86_400_000).toISOString();
     db.prepare("UPDATE memories SET created_at = ? WHERE id = ?").run(
       oldDate,
-      wb.written[0].memoryId,
+      wb.written[0]!.memoryId,
     );
     const rr = store.recall(makeRecallRequest({ query: "alpha", limits: { recencyDays: 30 } }));
     expect(rr.items).toEqual([]);
@@ -205,7 +205,7 @@ describe("MemoryStore — recall filters", () => {
     const yesterday = new Date(Date.now() - 86_400_000).toISOString();
     db.prepare("UPDATE memories SET stale_after = ? WHERE id = ?").run(
       yesterday,
-      wb.written[0].memoryId,
+      wb.written[0]!.memoryId,
     );
     const rr = store.recall(makeRecallRequest({ query: "alpha" }));
     expect(rr.items).toEqual([]);
@@ -216,7 +216,7 @@ describe("MemoryStore — recall filters", () => {
     const tomorrow = new Date(Date.now() + 86_400_000).toISOString();
     db.prepare("UPDATE memories SET stale_after = ? WHERE id = ?").run(
       tomorrow,
-      wb.written[0].memoryId,
+      wb.written[0]!.memoryId,
     );
     const rr = store.recall(makeRecallRequest({ query: "alpha" }));
     expect(rr.items).toHaveLength(1);
@@ -240,7 +240,7 @@ describe("MemoryStore — recall filters", () => {
       }),
     );
     expect(rr.items).toHaveLength(1);
-    expect(rr.items[0].summary).toBe("alpha A");
+    expect(rr.items[0]!.summary).toBe("alpha A");
   });
 });
 
@@ -352,11 +352,11 @@ describe("MemoryStore — ranking", () => {
     const old = new Date(Date.now() - 200 * 86_400_000).toISOString();
     db.prepare("UPDATE memories SET created_at = ? WHERE id = ?").run(
       old,
-      wbOld.written[0].memoryId,
+      wbOld.written[0]!.memoryId,
     );
     const rr = store.recall(makeRecallRequest({ query: "alpha bravo", limits: { maxItems: 1 } }));
     expect(rr.items).toHaveLength(1);
-    expect(rr.items[0].memoryId).toBe(wbNew.written[0].memoryId);
+    expect(rr.items[0]!.memoryId).toBe(wbNew.written[0]!.memoryId);
   });
 });
 
@@ -367,7 +367,7 @@ describe("MemoryStore — writeback guardrails", () => {
     );
     expect(wb.written).toEqual([]);
     expect(wb.blocked).toHaveLength(1);
-    expect(wb.blocked[0].reason).toBe("potential_secret");
+    expect(wb.blocked[0]!.reason).toBe("potential_secret");
   });
 
   test("blocks missing_source_ref for artifact_reference type", () => {
@@ -375,14 +375,14 @@ describe("MemoryStore — writeback guardrails", () => {
       makeWritebackRequest([makeDraft({ type: "artifact_reference", sourceRefs: [] })]),
     );
     expect(wb.written).toEqual([]);
-    expect(wb.blocked[0].reason).toBe("missing_source_ref");
+    expect(wb.blocked[0]!.reason).toBe("missing_source_ref");
   });
 
   test("blocks missing_source_ref for output type", () => {
     const wb = store.writeback(
       makeWritebackRequest([makeDraft({ type: "output", sourceRefs: [] })]),
     );
-    expect(wb.blocked[0].reason).toBe("missing_source_ref");
+    expect(wb.blocked[0]!.reason).toBe("missing_source_ref");
   });
 
   test("artifact_reference with sourceRef is accepted", () => {
@@ -401,7 +401,7 @@ describe("MemoryStore — writeback guardrails", () => {
     const wb = store.writeback(
       makeWritebackRequest([makeDraft({ content: "AKIAIOSFODNN7EXAMPLE", summary: "leaky" })]),
     );
-    expect(wb.blocked[0].summary).toBe("leaky");
+    expect(wb.blocked[0]!.summary).toBe("leaky");
   });
 });
 
@@ -413,7 +413,7 @@ describe("MemoryStore — idempotency", () => {
     const wb2 = store.writeback(makeWritebackRequest([draft]));
     expect(wb2.written).toEqual([]);
     expect(wb2.deduped).toHaveLength(1);
-    expect(wb2.deduped[0].memoryId).toBe(wb1.written[0].memoryId);
+    expect(wb2.deduped[0]!.memoryId).toBe(wb1.written[0]!.memoryId);
   });
 
   test("multi-draft writeback distinguishes per-draft contentHash", () => {
@@ -434,7 +434,7 @@ describe("MemoryStore — idempotency", () => {
         task: { runtime: "workflow:foo", taskId: "task-99" },
       }),
     );
-    expect(wb.written[0].idempotencyKey).toBe("workflow:foo:task-99:decision:fixed");
+    expect(wb.written[0]!.idempotencyKey).toBe("workflow:foo:task-99:decision:fixed");
   });
 });
 
@@ -450,19 +450,20 @@ describe("MemoryStore — sourceRefs and artifacts persistence", () => {
         }),
       ]),
     );
-    const mem = store.getById(wb.written[0].memoryId);
+    const mem = store.getById(wb.written[0]!.memoryId);
     expect(mem?.sourceRefs).toHaveLength(2);
-    expect(mem?.sourceRefs[0].kind).toBe("pr");
-    expect(mem?.sourceRefs[0].uri).toBe("https://github.com/foo/bar/pull/1");
+    const firstSourceRef = mem?.sourceRefs[0];
+    expect(firstSourceRef?.kind).toBe("pr");
+    expect(firstSourceRef?.uri).toBe("https://github.com/foo/bar/pull/1");
   });
 
   test("artifacts round-trip via getById", () => {
     const wb = store.writeback(
       makeWritebackRequest([makeDraft({ artifacts: [{ kind: "file", uri: "/path/to/file.ts" }] })]),
     );
-    const mem = store.getById(wb.written[0].memoryId);
+    const mem = store.getById(wb.written[0]!.memoryId);
     expect(mem?.artifacts).toHaveLength(1);
-    expect(mem?.artifacts[0].uri).toBe("/path/to/file.ts");
+    expect(mem?.artifacts[0]?.uri).toBe("/path/to/file.ts");
   });
 
   test("writeback audit_events row is written", () => {
@@ -479,7 +480,7 @@ describe("MemoryStore — sourceRefs and artifacts persistence", () => {
 describe("MemoryStore — confirm state machine", () => {
   test("confirm upgrades agent provenance to user_confirmed and sets instruction flag", () => {
     const wb = store.writeback(makeWritebackRequest([makeDraft()]));
-    const memoryId = wb.written[0].memoryId;
+    const memoryId = wb.written[0]!.memoryId;
 
     const result = store.confirm({ memoryId, action: "confirm", actor: "alice" });
     expect(result.applied).toBe(true);
@@ -492,7 +493,7 @@ describe("MemoryStore — confirm state machine", () => {
 
   test("confirm preserves already-eligible provenance (user_confirmed / imported)", () => {
     const wb = store.writeback(makeWritebackRequest([makeDraft()]));
-    const memoryId = wb.written[0].memoryId;
+    const memoryId = wb.written[0]!.memoryId;
     db.prepare("UPDATE memories SET provenance = 'imported' WHERE id = ?").run(memoryId);
     store.confirm({ memoryId, action: "confirm", actor: "alice" });
     const mem = store.getById(memoryId);
@@ -502,15 +503,15 @@ describe("MemoryStore — confirm state machine", () => {
 
   test("evidence_only forces instruction flag off", () => {
     const wb = store.writeback(makeWritebackRequest([makeDraft()]));
-    store.confirm({ memoryId: wb.written[0].memoryId, action: "evidence_only", actor: "a" });
-    const mem = store.getById(wb.written[0].memoryId);
+    store.confirm({ memoryId: wb.written[0]!.memoryId, action: "evidence_only", actor: "a" });
+    const mem = store.getById(wb.written[0]!.memoryId);
     expect(mem?.reviewStatus).toBe("evidence_only");
     expect(mem?.usePolicy.canUseAsInstruction).toBe(false);
   });
 
   test("restrict sets do_not_inject_automatically; subsequent recall excludes", () => {
     const wb = store.writeback(makeWritebackRequest([makeDraft()]));
-    const memoryId = wb.written[0].memoryId;
+    const memoryId = wb.written[0]!.memoryId;
     store.confirm({ memoryId, action: "restrict", actor: "alice" });
     const mem = store.getById(memoryId);
     expect(mem?.usePolicy.doNotInjectAutomatically).toBe(true);
@@ -522,25 +523,25 @@ describe("MemoryStore — confirm state machine", () => {
 
   test("reject sets lifecycle to rejected; subsequent recall excludes", () => {
     const wb = store.writeback(makeWritebackRequest([makeDraft()]));
-    store.confirm({ memoryId: wb.written[0].memoryId, action: "reject", actor: "alice" });
+    store.confirm({ memoryId: wb.written[0]!.memoryId, action: "reject", actor: "alice" });
     const rr = store.recall(makeRecallRequest({ query: "alpha" }));
     expect(rr.items).toEqual([]);
-    const mem = store.getById(wb.written[0].memoryId);
+    const mem = store.getById(wb.written[0]!.memoryId);
     expect(mem?.lifecycle).toBe("rejected");
   });
 
   test("merge sets lifecycle to superseded", () => {
     const wb = store.writeback(makeWritebackRequest([makeDraft()]));
-    store.confirm({ memoryId: wb.written[0].memoryId, action: "merge", actor: "a" });
-    const mem = store.getById(wb.written[0].memoryId);
+    store.confirm({ memoryId: wb.written[0]!.memoryId, action: "merge", actor: "a" });
+    const mem = store.getById(wb.written[0]!.memoryId);
     expect(mem?.lifecycle).toBe("superseded");
     expect(mem?.reviewStatus).toBe("merged");
   });
 
   test("mark_stale sets lifecycle and review_status to stale", () => {
     const wb = store.writeback(makeWritebackRequest([makeDraft()]));
-    store.confirm({ memoryId: wb.written[0].memoryId, action: "mark_stale", actor: "a" });
-    const mem = store.getById(wb.written[0].memoryId);
+    store.confirm({ memoryId: wb.written[0]!.memoryId, action: "mark_stale", actor: "a" });
+    const mem = store.getById(wb.written[0]!.memoryId);
     expect(mem?.lifecycle).toBe("stale");
     expect(mem?.reviewStatus).toBe("stale");
   });
@@ -557,7 +558,7 @@ describe("MemoryStore — confirm state machine", () => {
   test("confirm writes review_actions and audit_events rows", () => {
     const wb = store.writeback(makeWritebackRequest([makeDraft()]));
     store.confirm({
-      memoryId: wb.written[0].memoryId,
+      memoryId: wb.written[0]!.memoryId,
       action: "confirm",
       actor: "alice",
       notes: "looks good",
@@ -585,12 +586,12 @@ describe("MemoryStore — listPending", () => {
         makeDraft({ contentHash: "b", summary: "alpha b" }),
       ]),
     );
-    store.confirm({ memoryId: wb.written[0].memoryId, action: "confirm", actor: "alice" });
+    store.confirm({ memoryId: wb.written[0]!.memoryId, action: "confirm", actor: "alice" });
 
     const page = store.listPending({});
     expect(page.items).toHaveLength(1);
-    expect(page.items[0].memoryId).toBe(wb.written[1].memoryId);
-    expect(page.items[0].reviewStatus).toBe("pending");
+    expect(page.items[0]!.memoryId).toBe(wb.written[1]!.memoryId);
+    expect(page.items[0]!.reviewStatus).toBe("pending");
   });
 
   test("orders newest first by (created_at DESC, id DESC)", () => {
@@ -603,12 +604,12 @@ describe("MemoryStore — listPending", () => {
     // Backdate the first row so the second row is unambiguously newer.
     db.prepare("UPDATE memories SET created_at = ? WHERE id = ?").run(
       new Date(Date.now() - 60_000).toISOString(),
-      wb.written[0].memoryId,
+      wb.written[0]!.memoryId,
     );
     const page = store.listPending({});
     expect(page.items.map((i) => i.memoryId)).toEqual([
-      wb.written[1].memoryId,
-      wb.written[0].memoryId,
+      wb.written[1]!.memoryId,
+      wb.written[0]!.memoryId,
     ]);
   });
 
@@ -689,7 +690,7 @@ describe("MemoryStore — listPending", () => {
     );
     const page = store.listPending({ projectId: "proj-a" });
     expect(page.items).toHaveLength(1);
-    expect(page.items[0].scope.projectId).toBe("proj-a");
+    expect(page.items[0]!.scope.projectId).toBe("proj-a");
   });
 
   test("scope filter — scopeVisibility narrows the page", () => {
@@ -701,14 +702,14 @@ describe("MemoryStore — listPending", () => {
     );
     const page = store.listPending({ scopeVisibility: "personal" });
     expect(page.items).toHaveLength(1);
-    expect(page.items[0].scope.visibility).toBe("personal");
+    expect(page.items[0]!.scope.visibility).toBe("personal");
   });
 });
 
 describe("MemoryStore — durability", () => {
   test("reopening DB preserves rows and FTS index", () => {
     const wb = store.writeback(makeWritebackRequest([makeDraft()]));
-    const memoryId = wb.written[0].memoryId;
+    const memoryId = wb.written[0]!.memoryId;
     db.close();
 
     db = openDatabase({ path: dbPath });
@@ -717,6 +718,6 @@ describe("MemoryStore — durability", () => {
     expect(store.getById(memoryId)).toBeDefined();
     const rr = store.recall(makeRecallRequest({ query: "alpha" }));
     expect(rr.items).toHaveLength(1);
-    expect(rr.items[0].memoryId).toBe(memoryId);
+    expect(rr.items[0]!.memoryId).toBe(memoryId);
   });
 });
