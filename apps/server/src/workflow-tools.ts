@@ -424,7 +424,19 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         return;
       }
       const name = resolution.name;
-      const workingDir = project?.rootPath ?? ctx.cwd;
+      const inheritedDir =
+        typeof ctx.turnContext?.workflowWorkingDir === "string"
+          ? ctx.turnContext.workflowWorkingDir
+          : undefined;
+      let workingDir = project?.rootPath ?? ctx.cwd;
+      if (
+        inheritedDir !== undefined &&
+        (project === undefined ||
+          canonicalPath(project.rootPath) === canonicalPath(inheritedDir) ||
+          isPathInside(canonicalPath(project.rootPath), canonicalPath(inheritedDir)))
+      ) {
+        workingDir = inheritedDir;
+      }
 
       const definition = catalog.get(name, scope);
       if (definition?.requiresProject === true) {

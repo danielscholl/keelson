@@ -18,7 +18,7 @@ import type { MessageChunk, ToolContext, ToolDefinition } from "@keelson/shared"
 import { bootstrapWorkflows } from "../src/bootstrap.ts";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
-import { createProjectsStore } from "../src/projects-store.ts";
+import { canonicalPath, createProjectsStore } from "../src/projects-store.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import { createWorkflowChatTools } from "../src/workflow-tools.ts";
 import {
@@ -96,12 +96,16 @@ function toolByName(tools: ToolDefinition[], name: string): ToolDefinition {
   return tool;
 }
 
-function makeCtx(cwd: string): { ctx: ToolContext; chunks: MessageChunk[] } {
+function makeCtx(
+  cwd: string,
+  turnContext?: Readonly<Record<string, unknown>>,
+): { ctx: ToolContext; chunks: MessageChunk[] } {
   const chunks: MessageChunk[] = [];
   const ctx: ToolContext = {
     cwd,
     emit: (chunk) => chunks.push(chunk),
     abortSignal: new AbortController().signal,
+    ...(turnContext !== undefined ? { turnContext } : {}),
   };
   return { ctx, chunks };
 }
@@ -813,6 +817,41 @@ nodes:
     expect(result.isError).toBe(false);
     expect(result.content).toContain("completed successfully");
     expect(result.content).toContain("project-sentinel-456");
+  });
+
+  test("workflow_run inherits a nested run's worktree for the same project", async () => {
+    const rig = makeScopedRig();
+    const worktreeDir = join(rig.projectRoot, ".worktrees", "nested");
+    mkdirSync(worktreeDir, { recursive: true });
+
+    const nested = makeCtx(rig.projectRoot, { workflowWorkingDir: worktreeDir });
+    await toolByName(rig.tools, "workflow_run").execute(
+      { name: "proj-flow", project: "scoped" },
+      nested.ctx,
+    );
+
+    const detail = rig.controller.getRun(extractRunId(nested.chunks));
+    expect(detail?.workingDir).toBe(canonicalPath(worktreeDir));
+    expect(detail?.workingDir).not.toBe(canonicalPath(rig.projectRoot));
+  });
+
+  test("workflow_run keeps a different named project's root", async () => {
+    const rig = makeScopedRig();
+    writeWorkflow("done.yaml", NO_APPROVAL_WF);
+    const worktreeDir = join(rig.projectRoot, ".worktrees", "nested");
+    const otherRoot = join(tmpDir, "other-project");
+    mkdirSync(worktreeDir, { recursive: true });
+    mkdirSync(otherRoot, { recursive: true });
+    rig.projectsStore.create({ name: "other", rootPath: otherRoot });
+
+    const nested = makeCtx(rig.projectRoot, { workflowWorkingDir: worktreeDir });
+    await toolByName(rig.tools, "workflow_run").execute(
+      { name: "done", project: "other" },
+      nested.ctx,
+    );
+
+    const detail = rig.controller.getRun(extractRunId(nested.chunks));
+    expect(detail?.workingDir).toBe(canonicalPath(otherRoot));
   });
 
   test("workflow_run rejects an unknown project selector", async () => {
