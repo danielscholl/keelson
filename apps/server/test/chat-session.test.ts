@@ -37,6 +37,7 @@ function registerSessionProvider(
     sessionResume: true,
     streaming: true,
     tools: false,
+    reasoningEffort: false,
     models: ["session-model"],
     defaultModel: "session-model",
   };
@@ -72,6 +73,7 @@ function registerAbortingProvider(
     sessionResume: true,
     streaming: true,
     tools: false,
+    reasoningEffort: false,
     models: ["session-model"],
     defaultModel: "session-model",
   };

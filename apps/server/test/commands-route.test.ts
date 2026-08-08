@@ -39,7 +39,9 @@ describe("GET /api/commands", () => {
     });
     const res = await app.fetch(new Request("http://test/api/commands"));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { commands: Array<{ name: string; ribId: string }> };
+    const body = (await res.json()) as {
+      commands: Array<{ name: string; description: string; ribId: string }>;
+    };
     expect(body.commands).toEqual([{ name: "mind", description: "Open a Mind", ribId: "chamber" }]);
   });
 
@@ -110,7 +112,7 @@ describe("POST /api/commands/:ribId/:name/invoke", () => {
     const app = makeApp({ invokers });
     const res = await app.fetch(post("/api/commands/chamber/mind/invoke", {}));
     expect(res.status).toBe(200);
-    expect((await res.json()) as { ok: boolean }).toEqual({ ok: false, error: "no slug" });
+    expect((await res.json()) as CommandInvokeResult).toEqual({ ok: false, error: "no slug" });
   });
 
   test("400 for a non-object body", async () => {

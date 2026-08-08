@@ -53,6 +53,7 @@ function registerSpy(capture: (opts: SendQueryOptions | undefined) => void): str
     sessionResume: false,
     streaming: true,
     tools: false,
+    reasoningEffort: false,
     models: ["spy-model"],
     defaultModel: "spy-model",
   };
@@ -190,6 +191,7 @@ nodes:
 
     // Clear so the assertion is unambiguously about the resume re-run.
     captured = undefined;
+    const getCaptured = (): SendQueryOptions | undefined => captured;
     const resumeRes = await app.fetch(
       new Request(`http://test/api/workflows/runs/${runId}/resume-run`, {
         method: "POST",
@@ -200,7 +202,7 @@ nodes:
     expect(resumeRes.status).toBe(200);
     expect(await pollUntilTerminal(app, runId)).toBe("succeeded");
 
-    const sp = captured?.systemPrompt ?? "";
+    const sp = getCaptured()?.systemPrompt ?? "";
     expect(sp).toContain("## Project notebook");
     expect(sp).toContain("recent thing");
   });

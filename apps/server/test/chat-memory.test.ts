@@ -53,6 +53,7 @@ function registerSpy(id: string, capture: (opts: SendQueryOptions | undefined) =
     sessionResume: false,
     streaming: true,
     tools: false,
+    reasoningEffort: false,
     models: ["spy-model"],
     defaultModel: "spy-model",
   };
@@ -109,6 +110,9 @@ function makeFakeMemoryStore(opts: FakeMemoryStoreOptions = {}): {
     listPending(_query) {
       throw new Error("listPending must not be called from chat recall path");
     },
+    listMemories(_query) {
+      throw new Error("listMemories must not be called from chat recall path");
+    },
     getById(_id) {
       throw new Error("getById must not be called from chat recall path");
     },
@@ -159,7 +163,7 @@ describe("chat memory recall", () => {
     });
 
     expect(calls).toHaveLength(1);
-    const req = calls[0];
+    const req = calls[0]!;
     expect(req.schemaVersion).toBe(RECALL_REQUEST_SCHEMA_VERSION);
     expect(req.scope).toEqual({ visibility: "project" });
     expect(req.task.runtime).toBe("chat");

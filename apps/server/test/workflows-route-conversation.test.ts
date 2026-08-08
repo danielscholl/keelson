@@ -323,13 +323,10 @@ nodes:
     // Synthetic store that throws on createRun — every other method is a no-op
     // since this test never reaches them.
     const throwingStore: WorkflowStore = {
+      ...createWorkflowStore(db),
       createRun: () => {
         throw new Error("simulated FK failure");
       },
-      updateRunStatus: () => {},
-      upsertNodeOutput: () => {},
-      getRun: () => undefined,
-      listRuns: () => [],
     };
     const app = new Hono();
     chatRoutes(app, conversationStore, {
@@ -387,6 +384,7 @@ nodes:
       inputs: {},
       startedAt: "2025-01-01T00:00:00.000Z",
       conversationId: conv.id,
+      workingDir: tmpDir,
     });
 
     expect(() =>
@@ -396,6 +394,7 @@ nodes:
         inputs: {},
         startedAt: "2025-01-01T00:00:01.000Z",
         conversationId: conv.id,
+        workingDir: tmpDir,
       }),
     ).toThrow();
   });
