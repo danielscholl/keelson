@@ -400,17 +400,19 @@ export function buildProgram(): Command {
     .command("status [runId]")
     .description("show recent runs or a single run's status (server-required)")
     .option("--workflow <name>", "list runs for a specific workflow name")
+    .option("--brief", "compact status: node id/status only, no node outputs")
     .option("--base-url <url>", "explicit server base URL (skips the probe)")
     .action(async function statusAction(
       this: Command,
       runId: string | undefined,
-      statusOpts: { workflow?: string; baseUrl?: string },
+      statusOpts: { workflow?: string; brief?: boolean; baseUrl?: string },
     ) {
       const { json } = globalOpts(this);
       await runWorkflowStatus(runId, {
         json,
         baseUrl: statusOpts.baseUrl,
         workflow: statusOpts.workflow,
+        brief: Boolean(statusOpts.brief),
       });
     });
 

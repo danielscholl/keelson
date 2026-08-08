@@ -92,6 +92,26 @@ function renderNodes(detail: WorkflowRunDetail): string {
   return blocks.join("\n\n");
 }
 
+function renderBriefStatus(
+  detail: WorkflowRunDetail,
+  opts: { current: string[]; pauseId?: string; awaitingNodeId?: string },
+): string {
+  const lines = [
+    `Run ${detail.runId} — workflow "${detail.workflowName}" — status ${detail.status} — started ${detail.startedAt}.`,
+  ];
+  if (opts.current.length > 0) {
+    lines.push(`current: ${opts.current.join(", ")}`);
+  }
+  if (opts.awaitingNodeId) {
+    lines.push(`Awaiting approval at "${opts.awaitingNodeId}"`);
+    if (opts.pauseId !== undefined) {
+      lines.push(resumeInstructions(detail.runId, opts.awaitingNodeId, opts.pauseId));
+    }
+  }
+  lines.push("nodes:", ...detail.nodes.map((node) => `  [${node.nodeId}] ${node.status}`));
+  return lines.join("\n");
+}
+
 // Shared resume guidance so workflow_run (live pause) and workflow_status
 // (status-polled pause) hand the model the SAME runId/nodeId/pauseId protocol.
 // pauseId may be absent only for a paused-but-reconciled run after a restart.
@@ -209,6 +229,7 @@ const resumeInputSchema = z.object({
 
 const statusInputSchema = z.object({
   runId: z.string().optional(),
+  brief: z.boolean().optional(),
 });
 
 const REPO_MISSING_HINT_RE = /(?:failed to run git|not a git repository)/i;
@@ -524,7 +545,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
   const workflowStatus: ToolDefinition = {
     name: "workflow_status",
     description:
-      "Check workflow runs. With no runId, lists currently running and paused runs. With a runId, returns that run's per-node status, including any node awaiting approval.",
+      "Check workflow runs. With no runId, lists currently running and paused runs. With a runId, returns that run's per-node status, including any node awaiting approval. Set brief: true for cheap poll loops with node id/status only, the current node, and awaiting node/pauseId; full node output is the default.",
     inputSchema: statusInputSchema,
     async execute(input, ctx) {
       const parsed = statusInputSchema.safeParse(input);
@@ -540,6 +561,24 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
           return;
         }
         const awaiting = detail.nodes.find((n) => n.status === "awaiting");
+        if (parsed.data.brief === true) {
+          const tracked = controller.currentNodes(runId);
+          const current = tracked.length === 0 && awaiting ? [awaiting.nodeId] : tracked;
+          const pauseId = awaiting
+            ? controller
+                .pendingApprovals(runId)
+                .find((pending) => pending.nodeId === awaiting.nodeId)?.pauseId
+            : undefined;
+          emitResult(
+            ctx,
+            renderBriefStatus(detail, {
+              current,
+              ...(pauseId !== undefined ? { pauseId } : {}),
+              ...(awaiting !== undefined ? { awaitingNodeId: awaiting.nodeId } : {}),
+            }),
+          );
+          return;
+        }
         const lines = [
           `Run ${runId} — workflow "${detail.workflowName}" — status ${detail.status}.`,
         ];

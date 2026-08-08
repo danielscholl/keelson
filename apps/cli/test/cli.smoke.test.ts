@@ -529,6 +529,73 @@ describe("keelson CLI smoke", () => {
     expect(envelope.data.status).toBe("succeeded");
   });
 
+  test("workflow status --brief projects node status and preserves full default output", async () => {
+    const runId = "11111111-1111-4111-8111-111111111111";
+    const detail = {
+      runId,
+      workflowName: "status-smoke",
+      status: "succeeded",
+      startedAt: "2026-08-08T12:00:00.000Z",
+      completedAt: "2026-08-08T12:00:01.000Z",
+      error: null,
+      conversationId: null,
+      projectId: null,
+      workingDir: null,
+      worktreePath: null,
+      inputs: {},
+      nodes: [
+        {
+          nodeId: "done",
+          status: "succeeded",
+          outputText: "cli-status-output-sentinel",
+          contentParts: null,
+          startedAt: "2026-08-08T12:00:00.000Z",
+          completedAt: "2026-08-08T12:00:01.000Z",
+          error: null,
+        },
+      ],
+    };
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(req) {
+        const path = new URL(req.url).pathname;
+        if (path === `/api/workflows/runs/${runId}`) {
+          return Response.json({ run: detail });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    const baseUrl = `http://${server.hostname}:${server.port}`;
+
+    try {
+      const brief = await runCli([
+        "--json",
+        "workflow",
+        "status",
+        runId,
+        "--brief",
+        "--base-url",
+        baseUrl,
+      ]);
+      expect(brief.exitCode).toBe(0);
+      const briefEnvelope = JSON.parse(brief.stdout.trim());
+      expect(briefEnvelope.data.nodes).toEqual([{ id: "done", status: "succeeded" }]);
+      expect(briefEnvelope.data.nodes[0].outputText).toBeUndefined();
+      expect(briefEnvelope.data.current).toBeNull();
+      expect(briefEnvelope.data.awaiting).toBeNull();
+      expect(brief.stdout).not.toContain("cli-status-output-sentinel");
+
+      const full = await runCli(["--json", "workflow", "status", runId, "--base-url", baseUrl]);
+      expect(full.exitCode).toBe(0);
+      expect(JSON.parse(full.stdout.trim()).data.run.nodes[0].outputText).toBe(
+        "cli-status-output-sentinel",
+      );
+    } finally {
+      server.stop(true);
+    }
+  });
+
   test("workflow run rejects duplicate ARGUMENTS sources", async () => {
     const { stdout, exitCode } = await runCli([
       "--json",

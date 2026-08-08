@@ -2,6 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { workflowRunDetailSchema } from "@keelson/shared";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import {
   getRun,
@@ -18,6 +19,7 @@ export interface WorkflowStatusOptions {
   json: boolean;
   baseUrl?: string;
   workflow?: string;
+  brief?: boolean;
 }
 
 export async function runWorkflowStatus(
@@ -46,8 +48,31 @@ export async function runWorkflowStatus(
         );
         process.exit(resolved.ambiguous ? EXIT_BAD_ARGS : EXIT_NOT_FOUND);
       }
-      const run = await getRun(baseUrl, resolved.runId);
-      emit({ data: run }, { json: opts.json });
+      const response = await getRun(baseUrl, resolved.runId);
+      if (opts.brief) {
+        if (typeof response !== "object" || response === null || !("run" in response)) {
+          throw new Error("workflow run response is missing run detail");
+        }
+        const detail = workflowRunDetailSchema.parse(response.run);
+        const awaitingNode = detail.nodes.find((node) => node.status === "awaiting");
+        emit(
+          {
+            data: {
+              runId: detail.runId,
+              workflowName: detail.workflowName,
+              status: detail.status,
+              startedAt: detail.startedAt,
+              nodes: detail.nodes.map((node) => ({ id: node.nodeId, status: node.status })),
+              current: awaitingNode?.nodeId ?? null,
+              awaiting:
+                detail.status === "paused" && awaitingNode ? { nodeId: awaitingNode.nodeId } : null,
+            },
+          },
+          { json: opts.json },
+        );
+        process.exit(EXIT_OK);
+      }
+      emit({ data: response }, { json: opts.json });
       process.exit(EXIT_OK);
     }
     if (opts.workflow) {
