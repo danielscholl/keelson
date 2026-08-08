@@ -155,6 +155,18 @@ nodes:
       message: please approve
 `;
 
+const BRIEF_APPROVAL_WF = `name: brief-pa
+description: |
+  Use when: polling a run at an approval gate
+nodes:
+  - id: prepare
+    bash: echo brief-output-sentinel-789
+  - id: review
+    depends_on: [prepare]
+    approval:
+      message: please approve
+`;
+
 const FAIL_WF = `name: boom
 description: |
   Use when: exercising a failing gate
@@ -680,6 +692,41 @@ nodes:
       okCtx.ctx,
     );
     expect(lastToolResult(okCtx.chunks).isError).toBe(false);
+  });
+
+  test("workflow_status brief omits output but keeps awaiting resume refs", async () => {
+    writeWorkflow("brief-pa.yaml", BRIEF_APPROVAL_WF);
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const run = toolByName(tools, "workflow_run");
+    const respond = toolByName(tools, "workflow_respond");
+    const status = toolByName(tools, "workflow_status");
+
+    const runCtx = makeCtx(cwd);
+    await run.execute({ name: "brief-pa" }, runCtx.ctx);
+    const refs = extractPauseRefs(lastToolResult(runCtx.chunks).content);
+
+    const briefCtx = makeCtx(cwd);
+    await status.execute({ runId: refs.runId, brief: true }, briefCtx.ctx);
+    const brief = lastToolResult(briefCtx.chunks);
+    expect(brief.isError).toBe(false);
+    expect(brief.content).toContain("[prepare] succeeded");
+    expect(brief.content).toContain("[review] awaiting");
+    expect(brief.content).toContain('current: review');
+    expect(brief.content).toContain('Awaiting approval at "review"');
+    expect(brief.content).toContain(`pauseId="${refs.pauseId}"`);
+    expect(brief.content).not.toContain("brief-output-sentinel-789");
+
+    const fullCtx = makeCtx(cwd);
+    await status.execute({ runId: refs.runId }, fullCtx.ctx);
+    expect(lastToolResult(fullCtx.chunks).content).toContain("brief-output-sentinel-789");
+
+    const respondCtx = makeCtx(cwd);
+    await respond.execute(
+      { runId: refs.runId, nodeId: refs.nodeId, text: "approve", pauseId: refs.pauseId },
+      respondCtx.ctx,
+    );
+    expect(lastToolResult(respondCtx.chunks).isError).toBe(false);
   });
 
   test("workflow_respond enforces the 16 KiB reply cap like POST /resume", async () => {
