@@ -19,15 +19,17 @@ const openApproval = (registry: ApprovalRegistry): Promise<ApprovalDecision> =>
   registry.request({ surface: "chat", policyId: "builtin:ask_on_shell", reason: "confirm shell" });
 
 function post(app: Hono, id: string, body: unknown, origin?: string): Promise<Response> {
-  return app.fetch(
-    new Request(`http://test/api/approvals/${id}`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(origin ? { origin } : {}),
-      },
-      body: typeof body === "string" ? body : JSON.stringify(body),
-    }),
+  return Promise.resolve(
+    app.fetch(
+      new Request(`http://test/api/approvals/${id}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(origin ? { origin } : {}),
+        },
+        body: typeof body === "string" ? body : JSON.stringify(body),
+      }),
+    ),
   );
 }
 

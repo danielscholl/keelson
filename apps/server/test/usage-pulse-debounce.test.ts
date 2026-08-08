@@ -29,6 +29,7 @@ function fakeStore(): UsageStore {
     }),
     series: () => [],
     breakdown: () => [],
+    jobs: () => [],
     events: () => [],
     pulse: () => ({
       composedTotals: {
@@ -108,6 +109,7 @@ describe("withUsagePulseDebounce", () => {
     expect(decorated.summary).toBe(base.summary);
     expect(decorated.series).toBe(base.series);
     expect(decorated.breakdown).toBe(base.breakdown);
+    expect(decorated.jobs).toBe(base.jobs);
     expect(decorated.events).toBe(base.events);
     expect(decorated.pulse).toBe(base.pulse);
   });

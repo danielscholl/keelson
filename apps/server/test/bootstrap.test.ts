@@ -31,6 +31,7 @@ import {
   RECALL_RESPONSE_SCHEMA_VERSION,
   WRITEBACK_REQUEST_SCHEMA_VERSION,
   WRITEBACK_RESPONSE_SCHEMA_VERSION,
+  writebackRequestSchema,
 } from "@keelson/shared";
 import { crossRibGrantsFromConfig, serializeCrossRibGrants } from "@keelson/shared/config";
 import { clearRegistry, getRegisteredTools } from "@keelson/skills";
@@ -817,14 +818,18 @@ describe("bootstrapRibs", () => {
     // this one test and restore it afterward.
     clearProviderRegistry();
     const capabilities: ProviderCapabilities = {
-      supportsTools: false,
-      supportsImages: false,
-      supportsResume: false,
-      supportsThinking: false,
-      supportsReasoningEffort: false,
+      sessionResume: false,
+      streaming: true,
+      tools: false,
+      reasoningEffort: false,
+      models: [],
+      defaultModel: "",
     };
     const fakeProvider: IAgentProvider = {
       async *sendQuery(): AsyncGenerator<MessageChunk> {},
+      getType: () => "fake",
+      getCapabilities: () => capabilities,
+      listModels: async () => [],
     };
     const register = (id: string, displayName: string): void =>
       registerProvider({
@@ -922,16 +927,21 @@ describe("bootstrapRibs", () => {
     expect(await memory?.recall(recallReq)).toEqual(recallResponse);
     expect(recallCalls).toHaveLength(1);
 
-    const writebackReq: WritebackRequest = {
+    const writebackReq = {
       schemaVersion: WRITEBACK_REQUEST_SCHEMA_VERSION,
       idempotencyKey: "idem-1",
       scope: { visibility: "project", projectId: "p1" },
       task: { runtime: "rib:alpha" },
       memories: [
-        { type: "decision", summary: "shipped X", content: "we decided X", contentHash: "h1" },
+        {
+          type: "decision",
+          summary: "shipped X",
+          content: "we decided X",
+          contentHash: "h1",
+        },
       ],
-    };
-    expect(await memory?.writeback(writebackReq)).toEqual(writebackResponse);
+    } satisfies z.input<typeof writebackRequestSchema>;
+    expect(await memory?.writeback(writebackReq as WritebackRequest)).toEqual(writebackResponse);
     expect(writebackCalls).toHaveLength(1);
     // The seam re-parses, so the store sees provenance/sourceRefs/artifacts defaulted in.
     expect(writebackCalls[0]?.memories[0]?.provenance).toBe("generated");
@@ -1624,15 +1634,19 @@ describe("bootstrapPromptHandler", () => {
   });
 
   function registerFakeProvider(id: string): void {
+    const capabilities: ProviderCapabilities = {
+      sessionResume: false,
+      streaming: true,
+      tools: false,
+      reasoningEffort: false,
+      models: [],
+      defaultModel: "",
+    };
     const provider: IAgentProvider = {
       async *sendQuery(): AsyncGenerator<MessageChunk> {},
-    };
-    const capabilities: ProviderCapabilities = {
-      supportsTools: false,
-      supportsImages: false,
-      supportsResume: false,
-      supportsThinking: false,
-      supportsReasoningEffort: false,
+      getType: () => id,
+      getCapabilities: () => capabilities,
+      listModels: async () => [],
     };
     registerProvider({
       id,

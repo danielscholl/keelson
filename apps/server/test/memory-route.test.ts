@@ -83,7 +83,7 @@ function seedMemory(
       },
     ],
   });
-  return wb.written[0].memoryId;
+  return wb.written[0]!.memoryId;
 }
 
 describe("POST /api/memory/recall", () => {
@@ -100,7 +100,7 @@ describe("POST /api/memory/recall", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as RecallResponse;
     expect(body.items).toHaveLength(1);
-    expect(body.items[0].summary).toBe("alpha bravo");
+    expect(body.items[0]!.summary).toBe("alpha bravo");
   });
 
   test("rejects malformed JSON with 400", async () => {
@@ -184,7 +184,7 @@ describe("POST /api/memory/writeback", () => {
     const body = (await res.json()) as WritebackResponse;
     expect(body.written).toEqual([]);
     expect(body.blocked).toHaveLength(1);
-    expect(body.blocked[0].reason).toBe("potential_secret");
+    expect(body.blocked[0]!.reason).toBe("potential_secret");
   });
 });
 
@@ -264,7 +264,7 @@ describe("GET /api/memory/review", () => {
     db.prepare("UPDATE memories SET stale_after = ? WHERE id = ?").run(future, memoryId);
     const res = await app.fetch(getJson("/api/memory/review"));
     const body = (await res.json()) as ReviewListResponse;
-    expect(body.items[0].staleAfter).toBe(future);
+    expect(body.items[0]!.staleAfter).toBe(future);
   });
 
   test("limit + cursor paginate deterministically", async () => {
@@ -362,7 +362,7 @@ describe("GET /api/memory/review", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as ReviewListResponse;
     expect(body.items).toHaveLength(1);
-    expect(body.items[0].scope.projectId).toBe("proj-a");
+    expect(body.items[0]!.scope.projectId).toBe("proj-a");
   });
 });
 
@@ -383,6 +383,9 @@ describe("internal error envelope (no storage detail leak)", () => {
         throw error;
       },
       listPending: () => {
+        throw error;
+      },
+      listMemories: () => {
         throw error;
       },
       getById: () => undefined,

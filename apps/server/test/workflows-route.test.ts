@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isRegisteredProvider, registerStubProvider, unregisterProvider } from "@keelson/providers";
-import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
+import { TERMINAL_RUN_STATUSES, type TokenUsage } from "@keelson/shared";
 
 import { makePromptHandler, type WorkflowDefinition } from "@keelson/workflows";
 import { Hono } from "hono";
@@ -573,7 +573,7 @@ nodes:
     await new Promise((r) => setTimeout(r, 100));
     expect(activeRuns.size()).toBe(1);
 
-    await activeRuns.abortAll("test shutdown");
+    await activeRuns.abortAll();
 
     expect(activeRuns.size()).toBe(0);
     const run = store.getRun(runId);
@@ -1147,7 +1147,7 @@ nodes:
       nodes: Array<{
         nodeId: string;
         status: string;
-        usage: { inputTokens: number; outputTokens: number } | null;
+        usage: TokenUsage | null;
       }>;
     };
     expect(run.status).toBe("succeeded");
@@ -2944,6 +2944,7 @@ nodes:
         inputs: {},
         startedAt: now,
         conversationId: conv.id,
+        workingDir: tmpDir,
       });
       if (status !== "running") {
         store.updateRunStatus({
@@ -3094,8 +3095,8 @@ nodes:
       runs: Array<{ runId: string; status: string }>;
     };
     expect(body.runs).toHaveLength(1);
-    expect(body.runs[0].runId).toBe(runId);
-    expect(body.runs[0].status).toBe("paused");
+    expect(body.runs[0]!.runId).toBe(runId);
+    expect(body.runs[0]!.status).toBe("paused");
 
     // Cleanup: resume so the rig doesn't leak a paused run between tests.
     await app.fetch(
@@ -3195,6 +3196,7 @@ nodes:
         inputs: {},
         startedAt: `2025-01-01T00:00:0${i}.000Z`,
         conversationId: conv.id,
+        workingDir: tmpDir,
       });
       store.updateRunStatus({ runId: `r${i}`, status: "succeeded", completedAt: "x", error: null });
     }
@@ -3233,6 +3235,7 @@ nodes:
         inputs: {},
         startedAt: `2025-01-01T00:00:00.00${runId.slice(-1)}Z`,
         conversationId: conv.id,
+        workingDir: tmpDir,
         origin,
       });
       store.updateRunStatus({ runId, status: "succeeded", completedAt: "x", error: null });
@@ -3283,6 +3286,7 @@ nodes:
         inputs: {},
         startedAt: at,
         conversationId: conv.id,
+        workingDir: tmpDir,
         origin,
       });
     };
@@ -3332,6 +3336,7 @@ nodes:
         inputs: {},
         startedAt: `2025-01-01T00:00:0${i}.000Z`,
         conversationId: conv.id,
+        workingDir: tmpDir,
         origin: "scheduled",
       });
       store.updateRunStatus({

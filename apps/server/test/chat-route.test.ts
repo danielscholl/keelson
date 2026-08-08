@@ -78,6 +78,7 @@ function makeSpyProvider(
     sessionResume: false,
     streaming: true,
     tools: false,
+    reasoningEffort: false,
     models: ["spy-model"],
     defaultModel: "spy-model",
   };
@@ -412,7 +413,7 @@ describe("handleChatRequest dispatch", () => {
     }
 
     // First chunk is the stub's 'system' line
-    const first = chunkEvents[0];
+    const first = chunkEvents[0]!;
     if (first.event.type === "chunk") {
       expect(first.event.payload.type).toBe("system");
     }
@@ -431,12 +432,12 @@ describe("handleChatRequest dispatch", () => {
     const stored = store.get(conv.id);
     expect(stored).toBeDefined();
     expect(stored!.messages).toHaveLength(2);
-    expect(stored!.messages[0].role).toBe("user");
-    expect(stored!.messages[0].content).toBe("hello world");
-    expect(stored!.messages[1].role).toBe("assistant");
+    expect(stored!.messages[0]!.role).toBe("user");
+    expect(stored!.messages[0]!.content).toBe("hello world");
+    expect(stored!.messages[1]!.role).toBe("assistant");
     // Stub yields each token with a trailing space — accumulated text contains both
-    expect(stored!.messages[1].content).toContain("hello");
-    expect(stored!.messages[1].content).toContain("world");
+    expect(stored!.messages[1]!.content).toContain("hello");
+    expect(stored!.messages[1]!.content).toContain("world");
   });
 
   test("records user prompt even when provider lookup fails", async () => {
@@ -451,8 +452,8 @@ describe("handleChatRequest dispatch", () => {
 
     const stored = store.get(conv.id);
     expect(stored!.messages).toHaveLength(1);
-    expect(stored!.messages[0].role).toBe("user");
-    expect(stored!.messages[0].content).toBe("hi");
+    expect(stored!.messages[0]!.role).toBe("user");
+    expect(stored!.messages[0]!.content).toBe("hi");
   });
 
   test("emits error frame for unknown providerId", async () => {
@@ -466,11 +467,11 @@ describe("handleChatRequest dispatch", () => {
     });
 
     expect(sent).toHaveLength(2);
-    expect(sent[0].event.type).toBe("error");
-    if (sent[0].event.type === "error") {
-      expect(sent[0].event.code).toBe("UNKNOWN_PROVIDER");
+    expect(sent[0]!.event.type).toBe("error");
+    if (sent[0]!.event.type === "error") {
+      expect(sent[0]!.event.code).toBe("UNKNOWN_PROVIDER");
     }
-    expect(sent[1].event.type).toBe("done");
+    expect(sent[1]!.event.type).toBe("done");
   });
 
   test("emits error frame for unknown conversationId", async () => {
@@ -483,11 +484,11 @@ describe("handleChatRequest dispatch", () => {
     });
 
     expect(sent).toHaveLength(2);
-    expect(sent[0].event.type).toBe("error");
-    if (sent[0].event.type === "error") {
-      expect(sent[0].event.code).toBe("UNKNOWN_CONVERSATION");
+    expect(sent[0]!.event.type).toBe("error");
+    if (sent[0]!.event.type === "error") {
+      expect(sent[0]!.event.code).toBe("UNKNOWN_CONVERSATION");
     }
-    expect(sent[1].event.type).toBe("done");
+    expect(sent[1]!.event.type).toBe("done");
   });
 
   test("auto-names a fresh conversation from the first user prompt", async () => {
@@ -714,6 +715,7 @@ describe("handleChatRequest dispatch", () => {
       sessionResume: false,
       streaming: true,
       tools: true,
+      reasoningEffort: false,
       models: ["spy-model"],
       defaultModel: "spy-model",
     };
@@ -830,6 +832,7 @@ describe("handleChatRequest dispatch", () => {
       sessionResume: false,
       streaming: true,
       tools: false,
+      reasoningEffort: false,
       models: ["expensive-model"],
       defaultModel: "expensive-model",
     };
@@ -1152,6 +1155,7 @@ describe("handleChatRequest dispatch", () => {
       sessionResume: false,
       streaming: true,
       tools: true,
+      reasoningEffort: false,
       models: ["spy-model"],
       defaultModel: "spy-model",
     };
@@ -1226,6 +1230,7 @@ describe("handleChatRequest dispatch", () => {
       sessionResume: false,
       streaming: true,
       tools: true,
+      reasoningEffort: false,
       models: ["spy-model"],
       defaultModel: "spy-model",
     };
@@ -1412,14 +1417,14 @@ describe("handleChatRequest dispatch", () => {
     });
 
     expect(sent).toHaveLength(1);
-    expect(sent[0].event.type).toBe("chunk");
+    expect(sent[0]!.event.type).toBe("chunk");
     // Critically: no final 'done' frame after abort
     expect(sent.some((f) => f.event.type === "done")).toBe(false);
 
     // Aborted turn must not produce an assistant message in the store
     const stored = store.get(conv.id);
     expect(stored!.messages).toHaveLength(1);
-    expect(stored!.messages[0].role).toBe("user");
+    expect(stored!.messages[0]!.role).toBe("user");
   });
 });
 
@@ -1444,7 +1449,7 @@ describe("WebSocket handlers", () => {
     await handlers.message!(fakeWs, "not json at all {");
 
     expect(sent).toHaveLength(1);
-    const parsed = chatFrameSchema.parse(JSON.parse(sent[0]));
+    const parsed = chatFrameSchema.parse(JSON.parse(sent[0]!));
     expect(parsed.event.type).toBe("error");
     if (parsed.event.type === "error") {
       expect(parsed.event.code).toBe("PARSE_ERROR");
@@ -1484,7 +1489,7 @@ describe("WebSocket handlers", () => {
 
     expect(closed).toBe(true);
     expect(sent).toHaveLength(1);
-    const parsed = chatFrameSchema.parse(JSON.parse(sent[0]));
+    const parsed = chatFrameSchema.parse(JSON.parse(sent[0]!));
     expect(parsed.event.type).toBe("error");
   });
 
@@ -1520,7 +1525,7 @@ describe("WebSocket handlers", () => {
 
     expect(closed).toBe(true);
     expect(sent).toHaveLength(1);
-    const parsed = chatFrameSchema.parse(JSON.parse(sent[0]));
+    const parsed = chatFrameSchema.parse(JSON.parse(sent[0]!));
     expect(parsed.event.type).toBe("error");
   });
 
@@ -1552,7 +1557,7 @@ describe("WebSocket handlers", () => {
 
     expect(closed).toBe(true);
     expect(sent).toHaveLength(1);
-    const parsed = chatFrameSchema.parse(JSON.parse(sent[0]));
+    const parsed = chatFrameSchema.parse(JSON.parse(sent[0]!));
     expect(parsed.event.type).toBe("error");
   });
 
@@ -1566,6 +1571,7 @@ describe("WebSocket handlers", () => {
       sessionResume: false,
       streaming: true,
       tools: false,
+      reasoningEffort: false,
       models: ["m"],
       defaultModel: "m",
     };
@@ -1631,7 +1637,7 @@ describe("WebSocket handlers", () => {
 });
 
 describe("WebSocket upgrade gate", () => {
-  let server: Server;
+  let server: Server<WsData>;
   let baseUrl: string;
 
   beforeAll(() => {
@@ -1708,7 +1714,7 @@ describe("handleChatRequest — token usage", () => {
       (f) => f.event.type === "chunk" && f.event.payload.type === "usage",
     );
     expect(usageFrames).toHaveLength(1);
-    const event = usageFrames[0].event;
+    const event = usageFrames[0]!.event;
     if (event.type === "chunk" && event.payload.type === "usage") {
       expect(event.payload.usage).toEqual({
         inputTokens: 3,
@@ -1783,7 +1789,7 @@ describe("handleChatRequest — usage ledger", () => {
       status: "ok",
       conversationId: conv.id,
     });
-    expect(events[0].durationMs).toEqual(expect.any(Number));
+    expect(events[0]!.durationMs).toEqual(expect.any(Number));
 
     // Provider/model provenance also lands on the assistant message row
     // itself (server-internal — never round-tripped onto the wire Message).
@@ -1818,6 +1824,7 @@ describe("handleChatRequest — usage-only turn persistence", () => {
       sessionResume: false,
       streaming: true,
       tools: false,
+      reasoningEffort: false,
       models: ["m"],
       defaultModel: "m",
     };
@@ -1862,6 +1869,7 @@ describe("handleChatRequest — usage boundary hardening", () => {
       sessionResume: false,
       streaming: true,
       tools: false,
+      reasoningEffort: false,
       models: ["m"],
       defaultModel: "m",
     };
@@ -2002,6 +2010,7 @@ describe("handleChatRequest — resolved-model chunk", () => {
       sessionResume: false,
       streaming: true,
       tools: false,
+      reasoningEffort: false,
       models: ["m"],
       defaultModel: "m",
     };

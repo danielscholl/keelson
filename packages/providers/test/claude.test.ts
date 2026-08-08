@@ -356,7 +356,7 @@ describe("ClaudeProvider — subscription preference", () => {
 
 describe("ClaudeQueryFactory.detectSubscription", () => {
   it("true when the key-stripped status reports a subscription", async () => {
-    const calls = { count: 0 };
+    const calls: { count: number; env?: Record<string, string> } = { count: 0 };
     const factory = new ClaudeQueryFactory({
       cliRunner: fakeCliRunner({ loggedIn: true, subscriptionType: "max" }, calls),
     });

@@ -64,12 +64,14 @@ function makeRig(): Rig {
 }
 
 function put(app: Hono, name: string, body: unknown): Promise<Response> {
-  return app.fetch(
-    new Request(`http://test/api/gateways/${name}`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }),
+  return Promise.resolve(
+    app.fetch(
+      new Request(`http://test/api/gateways/${name}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    ),
   );
 }
 

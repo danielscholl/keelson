@@ -487,6 +487,7 @@ describe("fix-issue CI triage criteria", () => {
 
   test("blocks criteria conflicts and validates fixes before push", () => {
     const prompt = workflowNode("fix-ci").prompt;
+    if (prompt === undefined) throw new Error("Missing prompt on fix-ci node");
 
     expect(prompt).toContain('If `ci_status` is "conflict"');
     expect(prompt).toContain("`conflicts` is non-empty");
