@@ -596,6 +596,106 @@ describe("keelson CLI smoke", () => {
     }
   });
 
+  test("workflow status with no runId lists running runs, not only paused ones", async () => {
+    const runningRun = {
+      runId: "22222222-2222-4222-8222-222222222222",
+      workflowName: "long-job",
+      status: "running",
+      startedAt: "2026-08-08T12:00:00.000Z",
+    };
+    const pausedRun = {
+      runId: "33333333-3333-4333-8333-333333333333",
+      workflowName: "gated-job",
+      status: "paused",
+      startedAt: "2026-08-08T12:00:05.000Z",
+    };
+    const queried: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(req) {
+        const requested = new URL(req.url);
+        if (requested.pathname !== "/api/workflows/runs") {
+          return new Response("not found", { status: 404 });
+        }
+        const status = requested.searchParams.get("status");
+        queried.push(status ?? "none");
+        const wanted = (status ?? "").split(",");
+        return Response.json({
+          runs: [runningRun, pausedRun].filter((run) => wanted.includes(run.status)),
+        });
+      },
+    });
+    const baseUrl = `http://${server.hostname}:${server.port}`;
+
+    try {
+      const listing = await runCli(["--json", "workflow", "status", "--base-url", baseUrl]);
+      expect(listing.exitCode).toBe(0);
+      const runs = JSON.parse(listing.stdout.trim()).data.runs;
+      expect(runs.map((r: { runId: string }) => r.runId)).toEqual([
+        runningRun.runId,
+        pausedRun.runId,
+      ]);
+      // A single request: two status queries would be two snapshots, and a run
+      // transitioning between them could be missing from both.
+      expect(queried).toEqual(["running,paused"]);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("workflow status names the remedy when the server predates multi-status filtering", async () => {
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () => Response.json({ error: "invalid status 'running,paused'" }, { status: 400 }),
+    });
+    const baseUrl = `http://${server.hostname}:${server.port}`;
+
+    try {
+      const { stdout, exitCode } = await runCli([
+        "--json",
+        "workflow",
+        "status",
+        "--base-url",
+        baseUrl,
+      ]);
+      expect(exitCode).not.toBe(0);
+      const envelope = JSON.parse(stdout.trim());
+      expect(envelope.ok).toBe(false);
+      expect(envelope.error).toContain("older than this CLI");
+      expect(envelope.error).toContain("keelson restart");
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("workflow status with no active runs says so instead of printing an empty label", async () => {
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(req) {
+        if (new URL(req.url).pathname !== "/api/workflows/runs") {
+          return new Response("not found", { status: 404 });
+        }
+        return Response.json({ runs: [] });
+      },
+    });
+    const baseUrl = `http://${server.hostname}:${server.port}`;
+
+    try {
+      const human = await runCli(["workflow", "status", "--base-url", baseUrl]);
+      expect(human.exitCode).toBe(0);
+      expect(human.stdout.trim()).toBe("no active runs");
+
+      const json = await runCli(["--json", "workflow", "status", "--base-url", baseUrl]);
+      expect(json.exitCode).toBe(0);
+      expect(JSON.parse(json.stdout.trim()).data).toEqual({ runs: [] });
+    } finally {
+      server.stop(true);
+    }
+  });
+
   test("workflow run rejects duplicate ARGUMENTS sources", async () => {
     const { stdout, exitCode } = await runCli([
       "--json",

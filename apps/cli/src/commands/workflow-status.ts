@@ -8,7 +8,7 @@ import {
   getRun,
   HttpError,
   isServerDownError,
-  listPausedRuns,
+  listActiveRuns,
   listRunsByName,
   resolveRunRef,
 } from "../http/workflow-client.ts";
@@ -80,10 +80,13 @@ export async function runWorkflowStatus(
       emit({ data: runs }, { json: opts.json });
       process.exit(EXIT_OK);
     }
-    // Default surface: paused runs (the only query the server exposes without
-    // a workflow name). Operators reach here when checking "what's awaiting
-    // input"; concrete-run views need an explicit --workflow or runId.
-    const runs = await listPausedRuns(baseUrl);
+    // Membership here must match the MCP workflow_status listing, or the two
+    // surfaces disagree about what is active.
+    const runs = await listActiveRuns(baseUrl);
+    if (!opts.json && runs.runs.length === 0) {
+      emit({ data: "no active runs" }, { json: false });
+      process.exit(EXIT_OK);
+    }
     emit({ data: runs }, { json: opts.json });
     process.exit(EXIT_OK);
   } catch (err) {

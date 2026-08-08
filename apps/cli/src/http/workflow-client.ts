@@ -179,12 +179,26 @@ export async function listRunsByName(
   return (await res.json()) as ListRunsResponse;
 }
 
-export async function listPausedRuns(baseUrl: string): Promise<ListRunsResponse> {
-  const res = await fetch(url(baseUrl, "/api/workflows/runs?status=paused"), {
+// One request covering both active statuses: splitting it into a query per
+// status would read two database snapshots, and a run transitioning between
+// them could be absent from both — the false negative this surface exists to
+// avoid.
+export async function listActiveRuns(baseUrl: string): Promise<ListRunsResponse> {
+  const res = await fetch(url(baseUrl, "/api/workflows/runs?status=running,paused"), {
     headers: defaultHeaders(baseUrl),
   });
+  // A server that predates multi-status filtering rejects the query outright.
+  // Naming the remedy beats a bare 400, which reads as a malformed request.
+  if (res.status === 400)
+    throw new HttpError(
+      res.status,
+      "server rejected the active-runs query; it is older than this CLI — run `keelson update`, then restart the server (`keelson restart`)",
+    );
   if (!res.ok)
-    throw new HttpError(res.status, `GET /workflows/runs?status=paused failed: ${res.status}`);
+    throw new HttpError(
+      res.status,
+      `GET /workflows/runs?status=running,paused failed: ${res.status}`,
+    );
   return (await res.json()) as ListRunsResponse;
 }
 
