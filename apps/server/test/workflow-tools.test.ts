@@ -357,6 +357,39 @@ nodes:
     );
   });
 
+  test("controller tracks the current node until it completes", async () => {
+    writeWorkflow(
+      "slow.yaml",
+      `name: slow
+description: |
+  Use when: observing an in-flight node
+nodes:
+  - id: waiting
+    bash: sleep 0.2
+`,
+    );
+    const { controller, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+
+    const started = controller.startRun({
+      name: "slow",
+      inputs: { ARGUMENTS: "" },
+      workingDir: cwd,
+    });
+    if (!started.ok) throw new Error(started.message);
+
+    let current: string[] = [];
+    for (let attempt = 0; attempt < 100; attempt++) {
+      current = controller.currentNodes(started.runId);
+      if (current.length > 0) break;
+      await Bun.sleep(10);
+    }
+    expect(current).toEqual(["waiting"]);
+
+    await waitForRun(controller, started.runId);
+    expect(controller.currentNodes(started.runId)).toEqual([]);
+  });
+
   test("workflow_resume is registered and marked state_changing", () => {
     const { tools, dispose } = makeRig();
     activeDispose = dispose;

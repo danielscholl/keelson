@@ -1509,6 +1509,7 @@ export interface WorkflowController {
   awaitPauseOrTerminal(runId: string, opts?: AwaitPauseOrTerminalOptions): Promise<WatchResult>;
   listRuns(opts?: { status?: WorkflowRunStatus }): WorkflowRunSummary[];
   getRun(runId: string): WorkflowRunDetail | undefined;
+  currentNodes(runId: string): string[];
   // Live pending approvals for a run, including the in-memory `pauseId` that the
   // persisted snapshot (getRun) cannot carry. Empty for a run with no live
   // resolver (terminal, unknown, or paused-but-reconciled after restart).
@@ -1880,6 +1881,10 @@ export function createWorkflowController(
 
     getRun(runId) {
       return store.getRun(runId);
+    },
+
+    currentNodes(runId) {
+      return [...(activeRuns.get(runId)?.currentNodes ?? [])];
     },
 
     pendingApprovals(runId) {
