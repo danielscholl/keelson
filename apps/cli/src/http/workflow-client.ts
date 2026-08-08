@@ -179,13 +179,27 @@ export async function listRunsByName(
   return (await res.json()) as ListRunsResponse;
 }
 
-export async function listPausedRuns(baseUrl: string): Promise<ListRunsResponse> {
-  const res = await fetch(url(baseUrl, "/api/workflows/runs?status=paused"), {
+async function listRunsByStatus(
+  baseUrl: string,
+  status: "running" | "paused",
+): Promise<ListRunsResponse> {
+  const res = await fetch(url(baseUrl, `/api/workflows/runs?status=${status}`), {
     headers: defaultHeaders(baseUrl),
   });
   if (!res.ok)
-    throw new HttpError(res.status, `GET /workflows/runs?status=paused failed: ${res.status}`);
+    throw new HttpError(res.status, `GET /workflows/runs?status=${status} failed: ${res.status}`);
   return (await res.json()) as ListRunsResponse;
+}
+
+// Running first, then paused — the same ordering and membership the MCP
+// workflow_status listing uses, so the two surfaces cannot disagree about
+// what is active.
+export async function listActiveRuns(baseUrl: string): Promise<ListRunsResponse> {
+  const [running, paused] = await Promise.all([
+    listRunsByStatus(baseUrl, "running"),
+    listRunsByStatus(baseUrl, "paused"),
+  ]);
+  return { runs: [...(running.runs ?? []), ...(paused.runs ?? [])] };
 }
 
 export async function resumeRun(
