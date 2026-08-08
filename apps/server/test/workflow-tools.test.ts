@@ -817,6 +817,13 @@ nodes:
     expect(result.isError).toBe(false);
     expect(result.content).toContain("completed successfully");
     expect(result.content).toContain("project-sentinel-456");
+    expect(
+      outside.chunks.some(
+        (chunk) =>
+          chunk.type === "text" &&
+          chunk.content.includes(`Started workflow "proj-flow" in "${rig.projectRoot}"`),
+      ),
+    ).toBe(true);
   });
 
   test("workflow_run inherits a nested run's worktree for the same project", async () => {

@@ -467,7 +467,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         emitResult(ctx, `Could not start workflow "${name}": ${started.message}`, true);
         return;
       }
-      const scopeNote = project ? "" : ` in "${workingDir}"`;
+      const scopeNote = ` in "${workingDir}"`;
       ctx.emit({
         type: "text",
         content: `Started workflow "${name}"${scopeNote} (run ${started.runId}).\n`,
