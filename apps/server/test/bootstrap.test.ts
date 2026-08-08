@@ -1123,7 +1123,9 @@ describe("bootstrapRibs", () => {
     // reload would be catalogued as an ordinary workflow that never publishes.
     bindNew = true;
     const reloaded = result.recollectWorkflowContributions();
-    expect(reloaded.contributions.map((c) => c.definition.name)).toEqual(["alpha-plain"]);
+    expect(reloaded.contributions.map((c) => (c.definition as { name: string }).name)).toEqual([
+      "alpha-plain",
+    ]);
     expect(reloaded.notices).toHaveLength(1);
     expect(reloaded.notices[0]?.level).toBe("warning");
     expect(reloaded.notices[0]?.message).toContain("alpha-fresh");
