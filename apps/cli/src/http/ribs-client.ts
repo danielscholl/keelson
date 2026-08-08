@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import type { ListRibsResponse, RibSummary } from "@keelson/shared";
+import type { ListRibsResponse, ReloadRibWorkflowsResponse, RibSummary } from "@keelson/shared";
 import { normalizeBase, originHeader } from "./base.ts";
 import { HttpError } from "./workflow-client.ts";
 
@@ -34,4 +34,20 @@ export async function fetchRibs(baseUrl: string): Promise<ListRibsResponse> {
 
 export async function listRibs(baseUrl: string): Promise<RibSummary[]> {
   return (await fetchRibs(baseUrl)).ribs;
+}
+
+export async function reloadRibWorkflows(
+  baseUrl: string,
+): Promise<ReloadRibWorkflowsResponse> {
+  const res = await fetch(`${normalizeBase(baseUrl)}/api/ribs/reload-workflows`, {
+    method: "POST",
+    headers: defaultHeaders(baseUrl),
+  });
+  if (!res.ok) {
+    throw new HttpError(
+      res.status,
+      await errorMessage(res, "POST /api/ribs/reload-workflows"),
+    );
+  }
+  return (await res.json()) as ReloadRibWorkflowsResponse;
 }
