@@ -424,16 +424,30 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         return;
       }
       const name = resolution.name;
-      const inheritedDir =
-        typeof ctx.turnContext?.workflowWorkingDir === "string"
-          ? ctx.turnContext.workflowWorkingDir
+      // A nested call inherits the caller's tree so a composed workflow checks
+      // the same checkout its parent is mutating. Identity comes from the
+      // parent run's persisted projectId, not from path containment: projects
+      // may nest (findByPathPrefix resolves the longest matching root), so a
+      // run inside an inner project's worktree would otherwise capture an
+      // explicitly named outer project. The dir comes from the run record for
+      // the same reason — it is the canonical path the executor actually used.
+      const parentRunId =
+        typeof ctx.turnContext?.workflowRunId === "string"
+          ? ctx.turnContext.workflowRunId
           : undefined;
+      const parentRun: WorkflowRunDetail | undefined =
+        parentRunId !== undefined ? controller.getRun(parentRunId) : undefined;
+      const inheritedDir =
+        parentRun?.worktreePath ??
+        parentRun?.workingDir ??
+        (typeof ctx.turnContext?.workflowWorkingDir === "string"
+          ? ctx.turnContext.workflowWorkingDir
+          : undefined);
       let workingDir = project?.rootPath ?? ctx.cwd;
       if (
+        parentRun !== undefined &&
         inheritedDir !== undefined &&
-        (project === undefined ||
-          canonicalPath(project.rootPath) === canonicalPath(inheritedDir) ||
-          isPathInside(canonicalPath(project.rootPath), canonicalPath(inheritedDir)))
+        (project === undefined || parentRun.projectId === project.id)
       ) {
         workingDir = inheritedDir;
       }
@@ -467,7 +481,11 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         emitResult(ctx, `Could not start workflow "${name}": ${started.message}`, true);
         return;
       }
-      const scopeNote = ` in "${workingDir}"`;
+      // startRun canonicalizes before persisting, so canonicalize here too —
+      // a relative or symlinked dir would otherwise print one path while the
+      // run record holds another, which is the mismatch this banner exists to
+      // expose.
+      const scopeNote = ` in "${canonicalPath(workingDir)}"`;
       ctx.emit({
         type: "text",
         content: `Started workflow "${name}"${scopeNote} (run ${started.runId}).\n`,
