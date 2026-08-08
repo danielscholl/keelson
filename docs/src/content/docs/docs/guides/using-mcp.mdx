@@ -37,6 +37,14 @@ tools. `tools/list` also sets the `readOnlyHint` and `destructiveHint`
 annotations, so a client can tell the two halves of the registry apart without
 calling anything.
 
+An orchestrating agent should poll a workflow with MCP `workflow_status` and
+`brief: true`. The compact result includes each node's id and status, live
+`current`, the awaiting node, and `pauseId`, without returning every node's
+output again. Those fields preserve the handle needed to resume an approval
+gate. The CLI `workflow status --brief` is a smaller operator view: it lists the
+nodes and names only the awaiting node as current, but it does not return
+`pauseId`. Do not use the CLI brief for an agent loop that must resume approvals.
+
 <Aside type="note" title="Open on loopback by default">
 A fresh endpoint serves the full registry (state-changing tools included) on
 loopback with no token. Lock it down deliberately: `exposeStateChanging: false`
