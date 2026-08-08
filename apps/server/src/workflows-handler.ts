@@ -362,6 +362,8 @@ export interface PendingApproval {
 export interface ActiveRunEntry {
   abort: AbortController;
   done: Promise<void>;
+  // Persisted detail has no running node row, so live status polling reads this set.
+  currentNodes: Set<string>;
   // Keyed by nodeId so two parallel approval nodes in one layer can pause
   // and resume independently.
   pendingApprovals: Map<string, PendingApproval>;
@@ -1122,6 +1124,7 @@ function startRunCore(
     activeRuns.register(runId, {
       abort,
       done,
+      currentNodes: new Set(),
       pendingApprovals,
       dedupeKey,
       definition: workflow,
@@ -1342,6 +1345,7 @@ function resumeRunCore(
     activeRuns.register(runId, {
       abort,
       done,
+      currentNodes: new Set(),
       pendingApprovals,
       dedupeKey: runDedupeKey(
         workflow.name,
@@ -1640,6 +1644,7 @@ export function createWorkflowController(
       activeRuns.register(runId, {
         abort,
         done,
+        currentNodes: new Set(),
         pendingApprovals: new Map(),
         dedupeKey: runId,
         conversationId: "",
@@ -3335,11 +3340,12 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
 
   const artifacts = await RunArtifactsDir.create(runId);
   const artifactsDir = artifacts.runWorkflowOptions().artifactsDir;
+  const activeRun = activeRuns.get(runId);
+  const currentNodes = activeRun?.currentNodes;
   if (artifactsDir !== undefined) {
     // The entry is registered (POST handler) before this awaited create runs,
     // so it's present; the field clears when activeRuns.delete fires below.
-    const entry = activeRuns.get(runId);
-    if (entry) entry.artifactsDir = artifactsDir;
+    if (activeRun) activeRun.artifactsDir = artifactsDir;
   }
 
   // Snapshot bridge: expose this run's latest structured node
@@ -3418,6 +3424,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
           subscribers,
           nodeStart,
           nodeAccumulators,
+          currentNodes,
           workflowName: workflow.name,
           ...(publishRun !== undefined ? { publishStructured: publishRun } : {}),
           ...(usageStore !== undefined ? { usageStore } : {}),
@@ -3578,6 +3585,7 @@ interface DispatchArgs {
   subscribers: WorkflowSubscribers;
   nodeStart: Map<string, string>;
   nodeAccumulators: Map<string, ReturnType<typeof createContentPartsAccumulator>>;
+  currentNodes?: Set<string>;
   // Snapshot bridge: when set, a node's structured output is
   // republished under the run-scoped snapshot key. Undefined → no publish.
   publishStructured?: (value: unknown) => void;
@@ -3600,6 +3608,7 @@ function dispatchRunEvent(args: DispatchArgs): void {
     subscribers,
     nodeStart,
     nodeAccumulators,
+    currentNodes,
     publishStructured,
     workflowName,
     usageStore,
@@ -3616,6 +3625,7 @@ function dispatchRunEvent(args: DispatchArgs): void {
     case "node_started":
       nodeStart.set(event.nodeId, new Date().toISOString());
       nodeAccumulators.set(event.nodeId, createContentPartsAccumulator());
+      currentNodes?.add(event.nodeId);
       // Drop any prior launch's row: a REST hydrate racing this relaunch must
       // not read the old terminal output back into the SPA (mergeNode prefers
       // a terminal snapshot), and WorkflowNodeStatus has no non-terminal value
@@ -3660,6 +3670,7 @@ function dispatchRunEvent(args: DispatchArgs): void {
       break;
     }
     case "node_done": {
+      currentNodes?.delete(event.nodeId);
       const startedAt = nodeStart.get(event.nodeId) ?? null;
       const completedAt = new Date().toISOString();
       const status: WorkflowNodeStatus = event.result.status;
