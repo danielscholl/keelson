@@ -34,6 +34,14 @@ function workflow(name: string, description: string, echo: string): string {
   return `name: ${name}\ndescription: ${description}\nnodes:\n  - id: step\n    bash: echo ${echo}\n`;
 }
 
+function ribWorkflow(name: string, description: string): WorkflowDefinition {
+  return {
+    name,
+    description,
+    nodes: [{ id: "step", bash: `echo ${name}` }],
+  };
+}
+
 describe("bootstrapWorkflows re-scan", () => {
   test("reflects YAML edits on the next access without rebuilding the catalog", () => {
     writeWorkflow("alpha.yaml", workflow("alpha", "original", "original"));
@@ -118,6 +126,86 @@ describe("bootstrapWorkflows re-scan", () => {
     unlinkSync(join(wfDir, "alpha.yaml"));
     expect(catalog.list()).toEqual([]);
     expect(catalog.get("alpha")).toBeUndefined();
+  });
+});
+
+describe("bootstrapWorkflows rib overlay reload", () => {
+  test("swaps added, edited, and removed rib workflows on the next access", () => {
+    const initialEdited = ribWorkflow("edited", "before");
+    const removed = ribWorkflow("removed", "removed");
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      extra: [initialEdited, removed],
+      ribProvenance: new Map([
+        ["edited", { ribId: "alpha", background: false }],
+        ["removed", { ribId: "alpha", background: false }],
+      ]),
+      ribNames: new Map([["alpha", "Alpha"]]),
+    });
+    expect(catalog.get("edited")).toBe(initialEdited);
+
+    const edited = ribWorkflow("edited", "after");
+    const added = ribWorkflow("added", "added");
+    catalog.setRibWorkflows({
+      definitions: [edited, added],
+      provenance: new Map([
+        ["edited", { ribId: "alpha", background: false }],
+        ["added", { ribId: "beta", background: true }],
+      ]),
+      ribNames: new Map([
+        ["alpha", "Alpha"],
+        ["beta", "Beta"],
+      ]),
+      notices: [
+        {
+          level: "warning",
+          filename: "<rib:beta>",
+          message: "fresh notice",
+        },
+      ],
+    });
+
+    expect(catalog.get("edited")).toBe(edited);
+    expect(catalog.get("edited")?.description).toBe("after");
+    expect(catalog.get("removed")).toBeUndefined();
+    expect(catalog.get("added")).toBe(added);
+    expect(
+      catalog
+        .list()
+        .map((definition) => definition.name)
+        .sort(),
+    ).toEqual(["added", "edited"]);
+    expect(catalog.provenance("added")).toEqual({
+      source: { kind: "rib", ribId: "beta", ribName: "Beta" },
+      background: true,
+    });
+    expect(catalog.discoveryNotices()).toEqual([
+      {
+        level: "warning",
+        filename: "<rib:beta>",
+        message: "fresh notice",
+      },
+    ]);
+  });
+
+  test("keeps a global workflow ahead of a reloaded rib workflow", () => {
+    writeWorkflow("shared.yaml", workflow("shared", "global", "global"));
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+
+    catalog.setRibWorkflows({
+      definitions: [ribWorkflow("shared", "rib")],
+      provenance: new Map([["shared", { ribId: "alpha", background: false }]]),
+      ribNames: new Map([["alpha", "Alpha"]]),
+      notices: [],
+    });
+
+    expect(catalog.get("shared")?.description).toBe("global");
+    expect(catalog.provenance("shared").source.kind).toBe("local");
+    expect(
+      catalog
+        .discoveryNotices()
+        .some((notice) => notice.message.includes("shadowed by a global workflow")),
+    ).toBe(true);
   });
 });
 

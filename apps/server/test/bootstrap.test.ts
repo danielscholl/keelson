@@ -1011,6 +1011,127 @@ describe("bootstrapRibs", () => {
     expect(await actionHandlers.get("alpha")?.({ type: "go" })).toEqual({ ok: true });
   });
 
+  test("recollects current workflow contributions and skips a rib that throws", () => {
+    let revision = "first";
+    let shouldThrow = false;
+    const result = applyRibs({
+      active: ["alpha"],
+      available: {
+        alpha: {
+          id: "alpha",
+          displayName: "alpha",
+          contributeWorkflows: () => {
+            if (shouldThrow) throw new Error("reload failed");
+            return [
+              {
+                definition: {
+                  name: "alpha-workflow",
+                  description: revision,
+                  nodes: [{ id: "step", bash: "echo hi" }],
+                },
+                bindSnapshotKey: "rib:alpha:result",
+              },
+            ];
+          },
+        },
+      },
+      ctx: {
+        getExec: () => ({
+          runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+          runText: async () => ({ ok: true as const, data: "" }),
+        }),
+      },
+    });
+
+    revision = "second";
+    const reloaded = result.recollectWorkflowContributions();
+    expect(reloaded.contributions).toEqual([
+      {
+        ribId: "alpha",
+        definition: {
+          name: "alpha-workflow",
+          description: "second",
+          nodes: [{ id: "step", bash: "echo hi" }],
+        },
+        bindSnapshotKey: "rib:alpha:result",
+      },
+    ]);
+    expect(reloaded.notices).toEqual([]);
+
+    // A throwing rib must not silently empty its slice of the overlay: the
+    // catalog would lose those workflows while the reload reported success.
+    shouldThrow = true;
+    const failed = result.recollectWorkflowContributions();
+    expect(failed.contributions).toEqual([
+      {
+        ribId: "alpha",
+        definition: {
+          name: "alpha-workflow",
+          description: "first",
+          nodes: [{ id: "step", bash: "echo hi" }],
+        },
+        bindSnapshotKey: "rib:alpha:result",
+      },
+    ]);
+    expect(failed.notices).toHaveLength(1);
+    expect(failed.notices[0]?.level).toBe("error");
+    expect(failed.notices[0]?.message).toContain("reload failed");
+    expect(failed.notices[0]?.message).toContain("keeping the workflows collected at startup");
+  });
+
+  test("recollectWorkflowContributions holds back a newly bound producer", () => {
+    let bindNew = false;
+    const result = applyRibs({
+      active: ["alpha"],
+      available: {
+        alpha: {
+          id: "alpha",
+          displayName: "alpha",
+          contributeWorkflows: () => {
+            const contributions = [
+              {
+                definition: {
+                  name: "alpha-plain",
+                  description: "plain",
+                  nodes: [{ id: "step", bash: "echo hi" }],
+                },
+              },
+            ];
+            if (bindNew) {
+              contributions.push({
+                definition: {
+                  name: "alpha-fresh",
+                  description: "fresh",
+                  nodes: [{ id: "step", bash: "echo hi" }],
+                },
+                bindSnapshotKey: "rib:alpha:fresh",
+              } as (typeof contributions)[number]);
+            }
+            return contributions;
+          },
+        },
+      },
+      ctx: {
+        getExec: () => ({
+          runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+          runText: async () => ({ ok: true as const, data: "" }),
+        }),
+      },
+    });
+
+    // Its publish holder is registered at activation, so a key first seen on a
+    // reload would be catalogued as an ordinary workflow that never publishes.
+    bindNew = true;
+    const reloaded = result.recollectWorkflowContributions();
+    expect(reloaded.contributions.map((c) => (c.definition as { name: string }).name)).toEqual([
+      "alpha-plain",
+    ]);
+    expect(reloaded.notices).toHaveLength(1);
+    expect(reloaded.notices[0]?.level).toBe("warning");
+    expect(reloaded.notices[0]?.message).toContain("alpha-fresh");
+    expect(reloaded.notices[0]?.message).toContain("restart");
+  });
+
   describe("tool registration", () => {
     beforeEach(() => clearRegistry());
     afterEach(() => clearRegistry());
@@ -1143,6 +1264,52 @@ describe("bootstrapRibs", () => {
       const prepared = prepareRibWorkflows(boot.workflowContributions);
       expect(prepared.definitions.map((d) => d.name)).toContain("rib-hello");
       expect(prepared.provenance.get("rib-hello")).toEqual({ ribId: "test", background: false });
+    });
+
+    test("recollects current code contributions and rescans folder workflows", async () => {
+      process.env.KEELSON_RIBS = "wf";
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
+      try {
+        const workflowsDir = join(tempDir, "workflows");
+        await mkdir(workflowsDir);
+        const initialPath = join(workflowsDir, "initial.yaml");
+        await writeFile(initialPath, workflowYaml("folder-initial"));
+        let codeName = "code-initial";
+        const rib: Rib = {
+          id: "wf",
+          displayName: "wf",
+          contributeWorkflows: () => [
+            {
+              definition: {
+                name: codeName,
+                description: "from-code",
+                nodes: [{ id: "step", bash: "echo code" }],
+              },
+            },
+          ],
+        };
+        const boot = await bootstrapRibs({ available: { wf: rib }, ribDirs: { wf: tempDir } });
+
+        codeName = "code-current";
+        await rm(initialPath);
+        await writeFile(join(workflowsDir, "current.yaml"), workflowYaml("folder-current"));
+        await writeFile(join(workflowsDir, "broken.yaml"), "name: [unclosed\n");
+
+        const recollected = boot.recollectWorkflows();
+        expect(
+          recollected.contributions.map((contribution) => ({
+            ribId: contribution.ribId,
+            name: z.object({ name: z.string() }).parse(contribution.definition).name,
+          })),
+        ).toEqual([
+          { ribId: "wf", name: "code-current" },
+          { ribId: "wf", name: "folder-current" },
+        ]);
+        expect(recollected.notices).toHaveLength(1);
+        expect(recollected.notices[0]?.filename).toContain("broken.yaml");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
     });
 
     test("a broken YAML file is skipped while a valid sibling still loads", async () => {

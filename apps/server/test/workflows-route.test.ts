@@ -581,6 +581,60 @@ nodes:
     expect(run!.status).toBe("cancelled");
   });
 
+  test("a rib overlay reload does not alter an in-flight run", async () => {
+    const original: WorkflowDefinition = {
+      name: "rib-live",
+      description: "original",
+      nodes: [{ id: "work", bash: "sleep 0.3; echo original" }],
+    };
+    const replacement: WorkflowDefinition = {
+      name: "rib-live",
+      description: "replacement",
+      nodes: [{ id: "work", bash: "echo replacement" }],
+    };
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      extra: [original],
+      ribProvenance: new Map([["rib-live", { ribId: "alpha", background: false }]]),
+    });
+    const activeRuns = createActiveRuns();
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      { catalog, store, conversationStore: createConversationStore(db), defaultCwd: tmpDir },
+      activeRuns,
+    );
+
+    const startResponse = await app.fetch(
+      postRun("http://test/api/workflows/rib-live/runs", {
+        inputs: {},
+        workingDir: tmpDir,
+      }),
+    );
+    const { runId } = (await startResponse.json()) as { runId: string };
+    const entry = activeRuns.get(runId);
+    if (!entry) throw new Error("run was not registered");
+
+    catalog.setRibWorkflows({
+      definitions: [replacement],
+      provenance: new Map([["rib-live", { ribId: "alpha", background: false }]]),
+      ribNames: new Map([["alpha", "Alpha"]]),
+      notices: [],
+    });
+
+    expect(catalog.get("rib-live")).toBe(replacement);
+    expect(activeRuns.get(runId)).toBe(entry);
+    expect(entry.definition).toBe(original);
+    expect(entry.abort.signal.aborted).toBe(false);
+
+    await entry.done;
+    const run = await pollUntilTerminal(app, runId);
+    expect(run.status).toBe("succeeded");
+    expect((run.nodes as Array<{ outputText: string }>)[0]?.outputText).toContain("original");
+  });
+
   test("GET /api/workflows/runs/:id returns 404 for unknown run", async () => {
     const { app } = makeRig();
     const res = await app.fetch(new Request("http://test/api/workflows/runs/no-such-run"));

@@ -57,6 +57,7 @@ import {
   type SnapshotValidator,
   type ToolDefinition,
   type ToolReachability,
+  type WorkflowDiscoveryNotice,
   type WorkspaceLease,
 } from "@keelson/shared";
 import type { DynamicRegionStore } from "./dynamic-region-store.ts";
@@ -122,6 +123,13 @@ export interface ApplyRibsResult {
     (name: string, prefix: string) => Promise<readonly CommandCompletion[]>
   >;
   readonly workflowContributions: RibWorkflowContribution[];
+  // Notices ride along with the contributions: a reload that drops a rib's
+  // workflows must say so, or the catalog changes while the command reports
+  // success.
+  readonly recollectWorkflowContributions: () => {
+    contributions: RibWorkflowContribution[];
+    notices: WorkflowDiscoveryNotice[];
+  };
   // Docs sources each active rib contributed (Rib.contributeDocs), tagged with
   // the owning rib id. The composition root folds these into the DocsCatalog.
   readonly docsContributions: RibDocsContribution[];
@@ -280,6 +288,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     (name: string, prefix: string) => Promise<readonly CommandCompletion[]>
   >();
   const workflowContributions: RibWorkflowContribution[] = [];
+  const workflowContributors: Array<{ rib: Rib; ribCtx: RibContext }> = [];
   const docsContributions: RibDocsContribution[] = [];
   const policies: RibPolicyContribution[] = [];
   const tools: ToolDefinition[] = [];
@@ -479,6 +488,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     }
 
     if (rib.contributeWorkflows) {
+      workflowContributors.push({ rib, ribCtx });
       for (const contribution of rib.contributeWorkflows(ribCtx)) {
         const bindKey = contribution.bindSnapshotKey;
         let publish: ((value: unknown) => void) | undefined;
@@ -575,6 +585,68 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       disposers.push({ id: rib.id, dispose: rib.dispose.bind(rib) });
     }
   }
+  // A contribution's definition stays opaque here — prepareRibWorkflows is what
+  // validates it — so read the name defensively rather than assuming a shape.
+  const definitionName = (definition: unknown): string | undefined =>
+    typeof definition === "object" &&
+    definition !== null &&
+    "name" in definition &&
+    typeof definition.name === "string"
+      ? definition.name
+      : undefined;
+  // Names whose publish holder was registered at activation. A bindSnapshotKey
+  // appearing for the first time on a reload has no holder, so cataloguing it
+  // would advertise a producer that never publishes.
+  const bootBoundNames = new Set(
+    workflowContributions
+      .filter((contribution) => contribution.bindSnapshotKey !== undefined)
+      .map((contribution) => definitionName(contribution.definition))
+      .filter((name): name is string => name !== undefined),
+  );
+  const recollectWorkflowContributions = (): {
+    contributions: RibWorkflowContribution[];
+    notices: WorkflowDiscoveryNotice[];
+  } => {
+    const contributions: RibWorkflowContribution[] = [];
+    const notices: WorkflowDiscoveryNotice[] = [];
+    for (const { rib, ribCtx } of workflowContributors) {
+      try {
+        const fresh: RibWorkflowContribution[] = [];
+        for (const contribution of rib.contributeWorkflows!(ribCtx)) {
+          const bindKey = contribution.bindSnapshotKey;
+          const name = definitionName(contribution.definition);
+          if (bindKey !== undefined && (name === undefined || !bootBoundNames.has(name))) {
+            notices.push({
+              level: "warning",
+              filename: `rib:${rib.id}`,
+              message: `workflow '${name ?? "<unnamed>"}' binds snapshot key '${bindKey}' but was not bound at startup; binding needs a server restart, so it was left out of this reload`,
+            });
+            continue;
+          }
+          fresh.push({
+            ribId: rib.id,
+            definition: contribution.definition,
+            ...(bindKey !== undefined ? { bindSnapshotKey: bindKey } : {}),
+          });
+        }
+        contributions.push(...fresh);
+      } catch (err) {
+        // Skipping the rib would delete its workflows from the overlay while the
+        // reload still reported success. Keep what boot collected and say why.
+        const message = err instanceof Error ? err.message : String(err);
+        notices.push({
+          level: "error",
+          filename: `rib:${rib.id}`,
+          message: `contributeWorkflows failed during reload (${message}); keeping the workflows collected at startup`,
+        });
+        for (const contribution of workflowContributions) {
+          if (contribution.ribId === rib.id) contributions.push(contribution);
+        }
+      }
+    }
+    return { contributions, notices };
+  };
+
   return {
     manifests,
     disposers,
@@ -587,6 +659,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     commandInvokers,
     commandCompleters,
     workflowContributions,
+    recollectWorkflowContributions,
     docsContributions,
     policies,
     tools,

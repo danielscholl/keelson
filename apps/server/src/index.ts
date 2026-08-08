@@ -340,6 +340,12 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // Narrow rib-contributed workflow definitions and collect the run-path bindings
   // that republish a bound run's structured output to the rib's snapshot key.
   const ribWorkflows = prepareRibWorkflows(ribs.workflowContributions);
+  const bootBoundWorkflowNames = new Set(ribWorkflows.boundKeys.keys());
+  const bootBoundDefinitions = new Map(
+    ribWorkflows.definitions
+      .filter((definition) => bootBoundWorkflowNames.has(definition.name))
+      .map((definition) => [definition.name, definition]),
+  );
   // Unified governance: operator denylist floor + rib-contributed policies. The
   // three turn seams (chat, workflow prompt nodes, rib agent turns) gate their
   // projected tools through this one engine; an `ask` rides the approval registry.
@@ -426,15 +432,54 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   db.prepare("UPDATE conversations SET project_id = ? WHERE project_id IS NULL").run(
     defaultProject.id,
   );
+  const ribNames = new Map(ribs.manifests.map((m) => [m.id, m.displayName]));
   const workflowCatalog = bootstrapWorkflows({
     workflowDir: paths.workflowsDir,
     bundledDir: bundledWorkflowsDir(),
     listProjects: () => projectsStore.list(),
     extra: ribWorkflows.definitions,
     ribProvenance: ribWorkflows.provenance,
-    ribNames: new Map(ribs.manifests.map((m) => [m.id, m.displayName])),
+    ribNames,
     ribNotices: [...ribs.workflowNotices, ...ribWorkflows.notices],
   });
+  const reloadWorkflows = () => {
+    const recollected = ribs.recollectWorkflows();
+    const fresh = prepareRibWorkflows(recollected.contributions);
+    const definitions = [];
+    const provenance = new Map(ribWorkflows.provenance);
+    provenance.clear();
+    const retainedBoundNames = new Set<string>();
+
+    const retainBootBoundWorkflow = (name: string): void => {
+      if (retainedBoundNames.has(name)) return;
+      const definition = bootBoundDefinitions.get(name);
+      const source = ribWorkflows.provenance.get(name);
+      if (!definition || !source) {
+        throw new Error(`boot-bound rib workflow '${name}' is missing its catalog metadata`);
+      }
+      definitions.push(definition);
+      provenance.set(name, source);
+      retainedBoundNames.add(name);
+    };
+
+    for (const definition of fresh.definitions) {
+      if (bootBoundWorkflowNames.has(definition.name)) {
+        retainBootBoundWorkflow(definition.name);
+        continue;
+      }
+      definitions.push(definition);
+      const source = fresh.provenance.get(definition.name);
+      if (!source) {
+        throw new Error(`rib workflow '${definition.name}' is missing its catalog provenance`);
+      }
+      provenance.set(definition.name, source);
+    }
+    for (const name of bootBoundWorkflowNames) retainBootBoundWorkflow(name);
+
+    const notices = [...recollected.notices, ...fresh.notices];
+    workflowCatalog.setRibWorkflows({ definitions, provenance, ribNames, notices });
+    return { count: definitions.length, notices };
+  };
   // Composition-root ownership of in-flight runs — the shutdown handler
   // drains via this same handle so a SIGINT can abort active executions and
   // let their terminal-state writes land before db.close().
@@ -754,6 +799,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     actionHandlers: ribs.actionHandlers,
     dynamicRegionStore,
     crossRibGrants: ribs.crossRibGrants,
+    reloadWorkflows,
   });
   agentsRoutes(app, {
     agentListers: ribs.agentListers,

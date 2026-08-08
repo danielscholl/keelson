@@ -14,6 +14,7 @@ import {
   type RibSummary,
   type RibSurfaceDescriptor,
   type RibViewDescriptor,
+  reloadRibWorkflowsResponseSchema,
   ribActionResponseSchema,
   ribActionSchema,
   ribAuthStatusSchema,
@@ -21,6 +22,7 @@ import {
   ribIdFromKey,
   ribSurfaceDescriptorSchema,
   ribViewDescriptorSchema,
+  type WorkflowDiscoveryNotice,
 } from "@keelson/shared";
 import { type CrossRibGrants, serializeCrossRibGrants } from "@keelson/shared/config";
 import type { Hono } from "hono";
@@ -86,6 +88,7 @@ export interface RibsRoutesDeps {
   // omits it serves a response with the field absent (= "not reported"), which
   // is what an older server looks like to a client.
   crossRibGrants?: CrossRibGrants;
+  reloadWorkflows?: () => { count: number; notices: WorkflowDiscoveryNotice[] };
 }
 
 // GET /api/ribs + POST /api/ribs/:id/action. The SPA discovers active ribs and
@@ -93,7 +96,8 @@ export interface RibsRoutesDeps {
 // inbound half of the rib back-channel — loopback-trusted (guarded by the
 // /api/* CORS gate); there is no capability-token enforcement yet.
 export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
-  const { manifests, probes, actionHandlers, dynamicRegionStore, crossRibGrants } = deps;
+  const { manifests, probes, actionHandlers, dynamicRegionStore, crossRibGrants, reloadWorkflows } =
+    deps;
 
   app.get("/api/ribs", async (c) => {
     const ribs: RibSummary[] = await Promise.all(
@@ -140,6 +144,25 @@ export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
         ...(crossRibGrants ? { crossRibGrants: serializeCrossRibGrants(crossRibGrants) } : {}),
       }),
     );
+  });
+
+  app.post("/api/ribs/reload-workflows", (c) => {
+    const origin = c.req.header("origin");
+    if (origin && !isAllowedOrigin(origin)) {
+      return c.json({ error: "forbidden origin" }, 403);
+    }
+    if (!reloadWorkflows) {
+      return c.json({ error: "reload unavailable" }, 501);
+    }
+    try {
+      const result = reloadRibWorkflowsResponseSchema.safeParse(reloadWorkflows());
+      if (!result.success) {
+        return c.json({ error: "reload returned a malformed response" }, 500);
+      }
+      return c.json(result.data);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
   });
 
   app.post("/api/ribs/:id/action", async (c) => {
