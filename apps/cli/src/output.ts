@@ -2,6 +2,8 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { writeSync } from "node:fs";
+
 export interface EmitOptions {
   json: boolean;
   stream?: "stdout" | "stderr";
@@ -16,12 +18,23 @@ export type EmitPayload<T = unknown> =
   | { readonly data: T; readonly error?: undefined }
   | ErrorPayload;
 
-function write(line: string, stream: "stdout" | "stderr"): void {
-  if (stream === "stderr") {
-    process.stderr.write(`${line}\n`);
-  } else {
-    process.stdout.write(`${line}\n`);
+function writeAllSync(fd: number, text: string): void {
+  const buffer = Buffer.from(`${text}\n`, "utf8");
+  let offset = 0;
+  while (offset < buffer.length) {
+    try {
+      offset += writeSync(fd, buffer, offset, buffer.length - offset);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EAGAIN") continue;
+      if (code === "EPIPE") return;
+      throw error;
+    }
   }
+}
+
+function write(line: string, stream: "stdout" | "stderr"): void {
+  writeAllSync(stream === "stderr" ? 2 : 1, line);
 }
 
 export function renderHuman(value: unknown, indent = ""): string {
