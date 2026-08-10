@@ -1,8 +1,10 @@
 import {
   CANVAS_HTML_ACTION_CHANNEL,
+  CANVAS_HTML_SIZE_CHANNEL,
   CANVAS_HTML_THEME_CHANNEL,
   type CanvasHtmlAction,
   canvasHtmlActionSchema,
+  canvasHtmlSizeSchema,
 } from "@keelson/shared";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
@@ -53,6 +55,29 @@ const BRIDGE_SCRIPT = `
     document.documentElement.setAttribute("data-theme", d.theme);
     document.documentElement.style.colorScheme = d.theme;
   });
+  // Report content height so the host can size the frame to fit. The 2px dead
+  // band breaks the feedback loop a fractional or vh-derived height could set
+  // up between the parent resizing the frame and the frame re-measuring.
+  var SIZE_CHANNEL = ${JSON.stringify(CANVAS_HTML_SIZE_CHANNEL)};
+  var lastHeight = 0;
+  function postSize() {
+    var doc = document.documentElement;
+    var body = document.body;
+    var h = Math.max(doc ? doc.scrollHeight : 0, body ? body.scrollHeight : 0);
+    if (Math.abs(h - lastHeight) < 2) return;
+    lastHeight = h;
+    parent.postMessage({ channel: SIZE_CHANNEL, height: h }, "*");
+  }
+  window.addEventListener("load", postSize);
+  if (typeof ResizeObserver === "function") {
+    var sizer = new ResizeObserver(postSize);
+    if (document.documentElement) sizer.observe(document.documentElement);
+    // The bridge runs from <head>, before <body> exists; attach on DOM ready.
+    document.addEventListener("DOMContentLoaded", function () {
+      if (document.body) sizer.observe(document.body);
+      postSize();
+    });
+  }
 })();
 `.trim();
 
@@ -145,6 +170,25 @@ export function SandboxedHtml({
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [onAction]);
+
+  useEffect(() => {
+    function onSize(e: MessageEvent) {
+      if ((e.data as { channel?: unknown } | null)?.channel !== CANVAS_HTML_SIZE_CHANNEL) return;
+      const frame = ref.current;
+      if (!frame || e.source !== frame.contentWindow) return;
+      const parsed = canvasHtmlSizeSchema.safeParse(e.data);
+      if (!parsed.success) return;
+      // The frame is untrusted: clamp before applying. The floor keeps a broken
+      // measurement from collapsing the panel; the ceiling keeps a hostile one
+      // from minting a hundred-thousand-pixel page.
+      const height = Math.min(Math.max(Math.round(parsed.data.height), 160), 20_000);
+      frame.style.height = `${height}px`;
+      // Content-sized now — the pre-measurement viewport floor no longer applies.
+      frame.style.minHeight = "0px";
+    }
+    window.addEventListener("message", onSize);
+    return () => window.removeEventListener("message", onSize);
+  }, []);
 
   // sandbox="allow-scripts" WITHOUT allow-same-origin keeps the frame a unique
   // opaque origin: it cannot reach the parent DOM, cookies, storage, or the
