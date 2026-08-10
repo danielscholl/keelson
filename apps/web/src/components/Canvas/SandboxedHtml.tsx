@@ -63,6 +63,7 @@ const BRIDGE_SCRIPT = `
   // height could set up between the parent resizing and the frame re-measuring.
   var SIZE_CHANNEL = ${JSON.stringify(CANVAS_HTML_SIZE_CHANNEL)};
   var lastHeight = 0;
+  var lastViewport = 0;
   function postSize() {
     var doc = document.documentElement;
     var body = document.body;
@@ -71,6 +72,21 @@ const BRIDGE_SCRIPT = `
     var h = body.scrollHeight + (parseFloat(s.marginTop) || 0) + (parseFloat(s.marginBottom) || 0);
     if (doc.scrollHeight > window.innerHeight) h = Math.max(h, doc.scrollHeight);
     h = Math.ceil(h);
+    // vh-derived content re-grows every time the host applies a report (the
+    // report enlarges the viewport, the viewport enlarges the content), so a
+    // growth entirely explained by the viewport growth is recorded as seen but
+    // never re-posted — that ratchet would otherwise walk to the host's ceiling.
+    var viewport = window.innerHeight;
+    var viewportCoupled =
+      lastHeight > 0 &&
+      h > lastHeight &&
+      viewport > lastViewport &&
+      h - lastHeight <= viewport - lastViewport + 2;
+    lastViewport = viewport;
+    if (viewportCoupled) {
+      lastHeight = h;
+      return;
+    }
     if (Math.abs(h - lastHeight) < 2) return;
     lastHeight = h;
     parent.postMessage({ channel: SIZE_CHANNEL, height: h }, "*");
