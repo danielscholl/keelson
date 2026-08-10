@@ -305,6 +305,10 @@ describe("CanvasProvider / useCanvas", () => {
     // Content-sized now, so the pre-measurement viewport floor is released.
     expect(frame.style.minHeight).toBe("0px");
 
+    // A shorter report shrinks the frame — sizing is bidirectional.
+    postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 400 }, win);
+    expect(frame.style.height).toBe("400px");
+
     // A hostile or broken height is clamped, never applied raw.
     postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 10_000_000 }, win);
     expect(frame.style.height).toBe("20000px");

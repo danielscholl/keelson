@@ -55,29 +55,53 @@ const BRIDGE_SCRIPT = `
     document.documentElement.setAttribute("data-theme", d.theme);
     document.documentElement.style.colorScheme = d.theme;
   });
-  // Report content height so the host can size the frame to fit. The 2px dead
-  // band breaks the feedback loop a fractional or vh-derived height could set
-  // up between the parent resizing the frame and the frame re-measuring.
+  // Report content height so the host can size the frame to fit. Measured from
+  // body (margins added back) because documentElement.scrollHeight floors at the
+  // viewport, which would keep a tall frame from ever shrinking; that term only
+  // counts when it genuinely overflows the viewport (abs content anchored past
+  // body). The 2px dead band breaks the feedback loop a fractional or vh-derived
+  // height could set up between the parent resizing and the frame re-measuring.
   var SIZE_CHANNEL = ${JSON.stringify(CANVAS_HTML_SIZE_CHANNEL)};
   var lastHeight = 0;
   function postSize() {
     var doc = document.documentElement;
     var body = document.body;
-    var h = Math.max(doc ? doc.scrollHeight : 0, body ? body.scrollHeight : 0);
+    if (!doc || !body) return;
+    var s = getComputedStyle(body);
+    var h = body.scrollHeight + (parseFloat(s.marginTop) || 0) + (parseFloat(s.marginBottom) || 0);
+    if (doc.scrollHeight > window.innerHeight) h = Math.max(h, doc.scrollHeight);
+    h = Math.ceil(h);
     if (Math.abs(h - lastHeight) < 2) return;
     lastHeight = h;
     parent.postMessage({ channel: SIZE_CHANNEL, height: h }, "*");
   }
+  var scheduled = false;
+  function schedulePostSize() {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(function () { scheduled = false; postSize(); });
+  }
   window.addEventListener("load", postSize);
   if (typeof ResizeObserver === "function") {
-    var sizer = new ResizeObserver(postSize);
+    var sizer = new ResizeObserver(schedulePostSize);
     if (document.documentElement) sizer.observe(document.documentElement);
-    // The bridge runs from <head>, before <body> exists; attach on DOM ready.
-    document.addEventListener("DOMContentLoaded", function () {
-      if (document.body) sizer.observe(document.body);
-      postSize();
-    });
   }
+  // The bridge runs from <head>, before <body> exists; attach on DOM ready.
+  // ResizeObserver only sees box sizes — abs-positioned content changes scroll
+  // extent without a box change — so a MutationObserver fills that gap; both
+  // coalesce through one rAF-scheduled re-measure.
+  document.addEventListener("DOMContentLoaded", function () {
+    if (typeof sizer !== "undefined" && document.body) sizer.observe(document.body);
+    if (typeof MutationObserver === "function") {
+      new MutationObserver(schedulePostSize).observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true,
+      });
+    }
+    postSize();
+  });
 })();
 `.trim();
 
