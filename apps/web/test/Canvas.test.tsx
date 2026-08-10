@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import {
   CANVAS_HTML_ACTION_CHANNEL,
+  CANVAS_HTML_SIZE_CHANNEL,
   type CanvasBoardView,
   type CanvasDocument,
   type WorkflowNodeSummary,
@@ -287,6 +288,32 @@ describe("CanvasProvider / useCanvas", () => {
 
     postMessageTo(valid, win); // right source + valid body → relayed
     expect(seen).toEqual([valid]);
+  });
+
+  test("SandboxedHtml grows to a frame-reported content height, clamped", () => {
+    render(<SandboxedHtml html="<p>x</p>" />);
+    const frame = document.querySelector("iframe.canvas-html-frame") as HTMLIFrameElement;
+    const win = {} as Window;
+    Object.defineProperty(frame, "contentWindow", { value: win, configurable: true });
+
+    postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 1234 }, {} as Window); // wrong source
+    postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: "big" }, win); // bad schema
+    expect(frame.style.height).toBe("");
+
+    postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 1234.6 }, win);
+    expect(frame.style.height).toBe("1235px");
+    // Content-sized now, so the pre-measurement viewport floor is released.
+    expect(frame.style.minHeight).toBe("0px");
+
+    // A shorter report shrinks the frame — sizing is bidirectional.
+    postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 400 }, win);
+    expect(frame.style.height).toBe("400px");
+
+    // A hostile or broken height is clamped, never applied raw.
+    postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 10_000_000 }, win);
+    expect(frame.style.height).toBe("20000px");
+    postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 0 }, win);
+    expect(frame.style.height).toBe("160px");
   });
 
   test("a snapshot-sourced html action dispatches to the rib that owns the key", async () => {

@@ -76,6 +76,20 @@ export const canvasHtmlThemeSchema = z
   .strict();
 export type CanvasHtmlThemeMessage = z.infer<typeof canvasHtmlThemeSchema>;
 
+// Frame→host layout counterpart: the host-injected bridge measures the frame's
+// document and reports its content height, so the host can size the iframe to
+// its content instead of scrolling inside a fixed-height frame. The frame is
+// untrusted — the host clamps the value before applying it, so a hostile
+// height is a layout nuisance, never a takeover.
+export const CANVAS_HTML_SIZE_CHANNEL = "keelson:canvas:html:size";
+export const canvasHtmlSizeSchema = z
+  .object({
+    channel: z.literal(CANVAS_HTML_SIZE_CHANNEL),
+    height: z.number().finite().nonnegative(),
+  })
+  .strict();
+export type CanvasHtmlSizeMessage = z.infer<typeof canvasHtmlSizeSchema>;
+
 // Payload contract for a `kind: "view"` canvas. The data carries its own `view`
 // discriminant — the producer (a workflow or a rib) bakes it in; the base picks
 // a renderer from a closed catalog. Domain-free on purpose: `node.kind` is a
