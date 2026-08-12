@@ -23,6 +23,11 @@
   --magenta: #c7a8f0;
   --cyan:    #7cc0ff;
   --orange:  #f59f6c;
+  --ramp-1:  #ddcbf6;
+  --ramp-2:  #c0a0ee;
+  --ramp-3:  #a474e7;
+  --ramp-4:  #8749df;
+  --ramp-5:  #7126d9;
 
   /* Usage "Over time" categorical series palette (validated CVD ΔE ≥ 18.5
      against the --card surface) — cycled by model index, not reused
@@ -85,6 +90,11 @@
   --magenta: #804bc1;
   --cyan:    #2e6fd8;
   --orange:  #b66229;
+  --ramp-1:  #aa7de8;
+  --ramp-2:  #8d52e0;
+  --ramp-3:  #7126d9;
+  --ramp-4:  #5a1fad;
+  --ramp-5:  #441782;
 
   /* Same series, re-tuned for CVD ΔE ≥ 16.8 against the light --card. */
   --s1: #6d4fe0;
@@ -3900,6 +3910,26 @@ button.tab:focus-visible {
 .cvb-segment-text {
   color: var(--muted);
 }
+.cvb-segments-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.cvb-strip {
+  display: flex;
+  width: 100%;
+  height: 8px;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--card);
+}
+.cvb-strip-fill {
+  flex-basis: 0;
+  min-width: 0;
+  background: var(--dim);
+}
 
 /* actions — board-level buttons dispatched to the owning rib. Full-width
    stacked column with a leading glyph slot so a narrow Actions column reads as
@@ -4227,14 +4257,20 @@ button.cvb-action-field-model:disabled {
   border-radius: 999px;
   background: var(--accent);
 }
-.cvb-bar-fill[data-tone="ok"] {
+.cvb-bar-fill[data-tone="ok"],
+.cvb-strip-fill[data-tone="ok"] {
   background: var(--green);
 }
-.cvb-bar-fill[data-tone="warn"] {
+.cvb-bar-fill[data-tone="warn"],
+.cvb-strip-fill[data-tone="warn"] {
   background: var(--yellow);
 }
-.cvb-bar-fill[data-tone="error"] {
+.cvb-bar-fill[data-tone="error"],
+.cvb-strip-fill[data-tone="error"] {
   background: var(--red);
+}
+.cvb-strip-fill[data-tone="neutral"] {
+  background: var(--dim);
 }
 
 /* cards — movers / CVEs / access */
@@ -4925,13 +4961,16 @@ a.cvb-card-title::after {
 .cvb-link[data-tone="brand"] {
   color: var(--magenta);
 }
-.cvb-bar-fill[data-tone="info"] {
+.cvb-bar-fill[data-tone="info"],
+.cvb-strip-fill[data-tone="info"] {
   background: var(--cyan);
 }
-.cvb-bar-fill[data-tone="caution"] {
+.cvb-bar-fill[data-tone="caution"],
+.cvb-strip-fill[data-tone="caution"] {
   background: var(--orange);
 }
-.cvb-bar-fill[data-tone="brand"] {
+.cvb-bar-fill[data-tone="brand"],
+.cvb-strip-fill[data-tone="brand"] {
   background: var(--magenta);
 }
 .cvb-card-dot[data-tone="info"] {
@@ -5385,7 +5424,8 @@ a.cvb-card-title::after {
 .cvb-link[data-tone="accent"] {
   color: var(--accent);
 }
-.cvb-bar-fill[data-tone="accent"] {
+.cvb-bar-fill[data-tone="accent"],
+.cvb-strip-fill[data-tone="accent"] {
   background: var(--accent);
 }
 .cvb-card-dot[data-tone="accent"] {
@@ -5451,6 +5491,7 @@ a.cvb-card-title::after {
   color: var(--id-tone);
 }
 .cvb-bar-fill[data-tone^="id-"],
+.cvb-strip-fill[data-tone^="id-"],
 .cvb-card-dot[data-tone^="id-"],
 .cvb-glyph[data-tone^="id-"] {
   background: var(--id-tone);
@@ -5511,6 +5552,62 @@ a.cvb-card-title::after {
 }
 .cvb-action-button[data-tone^="id-"] .cvb-action-glyph {
   color: var(--id-tone);
+}
+
+[data-tone="ramp-1"] {
+  --ramp-tone: var(--ramp-1);
+}
+[data-tone="ramp-2"] {
+  --ramp-tone: var(--ramp-2);
+}
+[data-tone="ramp-3"] {
+  --ramp-tone: var(--ramp-3);
+}
+[data-tone="ramp-4"] {
+  --ramp-tone: var(--ramp-4);
+}
+[data-tone="ramp-5"] {
+  --ramp-tone: var(--ramp-5);
+}
+.canvas-view-table td[data-tone^="ramp-"],
+.cvb-stat-value[data-tone^="ramp-"],
+.cvb-field-value[data-tone^="ramp-"],
+.cvb-link[data-tone^="ramp-"],
+.surface-region-glyph-chip[data-tone^="ramp-"] {
+  color: var(--ramp-tone);
+}
+.cvb-strip-fill[data-tone^="ramp-"],
+.cvb-bar-fill[data-tone^="ramp-"],
+.cvb-card-dot[data-tone^="ramp-"],
+.cvb-glyph[data-tone^="ramp-"],
+.cvb-segment-bullet[data-tone^="ramp-"] {
+  background: var(--ramp-tone);
+}
+.cvb-segment-bullet[data-tone^="ramp-"] {
+  box-shadow: 0 0 4px var(--ramp-tone);
+}
+.cvb-rows--boxed .cvb-glyph[data-tone^="ramp-"]::before {
+  content: "•";
+  color: var(--ramp-tone);
+}
+.canvas-cell-badge[data-tone^="ramp-"],
+.cvb-grid-badge[data-tone^="ramp-"] {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--ramp-tone) 18%, transparent);
+}
+.cvb-pill[data-tone^="ramp-"] {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--ramp-tone) 45%, transparent);
+}
+.cvb-chip[data-tone^="ramp-"] {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--ramp-tone) 40%, transparent);
+  background: color-mix(in srgb, var(--ramp-tone) 14%, transparent);
+}
+.cvb-header-status[data-tone^="ramp-"] {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--ramp-tone) 45%, transparent);
+  background: color-mix(in srgb, var(--ramp-tone) 10%, transparent);
 }
 
 /* Not a bar — a scrim. The footer is absolutely positioned over the bottom of
