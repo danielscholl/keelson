@@ -8,8 +8,10 @@
 # (`bun install --lockfile-only`) and pushes it onto the branch, so the
 # frozen-lockfile install passes without a manual refresh.
 #
-# One npm entry per workspace because Dependabot scans the `directory`
-# only, not the workspace tree.
+# One npm entry per workspace, so each carries its own limits and labels.
+# The root entry is not confined to the root manifest though — its grouped
+# updates reach the whole workspace tree — so an ignore that has to hold
+# everywhere must be repeated in the root entry as well as the workspace one.
 #
 # npm entries carry a 7-day cooldown, matching bunfig.toml's
 # minimumReleaseAge: releases must only pin versions old enough to have
@@ -28,8 +30,6 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
-    # This entry's groups reach the whole workspace tree, not just the root
-    # manifest, so the per-workspace ignores below have to be repeated here.
     ignore:
       - dependency-name: "@earendil-works/*"
         update-types:
