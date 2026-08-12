@@ -3915,6 +3915,7 @@ button.tab:focus-visible {
   flex-direction: column;
   gap: 6px;
   width: 100%;
+  min-width: 100%;
 }
 .cvb-strip {
   display: flex;
