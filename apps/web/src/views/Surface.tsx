@@ -539,11 +539,9 @@ function SurfaceRegion({
           </BoardActionProvider>
         )}
       </div>
-      {/* The pulse rides its own row so the chrome (explore/select/expand + freshness)
-          holds a fixed spot on the title bar even in a narrow column. Gate on a
-          positive segment: Segments keeps only n > 0 and renders null when none
-          remain, so an unguarded wrapper would add a blank row for an empty pulse. */}
-      {board?.header?.segments?.some((s) => s.n > 0) && (
+      {/* The pulse rides its own row so title-bar chrome stays fixed; a non-empty
+          list retains all-zero data, while an empty list omits the row. */}
+      {board?.header?.segments && board.header.segments.length > 0 && (
         <div className="surface-region-head-meta">
           <Segments items={board.header.segments} />
         </div>
