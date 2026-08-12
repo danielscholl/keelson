@@ -28,6 +28,13 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
+    # This entry's groups reach the whole workspace tree, not just the root
+    # manifest, so the per-workspace ignores below have to be repeated here.
+    ignore:
+      - dependency-name: "@earendil-works/*"
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
     groups:
       types:
         patterns:
