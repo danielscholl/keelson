@@ -56,7 +56,7 @@ const { SandboxedHtml, composeCanvasHtmlDoc } = await import(
 );
 const { RunTrace } = await import("../src/components/Workflows/RunTrace.tsx");
 const { ToolCallsBlock } = await import("../src/components/Chat/ToolCallsBlock.tsx");
-const { BoardView } = await import("../src/components/Canvas/BoardView.tsx");
+const { BoardView, Segments } = await import("../src/components/Canvas/BoardView.tsx");
 const { BoardActionProvider } = await import("../src/components/Canvas/BoardActionContext.tsx");
 
 function Opener({ doc }: { doc: CanvasDocument }) {
@@ -652,6 +652,81 @@ describe("CanvasProvider / useCanvas", () => {
     expect(feedRow?.querySelector('.cvb-chip[data-tone="info"]')?.textContent).toBe("CLUSTER");
     expect(dialog.querySelector('a[href="https://portal.test"]')).not.toBeNull();
     expect(screen.getByRole("button", { name: "Copy user" })).toBeTruthy();
+  });
+
+  test("segment sections render proportional strips and retain zero counts", () => {
+    const { container } = render(
+      <BoardView
+        view={{
+          view: "board",
+          sections: [
+            {
+              kind: "segments",
+              items: [
+                { label: "Good", n: 12, tone: "ok" },
+                { label: "Poor", n: 0, tone: "warn" },
+                { label: "Fail", n: 0, tone: "error" },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(container.textContent).toContain("12 Good");
+    expect(container.textContent).toContain("0 Poor");
+    expect(container.textContent).toContain("0 Fail");
+    const fills = container.querySelectorAll<HTMLElement>(".cvb-strip-fill");
+    expect(fills.length).toBe(1);
+    expect(fills[0]?.getAttribute("data-tone")).toBe("ok");
+    expect(fills[0]?.style.flexGrow).toBe("12");
+  });
+
+  test("all-zero segments keep an empty track and legend while empty items render nothing", () => {
+    const { container } = render(
+      <BoardView
+        view={{
+          view: "board",
+          sections: [
+            {
+              kind: "segments",
+              items: [
+                { label: "Good", n: 0, tone: "ok" },
+                { label: "Fail", n: 0, tone: "error" },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(container.querySelector(".cvb-strip")).not.toBeNull();
+    expect(container.querySelector(".cvb-strip-fill")).toBeNull();
+    expect(container.textContent).toContain("0 Good");
+    expect(container.textContent).toContain("0 Fail");
+
+    const empty = render(<Segments items={[]} strip />);
+    expect(empty.container.firstChild).toBeNull();
+  });
+
+  test("board header and section ramp tones reach strip fills and legend bullets", () => {
+    const { container } = render(
+      <BoardView
+        view={{
+          view: "board",
+          header: { segments: [{ label: "Header", n: 3, tone: "ramp-3" }] },
+          sections: [
+            {
+              kind: "segments",
+              items: [{ label: "Section", n: 2, tone: "ramp-3" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(container.querySelectorAll('.cvb-strip-fill[data-tone="ramp-3"]').length).toBe(2);
+    expect(container.querySelectorAll('.cvb-segment-bullet[data-tone="ramp-3"]').length).toBe(2);
   });
 
   test("board renders reserved identity tones through to data-tone attributes", () => {

@@ -40,23 +40,39 @@ function makeKeyer() {
   };
 }
 
-// A "pulse" strip: a glowing toned bullet + muted `{n} {label}`, segments joined
-// by `·` (via CSS). Zero-count segments are dropped so the strip collapses to
-// just what's live; an all-zero strip renders nothing.
-export function Segments({ items }: { items: Segment[] }) {
-  const key = makeKeyer();
-  const visible = items.filter((s) => s.n > 0);
-  if (visible.length === 0) return null;
-  return (
+export function Segments({ items, strip = false }: { items: Segment[]; strip?: boolean }) {
+  if (items.length === 0) return null;
+  const legendKey = makeKeyer();
+  const legend = (
     <div className="cvb-segments">
-      {visible.map((s) => (
-        <span key={key(JSON.stringify(s))} className="cvb-segment">
+      {items.map((s) => (
+        <span key={legendKey(JSON.stringify(s))} className="cvb-segment">
           <span className="cvb-segment-bullet" data-tone={s.tone ?? "neutral"} aria-hidden="true" />
           <span className="cvb-segment-text">
             {s.n} {s.label}
           </span>
         </span>
       ))}
+    </div>
+  );
+  if (!strip) return legend;
+
+  const stripKey = makeKeyer();
+  return (
+    <div className="cvb-segments-strip">
+      <div className="cvb-strip" aria-hidden="true">
+        {items
+          .filter((s) => s.n > 0)
+          .map((s) => (
+            <div
+              key={stripKey(JSON.stringify(s))}
+              className="cvb-strip-fill"
+              data-tone={s.tone ?? "neutral"}
+              style={{ flexGrow: s.n }}
+            />
+          ))}
+      </div>
+      {legend}
     </div>
   );
 }
@@ -891,7 +907,7 @@ function Section({ section }: { section: BoardSection }) {
       );
     }
     case "segments":
-      return <Segments items={section.items} />;
+      return <Segments items={section.items} strip />;
     case "bars": {
       const key = makeKeyer();
       const inline = section.inline === true;
@@ -1273,7 +1289,7 @@ export function BoardHeader({ view }: { view: Pick<CanvasBoardView, "title" | "h
       {view.header?.chip && <span className="cvb-chip cvb-header-chip">{view.header.chip}</span>}
       {view.title && <span className="cvb-title">{view.title}</span>}
       {view.header?.segments && view.header.segments.length > 0 && (
-        <Segments items={view.header.segments} />
+        <Segments items={view.header.segments} strip />
       )}
     </div>
   );

@@ -1678,6 +1678,24 @@ describe("canvasViewSchema", () => {
     }
   });
 
+  it("parses every ordinal ramp tone across board tone sites", () => {
+    for (const tone of ["ramp-1", "ramp-2", "ramp-3", "ramp-4", "ramp-5"]) {
+      const v = canvasViewSchema.parse({
+        view: "board",
+        header: { status: { label: "tier", tone } },
+        sections: [
+          { kind: "segments", items: [{ label: "bucket", n: 1, tone }] },
+          {
+            kind: "cards",
+            items: [{ title: "stage", titleTone: tone, dot: tone, pill: { label: "tier", tone } }],
+          },
+          { kind: "grid", cells: [{ label: "B1", badge: { text: "tier", tone } }] },
+        ],
+      });
+      expect(v.view).toBe("board");
+    }
+  });
+
   it("parses a card with a toned monospace title and a labelled reason line", () => {
     const v = canvasViewSchema.parse({
       view: "board",

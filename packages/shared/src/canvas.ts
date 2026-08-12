@@ -110,6 +110,9 @@ export type CanvasHtmlSizeMessage = z.infer<typeof canvasHtmlSizeSchema>;
 // against both SPA card surfaces; an actor's name must always accompany the
 // colour (the chip renderer keeps identity text in ink for this reason). A sixth
 // actor folds to `neutral` + name rather than minting a hue.
+// ramp-1...ramp-5 is the light-to-dark ordinal ladder for staged, tiered, or
+// bucketed data where category order carries meaning, unlike categorical id-*
+// and semantic hues.
 export const canvasToneSchema = z.enum([
   "ok",
   "warn",
@@ -124,6 +127,11 @@ export const canvasToneSchema = z.enum([
   "id-teal",
   "id-rose",
   "id-olive",
+  "ramp-1",
+  "ramp-2",
+  "ramp-3",
+  "ramp-4",
+  "ramp-5",
 ]);
 export type CanvasTone = z.infer<typeof canvasToneSchema>;
 

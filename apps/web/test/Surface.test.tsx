@@ -1073,14 +1073,14 @@ describe("Surface", () => {
     expect(container.querySelector(".surface-region-head-meta")).not.toBeNull();
   });
 
-  test("an all-non-positive pulse renders no head meta row (Segments would be empty)", () => {
+  test("an all-zero pulse renders a legend-only head meta row", () => {
     live("rib:demo:pulse", {
       view: "board",
       title: "Pulse",
       header: {
         segments: [
           { label: "active", n: 0, tone: "ok" },
-          { label: "stalled", n: -1, tone: "error" },
+          { label: "stalled", n: 0, tone: "error" },
         ],
       },
       sections: [{ kind: "stats", items: [{ label: "OpenPulse", value: 0 }] }],
@@ -1090,10 +1090,12 @@ describe("Surface", () => {
       title: "CIMPL",
       layout: { rows: [{ columns: [{ key: "rib:demo:pulse", title: "Pulse" }] }] },
     });
-    // The board itself still renders (its stat body is present); only the empty
-    // pulse row is suppressed, so this proves the guard — not a parse failure.
     expect(container.textContent).toContain("OpenPulse");
-    expect(container.querySelector(".surface-region-head-meta")).toBeNull();
+    const meta = container.querySelector(".surface-region-head-meta");
+    expect(meta).not.toBeNull();
+    expect(meta?.textContent).toContain("0 active");
+    expect(meta?.textContent).toContain("0 stalled");
+    expect(meta?.querySelector(".cvb-strip")).toBeNull();
   });
 
   test("a region's workflowArgs reach the refresh trigger hook", () => {
