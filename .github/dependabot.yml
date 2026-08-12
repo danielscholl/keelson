@@ -48,6 +48,13 @@ updates:
     labels:
       - dependencies
       - apps/cli
+    # pi is pre-1.0, so its minors carry API breaks; hold the family until the
+    # provider migrates (https://github.com/danielscholl/keelson/issues/785).
+    ignore:
+      - dependency-name: "@earendil-works/*"
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
     groups:
       dev-minor-and-patch:
         update-types:
@@ -140,6 +147,12 @@ updates:
           - version-update:semver-major
       - dependency-name: "@github/copilot-sdk"
         update-types:
+          - version-update:semver-major
+      # pi is pre-1.0, so its minors carry API breaks; hold the family until the
+      # provider migrates (https://github.com/danielscholl/keelson/issues/785).
+      - dependency-name: "@earendil-works/*"
+        update-types:
+          - version-update:semver-minor
           - version-update:semver-major
 
   - package-ecosystem: npm
