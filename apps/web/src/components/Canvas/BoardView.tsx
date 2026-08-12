@@ -40,7 +40,6 @@ function makeKeyer() {
   };
 }
 
-// Composition strips use positive counts proportionally; legends retain zeros and only empty items vanish.
 export function Segments({ items, strip = false }: { items: Segment[]; strip?: boolean }) {
   if (items.length === 0) return null;
   const legendKey = makeKeyer();
