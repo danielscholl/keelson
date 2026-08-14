@@ -475,6 +475,21 @@ export const canvasActionItemSchema = z
     message: "a selected toggle is not destructive — a toggle holds a state, destructive is a verb",
   });
 
+// A stat tile's change readout: `direction` picks the glyph (▲ ▼ →) and `tone`
+// colors it, so direction-as-status is never color-alone — the producer decides
+// whether up is good (an error-rate ▲ wears error; a throughput ▲ wears ok).
+// `text` is the already-formatted figure ("+12%", "−3"), never re-derived.
+const canvasStatDeltaSchema = z
+  .object({
+    text: z.string().min(1),
+    direction: z.enum(["up", "down", "flat"]),
+    // A delta wears a status judgment, not an identity — brand/accent/id-*/ramp-*
+    // are excluded by schema so they can't fall through to the muted fallback.
+    tone: z.enum(["ok", "warn", "error", "neutral", "info", "caution"]).optional(),
+  })
+  .strict();
+export type CanvasStatDelta = z.infer<typeof canvasStatDeltaSchema>;
+
 // The leaf board sections — every primitive except the layout-only `columns`.
 // Named so the same members compose both `leafBoardSectionSchema` (what a column
 // may nest) and the full `canvasBoardSectionSchema` below.
@@ -489,6 +504,11 @@ const statsSectionSchema = z
           value: canvasCellScalarSchema,
           sub: z.string().optional(),
           tone: canvasToneSchema.optional(),
+          delta: canvasStatDeltaSchema.optional(),
+          // Trend context behind the value, oldest first — rendered as an inline
+          // sparkline (muted stroke, emphasized endpoint), enhancement only: the
+          // delta/value must carry the reading without it.
+          spark: z.array(z.number().finite()).min(2).max(60).optional(),
         })
         .strict(),
     ),
@@ -711,6 +731,17 @@ const chartSectionSchema = z
     kind: z.literal("chart"),
     title: z.string().optional(),
     yLabel: z.string().optional(),
+    // How every series renders — section-level so mixed forms never share one
+    // plot. `line` (default) for change over time; `area` adds a translucent
+    // fill to the baseline for cumulative/volume emphasis (overlaid, not
+    // stacked — composition belongs to `segments`/`bars`); `bar` draws grouped
+    // zero-anchored bars per x slot for categorical comparison, so numeric x
+    // values render as ordered categories rather than a linear axis.
+    mark: z.enum(["line", "area", "bar"]).optional(),
+    // `zero` (default) anchors the y-axis at zero; `auto` releases it to the
+    // data's own band so variation inside a narrow range (a 93–99% pass rate)
+    // fills the plot instead of flattening against a zero-anchored ceiling.
+    baseline: z.enum(["zero", "auto"]).optional(),
     series: z
       .array(
         z
@@ -876,8 +907,9 @@ function assertUniqueSeriesLabels(
   }
 }
 
-// One place lists the leaf kinds carrying a cross-item uniqueness rule, so the
-// top-level walk and the columns-nested walk can't drift apart.
+// One place lists the leaf kinds carrying a cross-item rule, so the top-level
+// walk and the columns-nested walk can't drift apart. (These live on the union
+// walk, not member refines — a ZodEffects member would break the discriminator.)
 function assertLeafSectionUniqueness(
   leaf: z.infer<typeof leafBoardSectionSchema>,
   ctx: z.RefinementCtx,
@@ -887,6 +919,15 @@ function assertLeafSectionUniqueness(
     assertUniqueColumnKeys(leaf.columns, ctx, [...path, "columns"]);
   } else if (leaf.kind === "chart") {
     assertUniqueSeriesLabels(leaf.series, ctx, [...path, "series"]);
+    // Bars and area fills encode magnitude from the baseline, so a released
+    // zero anchor would misrepresent them — auto fits the line mark only.
+    if (leaf.baseline === "auto" && (leaf.mark === "bar" || leaf.mark === "area")) {
+      ctx.addIssue({
+        code: "custom",
+        message: 'baseline "auto" fits the line mark only — bars and areas anchor at zero',
+        path: [...path, "baseline"],
+      });
+    }
   }
 }
 

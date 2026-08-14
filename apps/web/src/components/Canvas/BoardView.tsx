@@ -1,4 +1,10 @@
-import type { CanvasBoardView, CanvasCardAction, CanvasTone, RibAction } from "@keelson/shared";
+import type {
+  CanvasBoardView,
+  CanvasCardAction,
+  CanvasStatDelta,
+  CanvasTone,
+  RibAction,
+} from "@keelson/shared";
 import {
   type CSSProperties,
   type FormEvent,
@@ -885,6 +891,50 @@ function CardSelectButton({
   );
 }
 
+const DELTA_GLYPH = { up: "▲", down: "▼", flat: "→" } as const;
+
+function StatDelta({ delta }: { delta: CanvasStatDelta }) {
+  return (
+    <span className="cvb-stat-delta" data-tone={delta.tone}>
+      <span aria-hidden="true">{DELTA_GLYPH[delta.direction]}</span>
+      <span className="cvb-sr-only">{delta.direction}</span> {delta.text}
+    </span>
+  );
+}
+
+// Inline trend context: a muted stroke wearing the tile's tone (via
+// currentColor) with an emphasized endpoint. Enhancement only — the value and
+// delta carry the reading, so the svg is aria-hidden.
+const SPARK_W = 64;
+const SPARK_H = 18;
+const SPARK_PAD = 2;
+
+function StatSpark({ values, tone }: { values: readonly number[]; tone?: CanvasTone }) {
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min;
+  const step = (SPARK_W - 2 * SPARK_PAD) / (values.length - 1);
+  const sy = (v: number) =>
+    span === 0 ? SPARK_H / 2 : SPARK_PAD + (1 - (v - min) / span) * (SPARK_H - 2 * SPARK_PAD);
+  const points = values
+    .map((v, i) => `${(SPARK_PAD + i * step).toFixed(1)},${sy(v).toFixed(1)}`)
+    .join(" ");
+  const endX = SPARK_PAD + (values.length - 1) * step;
+  return (
+    <svg
+      className="cvb-stat-spark"
+      data-tone={tone}
+      width={SPARK_W}
+      height={SPARK_H}
+      viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
+      aria-hidden="true"
+    >
+      <polyline points={points} />
+      <circle cx={endX} cy={sy(values[values.length - 1]!)} r={2} />
+    </svg>
+  );
+}
+
 function Section({ section }: { section: BoardSection }) {
   switch (section.kind) {
     case "stats": {
@@ -896,11 +946,15 @@ function Section({ section }: { section: BoardSection }) {
         >
           {section.items.map((s) => (
             <div key={key(JSON.stringify(s))} className="cvb-stat">
-              <span className="cvb-stat-value" data-tone={s.tone}>
-                {scalarText(s.value)}
+              <span className="cvb-stat-value-row">
+                <span className="cvb-stat-value" data-tone={s.tone}>
+                  {scalarText(s.value)}
+                </span>
+                {s.delta && <StatDelta delta={s.delta} />}
               </span>
               <span className="cvb-stat-label">{s.label}</span>
               {s.sub && <span className="cvb-stat-sub">{s.sub}</span>}
+              {s.spark && s.spark.length >= 2 && <StatSpark values={s.spark} tone={s.tone} />}
             </div>
           ))}
         </div>

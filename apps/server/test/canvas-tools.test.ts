@@ -234,6 +234,8 @@ describe("canvas_design_guide", () => {
       ["form", "not a chart"],
       ["color", DESIGN_TOKENS.dark.series[0]],
       ["marks", "tabular-nums"],
+      ["graphics", "MECHANISM"],
+      ["board", "section by the data's job"],
       ["anti-patterns", "Two y-axes"],
     ] as const) {
       const { ctx, chunks } = makeCtx();

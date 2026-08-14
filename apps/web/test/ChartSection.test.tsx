@@ -241,6 +241,220 @@ describe("chart board section", () => {
     const { container } = render(<BoardView view={view} />);
     expect(container.querySelectorAll("path.cvb-chart-line").length).toBe(1);
   });
+
+  test("the area mark adds a fill path under each line; line mark does not", () => {
+    const area = {
+      view: "board",
+      sections: [{ kind: "chart", mark: "area", series: [ramp("a", 0), ramp("b", 40)] }],
+    } as CanvasBoardView;
+    const { container } = render(<BoardView view={area} />);
+    const fills = container.querySelectorAll("path.cvb-chart-area");
+    expect(fills.length).toBe(2);
+    expect(fills[0]?.getAttribute("fill")).toBe("var(--s1)");
+    // The fill closes to the baseline and the stroke line still renders above it.
+    expect(fills[0]?.getAttribute("d")).toContain("Z");
+    expect(container.querySelectorAll("path.cvb-chart-line").length).toBe(2);
+    const line = render(<BoardView view={chartBoard([ramp("a", 0)])} />);
+    expect(line.container.querySelectorAll("path.cvb-chart-area").length).toBe(0);
+  });
+
+  test("the bar mark renders grouped zero-anchored bars and no lines or endpoint labels", () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "chart",
+          mark: "bar",
+          series: [
+            {
+              label: "unit",
+              points: [
+                { x: "core", y: 12 },
+                { x: "web", y: 7 },
+              ],
+            },
+            {
+              label: "e2e",
+              points: [
+                { x: "core", y: 3 },
+                { x: "web", y: 5 },
+              ],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(<BoardView view={view} />);
+    // 2 slots × 2 series.
+    const bars = container.querySelectorAll("path.cvb-chart-bar");
+    expect(bars.length).toBe(4);
+    expect(bars[0]?.getAttribute("fill")).toBe("var(--s1)");
+    expect(container.querySelectorAll("path.cvb-chart-line").length).toBe(0);
+    expect(container.querySelectorAll(".cvb-chart-endpoint-label").length).toBe(0);
+    // Identity still lands via the legend.
+    expect(container.querySelectorAll(".cvb-chart-legend-item").length).toBe(2);
+  });
+
+  test("baseline auto lifts the floor to the data's band; the default keeps zero", () => {
+    const band: ChartSeries = {
+      label: "pass",
+      points: [
+        { x: "Mon", y: 93.2 },
+        { x: "Tue", y: 96.1 },
+        { x: "Wed", y: 98.7 },
+      ],
+    };
+    const gridLabels = (container: HTMLElement) =>
+      [...container.querySelectorAll("text.cvb-chart-axis-label")]
+        .filter((t) => t.getAttribute("x") === "40")
+        .map((t) => Number(t.textContent));
+    const auto = render(
+      <BoardView
+        view={
+          {
+            view: "board",
+            sections: [{ kind: "chart", baseline: "auto", series: [band] }],
+          } as CanvasBoardView
+        }
+      />,
+    );
+    const autoGrid = gridLabels(auto.container);
+    expect(Math.min(...autoGrid)).toBeGreaterThan(0);
+    expect(Math.min(...autoGrid)).toBeLessThanOrEqual(93.2);
+    expect(Math.max(...autoGrid)).toBeGreaterThanOrEqual(98.7);
+    auto.unmount();
+    const zero = render(<BoardView view={chartBoard([band])} />);
+    expect(Math.min(...gridLabels(zero.container))).toBe(0);
+  });
+
+  test("bar mark bands numeric x as ordered categories instead of a linear axis", () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "chart",
+          mark: "bar",
+          series: [
+            {
+              label: "runs",
+              points: [
+                { x: 1, y: 4 },
+                { x: 2, y: 6 },
+                { x: 100, y: 2 },
+              ],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(<BoardView view={view} />);
+    const bars = [...container.querySelectorAll("path.cvb-chart-bar")];
+    expect(bars.length).toBe(3);
+    // Even band spacing: the x=2 bar sits midway, not piled next to x=1.
+    const xs = bars.map((b) => Number(/M(\d+\.?\d*)/.exec(b.getAttribute("d") ?? "")?.[1]));
+    expect(xs[1]! - xs[0]!).toBeCloseTo(xs[2]! - xs[1]!, 0);
+  });
+
+  test("a wide grouped-bar chart keeps each slot's bars inside its own band", () => {
+    const seriesCount = 6;
+    const categoryCount = 30;
+    const series: ChartSeries[] = Array.from({ length: seriesCount }, (_, si) => ({
+      label: `s${si}`,
+      points: Array.from({ length: categoryCount }, (_, ci) => ({
+        x: `cat${ci}`,
+        y: 10 + si + ci,
+      })),
+    }));
+    const view = {
+      view: "board",
+      sections: [{ kind: "chart", mark: "bar", series }],
+    } as CanvasBoardView;
+    const { container } = render(<BoardView view={view} />);
+    const bars = [...container.querySelectorAll("path.cvb-chart-bar")];
+    expect(bars.length).toBe(seriesCount * categoryCount);
+
+    // Every numeric token in a bar path's d is an (x, y) pair; the even
+    // indices are x-coordinates, so their min/max give the bar's x extent.
+    const xExtent = (d: string): [number, number] => {
+      const nums = (d.match(/-?\d+\.?\d*/g) ?? []).map(Number);
+      const xs = nums.filter((_, i) => i % 2 === 0);
+      return [Math.min(...xs), Math.max(...xs)];
+    };
+    const groups: [number, number][] = [];
+    for (let i = 0; i < bars.length; i += seriesCount) {
+      const slotBars = bars.slice(i, i + seriesCount);
+      const extents = slotBars.map((b) => xExtent(b.getAttribute("d") ?? ""));
+      groups.push([Math.min(...extents.map((e) => e[0])), Math.max(...extents.map((e) => e[1]))]);
+    }
+    expect(groups.length).toBe(categoryCount);
+    for (let i = 1; i < groups.length; i++) {
+      expect(groups[i]![0]).toBeGreaterThan(groups[i - 1]![1]);
+    }
+  });
+});
+
+describe("stats delta and spark", () => {
+  test("a delta renders its direction glyph and tone; a sparkline renders behind the value", () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "stats",
+          items: [
+            {
+              label: "Fail rate",
+              value: "2.1%",
+              delta: { text: "+0.4pp", direction: "up", tone: "error" },
+              spark: [1.2, 1.5, 1.4, 1.7, 2.1],
+            },
+            { label: "Services", value: 23 },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(<BoardView view={view} />);
+    const delta = container.querySelector(".cvb-stat-delta");
+    expect(delta?.textContent).toContain("▲");
+    expect(delta?.textContent).toContain("+0.4pp");
+    expect(delta?.getAttribute("data-tone")).toBe("error");
+    const sparks = container.querySelectorAll("svg.cvb-stat-spark");
+    expect(sparks.length).toBe(1);
+    expect(sparks[0]?.querySelector("polyline")).not.toBeNull();
+    expect(sparks[0]?.querySelector("circle")).not.toBeNull();
+    // The plain tile renders neither affordance.
+    const tiles = container.querySelectorAll(".cvb-stat");
+    expect(tiles[1]?.querySelector(".cvb-stat-delta")).toBeNull();
+    expect(tiles[1]?.querySelector(".cvb-stat-spark")).toBeNull();
+  });
+
+  test("a flat delta renders → and stays ink-colored without a tone", () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "stats",
+          items: [{ label: "Latency", value: "142ms", delta: { text: "±0", direction: "flat" } }],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(<BoardView view={view} />);
+    const delta = container.querySelector(".cvb-stat-delta");
+    expect(delta?.textContent).toContain("→");
+    expect(delta?.hasAttribute("data-tone")).toBe(false);
+  });
+
+  test("a flat spark series renders a midline instead of dividing by zero", () => {
+    const view = {
+      view: "board",
+      sections: [{ kind: "stats", items: [{ label: "Steady", value: 5, spark: [3, 3, 3] }] }],
+    } as CanvasBoardView;
+    const { container } = render(<BoardView view={view} />);
+    const points = container.querySelector(".cvb-stat-spark polyline")?.getAttribute("points");
+    expect(points).toBeTruthy();
+    for (const pair of points!.split(" ")) {
+      expect(Number(pair.split(",")[1])).toBe(9);
+    }
+  });
 });
 
 describe("seats and journey board sections", () => {
