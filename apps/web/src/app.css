@@ -5704,6 +5704,118 @@ a.cvb-card-title::after {
   background: color-mix(in srgb, var(--ramp-tone) 10%, transparent);
 }
 
+/* Board item affordances (rows/cards parity, item bars, unmeasured). Placed
+   after the tone blocks on purpose: an unmeasured fill's hatch and the item
+   strip's sizing must outrank the per-tone background rules above. */
+
+/* UNMEASURED (`n`/`value`: null) — a broken read is not a zero. The hatch is
+   deliberately toneless: a confident status colour on an unknown quantity
+   would claim a reading the producer doesn't have. */
+.cvb-strip-fill--unmeasured {
+  flex: 0 0 18px;
+  background: repeating-linear-gradient(-45deg, var(--dim) 0 2px, transparent 2px 5px);
+}
+.cvb-bar-fill--unmeasured {
+  width: 100%;
+  background: repeating-linear-gradient(-45deg, var(--dim) 0 2px, transparent 2px 5px);
+}
+.cvb-stat-value.is-unmeasured {
+  color: var(--muted);
+}
+
+/* Item-scale composition strip — the header strip's vocabulary on a card or
+   row bar. Reasserts height/surface after `.cvb-card-bar` (4px, sized for the
+   plain fill) so segment fills stay readable. */
+.cvb-strip--item {
+  width: 100%;
+  height: 6px;
+  background: var(--card-2);
+}
+/* A row's compact meter: fixed width between text and trailing so a dense
+   list keeps one line per record. */
+.cvb-row-bar {
+  flex: none;
+  width: 96px;
+  display: inline-flex;
+}
+.cvb-row-bar .cvb-bar-track {
+  width: 100%;
+  height: 4px;
+}
+
+/* Selectable rows — the cards click contract at row density. The constant
+   left inset reserves room for the selection bar so choosing a row never
+   shifts its content; selection reads by bar + weight, not tint alone. */
+.cvb-row--selectable {
+  position: relative;
+  padding-left: 8px;
+  transition: background 0.12s ease;
+}
+.cvb-row--selectable:hover {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.cvb-row--selectable :is(a, button, input, select, textarea, label):not(.cvb-card-select) {
+  position: relative;
+  z-index: 2;
+}
+.cvb-row.is-selected {
+  box-shadow: inset 2px 0 0 var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.cvb-row.is-selected .cvb-row-text {
+  font-weight: 600;
+}
+
+/* Corner icon action: `align: "end"` pins the wrapper to the row's trailing
+   edge — margin-left only, never a shorthand (`.cvb-cards--grid` claims
+   margin-top: auto on the same actions row to bottom-anchor footers). */
+.cvb-action--end {
+  margin-left: auto;
+}
+/* Icon-only: collapse the fixed glyph gutter and the label padding, or an
+   "icon-only" button stays label-width. */
+.cvb-action-button.is-icon-only {
+  padding: 7px 9px;
+  justify-content: center;
+}
+.cvb-action-button.is-icon-only .cvb-action-glyph {
+  width: auto;
+}
+
+/* Prose card fields — a document, not a readout: proportional type, a fixed
+   label gutter so sections align, and its own scroller. The cap must live
+   HERE: an `auto` grid row tracks its items' max-content, so overflow on the
+   card can't hold the row — only an explicit max-height on the scroller does. */
+.cvb-cards:not(.cvb-cards--boxed) .cvb-card-fields--prose {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 6px;
+  max-height: 150px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.cvb-cards:not(.cvb-cards--boxed) .cvb-card-fields--prose .cvb-field:not(:first-child)::before {
+  content: none;
+}
+.cvb-card-fields--prose .cvb-field {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.cvb-card-fields--prose .cvb-field-label {
+  flex: none;
+  width: 76px;
+}
+.cvb-card-fields--prose .cvb-field-value {
+  font-family: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* Not a bar — a scrim. The footer is absolutely positioned over the bottom of
    the scroll area so the plan scrolls *behind* it and dissolves into the reading
    surface before reaching the controls (the gradient is click-through). */

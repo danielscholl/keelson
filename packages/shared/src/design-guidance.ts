@@ -181,17 +181,19 @@ Pick the section by the data's job:
 - Magnitude across categories → bars (value/total rows; inline for a dense offender list) — or chart with mark: "bar" when grouped series per category matter.
 - Change over time → chart: mark "line" (default); "area" for cumulative/volume emphasis (overlaid, not stacked — composition belongs to segments); "bar" renders x as ordered categories, zero-anchored. ≤6 series, fixed-order palette slots, one y-axis. baseline "auto" (line only) releases the zero anchor so variation inside a narrow band (a 93–99% pass rate) fills the plot — use it when the story is the variation, not the magnitude; bars and areas always anchor at zero.
 - Exact values, many dimensions → table (toned cells; badges for grades and counts).
-- Entities with identity and verbs → cards (grid + columns for benches; ghost seats for open capacity; boxed for copyable credentials).
-- Event feed or status checklist → rows (boxed flips it to label:value cards).
+- Entities with identity and verbs → cards (grid + columns for benches; ghost seats for open capacity; boxed for copyable credentials). A card's bar carries per-entity progress: { value, total } for a plain fill, { segments } for stage composition at card scale. prose flips the fields to a scrolling document (a charter, a brief) in proportional type; stacked stays the line-oriented mono readout — a card sets one, not both.
+- Event feed or status checklist → rows (boxed flips it to label:value cards). Rows carry the cards click contract — action/selected for an overview list feeding an inspector, bar for a compact per-row meter — so choose cards vs rows on density alone, never because only one can be selected.
 - At-a-glance matrix or link strip → grid cells with toned badges.
 - A sequence where order is the story → journey; a fixed-capacity identity row → seats.
-- Verbs → one actions section (tabs for a mode picker, wrap for a chip strip); destructive verbs confirm, disabled ones carry reason.
+- Verbs → one actions section (tabs for a mode picker, wrap for a chip strip); destructive verbs confirm, disabled ones carry reason. iconOnly + align: "end" pins a glyph-only corner affordance whose label stays the accessible name. binding is the integrity-protected payload slot — merged after collected fields, so producer-stamped context (a fingerprint, a target identity) can never be shadowed by a form field.
+
+Unmeasured is not zero: when a collector fails, say so in the data — n: null on a segment, value: null on a bar or stat — and the host renders a hatched slot or a muted "?". Three states, three renderings: a real zero shows 0, unmeasured shows the hatch, absent is not emitted. Never substitute 0 for a failed read; that renders a broken collector as good news.
 
 Hierarchy: summary before detail — stats/segments first, tables and feeds after. One board answers one operator question, and header.status answers it fastest; don't repeat one fact across three sections. columns is layout only (one level deep) for genuinely side-by-side content, not a way to cram more in.
 
 Tone discipline mirrors the four color jobs: ok/warn/error/info/caution are state; id-* are actors (assigned once, always named, never status); ramp-1…5 is ordered magnitude; brand/accent are identity chrome. A number that is not a judgment wears NO tone — an all-toned board says nothing. Direction is never color-alone: the delta glyph rides regardless of tone.
 
-Board anti-patterns: a stats item per data row (stats summarize; the data is a table); tone on every value; a chart for two points (a delta says it better); segments with one segment; cards for what is really a table; verbs scattered across sections instead of one actions strip; free-text trend arrows in sub (that is what delta is for); a spark whose story the value and delta don't already tell.`,
+Board anti-patterns: a stats item per data row (stats summarize; the data is a table); tone on every value; a chart for two points (a delta says it better); segments with one segment; cards for what is really a table; verbs scattered across sections instead of one actions strip; free-text trend arrows in sub (that is what delta is for); a spark whose story the value and delta don't already tell; a 0 (or a dropped segment) standing in for a failed read — unmeasured is null and renders hatched.`,
 
   "anti-patterns": `# Anti-patterns — check your draft against this list
 

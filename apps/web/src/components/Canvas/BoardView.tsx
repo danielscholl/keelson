@@ -1,6 +1,7 @@
 import type {
   CanvasBoardView,
   CanvasCardAction,
+  CanvasItemBar,
   CanvasStatDelta,
   CanvasTone,
   RibAction,
@@ -22,7 +23,7 @@ import { ModelCatalogPopover, ModelFieldPicker } from "./ModelFieldPicker.tsx";
 import { TableView } from "./TableView.tsx";
 
 type BoardSection = CanvasBoardView["sections"][number];
-type Segment = { label: string; n: number; tone?: CanvasTone };
+type Segment = { label: string; n: number | null; tone?: CanvasTone };
 
 function scalarText(value: string | number | boolean | null): string {
   return value === null ? "—" : String(value);
@@ -46,6 +47,40 @@ function makeKeyer() {
   };
 }
 
+// The proportional composition track alone (fills, no legend) — shared by the
+// header strip and the item-scale card/row bar so the hatch treatment for an
+// unmeasured (`n: null`) segment exists in exactly one place. Unmeasured slots
+// render at a fixed basis (magnitude unknown), never as a zero-width fill.
+function Strip({
+  segments,
+  className,
+  label,
+}: {
+  segments: Segment[];
+  className?: string;
+  label?: string;
+}) {
+  const key = makeKeyer();
+  return (
+    <div
+      className={`cvb-strip${className ? ` ${className}` : ""}`}
+      {...(label ? { role: "img", "aria-label": label } : { "aria-hidden": true })}
+    >
+      {segments
+        .filter((s) => s.n === null || s.n > 0)
+        .map((s) => (
+          <div
+            key={key(JSON.stringify(s))}
+            className={`cvb-strip-fill${s.n === null ? " cvb-strip-fill--unmeasured" : ""}`}
+            data-tone={s.tone ?? "neutral"}
+            title={`${s.label} ${s.n ?? "?"}`}
+            style={s.n === null ? undefined : { flexGrow: s.n }}
+          />
+        ))}
+    </div>
+  );
+}
+
 export function Segments({ items, strip = false }: { items: Segment[]; strip?: boolean }) {
   if (items.length === 0) return null;
   const legendKey = makeKeyer();
@@ -55,7 +90,7 @@ export function Segments({ items, strip = false }: { items: Segment[]; strip?: b
         <span key={legendKey(JSON.stringify(s))} className="cvb-segment">
           <span className="cvb-segment-bullet" data-tone={s.tone ?? "neutral"} aria-hidden="true" />
           <span className="cvb-segment-text">
-            {s.n} {s.label}
+            {s.n ?? "?"} {s.label}
           </span>
         </span>
       ))}
@@ -63,22 +98,31 @@ export function Segments({ items, strip = false }: { items: Segment[]; strip?: b
   );
   if (!strip) return legend;
 
-  const stripKey = makeKeyer();
   return (
     <div className="cvb-segments-strip">
-      <div className="cvb-strip" aria-hidden="true">
-        {items
-          .filter((s) => s.n > 0)
-          .map((s) => (
-            <div
-              key={stripKey(JSON.stringify(s))}
-              className="cvb-strip-fill"
-              data-tone={s.tone ?? "neutral"}
-              style={{ flexGrow: s.n }}
-            />
-          ))}
-      </div>
+      <Strip segments={items} />
       {legend}
+    </div>
+  );
+}
+
+// A card/row bar: the `{ value, total }` fill or the segmented composition
+// strip at item scale. The strip form has no legend, so it carries its reading
+// as an accessible label and per-fill hover titles.
+function ItemBar({ bar, className }: { bar: CanvasItemBar; className?: string }) {
+  if ("segments" in bar) {
+    const label = bar.segments.map((s) => `${s.label} ${s.n ?? "unmeasured"}`).join(", ");
+    return (
+      <Strip
+        segments={bar.segments}
+        className={`cvb-strip--item${className ? ` ${className}` : ""}`}
+        label={label}
+      />
+    );
+  }
+  return (
+    <div className={`cvb-bar-track${className ? ` ${className}` : ""}`}>
+      <div className="cvb-bar-fill" style={{ width: `${barPct(bar.value, bar.total)}%` }} />
     </div>
   );
 }
@@ -109,10 +153,20 @@ function seedFieldValues(fields: readonly ActionField[]): Record<string, string>
 
 // Collected field values merge over a static object payload (so the rib reads a
 // typed-in `topic` the same way it reads any other payload key); a non-object
-// static payload is dropped when fields are present rather than nested.
-function mergePayload(staticPayload: unknown, collected?: Record<string, string>): unknown {
-  if (!collected) return staticPayload;
-  return { ...(isPlainObject(staticPayload) ? staticPayload : {}), ...collected };
+// static payload is dropped when fields/binding are present rather than nested.
+// `binding` merges LAST — it is the integrity-protected slot, so a form field
+// can never shadow a producer-stamped key the rib revalidates server-side.
+function mergePayload(
+  staticPayload: unknown,
+  collected?: Record<string, string>,
+  binding?: Record<string, unknown>,
+): unknown {
+  if (!collected && !binding) return staticPayload;
+  return {
+    ...(isPlainObject(staticPayload) ? staticPayload : {}),
+    ...(collected ?? {}),
+    ...(binding ?? {}),
+  };
 }
 
 function actionConfirmMode(item: ActionItem): ConfirmModalMode {
@@ -200,6 +254,12 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
     ) : (
       item.label
     );
+  // Icon-only: the glyph is the whole visible button, the label survives as the
+  // accessible name — and as the hover title when no hint claims it, so the
+  // affordance is never name-less. Schema guarantees the glyph exists.
+  const iconOnly = item.iconOnly === true;
+  const buttonTitle = tooltip ?? (iconOnly ? item.label : undefined);
+  const wrapClass = `cvb-action${item.align === "end" ? " cvb-action--end" : ""}`;
   const setOpen = (next: boolean) => {
     if (onOpenChange) onOpenChange(next);
     else setLocalOpen(next);
@@ -222,7 +282,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
     setPending(true);
     setError(null);
     try {
-      const payload = mergePayload(item.payload, collected);
+      const payload = mergePayload(item.payload, collected, item.binding);
       const result = await ctx.run(
         payload !== undefined ? { type: item.type, payload } : { type: item.type },
       );
@@ -271,24 +331,25 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
     const seed = seedFieldValues(fields);
     const providerField = soloPicker.modelPicker?.providerField;
     return (
-      <div className="cvb-action">
+      <div className={wrapClass}>
         <button
           type="button"
           id={`cvb-ap-${instanceId}`}
-          className={`cvb-action-button${item.destructive ? " is-destructive" : ""}${item.disabled ? " is-disabled" : ""}`}
+          className={`cvb-action-button${item.destructive ? " is-destructive" : ""}${item.disabled ? " is-disabled" : ""}${iconOnly ? " is-icon-only" : ""}`}
           data-tone={item.tone}
           disabled={nativelyDisabled}
           aria-disabled={ariaDisabled}
+          aria-label={iconOnly ? item.label : undefined}
           popoverTarget={item.disabled === true ? undefined : instanceId}
           aria-haspopup="dialog"
-          title={tooltip}
+          title={buttonTitle}
         >
           {item.glyph && (
             <span className="cvb-action-glyph" aria-hidden="true">
               {item.glyph}
             </span>
           )}
-          {labelContent}
+          {!iconOnly && labelContent}
         </button>
         <ModelCatalogPopover
           popoverId={instanceId}
@@ -325,17 +386,18 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
   }
 
   return (
-    <div className="cvb-action">
+    <div className={wrapClass}>
       {!expanded && (
         <button
           type="button"
-          className={`cvb-action-button${item.destructive ? " is-destructive" : ""}${item.disabled ? " is-disabled" : ""}${item.selected ? " is-selected" : ""}`}
+          className={`cvb-action-button${item.destructive ? " is-destructive" : ""}${item.disabled ? " is-disabled" : ""}${item.selected ? " is-selected" : ""}${iconOnly ? " is-icon-only" : ""}`}
           data-tone={item.tone}
           disabled={nativelyDisabled}
           aria-disabled={ariaDisabled}
           aria-expanded={hasFields ? open : undefined}
           aria-pressed={item.selected}
-          title={tooltip}
+          aria-label={iconOnly ? item.label : undefined}
+          title={buttonTitle}
           onClick={onButtonClick}
         >
           {item.glyph && (
@@ -343,7 +405,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
               {item.glyph}
             </span>
           )}
-          {labelContent}
+          {!iconOnly && labelContent}
         </button>
       )}
       {hasFields && (expanded || open) && (
@@ -557,7 +619,7 @@ export function CardOverflowActions({
     if (!ctx || pending) return;
     setPending(true);
     try {
-      const payload = mergePayload(item.payload);
+      const payload = mergePayload(item.payload, undefined, item.binding);
       const result = await ctx.run(
         payload !== undefined ? { type: item.type, payload } : { type: item.type },
       );
@@ -815,17 +877,21 @@ type BarItem = Extract<BoardSection, { kind: "bars" }>["items"][number];
 
 // A safe href links the whole bar row, mirroring how a grid cell links its whole cell.
 function BarRow({ bar, inline }: { bar: BarItem; inline: boolean }) {
+  // `value: null` = unmeasured: a full-width hatch (the fill is unknown, not
+  // empty) and a "?" readout — a failed read must not render as a 0% that
+  // looks like good news.
+  const pct = bar.value === null ? null : barPct(bar.value, bar.total);
   const track = (
     <div className="cvb-bar-track">
-      <div
-        className="cvb-bar-fill"
-        data-tone={bar.tone}
-        style={{ width: `${barPct(bar.value, bar.total)}%` }}
-      />
+      {pct === null ? (
+        <div className="cvb-bar-fill cvb-bar-fill--unmeasured" data-tone={bar.tone} />
+      ) : (
+        <div className="cvb-bar-fill" data-tone={bar.tone} style={{ width: `${pct}%` }} />
+      )}
     </div>
   );
   const trailing = (
-    <span className="cvb-bar-trailing">{bar.trailing ?? `${barPct(bar.value, bar.total)}%`}</span>
+    <span className="cvb-bar-trailing">{bar.trailing ?? (pct === null ? "?" : `${pct}%`)}</span>
   );
   const body = inline ? (
     <>
@@ -851,9 +917,9 @@ function BarRow({ bar, inline }: { bar: BarItem; inline: boolean }) {
   );
 }
 
-// A card's whole-body select toggle. Rendered as a transparent button stretched
-// over the card (see `.cvb-card-select`), layered UNDER the card's own controls by
-// z-index so those keep their semantics and clicks — a `role="button"` on the card
+// A card's (or row's) whole-body select toggle. Rendered as a transparent button
+// stretched over the item (see `.cvb-card-select`), layered UNDER its own controls by
+// z-index so those keep their semantics and clicks — a `role="button"` on the item
 // container would instead flatten them out of the accessibility tree. Carries the
 // `aria-pressed` selected state even when inert (no dispatcher, e.g. an inline
 // board), so selection is conveyed to assistive tech regardless. A per-button
@@ -947,8 +1013,13 @@ function Section({ section }: { section: BoardSection }) {
           {section.items.map((s) => (
             <div key={key(JSON.stringify(s))} className="cvb-stat">
               <span className="cvb-stat-value-row">
-                <span className="cvb-stat-value" data-tone={s.tone}>
-                  {scalarText(s.value)}
+                {/* null = unmeasured — a muted "?", never a dash that reads as a
+                    quiet nothing or a fabricated zero. */}
+                <span
+                  className={`cvb-stat-value${s.value === null ? " is-unmeasured" : ""}`}
+                  data-tone={s.value === null ? undefined : s.tone}
+                >
+                  {s.value === null ? "?" : scalarText(s.value)}
                 </span>
                 {s.delta && <StatDelta delta={s.delta} />}
               </span>
@@ -1064,16 +1135,11 @@ function Section({ section }: { section: BoardSection }) {
                     ) : null;
                   })()}
                 </div>
-                {c.bar && (
-                  <div className="cvb-bar-track cvb-card-bar">
-                    <div
-                      className="cvb-bar-fill"
-                      style={{ width: `${barPct(c.bar.value, c.bar.total)}%` }}
-                    />
-                  </div>
-                )}
+                {c.bar && <ItemBar bar={c.bar} className="cvb-card-bar" />}
                 {c.fields && c.fields.length > 0 && (
-                  <div className={`cvb-card-fields${c.stacked ? " cvb-card-fields--stacked" : ""}`}>
+                  <div
+                    className={`cvb-card-fields${c.stacked ? " cvb-card-fields--stacked" : ""}${c.prose ? " cvb-card-fields--prose" : ""}`}
+                  >
                     {c.fields.map((f) => (
                       <span key={fieldKey(JSON.stringify(f))} className="cvb-field">
                         {f.label && <span className="cvb-field-label">{f.label}</span>}
@@ -1180,12 +1246,27 @@ function Section({ section }: { section: BoardSection }) {
                 ) : (
                   <span className="cvb-row-text">{r.text}</span>
                 )}
+                {r.bar && (
+                  <span className="cvb-row-bar">
+                    <ItemBar bar={r.bar} />
+                  </span>
+                )}
                 {r.trailing && <span className="cvb-row-trailing">{r.trailing}</span>}
               </>
             );
             if (!r.detail) {
               return (
-                <div key={rowKey} className="cvb-row">
+                <div
+                  key={rowKey}
+                  className={`cvb-row${r.action ? " cvb-row--selectable" : ""}${r.selected ? " is-selected" : ""}`}
+                >
+                  {r.action && (
+                    <CardSelectButton
+                      action={r.action}
+                      selected={r.selected === true}
+                      label={r.text}
+                    />
+                  )}
                   {body}
                 </div>
               );
