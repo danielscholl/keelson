@@ -199,9 +199,23 @@ export const canvasGraphViewSchema = z
 // Composite "board" view — an ordered stack of generic dashboard sections, so
 // one payload renders KPI tiles, summary pulses, bars, a table, cards, and
 // status rows together. Every piece is domain-free; a rib supplies the data.
+// `n: null` means UNMEASURED — the collector behind this segment failed, which
+// is a different fact from a real zero. The renderer hatches it (never a
+// zero-width or zero-count fill), so a broken read can't pose as good news.
 const canvasSegmentSchema = z
-  .object({ label: z.string().min(1), n: z.number(), tone: canvasToneSchema.optional() })
+  .object({ label: z.string().min(1), n: z.number().nullable(), tone: canvasToneSchema.optional() })
   .strict();
+
+// A compact per-item meter shared by cards and rows: either a plain
+// value-of-total fill or the header strip's segmented composition at item
+// scale — same proportional fills, same tone vocabulary, labels and counts
+// on hover instead of a legend.
+const canvasItemBarSchema = z.union([
+  // `value: null` = unmeasured, matching the bars section — hatched, never 0%.
+  z.object({ value: z.number().nullable(), total: z.number() }).strict(),
+  z.object({ segments: z.array(canvasSegmentSchema).min(1) }).strict(),
+]);
+export type CanvasItemBar = z.infer<typeof canvasItemBarSchema>;
 const canvasPillSchema = z
   .object({ label: z.string().min(1), tone: canvasToneSchema.optional() })
   .strict();
@@ -385,6 +399,20 @@ export const canvasActionItemSchema = z
     // ribActionSchema's `payload`), e.g. the cluster the board was built against
     // so the rib can reject a stale action. The base never inspects it.
     payload: z.unknown().optional(),
+    // Integrity-protected dispatch context merged into the payload AFTER
+    // collected field values, so a form field can never shadow it — for
+    // producer-stamped bindings (a target identity, a fingerprint) the rib
+    // revalidates server-side. Static `payload` keys stay field-overridable by
+    // design (a field overriding a same-named default IS the form contract).
+    binding: z.record(z.string(), z.unknown()).optional(),
+    // Pin this action to the trailing edge of its row (margin-left: auto) — a
+    // corner affordance beside left-packed verbs. Only meaningful in a row
+    // layout (a card's action row, a wrap strip).
+    align: z.enum(["end"]).optional(),
+    // Render the glyph alone; `label` stays the accessible name (aria-label)
+    // and the hover title when no `hint` is set. Inert in the overflow (⋯)
+    // menu, where an unlabelled item would be unreadable.
+    iconOnly: z.boolean().optional(),
     // Input the action collects from the operator before dispatching. When set,
     // clicking the button opens a small form; the collected `{ name: value }`
     // map is merged into the dispatched payload (over any static object payload).
@@ -473,6 +501,11 @@ export const canvasActionItemSchema = z
   // pressed state at all. Keep them apart rather than pick a winner per context.
   .refine((a) => a.selected === undefined || !a.destructive, {
     message: "a selected toggle is not destructive — a toggle holds a state, destructive is a verb",
+  })
+  // Without a glyph an icon-only button renders empty — fail at publish, not on
+  // screen as an invisible click target.
+  .refine((a) => !a.iconOnly || (a.glyph !== undefined && a.glyph.length > 0), {
+    message: "an iconOnly action requires a glyph — the label becomes the accessible name only",
   });
 
 // A stat tile's change readout: `direction` picks the glyph (▲ ▼ →) and `tone`
@@ -501,6 +534,9 @@ const statsSectionSchema = z
       z
         .object({
           label: z.string().min(1),
+          // `null` = unmeasured: the tile renders a muted "?" (not "—", not a
+          // fabricated 0) — the same three-state vocabulary segments and bars
+          // carry. A tile with nothing to say is omitted, not nulled.
           value: canvasCellScalarSchema,
           sub: z.string().optional(),
           tone: canvasToneSchema.optional(),
@@ -532,7 +568,9 @@ const barsSectionSchema = z
       z
         .object({
           label: z.string().min(1),
-          value: z.number(),
+          // `null` = unmeasured (a failed read, not a zero) — the track renders
+          // hatched and the trailing readout falls back to "?", never "0%".
+          value: z.number().nullable(),
           total: z.number(),
           tone: canvasToneSchema.optional(),
           trailing: z.string().optional(),
@@ -592,6 +630,11 @@ const cardsSectionSchema = z
           // instead of the inline `·`-joined meta row — for line-oriented
           // readouts (a boot sequence, a log tail) where the break IS the shape.
           stacked: z.boolean().optional(),
+          // Render this card's fields as a document instead of a readout:
+          // proportional type (stacked stays monospace by design), a fixed label
+          // gutter so sections align, and the body scrolls past ~150px instead of
+          // stretching its grid row. For multi-section prose (a charter, a brief).
+          prose: z.boolean().optional(),
           dot: canvasToneSchema.optional(),
           pill: canvasPillSchema.optional(),
           href: z.string().optional(),
@@ -603,7 +646,7 @@ const cardsSectionSchema = z
           // which navigates rather than dispatches.
           action: canvasCardActionSchema.optional(),
           selected: z.boolean().optional(),
-          bar: z.object({ value: z.number(), total: z.number() }).strict().optional(),
+          bar: canvasItemBarSchema.optional(),
           fields: z.array(canvasFieldSchema).optional(),
           actions: z.array(canvasActionItemSchema).optional(),
           footnote: z.string().optional(),
@@ -625,6 +668,11 @@ const cardsSectionSchema = z
         // toggle behind it.
         .refine((c) => !c.selected || c.action !== undefined, {
           message: "a selected card requires an action",
+        })
+        // The two field layouts disagree on what a line is (mono readout vs
+        // proportional document) — a card commits to one.
+        .refine((c) => !(c.stacked && c.prose), {
+          message: "stacked and prose are rival field layouts — set one",
         }),
     ),
   })
@@ -666,8 +714,27 @@ const rowsSectionSchema = z
           // Long-form body disclosed under the row on demand (pre-wrapped plain
           // text, not markdown) — the full record behind a capped one-line `text`.
           detail: z.string().min(1).max(4000).optional(),
+          // A compact meter between text and trailing — the card `bar` contract
+          // at row scale, so a dense line-per-entity list can carry progress or
+          // stage composition without becoming cards.
+          bar: canvasItemBarSchema.optional(),
+          // Whole-row dispatch + selection, matching the cards contract exactly,
+          // so a producer chooses cards vs rows on density alone: the row body
+          // dispatches (clicks on an interactive child keep their own behaviour),
+          // `selected` marks it chosen via an inset bar and weight, not tint
+          // alone. `href` still navigates; `action` dispatches.
+          action: canvasCardActionSchema.optional(),
+          selected: z.boolean().optional(),
         })
-        .strict(),
+        .strict()
+        .refine((r) => !r.selected || r.action !== undefined, {
+          message: "a selected row requires an action",
+        })
+        // A disclosure row's whole line is already the <summary> toggle, so a
+        // second whole-row click target would fight it — carry one or the other.
+        .refine((r) => !(r.action && r.detail), {
+          message: "a row carries `action` or `detail`, not both — the row is one click target",
+        }),
     ),
   })
   .strict();

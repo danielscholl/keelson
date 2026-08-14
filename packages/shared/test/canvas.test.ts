@@ -508,6 +508,178 @@ describe("canvasViewSchema", () => {
     ).not.toThrow();
   });
 
+  it("parses unmeasured (null) on segments, bars items, and stat values", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      header: {
+        segments: [
+          { label: "ready", n: 4, tone: "ok" },
+          { label: "blocked", n: null },
+        ],
+      },
+      sections: [
+        {
+          kind: "segments",
+          items: [
+            { label: "done", n: 0 },
+            { label: "queued", n: null, tone: "warn" },
+          ],
+        },
+        { kind: "bars", items: [{ label: "api", value: null, total: 12 }] },
+        { kind: "stats", items: [{ label: "Pass rate", value: null }] },
+      ],
+    });
+    expect(v.view).toBe("board");
+    // Absent is still absent, not unmeasured — a segment's n stays required.
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "segments", items: [{ label: "x" }] }],
+      }),
+    ).toThrow();
+  });
+
+  it("parses the segmented item bar on cards and rows, alongside value/total", () => {
+    const composition = {
+      segments: [
+        { label: "done", n: 3, tone: "ok" },
+        { label: "left", n: null },
+      ],
+    };
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [
+            { title: "epic-1", bar: composition },
+            { title: "epic-2", bar: { value: 7, total: 12 } },
+            { title: "epic-5", bar: { value: null, total: 12 } },
+          ],
+        },
+        {
+          kind: "rows",
+          items: [
+            { text: "epic-3", bar: composition },
+            { text: "epic-4", bar: { value: 1, total: 2 } },
+          ],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+    // The two forms are exclusive strict members — a hybrid or empty bar fails.
+    const hybrids = [
+      {},
+      { value: 1, total: 2, segments: [{ label: "x", n: 1 }] },
+      { segments: [] },
+    ];
+    for (const bad of hybrids) {
+      expect(() =>
+        canvasViewSchema.parse({
+          view: "board",
+          sections: [{ kind: "cards", items: [{ title: "x", bar: bad }] }],
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("parses rows action/selected parity and enforces the cards rules on rows", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "rows",
+          items: [{ text: "bead-1", action: { type: "open", payload: { id: 1 } }, selected: true }],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+    // Selection without a control, and a second whole-row click target, both fail.
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "rows", items: [{ text: "x", selected: true }] }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          { kind: "rows", items: [{ text: "x", action: { type: "open" }, detail: "body" }] },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("parses align end and iconOnly on an action, and rejects a glyph-less iconOnly", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [{ type: "charter", label: "Charter", glyph: "▤", iconOnly: true, align: "end" }],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          { kind: "actions", items: [{ type: "charter", label: "Charter", iconOnly: true }] },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          { kind: "actions", items: [{ type: "charter", label: "Charter", align: "start" }] },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("parses an action binding and rejects a non-record one", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [{ type: "teardown", label: "Teardown", binding: { fingerprint: "abc" } }],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          { kind: "actions", items: [{ type: "teardown", label: "Teardown", binding: "abc" }] },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("parses a prose card and rejects prose combined with stacked", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [{ title: "seat", prose: true, fields: [{ label: "Role", value: "Navigator" }] }],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "cards", items: [{ title: "seat", prose: true, stacked: true }] }],
+      }),
+    ).toThrow();
+  });
+
   it("parses seats and journey sections, top-level and nested in columns", () => {
     const seats = {
       kind: "seats",
