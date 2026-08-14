@@ -199,8 +199,9 @@ function applyChunkToNode(node: NodeView, chunk: MessageChunk): NodeView {
 
 // Hydrates the hook state from the persisted run snapshot. Used on mount and
 // on every WS reconnect so a client that joined late catches up to whatever
-// the server has written, before the live stream resumes.
-function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
+// the server has written, before the live stream resumes. Exported for the
+// frame-reducer unit tests; the hook is the only app caller.
+export function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
   run: RunView;
   nodes: Record<string, NodeView>;
 } {
@@ -241,6 +242,19 @@ function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
       ...(row.provider !== null ? { provider: row.provider } : {}),
       ...(row.model !== null ? { model: row.model } : {}),
       ...(row.effort !== null ? { effort: row.effort } : {}),
+    };
+  }
+  // In-flight nodes have no persisted row yet; the server overlays them onto
+  // the snapshot from its live registry, so a client attaching mid-run shows
+  // the node running instead of "no nodes have run yet". The server-recorded
+  // startedAt keeps the elapsed timer and the eventual node_done duration
+  // honest. On the relaunch race (stale terminal row + live relaunch) the
+  // running view wins, matching applyFrame's node_started reset.
+  for (const running of snapshot.runningNodes) {
+    nodes[running.nodeId] = {
+      ...emptyNode(running.nodeId),
+      status: "running",
+      startedAt: Date.parse(running.startedAt),
     };
   }
   // awaitingNodeId is derived from the nodes map at the hook boundary;
@@ -622,6 +636,9 @@ export function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView 
     ...snapshotSide,
     ...liveSide,
     status: winningStatus,
+    // Server-recorded start (persisted row or running overlay) beats live's
+    // client stamp, which is only as early as the first observed frame.
+    startedAt: snapshotSide.startedAt ?? liveSide.startedAt,
     completedAt: winningSide.completedAt ?? liveSide.completedAt ?? snapshotSide.completedAt,
     durationMs: winningSide.durationMs ?? liveSide.durationMs ?? snapshotSide.durationMs,
     error: winningSide.error ?? liveSide.error ?? snapshotSide.error,

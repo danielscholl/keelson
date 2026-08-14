@@ -434,6 +434,8 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         inputs,
         nodes,
         brief: parseBrief(row.brief_json),
+        // Running nodes are in-memory state; the handler layer overlays them.
+        runningNodes: [],
       };
     },
     listRuns(workflowName) {

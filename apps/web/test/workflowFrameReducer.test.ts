@@ -3,8 +3,18 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
-import type { WorkflowFrame } from "@keelson/shared";
-import { applyFrame, mergeNode, type NodeView, type RunView } from "../src/hooks/useWorkflowRun.ts";
+import {
+  type WorkflowFrame,
+  type WorkflowRunDetail,
+  workflowRunDetailSchema,
+} from "@keelson/shared";
+import {
+  applyFrame,
+  hydrateFromSnapshot,
+  mergeNode,
+  type NodeView,
+  type RunView,
+} from "../src/hooks/useWorkflowRun.ts";
 
 // Drives the pure frame reducer with plain state closures — no React, no WS.
 function harness() {
@@ -107,5 +117,74 @@ describe("mergeNode effort", () => {
     const snapshot = base({ nodeId: "n1", effort: "low" });
     const live = base({ nodeId: "n1", effort: "xhigh" });
     expect(mergeNode(snapshot, live).effort).toBe("xhigh");
+  });
+
+  test("the snapshot's server-recorded start beats live's later client stamp", () => {
+    const snapshot = base({ nodeId: "n1", status: "running", startedAt: 1_000 });
+    const live = base({ nodeId: "n1", status: "running", startedAt: 23_000 });
+    expect(mergeNode(snapshot, live).startedAt).toBe(1_000);
+  });
+
+  test("a snapshot with no start defers to live's stamp", () => {
+    const snapshot = base({ nodeId: "n1", status: "pending" });
+    const live = base({ nodeId: "n1", status: "running", startedAt: 23_000 });
+    expect(mergeNode(snapshot, live).startedAt).toBe(23_000);
+  });
+});
+
+describe("hydrateFromSnapshot running overlay", () => {
+  const detail = (overrides: Record<string, unknown>): WorkflowRunDetail =>
+    workflowRunDetailSchema.parse({
+      runId: "r1",
+      workflowName: "wf",
+      status: "running",
+      startedAt: "2026-08-14T20:00:00.000Z",
+      completedAt: null,
+      error: null,
+      conversationId: null,
+      projectId: null,
+      workingDir: null,
+      worktreePath: null,
+      inputs: {},
+      nodes: [],
+      ...overrides,
+    });
+
+  test("an in-flight node hydrates as a running view with the server start", () => {
+    const startedAt = "2026-08-14T20:00:05.000Z";
+    const { nodes } = hydrateFromSnapshot(
+      detail({ runningNodes: [{ nodeId: "author", startedAt }] }),
+    );
+    expect(nodes.author?.status).toBe("running");
+    expect(nodes.author?.startedAt).toBe(Date.parse(startedAt));
+    expect(nodes.author?.contentParts).toEqual([]);
+    expect(nodes.author?.completedAt).toBeUndefined();
+  });
+
+  test("a snapshot without the overlay hydrates no running rows", () => {
+    const { nodes } = hydrateFromSnapshot(detail({}));
+    expect(Object.keys(nodes)).toEqual([]);
+  });
+
+  test("the running overlay outranks a stale terminal row for the same node", () => {
+    const { nodes } = hydrateFromSnapshot(
+      detail({
+        nodes: [
+          {
+            nodeId: "author",
+            status: "succeeded",
+            outputText: "round 1",
+            contentParts: null,
+            startedAt: "2026-08-14T19:59:00.000Z",
+            completedAt: "2026-08-14T19:59:30.000Z",
+            error: null,
+          },
+        ],
+        runningNodes: [{ nodeId: "author", startedAt: "2026-08-14T20:00:05.000Z" }],
+      }),
+    );
+    expect(nodes.author?.status).toBe("running");
+    expect(nodes.author?.logLines).toEqual([]);
+    expect(nodes.author?.completedAt).toBeUndefined();
   });
 });

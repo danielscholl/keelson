@@ -190,12 +190,21 @@ export const workflowRunSummarySchema = z
   .strict();
 export type WorkflowRunSummary = z.infer<typeof workflowRunSummarySchema>;
 
+// A node currently executing, composed from the server's in-memory state at
+// read time. A persisted node row exists only once the node completes, so
+// without this a client attaching mid-run has no trace of an in-flight node.
+export const workflowRunningNodeSchema = z
+  .object({ nodeId: z.string(), startedAt: z.string() })
+  .strict();
+export type WorkflowRunningNode = z.infer<typeof workflowRunningNodeSchema>;
+
 // Full run detail (GET /api/workflows/runs/:runId).
 export const workflowRunDetailSchema = workflowRunSummarySchema
   .extend({
     inputs: z.record(z.string(), z.string()),
     nodes: z.array(nodeOutputRowSchema),
     brief: briefSchema.nullable().default(null),
+    runningNodes: z.array(workflowRunningNodeSchema).default([]),
   })
   .strict();
 export type WorkflowRunDetail = z.infer<typeof workflowRunDetailSchema>;

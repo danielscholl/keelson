@@ -363,6 +363,48 @@ nodes:
     expect(run.nodes[0]!.outputText).toContain("hello from W2");
   });
 
+  test("GET .../runs/:runId overlays in-flight nodes as runningNodes", async () => {
+    writeWorkflow(
+      "slow.yaml",
+      `name: slow
+description: holds a node in flight
+nodes:
+  - id: waiting
+    bash: sleep 0.3
+`,
+    );
+    const { app } = makeRig();
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/slow/runs", { inputs: {} }),
+    );
+    expect(startRes.status).toBe(200);
+    const { runId } = (await startRes.json()) as { runId: string };
+
+    // Persisted rows only exist at node_done, so a mid-run detail fetch must
+    // surface the in-flight node from the live registry instead.
+    let running: Array<{ nodeId: string; startedAt: string }> = [];
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const res = await app.fetch(new Request(`http://test/api/workflows/runs/${runId}`));
+      const body = (await res.json()) as {
+        run: { runningNodes: Array<{ nodeId: string; startedAt: string }> };
+      };
+      running = body.run.runningNodes;
+      if (running.length > 0) break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(running.map((n) => n.nodeId)).toEqual(["waiting"]);
+    expect(Number.isNaN(Date.parse(running[0]!.startedAt))).toBe(false);
+
+    const done = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      runningNodes: unknown[];
+      nodes: Array<{ nodeId: string }>;
+    };
+    expect(done.status).toBe("succeeded");
+    expect(done.runningNodes).toEqual([]);
+    expect(done.nodes.map((n) => n.nodeId)).toEqual(["waiting"]);
+  });
+
   test("POST .../runs resolves a normalized name and runs the matched workflow", async () => {
     writeWorkflow(
       "smoke.yaml",

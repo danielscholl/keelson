@@ -35,7 +35,7 @@ function liveEntry(
   return {
     abort: new AbortController(),
     done: Promise.resolve(),
-    currentNodes: new Set(),
+    currentNodes: new Map(),
     pendingApprovals: new Map(),
     dedupeKey,
     ...(definition ? { definition } : {}),
