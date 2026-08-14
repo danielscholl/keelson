@@ -496,6 +496,16 @@ describe("canvasViewSchema", () => {
     ).toThrow();
     expect(() => canvasViewSchema.parse(stat(undefined, [1]))).toThrow();
     expect(() => canvasViewSchema.parse(stat(undefined, [1, Number.POSITIVE_INFINITY]))).toThrow();
+    // A delta's tone is a status judgment, not an identity — id-*/brand tones are rejected.
+    expect(() =>
+      canvasViewSchema.parse(stat({ text: "+1", direction: "up", tone: "id-blue" })),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse(stat({ text: "+1", direction: "up", tone: "brand" })),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse(stat({ text: "+1", direction: "up", tone: "caution" })),
+    ).not.toThrow();
   });
 
   it("parses seats and journey sections, top-level and nested in columns", () => {

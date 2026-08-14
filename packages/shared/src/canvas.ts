@@ -483,7 +483,9 @@ const canvasStatDeltaSchema = z
   .object({
     text: z.string().min(1),
     direction: z.enum(["up", "down", "flat"]),
-    tone: canvasToneSchema.optional(),
+    // A delta wears a status judgment, not an identity — brand/accent/id-*/ramp-*
+    // are excluded by schema so they can't fall through to the muted fallback.
+    tone: z.enum(["ok", "warn", "error", "neutral", "info", "caution"]).optional(),
   })
   .strict();
 export type CanvasStatDelta = z.infer<typeof canvasStatDeltaSchema>;

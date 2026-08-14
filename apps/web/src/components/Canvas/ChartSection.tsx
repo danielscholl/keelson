@@ -288,11 +288,13 @@ export function ChartSection({ section }: { section: CanvasChartSection }) {
   const { mark, slots, padR, direct, floor, gridLines, xLabels, lines, labelYs, y, yBase, bandW } =
     geometry;
 
-  // Grouped bars: each slot's band carries one bar per series with a 2-unit
-  // surface gap between touching fills; group width caps so a sparse chart
+  // Grouped bars: each slot's band carries one bar per series, gap and bar
+  // width both scaled from groupW (never a fixed minimum) so a group can
+  // never exceed its slot band; group width itself caps so a sparse chart
   // doesn't render comically wide bars.
   const groupW = Math.min(bandW * 0.68, 56 * lines.length);
-  const seriesBarW = Math.max((groupW - 2 * (lines.length - 1)) / lines.length, 1.5);
+  const barGap = Math.min(2, groupW / (2 * Math.max(lines.length - 1, 1)));
+  const seriesBarW = (groupW - barGap * (lines.length - 1)) / lines.length;
 
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -367,7 +369,7 @@ export function ChartSection({ section }: { section: CanvasChartSection }) {
           ? slots.map((slot) =>
               slot.values.map((v, si) => {
                 if (v == null) return null;
-                const x = slot.x - groupW / 2 + si * (seriesBarW + 2);
+                const x = slot.x - groupW / 2 + si * (seriesBarW + barGap);
                 const d = barPath(x, seriesBarW, y(v), yBase);
                 return d ? (
                   <path
@@ -379,22 +381,37 @@ export function ChartSection({ section }: { section: CanvasChartSection }) {
                 ) : null;
               }),
             )
-          : lines.map((line, si) => (
-              <g key={line.label}>
-                {line.area && <path className="cvb-chart-area" d={line.area} fill={line.color} />}
-                {line.d && <path className="cvb-chart-line" d={line.d} stroke={line.color} />}
-                {line.end && <circle cx={line.end.x} cy={line.end.y} r={3} fill={line.color} />}
-                {line.end && direct && (
-                  <text
-                    className="cvb-chart-endpoint-label"
-                    x={line.end.x + 8}
-                    y={(labelYs.get(si) ?? line.end.y) + 3}
-                  >
-                    {truncate(line.label, ENDPOINT_LABEL_CHARS)}
-                  </text>
-                )}
-              </g>
-            ))}
+          : [
+              // Two passes so an area's translucent fill never paints over
+              // another series' stroke or endpoint label.
+              ...lines.flatMap((line) =>
+                line.area
+                  ? [
+                      <path
+                        key={`area:${line.label}`}
+                        className="cvb-chart-area"
+                        d={line.area}
+                        fill={line.color}
+                      />,
+                    ]
+                  : [],
+              ),
+              ...lines.map((line, si) => (
+                <g key={`line:${line.label}`}>
+                  {line.d && <path className="cvb-chart-line" d={line.d} stroke={line.color} />}
+                  {line.end && <circle cx={line.end.x} cy={line.end.y} r={3} fill={line.color} />}
+                  {line.end && direct && (
+                    <text
+                      className="cvb-chart-endpoint-label"
+                      x={line.end.x + 8}
+                      y={(labelYs.get(si) ?? line.end.y) + 3}
+                    >
+                      {truncate(line.label, ENDPOINT_LABEL_CHARS)}
+                    </text>
+                  )}
+                </g>
+              )),
+            ]}
         {hover &&
           mark !== "bar" &&
           hoverRows.map(({ line, value }) => (

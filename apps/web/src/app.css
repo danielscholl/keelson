@@ -4270,12 +4270,6 @@ button.cvb-action-field-model:disabled {
 .cvb-stat-delta[data-tone="caution"] {
   color: var(--orange);
 }
-.cvb-stat-delta[data-tone="brand"] {
-  color: var(--magenta);
-}
-.cvb-stat-delta[data-tone="accent"] {
-  color: var(--accent);
-}
 .cvb-stat-spark {
   margin-top: 4px;
   color: var(--muted);
@@ -4294,6 +4288,18 @@ button.cvb-action-field-model:disabled {
 }
 .cvb-stat-spark[data-tone="caution"] {
   color: var(--orange);
+}
+.cvb-stat-spark[data-tone="brand"] {
+  color: var(--magenta);
+}
+.cvb-stat-spark[data-tone="accent"] {
+  color: var(--accent);
+}
+.cvb-stat-spark[data-tone^="id-"] {
+  color: var(--id-tone);
+}
+.cvb-stat-spark[data-tone^="ramp-"] {
+  color: var(--ramp-tone);
 }
 .cvb-stat-spark polyline {
   fill: none;

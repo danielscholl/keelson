@@ -354,6 +354,43 @@ describe("chart board section", () => {
     const xs = bars.map((b) => Number(/M(\d+\.?\d*)/.exec(b.getAttribute("d") ?? "")?.[1]));
     expect(xs[1]! - xs[0]!).toBeCloseTo(xs[2]! - xs[1]!, 0);
   });
+
+  test("a wide grouped-bar chart keeps each slot's bars inside its own band", () => {
+    const seriesCount = 6;
+    const categoryCount = 30;
+    const series: ChartSeries[] = Array.from({ length: seriesCount }, (_, si) => ({
+      label: `s${si}`,
+      points: Array.from({ length: categoryCount }, (_, ci) => ({
+        x: `cat${ci}`,
+        y: 10 + si + ci,
+      })),
+    }));
+    const view = {
+      view: "board",
+      sections: [{ kind: "chart", mark: "bar", series }],
+    } as CanvasBoardView;
+    const { container } = render(<BoardView view={view} />);
+    const bars = [...container.querySelectorAll("path.cvb-chart-bar")];
+    expect(bars.length).toBe(seriesCount * categoryCount);
+
+    // Every numeric token in a bar path's d is an (x, y) pair; the even
+    // indices are x-coordinates, so their min/max give the bar's x extent.
+    const xExtent = (d: string): [number, number] => {
+      const nums = (d.match(/-?\d+\.?\d*/g) ?? []).map(Number);
+      const xs = nums.filter((_, i) => i % 2 === 0);
+      return [Math.min(...xs), Math.max(...xs)];
+    };
+    const groups: [number, number][] = [];
+    for (let i = 0; i < bars.length; i += seriesCount) {
+      const slotBars = bars.slice(i, i + seriesCount);
+      const extents = slotBars.map((b) => xExtent(b.getAttribute("d") ?? ""));
+      groups.push([Math.min(...extents.map((e) => e[0])), Math.max(...extents.map((e) => e[1]))]);
+    }
+    expect(groups.length).toBe(categoryCount);
+    for (let i = 1; i < groups.length; i++) {
+      expect(groups[i]![0]).toBeGreaterThan(groups[i - 1]![1]);
+    }
+  });
 });
 
 describe("stats delta and spark", () => {
