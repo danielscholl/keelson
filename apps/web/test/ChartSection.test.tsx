@@ -295,6 +295,38 @@ describe("chart board section", () => {
     expect(container.querySelectorAll(".cvb-chart-legend-item").length).toBe(2);
   });
 
+  test("baseline auto lifts the floor to the data's band; the default keeps zero", () => {
+    const band: ChartSeries = {
+      label: "pass",
+      points: [
+        { x: "Mon", y: 93.2 },
+        { x: "Tue", y: 96.1 },
+        { x: "Wed", y: 98.7 },
+      ],
+    };
+    const gridLabels = (container: HTMLElement) =>
+      [...container.querySelectorAll("text.cvb-chart-axis-label")]
+        .filter((t) => t.getAttribute("x") === "40")
+        .map((t) => Number(t.textContent));
+    const auto = render(
+      <BoardView
+        view={
+          {
+            view: "board",
+            sections: [{ kind: "chart", baseline: "auto", series: [band] }],
+          } as CanvasBoardView
+        }
+      />,
+    );
+    const autoGrid = gridLabels(auto.container);
+    expect(Math.min(...autoGrid)).toBeGreaterThan(0);
+    expect(Math.min(...autoGrid)).toBeLessThanOrEqual(93.2);
+    expect(Math.max(...autoGrid)).toBeGreaterThanOrEqual(98.7);
+    auto.unmount();
+    const zero = render(<BoardView view={chartBoard([band])} />);
+    expect(Math.min(...gridLabels(zero.container))).toBe(0);
+  });
+
   test("bar mark bands numeric x as ordered categories instead of a linear axis", () => {
     const view = {
       view: "board",

@@ -71,6 +71,29 @@ function niceCeiling(max: number): number {
   return 10 * base;
 }
 
+// The smallest nice value (1/2/2.5/5 × 10^n) at or above `rough` — the grid
+// step for an auto-baseline band.
+function niceStep(rough: number): number {
+  if (!(rough > 0)) return 1;
+  const exp = Math.floor(Math.log10(rough));
+  const base = 10 ** exp;
+  for (const m of [1, 2, 2.5, 5]) {
+    if (m * base >= rough) return m * base;
+  }
+  return 10 * base;
+}
+
+// y-domain for `baseline: "auto"`: four nice steps spanning the data's own
+// band, floor snapped to the step, so a narrow high band (93–99%) fills the
+// plot. Widening the step once after snapping guarantees ceiling >= max.
+function autoBand(dataMin: number, dataMax: number): { floor: number; ceiling: number } {
+  let step = niceStep((dataMax - dataMin) / 4);
+  let floor = Math.floor(dataMin / step) * step;
+  if (dataMax === dataMin) floor -= 2 * step;
+  if (floor + 4 * step < dataMax) step = niceStep((dataMax - floor) / 4);
+  return { floor, ceiling: floor + 4 * step };
+}
+
 function trimNumber(v: number): string {
   // Two decimals under 1 so a sub-unit grid (0 / 0.05 / 0.1 …) keeps distinct
   // labels; one decimal above.
@@ -169,8 +192,8 @@ function buildGeometry(section: CanvasChartSection): ChartGeometry {
     }
   });
 
-  let dataMax = 0;
-  let dataMin = 0;
+  let dataMax = Number.NEGATIVE_INFINITY;
+  let dataMin = Number.POSITIVE_INFINITY;
   for (const slot of slots) {
     for (const v of slot.values) {
       if (v === null) continue;
@@ -178,8 +201,19 @@ function buildGeometry(section: CanvasChartSection): ChartGeometry {
       if (v < dataMin) dataMin = v;
     }
   }
-  const floor = dataMin < 0 ? -niceCeiling(-dataMin * 1.05) : 0;
-  const ceiling = niceCeiling(dataMax * 1.05);
+  if (dataMin > dataMax) {
+    dataMin = 0;
+    dataMax = 0;
+  }
+  // The schema rejects auto on bar/area; the mark guard here keeps a stale or
+  // unvalidated frame from rendering an off-zero bar anyway.
+  const auto = section.baseline === "auto" && mark === "line";
+  const { floor, ceiling } = auto
+    ? autoBand(dataMin, dataMax)
+    : {
+        floor: dataMin < 0 ? -niceCeiling(-dataMin * 1.05) : 0,
+        ceiling: niceCeiling(Math.max(dataMax, 0) * 1.05),
+      };
   const y = (v: number) => PAD_T + PLOT_H - ((v - floor) / (ceiling - floor)) * PLOT_H;
 
   const gridLines = [0, 1, 2, 3, 4].map((t) => {

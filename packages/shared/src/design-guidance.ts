@@ -179,7 +179,7 @@ Pick the section by the data's job:
 - The 3–5 figures that matter now → stats. A change reading is structured: delta { text, direction, tone } — direction picks the glyph (▲ ▼ →), tone says whether the move is good (an error-rate ▲ wears error; a throughput ▲ wears ok). spark (2–60 numbers, oldest first) adds trend context behind the value; the value and delta must carry the reading without it.
 - Composition of a whole → segments (one proportional strip), never a table of percentages.
 - Magnitude across categories → bars (value/total rows; inline for a dense offender list) — or chart with mark: "bar" when grouped series per category matter.
-- Change over time → chart: mark "line" (default); "area" for cumulative/volume emphasis (overlaid, not stacked — composition belongs to segments); "bar" renders x as ordered categories, zero-anchored. ≤6 series, fixed-order palette slots, one y-axis.
+- Change over time → chart: mark "line" (default); "area" for cumulative/volume emphasis (overlaid, not stacked — composition belongs to segments); "bar" renders x as ordered categories, zero-anchored. ≤6 series, fixed-order palette slots, one y-axis. baseline "auto" (line only) releases the zero anchor so variation inside a narrow band (a 93–99% pass rate) fills the plot — use it when the story is the variation, not the magnitude; bars and areas always anchor at zero.
 - Exact values, many dimensions → table (toned cells; badges for grades and counts).
 - Entities with identity and verbs → cards (grid + columns for benches; ghost seats for open capacity; boxed for copyable credentials).
 - Event feed or status checklist → rows (boxed flips it to label:value cards).

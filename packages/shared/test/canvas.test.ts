@@ -438,6 +438,36 @@ describe("canvasViewSchema", () => {
     ).toThrow();
   });
 
+  it("accepts baseline auto on the line mark only, top-level and nested in columns", () => {
+    const series = [{ label: "unit", points: [{ x: "a", y: 97 }] }];
+    const chart = (extra: Record<string, unknown>) => ({ kind: "chart", series, ...extra });
+    expect(
+      canvasViewSchema.parse({ view: "board", sections: [chart({ baseline: "auto" })] }).view,
+    ).toBe("board");
+    expect(
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [chart({ mark: "line", baseline: "auto" })],
+      }).view,
+    ).toBe("board");
+    for (const mark of ["bar", "area"] as const) {
+      expect(() =>
+        canvasViewSchema.parse({ view: "board", sections: [chart({ mark, baseline: "auto" })] }),
+      ).toThrow();
+      expect(() =>
+        canvasViewSchema.parse({
+          view: "board",
+          sections: [
+            { kind: "columns", columns: [{ sections: [chart({ mark, baseline: "auto" })] }] },
+          ],
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      canvasViewSchema.parse({ view: "board", sections: [chart({ baseline: "fit" })] }),
+    ).toThrow();
+  });
+
   it("parses a stat delta and spark, and rejects malformed ones", () => {
     const v = canvasViewSchema.parse({
       view: "board",

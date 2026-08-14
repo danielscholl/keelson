@@ -736,6 +736,10 @@ const chartSectionSchema = z
     // zero-anchored bars per x slot for categorical comparison, so numeric x
     // values render as ordered categories rather than a linear axis.
     mark: z.enum(["line", "area", "bar"]).optional(),
+    // `zero` (default) anchors the y-axis at zero; `auto` releases it to the
+    // data's own band so variation inside a narrow range (a 93–99% pass rate)
+    // fills the plot instead of flattening against a zero-anchored ceiling.
+    baseline: z.enum(["zero", "auto"]).optional(),
     series: z
       .array(
         z
@@ -901,8 +905,9 @@ function assertUniqueSeriesLabels(
   }
 }
 
-// One place lists the leaf kinds carrying a cross-item uniqueness rule, so the
-// top-level walk and the columns-nested walk can't drift apart.
+// One place lists the leaf kinds carrying a cross-item rule, so the top-level
+// walk and the columns-nested walk can't drift apart. (These live on the union
+// walk, not member refines — a ZodEffects member would break the discriminator.)
 function assertLeafSectionUniqueness(
   leaf: z.infer<typeof leafBoardSectionSchema>,
   ctx: z.RefinementCtx,
@@ -912,6 +917,15 @@ function assertLeafSectionUniqueness(
     assertUniqueColumnKeys(leaf.columns, ctx, [...path, "columns"]);
   } else if (leaf.kind === "chart") {
     assertUniqueSeriesLabels(leaf.series, ctx, [...path, "series"]);
+    // Bars and area fills encode magnitude from the baseline, so a released
+    // zero anchor would misrepresent them — auto fits the line mark only.
+    if (leaf.baseline === "auto" && (leaf.mark === "bar" || leaf.mark === "area")) {
+      ctx.addIssue({
+        code: "custom",
+        message: 'baseline "auto" fits the line mark only — bars and areas anchor at zero',
+        path: [...path, "baseline"],
+      });
+    }
   }
 }
 
