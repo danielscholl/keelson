@@ -4,10 +4,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { BoardActionProvider } from "../src/components/Canvas/BoardActionContext.tsx";
 import { BoardView } from "../src/components/Canvas/BoardView.tsx";
 
-// Board item contract: unmeasured (null) rendering, the shared card/row bar,
-// rows action/selected parity, icon-only corner actions, prose fields, and the
-// binding merge order. Dispatch is injected at the provider (no mock.module),
-// matching BoardActions.test.tsx.
+// Dispatch is injected at the provider (no mock.module), matching
+// BoardActions.test.tsx — sidestepping bun's process-global registry leakage.
 
 const okReveal = async (): Promise<RibActionResult> => ({ ok: true });
 
@@ -32,7 +30,10 @@ describe("unmeasured is not zero", () => {
     // The measured segment and the unmeasured slot fill the strip; the zero is
     // taught by the legend alone.
     expect(container.querySelectorAll(".cvb-strip-fill").length).toBe(2);
-    expect(container.querySelectorAll(".cvb-strip-fill--unmeasured").length).toBe(1);
+    const hatched = container.querySelectorAll(".cvb-strip-fill--unmeasured");
+    expect(hatched.length).toBe(1);
+    // Toneless by contract: no data-tone, so no tone selector can paint over the hatch.
+    expect(hatched[0]?.hasAttribute("data-tone")).toBe(false);
     expect(container.textContent).toContain("? blocked");
     expect(container.textContent).toContain("0 review");
   });
@@ -88,6 +89,7 @@ describe("shared item bar on cards and rows", () => {
             kind: "cards",
             items: [
               { title: "epic-1", bar: { value: 7, total: 12 } },
+              { title: "epic-5", bar: { value: null, total: 12 } },
               {
                 title: "epic-2",
                 bar: {
@@ -103,6 +105,10 @@ describe("shared item bar on cards and rows", () => {
       />,
     );
     expect(container.querySelector(".cvb-bar-track.cvb-card-bar .cvb-bar-fill")).toBeTruthy();
+    // An unmeasured value/total card bar hatches like the bars section does.
+    expect(
+      container.querySelector(".cvb-bar-track.cvb-card-bar .cvb-bar-fill--unmeasured"),
+    ).toBeTruthy();
     const strip = container.querySelector(".cvb-strip--item");
     // No legend at item scale — the strip carries its reading as an accessible label.
     expect(strip?.getAttribute("aria-label")).toBe("done 3, left unmeasured");

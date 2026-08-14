@@ -211,7 +211,8 @@ const canvasSegmentSchema = z
 // scale — same proportional fills, same tone vocabulary, labels and counts
 // on hover instead of a legend.
 const canvasItemBarSchema = z.union([
-  z.object({ value: z.number(), total: z.number() }).strict(),
+  // `value: null` = unmeasured, matching the bars section — hatched, never 0%.
+  z.object({ value: z.number().nullable(), total: z.number() }).strict(),
   z.object({ segments: z.array(canvasSegmentSchema).min(1) }).strict(),
 ]);
 export type CanvasItemBar = z.infer<typeof canvasItemBarSchema>;

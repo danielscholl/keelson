@@ -554,6 +554,7 @@ describe("canvasViewSchema", () => {
           items: [
             { title: "epic-1", bar: composition },
             { title: "epic-2", bar: { value: 7, total: 12 } },
+            { title: "epic-5", bar: { value: null, total: 12 } },
           ],
         },
         {

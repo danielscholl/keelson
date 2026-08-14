@@ -69,10 +69,12 @@ function Strip({
       {segments
         .filter((s) => s.n === null || s.n > 0)
         .map((s) => (
+          // An unmeasured slot carries NO data-tone: the toneless hatch is the
+          // contract, held structurally rather than by cascade order.
           <div
             key={key(JSON.stringify(s))}
             className={`cvb-strip-fill${s.n === null ? " cvb-strip-fill--unmeasured" : ""}`}
-            data-tone={s.tone ?? "neutral"}
+            data-tone={s.n === null ? undefined : (s.tone ?? "neutral")}
             title={`${s.label} ${s.n ?? "?"}`}
             style={s.n === null ? undefined : { flexGrow: s.n }}
           />
@@ -120,9 +122,14 @@ function ItemBar({ bar, className }: { bar: CanvasItemBar; className?: string })
       />
     );
   }
+  const pct = bar.value === null ? null : barPct(bar.value, bar.total);
   return (
     <div className={`cvb-bar-track${className ? ` ${className}` : ""}`}>
-      <div className="cvb-bar-fill" style={{ width: `${barPct(bar.value, bar.total)}%` }} />
+      {pct === null ? (
+        <div className="cvb-bar-fill cvb-bar-fill--unmeasured" />
+      ) : (
+        <div className="cvb-bar-fill" style={{ width: `${pct}%` }} />
+      )}
     </div>
   );
 }
@@ -884,7 +891,7 @@ function BarRow({ bar, inline }: { bar: BarItem; inline: boolean }) {
   const track = (
     <div className="cvb-bar-track">
       {pct === null ? (
-        <div className="cvb-bar-fill cvb-bar-fill--unmeasured" data-tone={bar.tone} />
+        <div className="cvb-bar-fill cvb-bar-fill--unmeasured" />
       ) : (
         <div className="cvb-bar-fill" data-tone={bar.tone} style={{ width: `${pct}%` }} />
       )}
