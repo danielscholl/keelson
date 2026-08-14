@@ -5710,12 +5710,15 @@ a.cvb-card-title::after {
 
 /* UNMEASURED (`n`/`value`: null) — a broken read is not a zero. The hatch is
    deliberately toneless: a confident status colour on an unknown quantity
-   would claim a reading the producer doesn't have. */
-.cvb-strip-fill--unmeasured {
+   would claim a reading the producer doesn't have. Doubled class selectors on
+   purpose: the hatch must outrank two-class context rules like
+   `.cvb-card-bar .cvb-bar-fill` (the brand-gradient card fill), which would
+   otherwise paint an unmeasured card bar as a full confident fill. */
+.cvb-strip-fill.cvb-strip-fill--unmeasured {
   flex: 0 0 18px;
   background: repeating-linear-gradient(-45deg, var(--dim) 0 2px, transparent 2px 5px);
 }
-.cvb-bar-fill--unmeasured {
+.cvb-bar-fill.cvb-bar-fill--unmeasured {
   width: 100%;
   background: repeating-linear-gradient(-45deg, var(--dim) 0 2px, transparent 2px 5px);
 }
