@@ -405,6 +405,45 @@ nodes:
     expect(done.nodes.map((n) => n.nodeId)).toEqual(["waiting"]);
   });
 
+  test("a paused approval node is awaiting, not a runningNodes entry", async () => {
+    writeWorkflow(
+      "gated.yaml",
+      `name: gated
+description: approval
+nodes:
+  - id: review
+    approval:
+      message: please approve
+`,
+    );
+    const { app, store } = makeRig();
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/gated/runs", { inputs: {} }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    await pollUntilStoreStatus(store, runId, (s) => s === "paused");
+
+    // The paused node stays in the live registry until node_done, but the
+    // overlay must not shadow its persisted awaiting row with a running view.
+    const res = await app.fetch(new Request(`http://test/api/workflows/runs/${runId}`));
+    const body = (await res.json()) as {
+      run: {
+        runningNodes: Array<{ nodeId: string }>;
+        nodes: Array<{ nodeId: string; status: string }>;
+      };
+    };
+    expect(body.run.runningNodes).toEqual([]);
+    expect(body.run.nodes.find((n) => n.nodeId === "review")?.status).toBe("awaiting");
+
+    await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume`, {
+        nodeId: "review",
+        text: "approve",
+      }),
+    );
+    await pollUntilTerminal(app, runId);
+  });
+
   test("POST .../runs resolves a normalized name and runs the matched workflow", async () => {
     writeWorkflow(
       "smoke.yaml",

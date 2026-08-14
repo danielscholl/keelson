@@ -247,10 +247,12 @@ export function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
   // In-flight nodes have no persisted row yet; the server overlays them onto
   // the snapshot from its live registry, so a client attaching mid-run shows
   // the node running instead of "no nodes have run yet". The server-recorded
-  // startedAt keeps the elapsed timer and the eventual node_done duration
-  // honest. On the relaunch race (stale terminal row + live relaunch) the
-  // running view wins, matching applyFrame's node_started reset.
+  // startedAt keeps the elapsed timer honest. On the relaunch race (stale
+  // terminal row + live relaunch) the running view wins, matching
+  // applyFrame's node_started reset — but an `awaiting` row is paused, not
+  // running, and keeps its approval state.
   for (const running of snapshot.runningNodes) {
+    if (nodes[running.nodeId]?.status === "awaiting") continue;
     nodes[running.nodeId] = {
       ...emptyNode(running.nodeId),
       status: "running",
@@ -636,9 +638,6 @@ export function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView 
     ...snapshotSide,
     ...liveSide,
     status: winningStatus,
-    // Server-recorded start (persisted row or running overlay) beats live's
-    // client stamp, which is only as early as the first observed frame.
-    startedAt: snapshotSide.startedAt ?? liveSide.startedAt,
     completedAt: winningSide.completedAt ?? liveSide.completedAt ?? snapshotSide.completedAt,
     durationMs: winningSide.durationMs ?? liveSide.durationMs ?? snapshotSide.durationMs,
     error: winningSide.error ?? liveSide.error ?? snapshotSide.error,
@@ -699,12 +698,15 @@ export function applyFrame(
         // report wall-clock-since-round-1 as the node's duration.
         const relaunch = NODE_TERMINAL_STATUSES.has(base.status);
         const carried = relaunch ? emptyNode(frame.nodeId) : base;
+        // The frame's server timestamp is this launch's true start; the
+        // client clock only anchors frames from servers that predate it.
+        const serverStart = frame.startedAt ? Date.parse(frame.startedAt) : undefined;
         return {
           ...prev,
           [frame.nodeId]: {
             ...carried,
             status: "running",
-            startedAt: relaunch ? Date.now() : (base.startedAt ?? Date.now()),
+            startedAt: serverStart ?? (relaunch ? Date.now() : (base.startedAt ?? Date.now())),
           },
         };
       });
@@ -750,13 +752,18 @@ export function applyFrame(
       setNodes((prev) => {
         const base = prev[frame.nodeId] ?? emptyNode(frame.nodeId);
         const completed = Date.now();
+        // The frame's server timestamp is authoritative for this launch's
+        // duration: a client that missed node_started (or holds a stale
+        // hydrate from a prior converge round) has no reliable local start.
+        const started = frame.startedAt ? Date.parse(frame.startedAt) : base.startedAt;
         return {
           ...prev,
           [frame.nodeId]: {
             ...base,
             status: mapNodeTerminalStatus(frame.status),
+            ...(started !== undefined ? { startedAt: started } : {}),
             completedAt: completed,
-            durationMs: base.startedAt ? Math.max(0, completed - base.startedAt) : undefined,
+            durationMs: started !== undefined ? Math.max(0, completed - started) : undefined,
             error: frame.error,
             ...(frame.usage !== undefined ? { usage: frame.usage } : {}),
             // node_done is authoritative for provenance: set it from the frame

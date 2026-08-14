@@ -118,17 +118,36 @@ describe("mergeNode effort", () => {
     const live = base({ nodeId: "n1", effort: "xhigh" });
     expect(mergeNode(snapshot, live).effort).toBe("xhigh");
   });
+});
 
-  test("the snapshot's server-recorded start beats live's later client stamp", () => {
-    const snapshot = base({ nodeId: "n1", status: "running", startedAt: 1_000 });
-    const live = base({ nodeId: "n1", status: "running", startedAt: 23_000 });
-    expect(mergeNode(snapshot, live).startedAt).toBe(1_000);
+describe("applyFrame server start anchoring", () => {
+  test("node_started anchors the view to the server's launch timestamp", () => {
+    const h = harness();
+    const startedAt = "2026-08-14T20:00:00.000Z";
+    h.apply({ type: "node_started", nodeId: "author", startedAt });
+    expect(h.node("author")?.startedAt).toBe(Date.parse(startedAt));
   });
 
-  test("a snapshot with no start defers to live's stamp", () => {
-    const snapshot = base({ nodeId: "n1", status: "pending" });
-    const live = base({ nodeId: "n1", status: "running", startedAt: 23_000 });
-    expect(mergeNode(snapshot, live).startedAt).toBe(23_000);
+  test("a relaunch takes the new launch's server start, not the old one", () => {
+    const h = harness();
+    h.apply({ type: "node_started", nodeId: "author", startedAt: "2026-08-14T20:00:00.000Z" });
+    h.apply({ type: "node_done", nodeId: "author", status: "succeeded", error: null });
+    const relaunchStart = "2026-08-14T20:01:00.000Z";
+    h.apply({ type: "node_started", nodeId: "author", startedAt: relaunchStart });
+    expect(h.node("author")?.startedAt).toBe(Date.parse(relaunchStart));
+  });
+
+  test("node_done's server start fixes the duration for a late subscriber", () => {
+    const h = harness();
+    // The reported bug: the client attached mid-run, missed node_started, and
+    // the row materialized from a late chunk burst — its client stamp made a
+    // 24s node read as the burst-to-done wall clock.
+    h.apply(textChunk("author", "reply"));
+    const startedAt = new Date(Date.now() - 24_000).toISOString();
+    h.apply({ type: "node_done", nodeId: "author", status: "succeeded", error: null, startedAt });
+    const settled = h.node("author");
+    expect(settled?.startedAt).toBe(Date.parse(startedAt));
+    expect(settled?.durationMs).toBeGreaterThanOrEqual(23_000);
   });
 });
 
@@ -164,6 +183,27 @@ describe("hydrateFromSnapshot running overlay", () => {
   test("a snapshot without the overlay hydrates no running rows", () => {
     const { nodes } = hydrateFromSnapshot(detail({}));
     expect(Object.keys(nodes)).toEqual([]);
+  });
+
+  test("an awaiting row keeps its approval state over the overlay", () => {
+    const { nodes } = hydrateFromSnapshot(
+      detail({
+        nodes: [
+          {
+            nodeId: "gate",
+            status: "awaiting",
+            outputText: "Approve the plan?",
+            contentParts: null,
+            startedAt: "2026-08-14T20:00:00.000Z",
+            completedAt: null,
+            error: null,
+          },
+        ],
+        runningNodes: [{ nodeId: "gate", startedAt: "2026-08-14T20:00:00.000Z" }],
+      }),
+    );
+    expect(nodes.gate?.status).toBe("awaiting");
+    expect(nodes.gate?.awaitingMessage).toBe("Approve the plan?");
   });
 
   test("the running overlay outranks a stale terminal row for the same node", () => {
