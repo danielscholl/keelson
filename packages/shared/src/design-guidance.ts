@@ -87,7 +87,7 @@ export function buildCanvasArtifactGuidance(): string {
     "- Status colors (--good/--warn/--crit) mean state; they never impersonate a series. One y-axis, never two. Direct-label sparingly plus a legend for 2+ series; text wears ink tokens, never the series color.",
     '- Declare every categorical palette on <body data-palette-dark="…" data-palette-light="…"> (comma-separated hex, in slot order). canvas_publish validates CVD separation and surface contrast per theme and rejects hard failures with a report — fix and retry. The token slots above already pass.',
     "",
-    "Before authoring anything nontrivial, call canvas_design_guide: 'page' (layout/typography/theming in depth), 'form' (which chart fits the data — or no chart), 'color' (the four color jobs + the keelson instance), 'marks' (mark anatomy, labels, hover), 'anti-patterns' (the catalog of what goes wrong — check your draft against it).",
+    "Before authoring anything nontrivial, call canvas_design_guide: 'page' (layout/typography/theming in depth), 'form' (which chart fits the data — or no chart), 'color' (the four color jobs + the keelson instance), 'marks' (mark anatomy, labels, hover), 'graphics' (inline SVG diagrams that survive the theme toggle), 'board' (the structured view: which section kind fits which data), 'anti-patterns' (the catalog of what goes wrong — check your draft against it).",
   ].join("\n");
 }
 
@@ -100,6 +100,7 @@ export const CANVAS_DESIGN_GUIDE_SECTIONS: Readonly<Record<string, string>> = {
 Read the request first and calibrate treatment. Most artifacts are working documents — a run report, an audit, a briefing. They deserve real typographic hierarchy, considered spacing, and a proper palette, delivered quietly: no giant hero, no scattered animation. Reserve editorial flourish (an orchestrated reveal, a display-face masthead) for pages explicitly meant to impress, and even then spend boldness in one place and keep everything around it calm.
 
 Structure:
+- Name the artifact like a product, not a caption: the title is a short, specific noun phrase (two to four words) that identifies this page among many — never a generic category label ("Status Report") and never a name with an appended explainer ("Keelson Audit — a review of…").
 - Open with a masthead that orients: an eyebrow label (mono, uppercase, letter-spaced), a headline that states the thesis (not the topic), and a one-paragraph BLUF with the key numbers bolded.
 - Stat tiles for the 3–5 figures that matter, before any detail. Encode state in form as well as number — a left accent bar, a toned value — so what needs attention reads at a glance.
 - Sections in reading order of importance; a labelled group ("P0 · do first") encodes real priority, numbered markers only when order genuinely carries information.
@@ -157,6 +158,41 @@ Stat tiles: value in mono at 28–32px with tabular-nums, label beneath in --mut
 
 Interaction inside the frame: hover affordances are welcome (CSS :hover reveals, a title attribute for exact values, a details/summary disclosure for long tails) but must be enhancement only — every value readable without hover, since the artifact may be exported or printed. Script is available (inline only) for tabs/filters; keep state in the page, remember there is no network, and never trap keyboard focus. Actions back to the host go through keelson.action(type, payload) or data-canvas-action attributes — only meaningful when a rib owns the artifact's key and gates those verbs.`,
 
+  graphics: `# Inline SVG graphics and diagrams
+
+When a picture earns its place — a topology, a pipeline, a lifecycle, a seam the prose keeps gesturing at — draw it as inline SVG in the page. A diagram earns its place by showing MECHANISM: what feeds what, where the boundary sits, which path the data takes. If it only decorates, cut it. Never emoji-art, never an external image (the frame has no network), never an icon font.
+
+What keeps hand-authored SVG working here:
+- Theme through the page's tokens: inline SVG inherits CSS custom properties, so fills and strokes reference var(--fg), var(--border), var(--card-2), var(--s1)… directly. Never hardcode a hex only one theme can read — the host re-stamps data-theme live and the diagram must follow.
+- viewBox plus width:100% (with a max-width) so it scales with the page; svg text { font-family: inherit } so labels wear the page's stack; text at ≥11 viewBox units; tabular-nums where figures align.
+- Structure over path-art: compose rects, lines, circles, and text from coordinates you compute — snap to a grid (multiples of 8) so alignment reads as designed. Long freehand path data is where hand-authored SVG goes wrong; if a shape needs one, simplify the shape.
+- Ink discipline carries over: node fills are --card/--card-2 with --border strokes and ink-token labels; the accent marks the ONE thing the diagram exists to point at; series colors only for series identity; status colors only for state, never decoration.
+- Label shapes in place; a legend only when labels genuinely cannot sit beside their marks. Arrowheads come from one <marker> def reused, stroked --muted — connective tissue stays quieter than nodes.
+- Flows read left→right or top→bottom. Route edges around nodes, never through them; a crossing the eye must untangle costs more than a longer path.
+- Every diagram carries role="img" and an aria-label saying what it shows, not "diagram".`,
+
+  board: `# Board design — the structured view
+
+A board (view: "board") is typed sections the host renders — the producer decides WHAT to say and which primitive says it; the host owns pixels, theme, and interaction, so a board can never go off-palette. Boards are for live operational state a producer recomposes; reach for an html artifact when the deliverable is a designed page someone keeps or shares.
+
+Pick the section by the data's job:
+- The 3–5 figures that matter now → stats. A change reading is structured: delta { text, direction, tone } — direction picks the glyph (▲ ▼ →), tone says whether the move is good (an error-rate ▲ wears error; a throughput ▲ wears ok). spark (2–60 numbers, oldest first) adds trend context behind the value; the value and delta must carry the reading without it.
+- Composition of a whole → segments (one proportional strip), never a table of percentages.
+- Magnitude across categories → bars (value/total rows; inline for a dense offender list) — or chart with mark: "bar" when grouped series per category matter.
+- Change over time → chart: mark "line" (default); "area" for cumulative/volume emphasis (overlaid, not stacked — composition belongs to segments); "bar" renders x as ordered categories, zero-anchored. ≤6 series, fixed-order palette slots, one y-axis.
+- Exact values, many dimensions → table (toned cells; badges for grades and counts).
+- Entities with identity and verbs → cards (grid + columns for benches; ghost seats for open capacity; boxed for copyable credentials).
+- Event feed or status checklist → rows (boxed flips it to label:value cards).
+- At-a-glance matrix or link strip → grid cells with toned badges.
+- A sequence where order is the story → journey; a fixed-capacity identity row → seats.
+- Verbs → one actions section (tabs for a mode picker, wrap for a chip strip); destructive verbs confirm, disabled ones carry reason.
+
+Hierarchy: summary before detail — stats/segments first, tables and feeds after. One board answers one operator question, and header.status answers it fastest; don't repeat one fact across three sections. columns is layout only (one level deep) for genuinely side-by-side content, not a way to cram more in.
+
+Tone discipline mirrors the four color jobs: ok/warn/error/info/caution are state; id-* are actors (assigned once, always named, never status); ramp-1…5 is ordered magnitude; brand/accent are identity chrome. A number that is not a judgment wears NO tone — an all-toned board says nothing. Direction is never color-alone: the delta glyph rides regardless of tone.
+
+Board anti-patterns: a stats item per data row (stats summarize; the data is a table); tone on every value; a chart for two points (a delta says it better); segments with one segment; cards for what is really a table; verbs scattered across sections instead of one actions strip; free-text trend arrows in sub (that is what delta is for); a spark whose story the value and delta don't already tell.`,
+
   "anti-patterns": `# Anti-patterns — check your draft against this list
 
 Color:
@@ -177,10 +213,17 @@ Page:
 - Webfonts or font data URIs (blocked/bloated); icon fonts (use inline SVG or glyphs).
 - External scripts, stylesheets, or fetch calls — the CSP blocks them; the page must be self-contained.
 - A giant editorial hero on a working report; emoji as section markers; everything centered; purple-gradient-on-white template smell.
+- The generated-look cluster: an accent bar/rail on every rounded card (an accent bar earns its place encoding state, not as template chrome); rounded-everything at one radius; three-column icon-feature grids; a "premium" serif display + terracotta scheme pasted onto an operational report.
 - Numbered section markers (01/02/03) where order carries no information.
+- A title that is a category label or carries its own explainer after a dash — name the page, put the explanation in the body.
 - Light theme as an afterthought: unreadable muted text, inverted shadows, washed-out accents.
 - Horizontal page scroll from a wide table (wrap it in its own overflow-x: auto container).
 - Motion without prefers-reduced-motion guards; hover-only information.
+
+Diagrams:
+- Decorative diagrams that show no mechanism; clip-art SVG blobs behind headings.
+- Hardcoded hex inside an svg (breaks the live theme re-stamp); labels in a series color instead of ink.
+- Freehand path data for what rects/lines/text express; edges through nodes; arrowheads louder than the shapes they connect.
 
 Process:
 - Publishing without validating a declared palette, or never declaring one on a page with categorical series.

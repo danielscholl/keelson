@@ -475,6 +475,19 @@ export const canvasActionItemSchema = z
     message: "a selected toggle is not destructive — a toggle holds a state, destructive is a verb",
   });
 
+// A stat tile's change readout: `direction` picks the glyph (▲ ▼ →) and `tone`
+// colors it, so direction-as-status is never color-alone — the producer decides
+// whether up is good (an error-rate ▲ wears error; a throughput ▲ wears ok).
+// `text` is the already-formatted figure ("+12%", "−3"), never re-derived.
+const canvasStatDeltaSchema = z
+  .object({
+    text: z.string().min(1),
+    direction: z.enum(["up", "down", "flat"]),
+    tone: canvasToneSchema.optional(),
+  })
+  .strict();
+export type CanvasStatDelta = z.infer<typeof canvasStatDeltaSchema>;
+
 // The leaf board sections — every primitive except the layout-only `columns`.
 // Named so the same members compose both `leafBoardSectionSchema` (what a column
 // may nest) and the full `canvasBoardSectionSchema` below.
@@ -489,6 +502,11 @@ const statsSectionSchema = z
           value: canvasCellScalarSchema,
           sub: z.string().optional(),
           tone: canvasToneSchema.optional(),
+          delta: canvasStatDeltaSchema.optional(),
+          // Trend context behind the value, oldest first — rendered as an inline
+          // sparkline (muted stroke, emphasized endpoint), enhancement only: the
+          // delta/value must carry the reading without it.
+          spark: z.array(z.number().finite()).min(2).max(60).optional(),
         })
         .strict(),
     ),
@@ -711,6 +729,13 @@ const chartSectionSchema = z
     kind: z.literal("chart"),
     title: z.string().optional(),
     yLabel: z.string().optional(),
+    // How every series renders — section-level so mixed forms never share one
+    // plot. `line` (default) for change over time; `area` adds a translucent
+    // fill to the baseline for cumulative/volume emphasis (overlaid, not
+    // stacked — composition belongs to `segments`/`bars`); `bar` draws grouped
+    // zero-anchored bars per x slot for categorical comparison, so numeric x
+    // values render as ordered categories rather than a linear axis.
+    mark: z.enum(["line", "area", "bar"]).optional(),
     series: z
       .array(
         z

@@ -35,10 +35,13 @@ interface ChartLine {
   label: string;
   color: string;
   d: string | null;
+  // Closed fill path to the zero baseline; built only for the `area` mark.
+  area: string | null;
   end: { x: number; y: number } | null;
 }
 
 interface ChartGeometry {
+  mark: "line" | "area" | "bar";
   slots: ChartSlot[];
   padR: number;
   direct: boolean;
@@ -49,6 +52,10 @@ interface ChartGeometry {
   // Per-series endpoint-label y, nudged apart so adjacent line-ends stay legible.
   labelYs: Map<number, number>;
   y: (v: number) => number;
+  // Zero baseline bars/areas anchor to (floor is never above zero).
+  yBase: number;
+  // Slot band width; 0 for the point-positioned marks.
+  bandW: number;
 }
 
 // A "nice" bound (1/2/2.5/5/10 × 10^n) so grid labels read like 2.5k rather
@@ -89,11 +96,35 @@ function seriesColor(index: number): string {
   return `var(--s${(index % SERIES_COLOR_COUNT) + 1})`;
 }
 
+// A zero-anchored bar rounded only at its data end (the marks rule: flat
+// baseline, rounded tip). Sign-aware so negative bars round downward.
+function barPath(x: number, w: number, yData: number, yBase: number): string {
+  const h = Math.abs(yBase - yData);
+  if (h === 0 || w <= 0) return "";
+  const r = Math.min(2.5, w / 2, h);
+  const s = yData <= yBase ? 1 : -1;
+  const shoulder = (yData + s * r).toFixed(1);
+  const tip = yData.toFixed(1);
+  return [
+    `M${x.toFixed(1)} ${yBase.toFixed(1)}`,
+    `L${x.toFixed(1)} ${shoulder}`,
+    `Q${x.toFixed(1)} ${tip} ${(x + r).toFixed(1)} ${tip}`,
+    `L${(x + w - r).toFixed(1)} ${tip}`,
+    `Q${(x + w).toFixed(1)} ${tip} ${(x + w).toFixed(1)} ${shoulder}`,
+    `L${(x + w).toFixed(1)} ${yBase.toFixed(1)}`,
+    "Z",
+  ].join(" ");
+}
+
 // Positions every distinct x on the shared axis. All-numeric x scales
 // linearly (a timeseries keeps its gaps); any string x falls back to ordered
-// categories in first-appearance order across series.
+// categories in first-appearance order across series. The `bar` mark always
+// lays slots out as evenly-spaced bands — bars compare categories, so a
+// numeric x becomes ordered categories rather than a linear axis.
 function buildGeometry(section: CanvasChartSection): ChartGeometry {
-  const direct = section.series.length <= MAX_DIRECT_LABELS;
+  const mark = section.mark ?? "line";
+  const banded = mark === "bar";
+  const direct = !banded && section.series.length <= MAX_DIRECT_LABELS;
   const padR = direct ? PAD_R_LABELED : PAD_R_BARE;
   const plotW = WIDTH - PAD_L - padR;
   const numeric = section.series.every((s) =>
@@ -118,6 +149,7 @@ function buildGeometry(section: CanvasChartSection): ChartGeometry {
   const last = keys[keys.length - 1];
   const span = numeric ? (last as number) - (first as number) : 0;
   const xAt = (key: string | number, i: number): number => {
+    if (banded) return PAD_L + ((i + 0.5) / keys.length) * plotW;
     if (keys.length <= 1) return PAD_L + plotW / 2;
     if (numeric) return PAD_L + (((key as number) - (first as number)) / span) * plotW;
     return PAD_L + (i / (keys.length - 1)) * plotW;
@@ -163,6 +195,9 @@ function buildGeometry(section: CanvasChartSection): ChartGeometry {
     lastLabelX = slot.x;
   }
 
+  const yBase = y(0);
+  const bandW = banded ? plotW / keys.length : 0;
+
   // Each series' positioned points in slot order — the line connects them
   // left to right regardless of the producer's point order.
   const lines: ChartLine[] = section.series.map((s, si) => {
@@ -170,14 +205,21 @@ function buildGeometry(section: CanvasChartSection): ChartGeometry {
       const v = slot.values[si];
       return v == null ? [] : [{ x: slot.x, y: y(v) }];
     });
+    const d =
+      points.length > 1
+        ? points.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ")
+        : null;
+    const last = points[points.length - 1];
+    const area =
+      mark === "area" && d && last
+        ? `${d} L${last.x.toFixed(1)} ${yBase.toFixed(1)} L${points[0]!.x.toFixed(1)} ${yBase.toFixed(1)} Z`
+        : null;
     return {
       label: s.label,
       color: seriesColor(si),
-      d:
-        points.length > 1
-          ? points.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ")
-          : null,
-      end: points[points.length - 1] ?? null,
+      d,
+      area,
+      end: last ?? null,
     };
   });
 
@@ -202,14 +244,21 @@ function buildGeometry(section: CanvasChartSection): ChartGeometry {
     });
   }
 
-  return { slots, padR, direct, floor, gridLines, xLabels, lines, labelYs, y };
+  return { mark, slots, padR, direct, floor, gridLines, xLabels, lines, labelYs, y, yBase, bandW };
 }
 
 export function ChartSection({ section }: { section: CanvasChartSection }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const geometry = useMemo(() => buildGeometry(section), [section]);
-  const { slots, padR, direct, floor, gridLines, xLabels, lines, labelYs, y } = geometry;
+  const { mark, slots, padR, direct, floor, gridLines, xLabels, lines, labelYs, y, yBase, bandW } =
+    geometry;
+
+  // Grouped bars: each slot's band carries one bar per series with a 2-unit
+  // surface gap between touching fills; group width caps so a sparse chart
+  // doesn't render comically wide bars.
+  const groupW = Math.min(bandW * 0.68, 56 * lines.length);
+  const seriesBarW = Math.max((groupW - 2 * (lines.length - 1)) / lines.length, 1.5);
 
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -243,7 +292,7 @@ export function ChartSection({ section }: { section: CanvasChartSection }) {
         className="cvb-chart-svg"
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         role="img"
-        aria-label={`${section.title || "Line chart"}: ${section.series
+        aria-label={`${section.title || `${mark === "bar" ? "Bar" : mark === "area" ? "Area" : "Line"} chart`}: ${section.series
           .map((s) => s.label)
           .join(", ")}`}
         onPointerMove={onPointerMove}
@@ -280,22 +329,40 @@ export function ChartSection({ section }: { section: CanvasChartSection }) {
             y2={PAD_T + PLOT_H}
           />
         )}
-        {lines.map((line, si) => (
-          <g key={line.label}>
-            {line.d && <path className="cvb-chart-line" d={line.d} stroke={line.color} />}
-            {line.end && <circle cx={line.end.x} cy={line.end.y} r={3} fill={line.color} />}
-            {line.end && direct && (
-              <text
-                className="cvb-chart-endpoint-label"
-                x={line.end.x + 8}
-                y={(labelYs.get(si) ?? line.end.y) + 3}
-              >
-                {truncate(line.label, ENDPOINT_LABEL_CHARS)}
-              </text>
-            )}
-          </g>
-        ))}
+        {mark === "bar"
+          ? slots.map((slot) =>
+              slot.values.map((v, si) => {
+                if (v == null) return null;
+                const x = slot.x - groupW / 2 + si * (seriesBarW + 2);
+                const d = barPath(x, seriesBarW, y(v), yBase);
+                return d ? (
+                  <path
+                    key={`${slot.id}:${lines[si]!.label}`}
+                    className="cvb-chart-bar"
+                    d={d}
+                    fill={lines[si]!.color}
+                  />
+                ) : null;
+              }),
+            )
+          : lines.map((line, si) => (
+              <g key={line.label}>
+                {line.area && <path className="cvb-chart-area" d={line.area} fill={line.color} />}
+                {line.d && <path className="cvb-chart-line" d={line.d} stroke={line.color} />}
+                {line.end && <circle cx={line.end.x} cy={line.end.y} r={3} fill={line.color} />}
+                {line.end && direct && (
+                  <text
+                    className="cvb-chart-endpoint-label"
+                    x={line.end.x + 8}
+                    y={(labelYs.get(si) ?? line.end.y) + 3}
+                  >
+                    {truncate(line.label, ENDPOINT_LABEL_CHARS)}
+                  </text>
+                )}
+              </g>
+            ))}
         {hover &&
+          mark !== "bar" &&
           hoverRows.map(({ line, value }) => (
             <circle
               key={line.label}

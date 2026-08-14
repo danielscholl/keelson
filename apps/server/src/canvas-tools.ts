@@ -49,9 +49,9 @@ const publishInputSchema = z
 const guideInputSchema = z
   .object({
     section: z
-      .enum(["page", "form", "color", "marks", "anti-patterns"])
+      .enum(["page", "form", "color", "marks", "graphics", "board", "anti-patterns"])
       .describe(
-        "Which reference to read: 'page' layout/typography/theming, 'form' choosing a chart, 'color' the color jobs + keelson palette instance, 'marks' mark anatomy and interaction, 'anti-patterns' the catalog to check drafts against.",
+        "Which reference to read: 'page' layout/typography/theming, 'form' choosing a chart, 'color' the color jobs + keelson palette instance, 'marks' mark anatomy and interaction, 'graphics' inline SVG diagrams, 'board' the structured board view's section catalog, 'anti-patterns' the catalog to check drafts against.",
       ),
   })
   .strict();
@@ -225,7 +225,7 @@ export function createCanvasTools(deps: CreateCanvasToolsDeps): CanvasToolsHandl
   const guide: ToolDefinition = {
     name: "canvas_design_guide",
     description:
-      "Read one section of the canvas artifact design guide before authoring: layout/typography/theming rules, chart-form selection, the color system and keelson palette instance, mark anatomy, or the anti-pattern catalog to check a draft against.",
+      "Read one section of the canvas design guide before authoring: layout/typography/theming rules, chart-form selection, the color system and keelson palette instance, mark anatomy, inline SVG diagram craft, the structured board view's section catalog, or the anti-pattern catalog to check a draft against.",
     inputSchema: guideInputSchema,
     async execute(input: unknown, ctx: ToolContext): Promise<void> {
       const parsed = guideInputSchema.safeParse(input);

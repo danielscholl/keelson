@@ -421,6 +421,53 @@ describe("canvasViewSchema", () => {
     expect(nested.view).toBe("board");
   });
 
+  it("parses each chart mark and rejects an unknown one", () => {
+    const series = [{ label: "unit", points: [{ x: "a", y: 1 }] }];
+    for (const mark of ["line", "area", "bar"] as const) {
+      const v = canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "chart", mark, series }],
+      });
+      expect(v.view).toBe("board");
+    }
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "chart", mark: "scatter", series }],
+      }),
+    ).toThrow();
+  });
+
+  it("parses a stat delta and spark, and rejects malformed ones", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "stats",
+          items: [
+            {
+              label: "Fail rate",
+              value: "2.1%",
+              delta: { text: "+0.4pp", direction: "up", tone: "error" },
+              spark: [1.2, 1.5, 1.7, 2.1],
+            },
+          ],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+    const stat = (delta?: unknown, spark?: unknown) => ({
+      view: "board",
+      sections: [{ kind: "stats", items: [{ label: "x", value: 1, delta, spark }] }],
+    });
+    // Direction outside the enum, a one-point spark, and a non-finite spark all fail.
+    expect(() =>
+      canvasViewSchema.parse(stat({ text: "+1", direction: "sideways" }, undefined)),
+    ).toThrow();
+    expect(() => canvasViewSchema.parse(stat(undefined, [1]))).toThrow();
+    expect(() => canvasViewSchema.parse(stat(undefined, [1, Number.POSITIVE_INFINITY]))).toThrow();
+  });
+
   it("parses seats and journey sections, top-level and nested in columns", () => {
     const seats = {
       kind: "seats",
