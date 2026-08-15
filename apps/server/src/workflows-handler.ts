@@ -43,6 +43,7 @@ import {
   type WorkflowFrame,
   type WorkflowNodeStatus,
   type WorkflowRunDetail,
+  type WorkflowRunningNode,
   type WorkflowRunOrigin,
   type WorkflowRunStatus,
   type WorkflowRunSummary,
@@ -362,8 +363,9 @@ export interface PendingApproval {
 export interface ActiveRunEntry {
   abort: AbortController;
   done: Promise<void>;
-  // Persisted detail has no running node row, so live status polling reads this set.
-  currentNodes: Set<string>;
+  // Persisted detail has no running node row until node_done, so live status
+  // polling and the run-detail overlay read this map (nodeId → startedAt ISO).
+  currentNodes: Map<string, string>;
   // Keyed by nodeId so two parallel approval nodes in one layer can pause
   // and resume independently.
   pendingApprovals: Map<string, PendingApproval>;
@@ -393,6 +395,19 @@ export interface ActiveRuns {
   delete(runId: string): void;
   size(): number;
   abortAll(): Promise<void>;
+}
+
+// Run-detail overlay: a node's persisted row exists only once it completes,
+// so in-flight nodes are read from the live registry instead. A paused node
+// stays in currentNodes until node_done but is awaiting, not running — its
+// persisted `awaiting` row carries the approval state and must not be
+// shadowed by a running view.
+function runningNodesFor(activeRuns: ActiveRuns, runId: string): WorkflowRunningNode[] {
+  const entry = activeRuns.get(runId);
+  if (!entry || entry.currentNodes.size === 0) return [];
+  return [...entry.currentNodes]
+    .filter(([nodeId]) => !entry.pendingApprovals.has(nodeId))
+    .map(([nodeId, startedAt]) => ({ nodeId, startedAt }));
 }
 
 // Canonical de-dup identity for a run start. Inputs are key-sorted so order
@@ -1124,7 +1139,7 @@ function startRunCore(
     activeRuns.register(runId, {
       abort,
       done,
-      currentNodes: new Set(),
+      currentNodes: new Map(),
       pendingApprovals,
       dedupeKey,
       definition: workflow,
@@ -1345,7 +1360,7 @@ function resumeRunCore(
     activeRuns.register(runId, {
       abort,
       done,
-      currentNodes: new Set(),
+      currentNodes: new Map(),
       pendingApprovals,
       dedupeKey: runDedupeKey(
         workflow.name,
@@ -1645,7 +1660,7 @@ export function createWorkflowController(
       activeRuns.register(runId, {
         abort,
         done,
-        currentNodes: new Set(),
+        currentNodes: new Map(),
         pendingApprovals: new Map(),
         dedupeKey: runId,
         conversationId: "",
@@ -1880,11 +1895,12 @@ export function createWorkflowController(
     },
 
     getRun(runId) {
-      return store.getRun(runId);
+      const run = store.getRun(runId);
+      return run ? { ...run, runningNodes: runningNodesFor(activeRuns, runId) } : undefined;
     },
 
     currentNodes(runId) {
-      return [...(activeRuns.get(runId)?.currentNodes ?? [])];
+      return [...(activeRuns.get(runId)?.currentNodes.keys() ?? [])];
     },
 
     pendingApprovals(runId) {
@@ -2387,7 +2403,12 @@ export function workflowsRoutes(
     const runId = c.req.param("runId");
     const run = store.getRun(runId);
     if (!run) return c.json({ error: `unknown run '${runId}'` }, 404);
-    return c.json({ run: workflowRunDetailSchema.parse(run) });
+    return c.json({
+      run: workflowRunDetailSchema.parse({
+        ...run,
+        runningNodes: runningNodesFor(activeRuns, runId),
+      }),
+    });
   });
 
   // Read-only fetch of a file under a run's per-run artifacts dir, sandboxed
@@ -3597,7 +3618,7 @@ interface DispatchArgs {
   subscribers: WorkflowSubscribers;
   nodeStart: Map<string, string>;
   nodeAccumulators: Map<string, ReturnType<typeof createContentPartsAccumulator>>;
-  currentNodes?: Set<string>;
+  currentNodes?: Map<string, string>;
   // Snapshot bridge: when set, a node's structured output is
   // republished under the run-scoped snapshot key. Undefined → no publish.
   publishStructured?: (value: unknown) => void;
@@ -3634,10 +3655,11 @@ function dispatchRunEvent(args: DispatchArgs): void {
         workflowName: event.workflowName,
       });
       break;
-    case "node_started":
-      nodeStart.set(event.nodeId, new Date().toISOString());
+    case "node_started": {
+      const startedAt = new Date().toISOString();
+      nodeStart.set(event.nodeId, startedAt);
       nodeAccumulators.set(event.nodeId, createContentPartsAccumulator());
-      currentNodes?.add(event.nodeId);
+      currentNodes?.set(event.nodeId, startedAt);
       // Drop any prior launch's row: a REST hydrate racing this relaunch must
       // not read the old terminal output back into the SPA (mergeNode prefers
       // a terminal snapshot), and WorkflowNodeStatus has no non-terminal value
@@ -3654,8 +3676,10 @@ function dispatchRunEvent(args: DispatchArgs): void {
       subscribers.broadcast(runId, {
         type: "node_started",
         nodeId: event.nodeId,
+        startedAt,
       });
       break;
+    }
     case "node_event": {
       // node_chunk events carry the provider's MessageChunk verbatim under
       // an unknown-typed boundary (executor.ts §NodeStreamEvent). Run them
@@ -3719,6 +3743,7 @@ function dispatchRunEvent(args: DispatchArgs): void {
         type: "node_done",
         nodeId: event.nodeId,
         status,
+        ...(startedAt !== null ? { startedAt } : {}),
         error: event.result.error ?? null,
         ...(usage !== null ? { usage } : {}),
         ...(provider !== null ? { provider } : {}),

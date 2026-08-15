@@ -52,7 +52,7 @@ function makeRig(entry: "with-dir" | "no-dir" | "none"): { app: Hono; activeRuns
     activeRuns.register(RUN_ID, {
       abort: new AbortController(),
       done: Promise.resolve(),
-      currentNodes: new Set(),
+      currentNodes: new Map(),
       pendingApprovals: new Map(),
       dedupeKey: "artifact-test",
       conversationId: "conv-test",

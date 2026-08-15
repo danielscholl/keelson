@@ -190,12 +190,21 @@ export const workflowRunSummarySchema = z
   .strict();
 export type WorkflowRunSummary = z.infer<typeof workflowRunSummarySchema>;
 
+// A node currently executing, composed from the server's in-memory state at
+// read time. A persisted node row exists only once the node completes, so
+// without this a client attaching mid-run has no trace of an in-flight node.
+export const workflowRunningNodeSchema = z
+  .object({ nodeId: z.string(), startedAt: z.string() })
+  .strict();
+export type WorkflowRunningNode = z.infer<typeof workflowRunningNodeSchema>;
+
 // Full run detail (GET /api/workflows/runs/:runId).
 export const workflowRunDetailSchema = workflowRunSummarySchema
   .extend({
     inputs: z.record(z.string(), z.string()),
     nodes: z.array(nodeOutputRowSchema),
     brief: briefSchema.nullable().default(null),
+    runningNodes: z.array(workflowRunningNodeSchema).default([]),
   })
   .strict();
 export type WorkflowRunDetail = z.infer<typeof workflowRunDetailSchema>;
@@ -298,7 +307,16 @@ export const workflowFrameSchema = z.discriminatedUnion("type", [
       workflowName: z.string(),
     })
     .strict(),
-  z.object({ type: z.literal("node_started"), nodeId: z.string() }).strict(),
+  // `startedAt` is the server's launch timestamp; the client anchors the
+  // node's elapsed timer and eventual duration to it instead of its own
+  // frame-arrival clock, which lags the true start for late subscribers.
+  z
+    .object({
+      type: z.literal("node_started"),
+      nodeId: z.string(),
+      startedAt: z.string().optional(),
+    })
+    .strict(),
   z
     .object({
       type: z.literal("node_chunk"),
@@ -319,6 +337,9 @@ export const workflowFrameSchema = z.discriminatedUnion("type", [
       nodeId: z.string(),
       status: workflowNodeStatusSchema,
       error: z.string().nullable(),
+      // Server-recorded launch timestamp for this node, authoritative for
+      // duration even when the client missed the launch's node_started.
+      startedAt: z.string().optional(),
       // Omitted (not null) when the node spent no reported tokens.
       usage: tokenUsageSchema.optional(),
       // Effective provider id / model an LLM-backed node ran on, so a live run

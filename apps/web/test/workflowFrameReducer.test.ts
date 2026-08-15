@@ -3,8 +3,18 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
-import type { WorkflowFrame } from "@keelson/shared";
-import { applyFrame, mergeNode, type NodeView, type RunView } from "../src/hooks/useWorkflowRun.ts";
+import {
+  type WorkflowFrame,
+  type WorkflowRunDetail,
+  workflowRunDetailSchema,
+} from "@keelson/shared";
+import {
+  applyFrame,
+  hydrateFromSnapshot,
+  mergeNode,
+  type NodeView,
+  type RunView,
+} from "../src/hooks/useWorkflowRun.ts";
 
 // Drives the pure frame reducer with plain state closures — no React, no WS.
 function harness() {
@@ -107,5 +117,114 @@ describe("mergeNode effort", () => {
     const snapshot = base({ nodeId: "n1", effort: "low" });
     const live = base({ nodeId: "n1", effort: "xhigh" });
     expect(mergeNode(snapshot, live).effort).toBe("xhigh");
+  });
+});
+
+describe("applyFrame server start anchoring", () => {
+  test("node_started anchors the view to the server's launch timestamp", () => {
+    const h = harness();
+    const startedAt = "2026-08-14T20:00:00.000Z";
+    h.apply({ type: "node_started", nodeId: "author", startedAt });
+    expect(h.node("author")?.startedAt).toBe(Date.parse(startedAt));
+  });
+
+  test("a relaunch takes the new launch's server start, not the old one", () => {
+    const h = harness();
+    h.apply({ type: "node_started", nodeId: "author", startedAt: "2026-08-14T20:00:00.000Z" });
+    h.apply({ type: "node_done", nodeId: "author", status: "succeeded", error: null });
+    const relaunchStart = "2026-08-14T20:01:00.000Z";
+    h.apply({ type: "node_started", nodeId: "author", startedAt: relaunchStart });
+    expect(h.node("author")?.startedAt).toBe(Date.parse(relaunchStart));
+  });
+
+  test("node_done's server start fixes the duration for a late subscriber", () => {
+    const h = harness();
+    // The reported bug: the client attached mid-run, missed node_started, and
+    // the row materialized from a late chunk burst — its client stamp made a
+    // 24s node read as the burst-to-done wall clock.
+    h.apply(textChunk("author", "reply"));
+    const startedAt = new Date(Date.now() - 24_000).toISOString();
+    h.apply({ type: "node_done", nodeId: "author", status: "succeeded", error: null, startedAt });
+    const settled = h.node("author");
+    expect(settled?.startedAt).toBe(Date.parse(startedAt));
+    expect(settled?.durationMs).toBeGreaterThanOrEqual(23_000);
+  });
+});
+
+describe("hydrateFromSnapshot running overlay", () => {
+  const detail = (overrides: Record<string, unknown>): WorkflowRunDetail =>
+    workflowRunDetailSchema.parse({
+      runId: "r1",
+      workflowName: "wf",
+      status: "running",
+      startedAt: "2026-08-14T20:00:00.000Z",
+      completedAt: null,
+      error: null,
+      conversationId: null,
+      projectId: null,
+      workingDir: null,
+      worktreePath: null,
+      inputs: {},
+      nodes: [],
+      ...overrides,
+    });
+
+  test("an in-flight node hydrates as a running view with the server start", () => {
+    const startedAt = "2026-08-14T20:00:05.000Z";
+    const { nodes } = hydrateFromSnapshot(
+      detail({ runningNodes: [{ nodeId: "author", startedAt }] }),
+    );
+    expect(nodes.author?.status).toBe("running");
+    expect(nodes.author?.startedAt).toBe(Date.parse(startedAt));
+    expect(nodes.author?.contentParts).toEqual([]);
+    expect(nodes.author?.completedAt).toBeUndefined();
+  });
+
+  test("a snapshot without the overlay hydrates no running rows", () => {
+    const { nodes } = hydrateFromSnapshot(detail({}));
+    expect(Object.keys(nodes)).toEqual([]);
+  });
+
+  test("an awaiting row keeps its approval state over the overlay", () => {
+    const { nodes } = hydrateFromSnapshot(
+      detail({
+        nodes: [
+          {
+            nodeId: "gate",
+            status: "awaiting",
+            outputText: "Approve the plan?",
+            contentParts: null,
+            startedAt: "2026-08-14T20:00:00.000Z",
+            completedAt: null,
+            error: null,
+          },
+        ],
+        runningNodes: [{ nodeId: "gate", startedAt: "2026-08-14T20:00:00.000Z" }],
+      }),
+    );
+    expect(nodes.gate?.status).toBe("awaiting");
+    expect(nodes.gate?.awaitingMessage).toBe("Approve the plan?");
+  });
+
+  test("the running overlay outranks a stale terminal row for the same node", () => {
+    const { nodes } = hydrateFromSnapshot(
+      detail({
+        nodes: [
+          {
+            nodeId: "author",
+            status: "succeeded",
+            outputText: "round 1",
+            contentParts: null,
+            startedAt: "2026-08-14T19:59:00.000Z",
+            completedAt: "2026-08-14T19:59:30.000Z",
+            error: null,
+          },
+        ],
+        runningNodes: [{ nodeId: "author", startedAt: "2026-08-14T20:00:05.000Z" }],
+      }),
+    );
+    expect(nodes.author?.status).toBe("running");
+    expect(nodes.author?.logLines).toEqual([]);
+    expect(nodes.author?.completedAt).toBeUndefined();
   });
 });
