@@ -3527,6 +3527,15 @@ button.tab:focus-visible {
   flex: 1 1 320px;
   min-width: 320px;
 }
+/* A stacked column: sibling columns keep independent heights, so unequal
+   boards pack without cross-column whitespace. */
+.surface-row > .surface-stack {
+  flex: 1 1 320px;
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 .surface-region {
   display: flex;
   flex-direction: column;

@@ -529,10 +529,16 @@ export const ribSurfaceDescriptorSchema = z
         banner: bannerRegionSchema.optional(),
         // `zoneTitle` labels a run of dynamic rows the merge derives from a
         // group's `groupTitle`; static rows leave it unset.
+        // A column entry is one region or a stack of regions: a stack renders
+        // as one vertical column whose height flows independently of its row
+        // siblings, so two columns of unequal boards pack without cross-column
+        // whitespace.
         rows: z.array(
           z
             .object({
-              columns: z.array(surfaceRegionSchema).min(1),
+              columns: z
+                .array(z.union([surfaceRegionSchema, z.array(surfaceRegionSchema).min(1)]))
+                .min(1),
               zoneTitle: z.string().min(1).max(120).optional(),
             })
             .strict(),
@@ -543,6 +549,13 @@ export const ribSurfaceDescriptorSchema = z
   })
   .strict();
 export type RibSurfaceDescriptor = z.infer<typeof ribSurfaceDescriptorSchema>;
+export type RibSurfaceColumn = RibSurfaceDescriptor["layout"]["rows"][number]["columns"][number];
+
+// The one normalization every column consumer shares, so a single region and a
+// stack never diverge in a walk.
+export function columnRegions(column: RibSurfaceColumn): readonly RibSurfaceRegion[] {
+  return Array.isArray(column) ? column : [column];
+}
 
 // Where a rib action came from, stamped by the host. Absent (or "board") is a
 // trusted host-UI dispatch — a board button, a loopback API call. "canvas-html"

@@ -110,11 +110,11 @@ describe("mergeSurfaceRegions", () => {
 
   test("appends dynamic regions as rows of width after the static rows", () => {
     const merged = mergeSurfaceRegions(surface([staticRow]), [r("a"), r("b"), r("c"), r("d")], 3);
-    expect(merged.layout.rows.map((row) => row.columns.map((c) => c.key))).toEqual([
-      ["rib:x:base"],
-      ["a", "b", "c"],
-      ["d"],
-    ]);
+    expect(
+      merged.layout.rows.map((row) =>
+        row.columns.map((c) => (Array.isArray(c) ? c.map((x) => x.key) : c.key)),
+      ),
+    ).toEqual([["rib:x:base"], ["a", "b", "c"], ["d"]]);
   });
 
   test("emits no empty trailing row when the count is an exact multiple of width", () => {
@@ -129,7 +129,11 @@ describe("mergeSurfaceRegions", () => {
       [r("a", "lens"), r("x", "room"), r("b", "lens"), r("y", "room")],
       3,
     );
-    expect(merged.layout.rows.slice(1).map((row) => row.columns.map((c) => c.key))).toEqual([
+    expect(
+      merged.layout.rows
+        .slice(1)
+        .map((row) => row.columns.map((c) => (Array.isArray(c) ? c.map((x) => x.key) : c.key))),
+    ).toEqual([
       ["a", "b"],
       ["x", "y"],
     ]);
@@ -175,7 +179,7 @@ describe("mergeSurfaceRegions", () => {
     );
     // The ungrouped 'stray' must not stamp its groupTitle onto the ungrouped row.
     const ungroupedRow = merged.layout.rows.find((row) =>
-      row.columns.some((c) => c.key === "stray"),
+      row.columns.some((c) => !Array.isArray(c) && c.key === "stray"),
     );
     expect(ungroupedRow?.zoneTitle).toBeUndefined();
   });

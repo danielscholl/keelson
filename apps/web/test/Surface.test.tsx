@@ -192,6 +192,37 @@ describe("Surface", () => {
     expect(container.querySelectorAll(".surface-row > .surface-region")).toHaveLength(2);
   });
 
+  test("a stacked column renders its regions vertically beside a single-region column", () => {
+    live("rib:demo:release", board("Release", "Forks", 13));
+    live("rib:demo:evidence", board("Evidence", "Runs", 61));
+    live("rib:demo:environment", board("Environment", "Ready", 29));
+    const { container } = renderSurface({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: {
+        rows: [
+          {
+            columns: [
+              [
+                { key: "rib:demo:release", title: "Release" },
+                { key: "rib:demo:evidence", title: "Evidence" },
+              ],
+              { key: "rib:demo:environment", title: "Environment" },
+            ],
+          },
+        ],
+      },
+    });
+    const stack = container.querySelector(".surface-row > .surface-stack");
+    expect(stack).not.toBeNull();
+    expect(stack?.querySelectorAll(".surface-region")).toHaveLength(2);
+    // The single-region column stays a direct row child, unwrapped.
+    expect(container.querySelectorAll(".surface-row > .surface-region")).toHaveLength(1);
+    expect(screen.getByText("Forks")).toBeDefined();
+    expect(screen.getByText("Runs")).toBeDefined();
+    expect(screen.getByText("Ready")).toBeDefined();
+  });
+
   test("a region without a static title falls back to the board's title in the head", () => {
     live("rib:demo:quality", board("Quality", "Services", 23));
     renderSurface({
