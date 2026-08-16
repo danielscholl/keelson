@@ -3520,7 +3520,7 @@ button.tab:focus-visible {
   align-items: flex-start;
   flex-wrap: wrap;
 }
-.surface-row:empty {
+.surface-row:not(:has(.surface-region)) {
   display: none;
 }
 .surface-row > .surface-region {
@@ -3535,6 +3535,11 @@ button.tab:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+/* A stack whose regions all hid themselves would otherwise hold its column open
+   and squeeze the row's remaining boards. */
+.surface-row > .surface-stack:empty {
+  display: none;
 }
 .surface-region {
   display: flex;

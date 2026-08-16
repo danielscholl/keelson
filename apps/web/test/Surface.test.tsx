@@ -223,6 +223,39 @@ describe("Surface", () => {
     expect(screen.getByText("Ready")).toBeDefined();
   });
 
+  test("a stack drops the regions that hid themselves, and empties out when all of them do", () => {
+    live("rib:demo:kept", board("Kept", "Ready", 4));
+    live("rib:demo:beside", board("Beside", "Runs", 9));
+    const { container } = renderSurface({
+      id: "demo",
+      title: "Demo",
+      layout: {
+        rows: [
+          {
+            columns: [
+              [
+                { key: "rib:demo:gone", title: "Gone", hideWhenEmpty: true },
+                { key: "rib:demo:kept", title: "Kept", hideWhenEmpty: true },
+              ],
+              [
+                { key: "rib:demo:also-gone", title: "Also gone", hideWhenEmpty: true },
+                { key: "rib:demo:gone-too", title: "Gone too", hideWhenEmpty: true },
+              ],
+              { key: "rib:demo:beside", title: "Beside" },
+            ],
+          },
+        ],
+      },
+    });
+    const [partial, allHidden] = [...container.querySelectorAll(".surface-stack")];
+    expect(partial?.querySelectorAll(".surface-region")).toHaveLength(1);
+    expect(screen.queryByText("Gone")).toBeNull();
+    // An all-hidden stack must leave a childless node so `.surface-stack:empty`
+    // collapses the column instead of squeezing the row's remaining boards.
+    expect(allHidden?.childNodes.length).toBe(0);
+    expect(container.querySelectorAll(".surface-row > .surface-region")).toHaveLength(1);
+  });
+
   test("a region without a static title falls back to the board's title in the head", () => {
     live("rib:demo:quality", board("Quality", "Services", 23));
     renderSurface({
