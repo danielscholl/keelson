@@ -3520,12 +3520,26 @@ button.tab:focus-visible {
   align-items: flex-start;
   flex-wrap: wrap;
 }
-.surface-row:empty {
+.surface-row:not(:has(.surface-region)) {
   display: none;
 }
 .surface-row > .surface-region {
   flex: 1 1 320px;
   min-width: 320px;
+}
+/* A stacked column: sibling columns keep independent heights, so unequal
+   boards pack without cross-column whitespace. */
+.surface-row > .surface-stack {
+  flex: 1 1 320px;
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* A stack whose regions all hid themselves would otherwise hold its column open
+   and squeeze the row's remaining boards. */
+.surface-row > .surface-stack:empty {
+  display: none;
 }
 .surface-region {
   display: flex;

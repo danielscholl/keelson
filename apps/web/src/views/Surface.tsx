@@ -5,6 +5,7 @@
 import {
   type CanvasBoardView,
   canvasViewSchema,
+  columnRegions,
   type OpenChatSeed,
   type RibSurfaceDescriptor,
   type RibSurfaceRegion,
@@ -112,8 +113,13 @@ export function Surface({
   // A projectScoped surface carries the shared project chip in its header, wired to
   // the owning rib's select-project action; derive the rib id from a region key
   // (every region key is rib-namespaced).
+  const firstColumn = rows[0]?.columns[0];
   const ribId = ribIdFromKey(
-    header?.key ?? banner?.key ?? rows[0]?.columns[0]?.key ?? footer?.key ?? "",
+    header?.key ??
+      banner?.key ??
+      (firstColumn ? columnRegions(firstColumn)[0]?.key : undefined) ??
+      footer?.key ??
+      "",
   );
   return (
     <div className="page surface-page">
@@ -177,18 +183,28 @@ export function Surface({
             // unconstrained and could collide if joined.
             // biome-ignore lint/suspicious/noArrayIndexKey: see above.
             <div className="surface-row" key={`row:${zone.start + rowIndex}`}>
-              {row.columns.map((col) => (
-                <SurfaceRegion
-                  key={col.key}
-                  region={col}
-                  onExplore={onExplore}
-                  selected={selected.has(col.key)}
-                  onToggleSelect={onExplore ? onToggleSelect : undefined}
-                  hiddenActions={hiddenActions}
-                  onLaunchWorkflow={onLaunchWorkflow}
-                  onOpenSurface={onOpenSurface}
-                />
-              ))}
+              {row.columns.map((col) => {
+                const regions = columnRegions(col);
+                const cells = regions.map((region) => (
+                  <SurfaceRegion
+                    key={region.key}
+                    region={region}
+                    onExplore={onExplore}
+                    selected={selected.has(region.key)}
+                    onToggleSelect={onExplore ? onToggleSelect : undefined}
+                    hiddenActions={hiddenActions}
+                    onLaunchWorkflow={onLaunchWorkflow}
+                    onOpenSurface={onOpenSurface}
+                  />
+                ));
+                return regions.length === 1 ? (
+                  cells[0]
+                ) : (
+                  <div className="surface-stack" key={`stack:${regions[0]?.key}`}>
+                    {cells}
+                  </div>
+                );
+              })}
             </div>
           ))}
         </section>

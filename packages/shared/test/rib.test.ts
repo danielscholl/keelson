@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import type { Rib, RibContext } from "../src/rib.ts";
+import type { Rib, RibContext, RibSurfaceRegion } from "../src/rib.ts";
 import {
+  columnRegions,
   listRibsResponseSchema,
   openChatSeedSchema,
   reloadRibWorkflowsResponseSchema,
@@ -14,6 +15,14 @@ import {
   ribSurfaceDescriptorSchema,
   ribViewDescriptorSchema,
 } from "../src/rib.ts";
+
+// Schema tests exercise single-region columns; unwrap the region|stack union once.
+function firstColumnRegion(d: {
+  layout: { rows: { columns: unknown[] }[] };
+}): RibSurfaceRegion | undefined {
+  const col = d.layout.rows[0]?.columns[0];
+  return (Array.isArray(col) ? col[0] : col) as RibSurfaceRegion | undefined;
+}
 
 describe("ribIdFromKey", () => {
   it("extracts the rib id from a namespaced key", () => {
@@ -157,6 +166,38 @@ describe("rib surface descriptor schema", () => {
     expect(s.layout.rows[0]?.columns).toHaveLength(2);
   });
 
+  it("round-trips a stacked column and normalizes it through columnRegions", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: {
+        rows: [
+          {
+            columns: [
+              [{ key: "rib:osdu:release" }, { key: "rib:osdu:evidence" }],
+              { key: "rib:osdu:environment" },
+            ],
+          },
+        ],
+      },
+    });
+    const [stack, single] = s.layout.rows[0]?.columns ?? [];
+    expect(Array.isArray(stack)).toBe(true);
+    expect(columnRegions(stack ?? []).map((r) => r.key)).toEqual([
+      "rib:osdu:release",
+      "rib:osdu:evidence",
+    ]);
+    expect(columnRegions(single ?? []).map((r) => r.key)).toEqual(["rib:osdu:environment"]);
+    // Region validation reaches inside a stack: an empty stack is rejected.
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({
+        id: "x",
+        title: "X",
+        layout: { rows: [{ columns: [[]] }] },
+      }).success,
+    ).toBe(false);
+  });
+
   it("allows an empty rows array (no lanes declared yet)", () => {
     expect(
       ribSurfaceDescriptorSchema.safeParse({ id: "x", title: "X", layout: { rows: [] } }).success,
@@ -173,7 +214,7 @@ describe("rib surface descriptor schema", () => {
       },
     });
     expect(s.layout.header?.workflow).toBe("osdu-cluster");
-    expect(s.layout.rows[0]?.columns[0]?.workflow).toBe("osdu-quality");
+    expect(firstColumnRegion(s)?.workflow).toBe("osdu-quality");
   });
 
   it("carries an optional cadenceMs on header, banner, and column regions", () => {
@@ -192,7 +233,7 @@ describe("rib surface descriptor schema", () => {
     });
     expect(s.layout.header?.cadenceMs).toBe(600_000);
     expect(s.layout.banner?.cadenceMs).toBe(1_800_000);
-    expect(s.layout.rows[0]?.columns[0]?.cadenceMs).toBe(7_200_000);
+    expect(firstColumnRegion(s)?.cadenceMs).toBe(7_200_000);
   });
 
   it("round-trips an explicit server refresh opt-out", () => {
@@ -214,7 +255,7 @@ describe("rib surface descriptor schema", () => {
         ],
       },
     });
-    expect(s.layout.rows[0]?.columns[0]?.serverRefresh).toBe(false);
+    expect(firstColumnRegion(s)?.serverRefresh).toBe(false);
   });
 
   it("defaults serverRefresh to undefined when omitted", () => {
@@ -223,7 +264,7 @@ describe("rib surface descriptor schema", () => {
       title: "CIMPL",
       layout: { rows: [{ columns: [{ key: "rib:osdu:quality" }] }] },
     });
-    expect(s.layout.rows[0]?.columns[0]?.serverRefresh).toBeUndefined();
+    expect(firstColumnRegion(s)?.serverRefresh).toBeUndefined();
   });
 
   it("rejects a non-boolean serverRefresh", () => {
@@ -257,7 +298,7 @@ describe("rib surface descriptor schema", () => {
         ],
       },
     });
-    expect(s.layout.rows[0]?.columns[0]?.workflowArgs).toEqual({ lens: "morning-brief" });
+    expect(firstColumnRegion(s)?.workflowArgs).toEqual({ lens: "morning-brief" });
   });
 
   it("rejects non-string workflowArgs values", () => {
@@ -301,7 +342,7 @@ describe("rib surface descriptor schema", () => {
         ],
       },
     });
-    expect(s.layout.rows[0]?.columns[0]?.headActions?.[0]?.type).toBe("retire-lens");
+    expect(firstColumnRegion(s)?.headActions?.[0]?.type).toBe("retire-lens");
   });
 
   it("rejects an empty, malformed, or over-cap headActions list", () => {
@@ -362,7 +403,7 @@ describe("rib surface descriptor schema", () => {
     });
     expect(s.layout.header?.live).toBe(true);
     expect(s.layout.banner?.live).toBe(true);
-    expect(s.layout.rows[0]?.columns[0]?.live).toBe(true);
+    expect(firstColumnRegion(s)?.live).toBe(true);
   });
 
   it("defaults live to undefined when omitted", () => {
@@ -371,7 +412,7 @@ describe("rib surface descriptor schema", () => {
       title: "Squad",
       layout: { rows: [{ columns: [{ key: "rib:squad:run" }] }] },
     });
-    expect(s.layout.rows[0]?.columns[0]?.live).toBeUndefined();
+    expect(firstColumnRegion(s)?.live).toBeUndefined();
   });
 
   it("carries an optional hideWhenEmpty flag on regions, but never on a banner", () => {
@@ -384,7 +425,7 @@ describe("rib surface descriptor schema", () => {
       },
     });
     expect(s.layout.header?.hideWhenEmpty).toBe(true);
-    expect(s.layout.rows[0]?.columns[0]?.hideWhenEmpty).toBe(true);
+    expect(firstColumnRegion(s)?.hideWhenEmpty).toBe(true);
 
     // Banners always render full: like the collapse flags, hideWhenEmpty is
     // stripped from the banner slot's schema.
@@ -404,7 +445,7 @@ describe("rib surface descriptor schema", () => {
       title: "Demo",
       layout: { rows: [{ columns: [{ key: "rib:demo:run" }] }] },
     });
-    expect(withoutFlag.layout.rows[0]?.columns[0]?.hideWhenEmpty).toBeUndefined();
+    expect(firstColumnRegion(withoutFlag)?.hideWhenEmpty).toBeUndefined();
   });
 
   it("rejects a cadenceMs below the 30s floor or non-integer", () => {
@@ -533,7 +574,7 @@ describe("rib surface descriptor schema", () => {
         ],
       },
     });
-    const col = s.layout.rows[0]?.columns[0];
+    const col = firstColumnRegion(s);
     expect(col?.collapsible).toBe(true);
     expect(col?.collapsed).toBe(true);
     expect(col?.byline).toBe("scope: navigation");
@@ -553,7 +594,7 @@ describe("rib surface descriptor schema", () => {
       },
     });
     expect(s.layout.rows[0]?.zoneTitle).toBe("Rooms");
-    expect(s.layout.rows[0]?.columns[0]?.groupTitle).toBe("Rooms");
+    expect(firstColumnRegion(s)?.groupTitle).toBe("Rooms");
   });
 
   it("parses a surface and region that set none of the new optional fields", () => {
@@ -563,7 +604,7 @@ describe("rib surface descriptor schema", () => {
       layout: { rows: [{ columns: [{ key: "rib:demo:quality" }] }] },
     });
     expect(s.subtitle).toBeUndefined();
-    const col = s.layout.rows[0]?.columns[0];
+    const col = firstColumnRegion(s);
     expect(col?.byline).toBeUndefined();
     expect(col?.groupTitle).toBeUndefined();
     expect(col?.collapsible).toBeUndefined();

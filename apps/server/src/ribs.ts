@@ -26,6 +26,7 @@ import {
   type CallToolResult,
   type CommandCompletion,
   type CommandInvokeResult,
+  columnRegions,
   type MemoryTools,
   type MutationLock,
   type OpenChatSeed,
@@ -806,7 +807,7 @@ export function allRegions(layout: RibSurfaceDescriptor["layout"]): readonly Rib
   return [
     ...(header ? [header] : []),
     ...(banner ? [banner] : []),
-    ...rows.flatMap((row) => row.columns),
+    ...rows.flatMap((row) => row.columns.flatMap((column) => columnRegions(column))),
     ...(footer ? [footer] : []),
   ];
 }
