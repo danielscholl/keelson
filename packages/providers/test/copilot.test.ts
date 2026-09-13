@@ -1,11 +1,11 @@
-import { existsSync } from "node:fs";
 import { beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { existsSync } from "node:fs";
 import type { ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
 import { isCopilotConnectionError } from "../src/copilot/errors.ts";
 import {
-  copilotCliDiagnostics,
   type CopilotToolProjectionContext,
+  copilotCliDiagnostics,
   projectToolsForCopilot,
   resolveBundledCopilotCliPath,
 } from "../src/copilot/factory.ts";
