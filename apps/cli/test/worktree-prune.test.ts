@@ -3,9 +3,10 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { deleteBranch, removeWorktree } from "@keelson/workflows";
 import { spawnEnv } from "./spawn-env.ts";
 
 const BIN = resolve(import.meta.dir, "..", "bin", "keelson.ts");
@@ -56,7 +57,7 @@ async function runGit(args: readonly string[], cwd: string): Promise<string> {
   return stdout.trim();
 }
 
-async function setupFixture(): Promise<{
+async function setupFixture(opts: { pruneStatus?: number } = {}): Promise<{
   sandbox: string;
   repoRoot: string;
   managedPath: string;
@@ -64,6 +65,7 @@ async function setupFixture(): Promise<{
   orphanPath: string;
   persistedPaths: string[];
   persistedRuns: { path: string; status: string }[];
+  pruneRequests: string[];
   baseUrl: string;
   server: ReturnType<typeof Bun.serve>;
 }> {
@@ -93,11 +95,12 @@ async function setupFixture(): Promise<{
   writeFileSync(join(orphanPath, ".git"), "gitdir: /nowhere/.git/worktrees/orphan\n");
   const persistedPaths = [orphanPath];
   const persistedRuns: { path: string; status: string }[] = [];
+  const pruneRequests: string[] = [];
 
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
-    fetch(req) {
+    async fetch(req) {
       const { pathname } = new URL(req.url);
       if (pathname === "/api/projects") {
         return Response.json({
@@ -106,6 +109,20 @@ async function setupFixture(): Promise<{
       }
       if (pathname === "/api/workflows/worktree-paths") {
         return Response.json({ paths: persistedPaths, runs: persistedRuns });
+      }
+      if (pathname === "/api/workflows/worktree-prune" && req.method === "POST") {
+        const { path } = (await req.json()) as { path: string };
+        pruneRequests.push(path);
+        if (opts.pruneStatus) return new Response(null, { status: opts.pruneStatus });
+        const out = await removeWorktree({ repoPath: repoRoot, dest: path, force: false });
+        const gone = out.removed
+          ? await deleteBranch({ repoPath: repoRoot, branch: "keelson/run-1" })
+          : { deleted: false, warning: null };
+        return Response.json({
+          removed: out.removed,
+          branchDeleted: gone.deleted ? "keelson/run-1" : null,
+          warning: out.warning ?? gone.warning,
+        });
       }
       if (pathname === "/api/health") {
         return Response.json({ ok: true, name: "keelson", schema_version: "2.7" });
@@ -122,6 +139,7 @@ async function setupFixture(): Promise<{
     orphanPath,
     persistedPaths,
     persistedRuns,
+    pruneRequests,
     baseUrl: `http://${server.hostname}:${server.port}`,
     server,
   };
@@ -307,6 +325,7 @@ describe("keelson worktree prune", () => {
         fixture.baseUrl,
       ]);
       expect(dryRun.exitCode).toBe(0);
+      expect(fixture.pruneRequests).toEqual([]);
       const dryRunEnv = JSON.parse(dryRun.stdout.trim()) as {
         ok: boolean;
         data: {
@@ -374,6 +393,7 @@ describe("keelson worktree prune", () => {
         fixture.baseUrl,
       ]);
       expect(exitCode).toBe(0);
+      expect(fixture.pruneRequests).toEqual([fixture.managedPath]);
       const env = JSON.parse(stdout.trim()) as {
         ok: boolean;
         data: {
@@ -433,4 +453,51 @@ describe("keelson worktree prune", () => {
       cleanupFixture(fixture);
     }
   });
+
+  test("preserves dirty finished worktrees unless --force is passed", async () => {
+    const fixture = await setupFixture();
+    try {
+      fixture.persistedRuns.push({ path: fixture.managedPath, status: "failed" });
+      const dirtyFile = join(fixture.managedPath, "uncommitted.txt");
+      writeFileSync(dirtyFile, "keep this work\n");
+      const plain = await runCli(["--json", "worktree", "prune", "--base-url", fixture.baseUrl]);
+      expect(plain.exitCode).toBe(1);
+      expect(JSON.parse(plain.stdout).data.failed).toEqual([
+        { path: fixture.managedPath, error: expect.stringContaining("git worktree remove failed") },
+      ]);
+      expect(readFileSync(dirtyFile, "utf8")).toBe("keep this work\n");
+      expect(await branchExists("keelson/run-1", fixture.repoRoot)).toBe(true);
+
+      const forced = await runCli([
+        "--json",
+        "worktree",
+        "prune",
+        "--force",
+        "--base-url",
+        fixture.baseUrl,
+      ]);
+      expect(forced.exitCode).toBe(0);
+      expect(existsSync(fixture.managedPath)).toBe(false);
+      expect(await branchExists("keelson/run-1", fixture.repoRoot)).toBe(false);
+    } finally {
+      cleanupFixture(fixture);
+    }
+  });
+
+  test.each([404, 409, 503])(
+    "does not fall back to local deletion when server prune returns %s",
+    async (pruneStatus) => {
+      const fixture = await setupFixture({ pruneStatus });
+      try {
+        fixture.persistedRuns.push({ path: fixture.managedPath, status: "cancelled" });
+        const out = await runCli(["--json", "worktree", "prune", "--base-url", fixture.baseUrl]);
+        expect(out.exitCode).toBe(pruneStatus === 503 ? 1 : 0);
+        expect(fixture.pruneRequests).toEqual([fixture.managedPath]);
+        expect(existsSync(fixture.managedPath)).toBe(true);
+        expect(await branchExists("keelson/run-1", fixture.repoRoot)).toBe(true);
+      } finally {
+        cleanupFixture(fixture);
+      }
+    },
+  );
 });

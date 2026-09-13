@@ -110,6 +110,28 @@ export async function listPersistedWorktrees(baseUrl: string): Promise<Persisted
   return { paths, statusByPath };
 }
 
+export async function prunePersistedWorktree(
+  baseUrl: string,
+  path: string,
+): Promise<{ removed: boolean; branchDeleted: string | null; warning: string | null }> {
+  const res = await fetch(url(baseUrl, "/api/workflows/worktree-prune"), {
+    method: "POST",
+    headers: { ...defaultHeaders(baseUrl), "content-type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (res.status === 404 || res.status === 409) {
+    return { removed: false, branchDeleted: null, warning: null };
+  }
+  if (!res.ok) {
+    throw new HttpError(res.status, `POST /api/workflows/worktree-prune failed: ${res.status}`);
+  }
+  return (await res.json()) as {
+    removed: boolean;
+    branchDeleted: string | null;
+    warning: string | null;
+  };
+}
+
 export interface StartRunBody {
   inputs: Record<string, string>;
   projectId?: string;

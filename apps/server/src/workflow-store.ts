@@ -136,12 +136,7 @@ export interface WorkflowStore {
   // Drives the Workflows-nav badge: caller polls for `paused` rows so other
   // tabs can show a pending-input count without subscribing to every run's WS.
   listRunsByStatus(status: WorkflowRunStatus): WorkflowRunSummary[];
-  // Distinct non-null worktree_path values across all runs. Used by `keelson
-  // worktree prune` so worktrees from deleted projects (FK NULLed but path
-  // still persisted) remain reachable for cleanup.
-  // Every run that checked out a worktree, with its status, so
-  // `keelson worktree prune` can tell a finished run's leftover from a live
-  // run's working directory. Deleted-project runs (FK NULLed) are included.
+  // Includes deleted-project runs whose FK was NULLed but worktree path was retained.
   listWorktreeRuns(): { runId: string; path: string; status: WorkflowRunStatus }[];
   // Hard-delete a terminal run. FK CASCADE on workflow_node_outputs handles
   // the per-node rows. The route layer is responsible for the linked

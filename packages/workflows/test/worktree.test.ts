@@ -579,6 +579,24 @@ describe("ensureWorktreeDeps", () => {
 });
 
 describe("deleteBranch", () => {
+  test("warns with details when the repository is invalid", async () => {
+    writeFileSync(join(tmp, ".git"), "gitdir: ./missing.git\n");
+
+    const result = await deleteBranch({ repoPath: tmp, branch: "keelson/test/feature" });
+    expect(result.deleted).toBe(false);
+    expect(result.warning).toContain("git show-ref failed (exit 128)");
+    expect(result.warning).toContain("not a git repository");
+  });
+
+  test("warns with details when the working directory does not exist", async () => {
+    const result = await deleteBranch({
+      repoPath: join(tmp, "does-not-exist", "sub"),
+      branch: "keelson/test/feature",
+    });
+    expect(result.deleted).toBe(false);
+    expect(result.warning).toMatch(/git show-ref failed \(exit 127\): .+/);
+  });
+
   test("deletes a branch once its worktree is gone, then reports idempotently", async () => {
     await initRepo(tmp);
     const dest = join(tmp, ".wt", "feature");

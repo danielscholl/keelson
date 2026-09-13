@@ -15,7 +15,11 @@ import {
 } from "@keelson/workflows";
 import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { listProjects } from "../http/projects-client.ts";
-import { isServerDownError, listPersistedWorktrees } from "../http/workflow-client.ts";
+import {
+  isServerDownError,
+  listPersistedWorktrees,
+  prunePersistedWorktree,
+} from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
 import { defaultServerBaseUrl } from "../server-probe.ts";
 
@@ -147,12 +151,7 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
     return true;
   };
 
-  // Persisted worktree paths from workflow_runs, with each run's status. The
-  // status is what lets prune sweep a finished run's leftover without --force
-  // while leaving a live run's working directory alone. The path list also
-  // catches worktrees whose project row has been deleted (FK NULLed, path
-  // retained) — those dirs are otherwise invisible to the project-scoped
-  // scans below.
+  // Deleted projects leave FK-NULLed runs with retained paths, invisible to project scans.
   let persistedPaths: string[] = [];
   const statusByPath = new Map<string, string>();
   try {
@@ -250,13 +249,24 @@ export async function runWorktreePrune(opts: WorktreePruneOptions): Promise<neve
       continue;
     }
     if (c.reason === "tracked" && c.repoPath !== null) {
+      if (!opts.force) {
+        try {
+          const out = await prunePersistedWorktree(baseUrl, c.path);
+          if (out.removed) result.removed.push(c.path);
+          if (out.branchDeleted !== null) result.branchesDeleted.push(out.branchDeleted);
+          if (out.warning !== null) result.failed.push({ path: c.path, error: out.warning });
+        } catch (err) {
+          result.failed.push({
+            path: c.path,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        continue;
+      }
       const out = await removeWorktree({
         repoPath: c.repoPath,
         dest: c.path,
-        // Tracked managed entries need --force at the git layer too: the
-        // executor left the branch's worktree intact, and `git worktree
-        // remove` refuses on tracked entries unless forced.
-        force: true,
+        force: opts.force,
       });
       if (out.removed) {
         result.removed.push(c.path);

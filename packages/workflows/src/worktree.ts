@@ -574,8 +574,14 @@ export async function deleteBranch(opts: {
     ["show-ref", "--verify", "--quiet", `refs/heads/${opts.branch}`],
     opts.repoPath,
   );
-  if (exists.exitCode !== 0) {
+  if (exists.exitCode === 1) {
     return { deleted: false, warning: null };
+  }
+  if (exists.exitCode !== 0) {
+    return {
+      deleted: false,
+      warning: `git show-ref failed (exit ${exists.exitCode}): ${exists.stderr.trim() || exists.stdout.trim()}`,
+    };
   }
   const result = await runGit(["branch", "-D", opts.branch], opts.repoPath);
   if (result.exitCode !== 0) {

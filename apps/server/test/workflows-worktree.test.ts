@@ -8,11 +8,12 @@
 
 import "./test-setup.ts";
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -20,7 +21,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
+import { TERMINAL_RUN_STATUSES, type WorkflowRunStatus } from "@keelson/shared";
+import * as worktrees from "@keelson/workflows";
 import { Hono } from "hono";
 
 import { bootstrapWorkflows } from "../src/bootstrap.ts";
@@ -28,7 +30,12 @@ import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
-import { workflowsRoutes } from "../src/workflows-handler.ts";
+import {
+  createActiveRuns,
+  createWorkflowController,
+  createWorkflowSubscribers,
+  workflowsRoutes,
+} from "../src/workflows-handler.ts";
 import { createWorkspaceLeaseStore } from "../src/workspace-lease-store.ts";
 import { createWorkspaceManager } from "../src/workspace-manager.ts";
 import { rmTemp } from "./temp.ts";
@@ -141,15 +148,158 @@ function makeRig(opts: { includeWorkspaceManager?: boolean; projectRootPath?: st
   });
   const catalog = bootstrapWorkflows({ workflowDir: wfDir });
   const app = new Hono();
-  workflowsRoutes(app, {
+  const options = {
     catalog,
     store,
     conversationStore,
     projectsStore,
     ...(opts.includeWorkspaceManager === false ? {} : { workspaceManager }),
-  });
-  return { app, store, projectId: project.id };
+  };
+  const activeRuns = createActiveRuns();
+  const subscribers = createWorkflowSubscribers();
+  workflowsRoutes(app, options, activeRuns, subscribers);
+  const controller = createWorkflowController(options, activeRuns, subscribers);
+  return { app, store, conversationStore, controller, projectId: project.id };
 }
+
+describe("worktree prune coordination", () => {
+  async function setup(status: WorkflowRunStatus = "failed", branch = "keelson/prune-test") {
+    await initRepo(repoDir);
+    writeWorkflow(
+      "prune-test.yaml",
+      "name: prune-test\ndescription: test prune coordination\nnodes:\n  - id: work\n    bash: exit 1\n",
+    );
+    const path = join(repoDir, ".worktrees", "prune-test");
+    await worktrees.createWorktree({ repoPath: repoDir, branch, dest: path });
+    const rig = makeRig();
+    function addRun(runId: string, runStatus: WorkflowRunStatus, worktreePath = path) {
+      rig.store.createRun({
+        runId,
+        workflowName: "prune-test",
+        inputs: {},
+        startedAt: new Date().toISOString(),
+        conversationId: rig.conversationStore.create({ providerId: "workflow" }).id,
+        workingDir: repoDir,
+        worktreePath,
+      });
+      rig.store.updateRunStatus({
+        runId,
+        status: runStatus,
+        completedAt: new Date().toISOString(),
+        error: null,
+      });
+    }
+    addRun("prune-run", status);
+    const prune = (body: unknown = { path }, origin = ORIGIN) =>
+      rig.app.request("/api/workflows/worktree-prune", {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const resume = () =>
+      rig.app.request("/api/workflows/runs/prune-run/resume-run", {
+        method: "POST",
+        headers: { origin: ORIGIN },
+      });
+    return { ...rig, path, branch, addRun, prune, resume };
+  }
+
+  test.each(["succeeded", "failed", "cancelled"] as const)(
+    "prunes clean %s worktrees and their branches",
+    async (status) => {
+      const rig = await setup(status);
+      const response = await rig.prune();
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        removed: true,
+        branchDeleted: rig.branch,
+        warning: null,
+      });
+      expect(existsSync(rig.path)).toBe(false);
+      expect((await gitText(["branch", "--list", rig.branch], repoDir)).trim()).toBe("");
+      expect((await rig.resume()).status).toBe(409);
+    },
+  );
+
+  test.each(["pending", "running", "paused"] as const)(
+    "protects a shared worktree with a %s run",
+    async (status) => {
+      const rig = await setup();
+      rig.addRun("other-run", status, join(rig.path, "..", "prune-test"));
+      expect((await rig.prune()).status).toBe(409);
+      expect(existsSync(rig.path)).toBe(true);
+    },
+  );
+
+  test("refuses prune if resume claimed a run after the status feed was read", async () => {
+    const rig = await setup();
+    const feed = await rig.app.request("/api/workflows/worktree-paths");
+    expect((await feed.json()).runs[0].status).toBe("failed");
+    expect(rig.store.claimRunForResume("prune-run")).toBe(true);
+    expect((await rig.prune()).status).toBe(409);
+    expect(existsSync(rig.path)).toBe(true);
+  });
+
+  test("blocks HTTP and tool resume and concurrent prune until removal settles", async () => {
+    const rig = await setup();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const original = worktrees.listWorktrees;
+    const listing = spyOn(worktrees, "listWorktrees").mockImplementation(async (repoPath) => {
+      entered.resolve();
+      await release.promise;
+      return original(repoPath);
+    });
+    const pending = rig.prune();
+    try {
+      await entered.promise;
+      expect((await rig.resume()).status).toBe(409);
+      expect(rig.controller.resumeRun("prune-run")).toMatchObject({
+        ok: false,
+        message: expect.stringContaining("worktree is being pruned"),
+      });
+      expect((await rig.prune()).status).toBe(409);
+      expect(rig.store.getRun("prune-run")?.status).toBe("failed");
+    } finally {
+      release.resolve();
+      await pending;
+      listing.mockRestore();
+    }
+    expect(existsSync(rig.path)).toBe(false);
+  });
+
+  test("preserves dirty work and releases the claim after Git refuses removal", async () => {
+    const rig = await setup();
+    const dirtyFile = join(rig.path, "README.md");
+    writeFileSync(dirtyFile, "uncommitted edits\n");
+    const response = await rig.prune();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      removed: false,
+      branchDeleted: null,
+      warning: expect.stringContaining("git worktree remove failed"),
+    });
+    expect(readFileSync(dirtyFile, "utf8")).toBe("uncommitted edits\n");
+    expect((await gitText(["branch", "--list", rig.branch], repoDir)).trim()).not.toBe("");
+    await git(["checkout", "--", "README.md"], rig.path);
+    expect((await rig.prune()).status).toBe(200);
+    expect(existsSync(rig.path)).toBe(false);
+  });
+
+  test("does not remove user-managed worktrees", async () => {
+    const rig = await setup("failed", "feature/keep");
+    expect((await rig.prune()).status).toBe(409);
+    expect(existsSync(rig.path)).toBe(true);
+  });
+
+  test("rejects forbidden origins, malformed bodies, and unrecorded paths", async () => {
+    const rig = await setup();
+    expect((await rig.prune({ path: rig.path }, "https://evil.example")).status).toBe(403);
+    expect((await rig.prune({ path: "relative" })).status).toBe(400);
+    expect((await rig.prune({ path: repoDir })).status).toBe(404);
+    expect(existsSync(rig.path)).toBe(true);
+  });
+});
 
 async function pollUntilTerminal(
   app: Hono,
