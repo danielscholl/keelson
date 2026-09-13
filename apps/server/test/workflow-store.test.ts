@@ -70,6 +70,39 @@ afterEach(() => {
 });
 
 describe("SQLite WorkflowStore", () => {
+  test("pruned identities survive reopening and block atomic resume claims", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    for (const runId of ["old", "new"]) {
+      store.createRun({
+        runId,
+        workflowName: "fixed-branch",
+        inputs: {},
+        startedAt: new Date().toISOString(),
+        conversationId: mintConv(db, runId),
+        worktreePath: "/repo/.worktrees/fixed",
+      });
+      store.updateRunStatus({ runId, status: "failed", completedAt: null, error: null });
+    }
+    expect(store.setRunsWorktreePruned(["old"], true)).toEqual(["old"]);
+    const newlyMarked = store.setRunsWorktreePruned(["old", "new"], true);
+    expect(newlyMarked).toEqual(["new"]);
+    store.setRunsWorktreePruned(newlyMarked, false);
+    db.close();
+
+    const reopened = openDatabase({ path: dbPath });
+    try {
+      const restored = createWorkflowStore(reopened);
+      expect(restored.isRunWorktreePruned("old")).toBe(true);
+      expect(restored.getRun("old")?.worktreePath).toBe("/repo/.worktrees/fixed");
+      expect(restored.claimRunForResume("old")).toBe(false);
+      expect(restored.isRunWorktreePruned("new")).toBe(false);
+      expect(restored.claimRunForResume("new")).toBe(true);
+    } finally {
+      reopened.close();
+    }
+  });
+
   test("createRun seeds a running row visible to getRun", () => {
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);

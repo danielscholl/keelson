@@ -328,6 +328,15 @@ const migrations: Migration[] = [
       db.exec("ALTER TABLE workflow_runs ADD COLUMN provider_override TEXT;");
     },
   },
+  {
+    version: 14,
+    description: "persist pruned workflow worktree identities",
+    up: (db) => {
+      db.exec(
+        "ALTER TABLE workflow_runs ADD COLUMN worktree_pruned INTEGER NOT NULL DEFAULT 0 CHECK (worktree_pruned IN (0, 1));",
+      );
+    },
+  },
 ];
 
 // The lowest version this build can apply. A database stamped below it was

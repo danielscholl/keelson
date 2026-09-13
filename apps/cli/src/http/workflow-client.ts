@@ -113,11 +113,12 @@ export async function listPersistedWorktrees(baseUrl: string): Promise<Persisted
 export async function prunePersistedWorktree(
   baseUrl: string,
   path: string,
+  force = false,
 ): Promise<{ removed: boolean; branchDeleted: string | null; warning: string | null }> {
   const res = await fetch(url(baseUrl, "/api/workflows/worktree-prune"), {
     method: "POST",
     headers: { ...defaultHeaders(baseUrl), "content-type": "application/json" },
-    body: JSON.stringify({ path }),
+    body: JSON.stringify({ path, force }),
   });
   if (res.status === 404 || res.status === 409) {
     return { removed: false, branchDeleted: null, warning: null };

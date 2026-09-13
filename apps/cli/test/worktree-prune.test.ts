@@ -111,13 +111,19 @@ async function setupFixture(opts: { pruneStatus?: number } = {}): Promise<{
         return Response.json({ paths: persistedPaths, runs: persistedRuns });
       }
       if (pathname === "/api/workflows/worktree-prune" && req.method === "POST") {
-        const { path } = (await req.json()) as { path: string };
+        const { path, force } = (await req.json()) as { path: string; force: boolean };
         pruneRequests.push(path);
         if (opts.pruneStatus) return new Response(null, { status: opts.pruneStatus });
-        const out = await removeWorktree({ repoPath: repoRoot, dest: path, force: false });
-        const gone = out.removed
-          ? await deleteBranch({ repoPath: repoRoot, branch: "keelson/run-1" })
-          : { deleted: false, warning: null };
+        const out = await removeWorktree({ repoPath: repoRoot, dest: path, force });
+        if (force && !out.removed && path !== managedPath) {
+          rmSync(path, { recursive: true, force: true });
+          out.removed = true;
+          out.warning = null;
+        }
+        const gone =
+          out.removed && path === managedPath
+            ? await deleteBranch({ repoPath: repoRoot, branch: "keelson/run-1" })
+            : { deleted: false, warning: null };
         return Response.json({
           removed: out.removed,
           branchDeleted: gone.deleted ? "keelson/run-1" : null,

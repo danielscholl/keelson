@@ -107,6 +107,8 @@ export interface WorkflowStore {
   // Patches worktree_path after-the-fact (worktree creation is lazy, so the
   // path isn't known at createRun time when isolation is on).
   setRunWorktreePath(runId: string, worktreePath: string | null): void;
+  isRunWorktreePruned(runId: string): boolean;
+  setRunsWorktreePruned(runIds: readonly string[], pruned: boolean): string[];
   setRunWorktreeBase(runId: string, worktreeBase: string | null): void;
   setRunBrief(runId: string, brief: Brief | null): void;
   // Accumulated model-call spend for one run: `totalTokens` is fresh input +
@@ -282,9 +284,17 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     "UPDATE workflow_runs SET status = ?, completed_at = ?, error = ? WHERE id = ?",
   );
   const claimResume = db.prepare(
-    "UPDATE workflow_runs SET status = 'running', completed_at = NULL, error = NULL WHERE id = ? AND status IN ('failed', 'cancelled')",
+    "UPDATE workflow_runs SET status = 'running', completed_at = NULL, error = NULL WHERE id = ? AND status IN ('failed', 'cancelled') AND worktree_pruned = 0",
   );
   const updateWorktreePath = db.prepare("UPDATE workflow_runs SET worktree_path = ? WHERE id = ?");
+  const selectWorktreePruned = db.prepare("SELECT worktree_pruned FROM workflow_runs WHERE id = ?");
+  const updateWorktreePruned = db.prepare(
+    "UPDATE workflow_runs SET worktree_pruned = ? WHERE id = ? AND worktree_pruned != ?",
+  );
+  const setWorktreePruned = db.transaction((runIds: readonly string[], pruned: boolean) => {
+    const value = pruned ? 1 : 0;
+    return runIds.filter((runId) => updateWorktreePruned.run(value, runId, value).changes > 0);
+  });
   const updateWorktreeBase = db.prepare("UPDATE workflow_runs SET worktree_base = ? WHERE id = ?");
   const updateBrief = db.prepare("UPDATE workflow_runs SET brief_json = ? WHERE id = ?");
   const selectRun = db.prepare("SELECT * FROM workflow_runs WHERE id = ?");
@@ -370,6 +380,11 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     setRunWorktreePath(runId, worktreePath) {
       updateWorktreePath.run(worktreePath, runId);
     },
+    isRunWorktreePruned(runId) {
+      const row = selectWorktreePruned.get(runId) as { worktree_pruned: number } | null;
+      return row?.worktree_pruned === 1;
+    },
+    setRunsWorktreePruned: setWorktreePruned,
     setRunWorktreeBase(runId, worktreeBase) {
       updateWorktreeBase.run(worktreeBase, runId);
     },

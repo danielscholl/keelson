@@ -266,6 +266,87 @@ describe("worktree prune coordination", () => {
     expect(existsSync(path)).toBe(false);
   });
 
+  test.each([false, true])(
+    "a recreated path cannot revive a pruned run (force=%s)",
+    async (force) => {
+      const rig = await setup(force ? "running" : "failed");
+      if (force) writeFileSync(join(rig.path, "uncommitted.txt"), "discard explicitly\n");
+      const response = await rig.prune({ path: rig.path, force });
+      expect(response.status).toBe(200);
+      expect((await response.json()).removed).toBe(true);
+      expect(rig.store.isRunWorktreePruned("prune-run")).toBe(true);
+
+      await worktrees.createWorktree({ repoPath: repoDir, branch: rig.branch, dest: rig.path });
+      rig.addRun("replacement-run", "running");
+      rig.store.updateRunStatus({
+        runId: "prune-run",
+        status: "failed",
+        completedAt: new Date().toISOString(),
+        error: null,
+      });
+      expect((await rig.resume()).status).toBe(409);
+      expect(rig.controller.resumeRun("prune-run")).toMatchObject({
+        ok: false,
+        message: expect.stringContaining("was pruned"),
+      });
+      expect(rig.store.claimRunForResume("prune-run")).toBe(false);
+      expect(existsSync(rig.path)).toBe(true);
+    },
+  );
+
+  test("an interrupted deletion keeps its durable marker and releases the path guard", async () => {
+    const rig = await setup();
+    const removal = spyOn(worktrees, "removeWorktree").mockImplementation(async () => {
+      expect(rig.store.isRunWorktreePruned("prune-run")).toBe(true);
+      throw new Error("interrupted removal");
+    });
+    try {
+      expect((await rig.prune()).status).toBe(500);
+      expect(rig.store.isRunWorktreePruned("prune-run")).toBe(true);
+      expect((await rig.resume()).status).toBe(409);
+    } finally {
+      removal.mockRestore();
+    }
+    expect((await rig.prune()).status).toBe(200);
+    expect(existsSync(rig.path)).toBe(false);
+  });
+
+  test("a failed prune of a replacement does not restore the old run's identity", async () => {
+    const rig = await setup();
+    expect((await rig.prune()).status).toBe(200);
+    await worktrees.createWorktree({ repoPath: repoDir, branch: rig.branch, dest: rig.path });
+    rig.addRun("replacement-run", "failed");
+    writeFileSync(join(rig.path, "uncommitted.txt"), "keep replacement work\n");
+
+    const response = await rig.prune();
+    expect((await response.json()).removed).toBe(false);
+    expect(rig.store.isRunWorktreePruned("prune-run")).toBe(true);
+    expect(rig.store.isRunWorktreePruned("replacement-run")).toBe(false);
+    expect(rig.store.claimRunForResume("prune-run")).toBe(false);
+  });
+
+  test.each([false, true])(
+    "forced orphan cleanup persists identity (stalePointer=%s)",
+    async (stalePointer) => {
+      const rig = await setup("running");
+      await worktrees.removeWorktree({ repoPath: repoDir, dest: rig.path });
+      mkdirSync(rig.path);
+      if (stalePointer) {
+        writeFileSync(
+          join(rig.path, ".git"),
+          `gitdir: ${join(tmpDir, "missing", ".git", "worktrees", "old")}\n`,
+        );
+      }
+      writeFileSync(join(rig.path, "work.txt"), "in flight\n");
+      expect((await rig.prune()).status).toBe(409);
+      const response = await rig.prune({ path: rig.path, force: true });
+      expect(response.status).toBe(200);
+      expect((await response.json()).removed).toBe(true);
+      expect(existsSync(rig.path)).toBe(false);
+      expect(rig.store.isRunWorktreePruned("prune-run")).toBe(true);
+    },
+  );
+
   test("refuses prune if resume claimed a run after the status feed was read", async () => {
     const rig = await setup();
     const feed = await rig.app.request("/api/workflows/worktree-paths");
@@ -337,6 +418,7 @@ describe("worktree prune coordination", () => {
       warning: expect.stringContaining("git worktree remove failed"),
     });
     expect(readFileSync(dirtyFile, "utf8")).toBe("uncommitted edits\n");
+    expect(rig.store.isRunWorktreePruned("prune-run")).toBe(false);
     expect((await gitText(["branch", "--list", rig.branch], repoDir)).trim()).not.toBe("");
     await git(["checkout", "--", "README.md"], rig.path);
     expect((await rig.prune()).status).toBe(200);
@@ -433,6 +515,8 @@ describe("worktree prune coordination", () => {
   test("does not remove user-managed worktrees", async () => {
     const rig = await setup("failed", "feature/keep");
     expect((await rig.prune()).status).toBe(409);
+    expect((await rig.prune({ path: rig.path, force: true })).status).toBe(409);
+    expect(rig.store.isRunWorktreePruned("prune-run")).toBe(false);
     expect(existsSync(rig.path)).toBe(true);
   });
 

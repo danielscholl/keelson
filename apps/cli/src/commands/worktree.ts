@@ -245,24 +245,22 @@ export async function runWorktreePrune(opts: WorktreePruneOptions): Promise<neve
     if (c.reason === "tracked" && !isManaged) {
       continue;
     }
-    if (!opts.force) {
-      if (c.runStatus !== null) {
-        if (!isFinishedRun(c.runStatus)) continue;
-        try {
-          const out = await prunePersistedWorktree(baseUrl, c.path);
-          if (out.removed) result.removed.push(c.path);
-          if (out.branchDeleted !== null) result.branchesDeleted.push(out.branchDeleted);
-          if (out.warning !== null) result.failed.push({ path: c.path, error: out.warning });
-        } catch (err) {
-          result.failed.push({
-            path: c.path,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-        continue;
+    if (c.runStatus !== null) {
+      if (!opts.force && !isFinishedRun(c.runStatus)) continue;
+      try {
+        const out = await prunePersistedWorktree(baseUrl, c.path, opts.force);
+        if (out.removed) result.removed.push(c.path);
+        if (out.branchDeleted !== null) result.branchesDeleted.push(out.branchDeleted);
+        if (out.warning !== null) result.failed.push({ path: c.path, error: out.warning });
+      } catch (err) {
+        result.failed.push({
+          path: c.path,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-      if (c.reason === "tracked") continue;
+      continue;
     }
+    if (!opts.force && c.reason === "tracked") continue;
     if (c.reason === "tracked" && c.repoPath !== null) {
       const out = await removeWorktree({
         repoPath: c.repoPath,

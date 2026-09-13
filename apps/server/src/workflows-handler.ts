@@ -1226,6 +1226,13 @@ function resumeRunCore(
   if (!run) {
     return { ok: false, reason: "not_found", message: `unknown run '${runId}'` };
   }
+  if (store.isRunWorktreePruned(runId)) {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run '${runId}' worktree was pruned and cannot be resumed`,
+    };
+  }
   if (
     run.worktreePath !== null &&
     (worktreeOperations.get(store)?.has(worktreePathKey(run.worktreePath)) ||
@@ -2117,16 +2124,20 @@ export function workflowsRoutes(
   app.post("/api/workflows/worktree-prune", async (c) => {
     if (originForbidden(c)) return c.json({ error: "forbidden origin" }, 403);
     const parsed = z
-      .object({ path: z.string().refine(isAbsolute) })
+      .object({ path: z.string().refine(isAbsolute), force: z.boolean().default(false) })
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "invalid worktree path" }, 400);
+    const force = parsed.data.force;
     const key = worktreePathKey(parsed.data.path);
     const runs = store.listWorktreeRuns().filter((run) => worktreePathKey(run.path) === key);
     if (runs.length === 0) return c.json({ error: "unknown worktree" }, 404);
     const operations = worktreeOperationsFor(store);
     if (
       operations.has(key) ||
-      runs.some((run) => !TERMINAL_RUN_STATUSES.includes(run.status) || activeRuns.get(run.runId))
+      (!force &&
+        runs.some(
+          (run) => !TERMINAL_RUN_STATUSES.includes(run.status) || activeRuns.get(run.runId),
+        ))
     ) {
       return c.json({ error: "worktree is still in use" }, 409);
     }
@@ -2136,22 +2147,48 @@ export function workflowsRoutes(
     try {
       const path = runs[0]!.path;
       const repoPath = repoPathFromWorktree(path);
-      if (repoPath === null) return c.json({ error: "worktree repository unavailable" }, 409);
-      const listing = await listWorktreesWithStatus(repoPath);
-      if (listing.error !== null) {
+      if (repoPath === null && !force) {
+        return c.json({ error: "worktree repository unavailable" }, 409);
+      }
+      const listing =
+        repoPath === null
+          ? { worktrees: [], error: null }
+          : await listWorktreesWithStatus(repoPath);
+      if (listing.error !== null && !force) {
         return c.json({ removed: false, branchDeleted: null, warning: listing.error });
       }
       const entry = listing.worktrees.find((entry) => worktreePathKey(entry.path) === key);
-      if (!entry || (entry.branch !== null && !entry.branch.startsWith("keelson/"))) {
+      if ((!entry && !force) || (entry?.branch != null && !entry.branch.startsWith("keelson/"))) {
         return c.json({ error: "not a managed worktree" }, 409);
       }
-      const out = await removeWorktree({ repoPath, dest: path, force: false });
+      // Persist before deletion so a crash cannot let a recreated path revive an old run.
+      const marked = store.setRunsWorktreePruned(
+        runs.map((run) => run.runId),
+        true,
+      );
+      const out =
+        repoPath !== null && entry
+          ? await removeWorktree({ repoPath, dest: path, force })
+          : { removed: false, warning: listing.error };
+      if (!out.removed && force) {
+        try {
+          await rm(path, { recursive: true, force: true });
+          out.removed = true;
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
+          out.warning = [out.warning, `worktree removal failed: ${detail}`]
+            .filter(Boolean)
+            .join("; ");
+        }
+      } else if (!out.removed && existsSync(path)) {
+        store.setRunsWorktreePruned(marked, false);
+      }
       let branchDeleted: string | null = null;
       let warning = out.warning;
-      if (out.removed && entry.branch?.startsWith("keelson/")) {
+      if (out.removed && repoPath !== null && entry?.branch?.startsWith("keelson/")) {
         const gone = await deleteBranch({ repoPath, branch: entry.branch });
         if (gone.deleted) branchDeleted = entry.branch;
-        warning = gone.warning;
+        warning = [warning, gone.warning].filter(Boolean).join("; ") || null;
       }
       return c.json({ removed: out.removed, branchDeleted, warning });
     } finally {
