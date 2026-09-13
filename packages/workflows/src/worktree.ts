@@ -524,6 +524,7 @@ export interface RemoveWorktreeOptions {
   dest: string;
   /** When true, pass --force so an uncommitted-changes worktree is removed too. */
   force?: boolean;
+  removeMissing?: boolean;
 }
 
 export interface RemoveWorktreeResult {
@@ -539,7 +540,7 @@ export interface RemoveWorktreeResult {
  * Returns `removed: false` when the worktree didn't exist (idempotent).
  */
 export async function removeWorktree(opts: RemoveWorktreeOptions): Promise<RemoveWorktreeResult> {
-  if (!existsSync(opts.dest)) {
+  if (!opts.removeMissing && !existsSync(opts.dest)) {
     return { removed: false, warning: null };
   }
   const args = opts.force
@@ -553,6 +554,38 @@ export async function removeWorktree(opts: RemoveWorktreeOptions): Promise<Remov
     };
   }
   return { removed: true, warning: null };
+}
+
+export interface DeleteBranchResult {
+  deleted: boolean;
+  warning: string | null;
+}
+
+export async function deleteBranch(opts: {
+  repoPath: string;
+  branch: string;
+}): Promise<DeleteBranchResult> {
+  const exists = await runGit(
+    ["show-ref", "--verify", "--quiet", `refs/heads/${opts.branch}`],
+    opts.repoPath,
+  );
+  if (exists.exitCode === 1) {
+    return { deleted: false, warning: null };
+  }
+  if (exists.exitCode !== 0) {
+    return {
+      deleted: false,
+      warning: `git show-ref failed (exit ${exists.exitCode}): ${exists.stderr.trim() || exists.stdout.trim()}`,
+    };
+  }
+  const result = await runGit(["branch", "-D", opts.branch], opts.repoPath);
+  if (result.exitCode !== 0) {
+    return {
+      deleted: false,
+      warning: `git branch -D ${opts.branch} failed: ${result.stderr.trim() || result.stdout.trim()}`,
+    };
+  }
+  return { deleted: true, warning: null };
 }
 
 /**

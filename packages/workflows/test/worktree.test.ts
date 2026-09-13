@@ -14,6 +14,7 @@ import { basename, join } from "node:path";
 import {
   canonicalPath,
   createWorktree,
+  deleteBranch,
   ensureWorktreeDeps,
   fetchOrigin,
   gitToplevel,
@@ -574,6 +575,51 @@ describe("ensureWorktreeDeps", () => {
     expect(result.installed).toBe(false);
     expect(result.skipped).toBe("no-lockfile");
     expect(result.error).toBeNull();
+  });
+});
+
+describe("deleteBranch", () => {
+  test("warns with details when the repository is invalid", async () => {
+    writeFileSync(join(tmp, ".git"), "gitdir: ./missing.git\n");
+
+    const result = await deleteBranch({ repoPath: tmp, branch: "keelson/test/feature" });
+    expect(result.deleted).toBe(false);
+    expect(result.warning).toContain("git show-ref failed (exit 128)");
+    expect(result.warning).toContain("not a git repository");
+  });
+
+  test("warns with details when the working directory does not exist", async () => {
+    const result = await deleteBranch({
+      repoPath: join(tmp, "does-not-exist", "sub"),
+      branch: "keelson/test/feature",
+    });
+    expect(result.deleted).toBe(false);
+    expect(result.warning).toMatch(/git show-ref failed \(exit 127\): .+/);
+  });
+
+  test("deletes a branch once its worktree is gone, then reports idempotently", async () => {
+    await initRepo(tmp);
+    const dest = join(tmp, ".wt", "feature");
+    await createWorktree({ repoPath: tmp, branch: "keelson/test/feature", dest });
+    await removeWorktree({ repoPath: tmp, dest });
+
+    const first = await deleteBranch({ repoPath: tmp, branch: "keelson/test/feature" });
+    expect(first).toEqual({ deleted: true, warning: null });
+    expect((await gitText(["branch", "--list", "keelson/test/feature"], tmp)).trim()).toBe("");
+
+    const again = await deleteBranch({ repoPath: tmp, branch: "keelson/test/feature" });
+    expect(again).toEqual({ deleted: false, warning: null });
+  });
+
+  test("warns instead of deleting a branch that a worktree still has checked out", async () => {
+    await initRepo(tmp);
+    const dest = join(tmp, ".wt", "feature");
+    await createWorktree({ repoPath: tmp, branch: "keelson/test/feature", dest });
+
+    const result = await deleteBranch({ repoPath: tmp, branch: "keelson/test/feature" });
+    expect(result.deleted).toBe(false);
+    expect(result.warning).toContain("git branch -D keelson/test/feature failed");
+    expect(existsSync(dest)).toBe(true);
   });
 });
 

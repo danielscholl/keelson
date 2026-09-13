@@ -30,7 +30,7 @@ describe("migrations", () => {
         version: number;
       }>
     ).map((r) => r.version);
-    expect(versions).toEqual([12, 13]);
+    expect(versions).toEqual([12, 13, 14]);
 
     expect(tableNames(db)).toContain("conversations");
     expect(tableNames(db)).toContain("memories");
@@ -56,7 +56,7 @@ describe("migrations", () => {
     const columns = db.query("PRAGMA table_info(workflow_runs)").all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toContain("provider_override");
     expect(db.query("SELECT MAX(version) AS v FROM schema_version").get() as { v: number }).toEqual(
-      { v: 13 },
+      { v: 14 },
     );
     db.close();
   });
@@ -83,7 +83,23 @@ describe("migrations", () => {
 
     expect(tableNames(db)).toEqual(before);
     expect(db.query("SELECT count(*) AS c FROM schema_version").get() as { c: number }).toEqual({
-      c: 2,
+      c: 3,
+    });
+    db.close();
+  });
+
+  test("upgrades existing runs without marking them as pruned", () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+      INSERT INTO schema_version VALUES (13);
+      CREATE TABLE workflow_runs (id TEXT PRIMARY KEY);
+      INSERT INTO workflow_runs VALUES ('existing-run');
+    `);
+    runMigrations(db);
+    expect(db.query("SELECT id, worktree_pruned FROM workflow_runs").get()).toEqual({
+      id: "existing-run",
+      worktree_pruned: 0,
     });
     db.close();
   });

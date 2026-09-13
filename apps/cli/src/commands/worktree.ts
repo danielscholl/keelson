@@ -5,11 +5,21 @@
 import { existsSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-import type { Project } from "@keelson/shared";
-import { isGitRepo, listWorktrees, removeWorktree, repoPathFromWorktree } from "@keelson/workflows";
+import { type Project, TERMINAL_RUN_STATUSES } from "@keelson/shared";
+import {
+  deleteBranch,
+  isGitRepo,
+  listWorktrees,
+  removeWorktree,
+  repoPathFromWorktree,
+} from "@keelson/workflows";
 import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { listProjects } from "../http/projects-client.ts";
-import { isServerDownError, listPersistedWorktreePaths } from "../http/workflow-client.ts";
+import {
+  isServerDownError,
+  listPersistedWorktrees,
+  prunePersistedWorktree,
+} from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
 import { defaultServerBaseUrl } from "../server-probe.ts";
 
@@ -42,12 +52,21 @@ interface PruneCandidate {
   branch: string | null;
   repoPath: string | null;
   reason: "tracked" | "orphan-no-repo" | "orphan-stale-record";
+  // Status of the run that owns this worktree, from the server's run table.
+  // null when the server is down or no run recorded the path.
+  runStatus: string | null;
+  recorded: boolean;
 }
 
 interface PruneResult {
   removed: string[];
+  branchesDeleted: string[];
   failed: { path: string; error: string }[];
   inspected: number;
+}
+
+function isFinishedRun(status: string | null): boolean {
+  return status !== null && (TERMINAL_RUN_STATUSES as readonly string[]).includes(status);
 }
 
 async function buildLiveByPath(repoPath: string): Promise<Map<string, string | null>> {
@@ -64,8 +83,10 @@ async function classifyWorktreeDir(args: {
   projectName: string;
   projectRepoPath: string | null;
   liveByPath: Map<string, string | null>;
+  runStatus: string | null;
+  recorded: boolean;
 }): Promise<PruneCandidate | null> {
-  const { path, projectName, projectRepoPath, liveByPath } = args;
+  const { path, projectName, projectRepoPath, liveByPath, runStatus, recorded } = args;
   try {
     if (!statSync(path).isDirectory()) return null;
   } catch {
@@ -98,6 +119,8 @@ async function classifyWorktreeDir(args: {
     projectName,
     branch: branch ?? null,
     repoPath: effectiveRepoPath,
+    runStatus,
+    recorded,
     reason:
       effectiveRepoPath === null
         ? "orphan-no-repo"
@@ -131,11 +154,28 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
     return true;
   };
 
-  // Repo-local placement is `<project.rootPath>/.worktrees/<leaf>/`. This
-  // directory lives *inside the user's repo*, so we must not enqueue plain
-  // user directories the operator dropped there. Only consider entries that
-  // are genuine worktrees: either git lists them as live, or their `.git`
-  // pointer resolves to a repo. Anything else is left alone.
+  // Deleted projects leave FK-NULLed runs with retained paths, invisible to project scans.
+  let persistedPaths: string[] = [];
+  const cleanupPaths = new Set<string>();
+  const statusByPath = new Map<string, string>();
+  try {
+    const persisted = await listPersistedWorktrees(baseUrl);
+    persistedPaths = persisted.paths;
+    for (const path of persisted.cleanupPaths) cleanupPaths.add(canonicalForCompare(path));
+    for (const [path, status] of persisted.statusByPath) {
+      const key = canonicalForCompare(path);
+      const prior = statusByPath.get(key);
+      if (prior !== undefined && !isFinishedRun(prior)) continue;
+      statusByPath.set(key, status);
+    }
+  } catch (err) {
+    if (!isServerDownError(err)) throw err;
+  }
+  const runStatusFor = (path: string): string | null =>
+    statusByPath.get(canonicalForCompare(path)) ?? null;
+  const recordedPaths = new Set(persistedPaths.map(canonicalForCompare));
+
+  // Repo-local user directories are not managed unless Git or a persisted run identifies them.
   for (const project of projects) {
     const repoLocalRoot = join(project.rootPath, ".worktrees");
     if (!existsSync(repoLocalRoot)) continue;
@@ -145,34 +185,42 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
       if (!recordPath(path)) continue;
       const isLive = liveByPath.has(canonicalForCompare(path));
       const recovered = repoPathFromWorktree(path);
-      if (!isLive && recovered === null) continue;
+      if (!isLive && recovered === null && !recordedPaths.has(canonicalForCompare(path))) continue;
       const c = await classifyWorktreeDir({
         path,
         projectName: project.name,
         projectRepoPath: project.rootPath,
         liveByPath,
+        runStatus: runStatusFor(path),
+        recorded: recordedPaths.has(canonicalForCompare(path)),
       });
       if (c !== null) candidates.push(c);
     }
   }
 
-  // Persisted worktree paths from workflow_runs. Catches worktrees whose
-  // project row has been deleted (FK NULLed, path retained) — those dirs
-  // are otherwise invisible to the project-scoped scans above.
-  let orphanPaths: string[] = [];
-  try {
-    orphanPaths = await listPersistedWorktreePaths(baseUrl);
-  } catch (err) {
-    if (!isServerDownError(err)) throw err;
-  }
-  for (const path of orphanPaths) {
-    if (!existsSync(path)) continue;
+  for (const path of persistedPaths) {
     if (!recordPath(path)) continue;
+    if (!existsSync(path)) {
+      if (cleanupPaths.has(canonicalForCompare(path))) {
+        candidates.push({
+          path,
+          projectName: basename(dirname(path)),
+          branch: null,
+          repoPath: null,
+          runStatus: runStatusFor(path),
+          recorded: true,
+          reason: "tracked",
+        });
+      }
+      continue;
+    }
     const c = await classifyWorktreeDir({
       path,
       projectName: basename(dirname(path)),
       projectRepoPath: null,
       liveByPath: new Map(),
+      runStatus: runStatusFor(path),
+      recorded: true,
     });
     if (c !== null) candidates.push(c);
   }
@@ -196,7 +244,12 @@ export async function runWorktreePrune(opts: WorktreePruneOptions): Promise<neve
     process.exit(EXIT_OK);
   }
 
-  const result: PruneResult = { removed: [], failed: [], inspected: candidates.length };
+  const result: PruneResult = {
+    removed: [],
+    branchesDeleted: [],
+    failed: [],
+    inspected: candidates.length,
+  };
   for (const c of candidates) {
     // Worktrees on `keelson/...` branches are ones the executor created. They
     // can be safely removed even when git still tracks them — failed/cancelled
@@ -209,23 +262,35 @@ export async function runWorktreePrune(opts: WorktreePruneOptions): Promise<neve
     if (c.reason === "tracked" && !isManaged) {
       continue;
     }
-    if (c.reason === "tracked" && !opts.force) {
-      // Default behavior: don't touch tracked entries — `--force` is the
-      // operator saying "yes, even live worktrees" (a live run's worktree
-      // would still be a tracked managed entry until the run terminates).
+    if (c.recorded) {
+      if (!opts.force && c.runStatus !== null && !isFinishedRun(c.runStatus)) continue;
+      try {
+        const out = await prunePersistedWorktree(baseUrl, c.path, opts.force);
+        if (out.removed) result.removed.push(c.path);
+        if (out.branchDeleted !== null) result.branchesDeleted.push(out.branchDeleted);
+        if (out.warning !== null) result.failed.push({ path: c.path, error: out.warning });
+      } catch (err) {
+        result.failed.push({
+          path: c.path,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
       continue;
     }
+    if (!opts.force && c.reason === "tracked") continue;
     if (c.reason === "tracked" && c.repoPath !== null) {
       const out = await removeWorktree({
         repoPath: c.repoPath,
         dest: c.path,
-        // Tracked managed entries need --force at the git layer too: the
-        // executor left the branch's worktree intact, and `git worktree
-        // remove` refuses on tracked entries unless forced.
-        force: true,
+        force: opts.force,
       });
       if (out.removed) {
         result.removed.push(c.path);
+        if (c.branch?.startsWith("keelson/")) {
+          const gone = await deleteBranch({ repoPath: c.repoPath, branch: c.branch });
+          if (gone.deleted) result.branchesDeleted.push(c.branch);
+          if (gone.warning !== null) result.failed.push({ path: c.path, error: gone.warning });
+        }
         continue;
       }
       if (out.warning !== null) {
