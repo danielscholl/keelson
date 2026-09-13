@@ -484,6 +484,80 @@ describe("keelson worktree prune", () => {
     }
   });
 
+  test.each(["running", "paused"] as const)(
+    "preserves %s run directories with missing Git metadata unless forced",
+    async (status) => {
+      const fixture = await setupFixture();
+      const noRepoPath = join(fixture.sandbox, "no-repo");
+      try {
+        mkdirSync(noRepoPath);
+        writeFileSync(join(noRepoPath, "uncommitted.txt"), "keep\n");
+        fixture.persistedPaths.push(noRepoPath);
+        fixture.persistedRuns.push(
+          { path: fixture.orphanPath, status },
+          { path: `${fixture.orphanPath}/../orphan`, status: "cancelled" },
+          { path: noRepoPath, status },
+        );
+
+        const plain = await runCli(["--json", "worktree", "prune", "--base-url", fixture.baseUrl]);
+        expect(plain.exitCode).toBe(0);
+        expect(JSON.parse(plain.stdout).data.removed).toEqual([]);
+        expect(fixture.pruneRequests).toEqual([]);
+        expect(existsSync(fixture.orphanPath)).toBe(true);
+        expect(readFileSync(join(noRepoPath, "uncommitted.txt"), "utf8")).toBe("keep\n");
+
+        const forced = await runCli([
+          "--json",
+          "worktree",
+          "prune",
+          "--force",
+          "--base-url",
+          fixture.baseUrl,
+        ]);
+        expect(forced.exitCode).toBe(0);
+        expect(existsSync(fixture.orphanPath)).toBe(false);
+        expect(existsSync(noRepoPath)).toBe(false);
+      } finally {
+        cleanupFixture(fixture);
+      }
+    },
+  );
+
+  test("does not locally delete a recorded orphan when server coordination refuses", async () => {
+    const fixture = await setupFixture({ pruneStatus: 409 });
+    try {
+      fixture.persistedRuns.push({ path: fixture.orphanPath, status: "failed" });
+      const out = await runCli(["--json", "worktree", "prune", "--base-url", fixture.baseUrl]);
+      expect(out.exitCode).toBe(0);
+      expect(fixture.pruneRequests).toEqual([fixture.orphanPath]);
+      expect(JSON.parse(out.stdout).data.removed).toEqual([]);
+      expect(existsSync(fixture.orphanPath)).toBe(true);
+    } finally {
+      cleanupFixture(fixture);
+    }
+  });
+
+  test.each([false, true])("server-down discovery removes nothing (force=%s)", async (force) => {
+    const fixture = await setupFixture();
+    try {
+      fixture.server.stop(true);
+      const out = await runCli([
+        "--json",
+        "worktree",
+        "prune",
+        ...(force ? ["--force"] : []),
+        "--base-url",
+        fixture.baseUrl,
+      ]);
+      expect(out.exitCode).toBe(0);
+      expect(JSON.parse(out.stdout).data).toMatchObject({ inspected: 0, removed: [] });
+      expect(existsSync(fixture.managedPath)).toBe(true);
+      expect(existsSync(fixture.orphanPath)).toBe(true);
+    } finally {
+      cleanupFixture(fixture);
+    }
+  });
+
   test.each([404, 409, 503])(
     "does not fall back to local deletion when server prune returns %s",
     async (pruneStatus) => {

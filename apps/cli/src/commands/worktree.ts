@@ -158,7 +158,10 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
     const persisted = await listPersistedWorktrees(baseUrl);
     persistedPaths = persisted.paths;
     for (const [path, status] of persisted.statusByPath) {
-      statusByPath.set(canonicalForCompare(path), status);
+      const key = canonicalForCompare(path);
+      const prior = statusByPath.get(key);
+      if (prior !== undefined && !isFinishedRun(prior)) continue;
+      statusByPath.set(key, status);
     }
   } catch (err) {
     if (!isServerDownError(err)) throw err;
@@ -242,14 +245,9 @@ export async function runWorktreePrune(opts: WorktreePruneOptions): Promise<neve
     if (c.reason === "tracked" && !isManaged) {
       continue;
     }
-    if (c.reason === "tracked" && !opts.force && !isFinishedRun(c.runStatus)) {
-      // A tracked entry whose run is still live (or whose status is unknown
-      // because the server was down) stays put — `--force` is the operator
-      // saying "yes, even live worktrees".
-      continue;
-    }
-    if (c.reason === "tracked" && c.repoPath !== null) {
-      if (!opts.force) {
+    if (!opts.force) {
+      if (c.runStatus !== null) {
+        if (!isFinishedRun(c.runStatus)) continue;
         try {
           const out = await prunePersistedWorktree(baseUrl, c.path);
           if (out.removed) result.removed.push(c.path);
@@ -263,6 +261,9 @@ export async function runWorktreePrune(opts: WorktreePruneOptions): Promise<neve
         }
         continue;
       }
+      if (c.reason === "tracked") continue;
+    }
+    if (c.reason === "tracked" && c.repoPath !== null) {
       const out = await removeWorktree({
         repoPath: c.repoPath,
         dest: c.path,

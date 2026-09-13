@@ -126,9 +126,12 @@ is finished, `keelson worktree prune` removes the worktree and its `keelson/…`
 branch (`--dry-run` lists candidates; `--force` also removes live runs' worktrees
 and ones with uncommitted changes). The server checks that no run is using the
 worktree and blocks resume during removal. New runs targeting the same path wait
-until pruning finishes before preparing their checkout. If the server is unavailable or too
-old to coordinate pruning, tracked worktrees stay put without `--force`. A run
-whose worktree has been removed cannot be resumed. [Directories](../../reference/directories/)
+until pruning finishes before preparing their checkout. Candidate discovery needs
+a running server, even with `--force`; an unavailable server means nothing is
+discovered or removed. An older server without prune coordination leaves tracked
+worktrees alone without `--force`. Recorded worktrees with broken Git metadata
+also require `--force`. A run whose worktree has been removed cannot be resumed.
+[Directories](../../reference/directories/)
 maps where they live.
 
 <Aside type="note" title="Isolation is not a sandbox">

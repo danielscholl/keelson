@@ -698,7 +698,7 @@ export function buildProgram(): Command {
   worktree
     .command("prune")
     .description(
-      "remove worktrees left under <project>/.worktrees/ by finished (succeeded, failed, cancelled) runs",
+      "remove worktrees left under <project>/.worktrees/ by finished runs (discovery requires a running server)",
     )
     .option("--dry-run", "list candidates without removing anything", false)
     .option("--force", "also remove worktrees of live runs and dirty directories", false)
