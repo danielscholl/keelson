@@ -560,12 +560,6 @@ export interface DeleteBranchResult {
   warning: string | null;
 }
 
-/**
- * Delete a local branch after its worktree is gone. `git worktree remove`
- * leaves the branch behind, so a pruned run would otherwise still show up in
- * `git branch`. Returns `deleted: false` (no warning) when the branch does not
- * exist, so callers can treat it as idempotent.
- */
 export async function deleteBranch(opts: {
   repoPath: string;
   branch: string;

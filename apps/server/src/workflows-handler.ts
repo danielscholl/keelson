@@ -69,7 +69,7 @@ import {
   gitToplevel,
   headDivergesFrom,
   isGitRepo,
-  listWorktrees,
+  listWorktreesWithStatus,
   type MemoryTools,
   makeApprovalHandler,
   makeCancelHandler,
@@ -2134,9 +2134,11 @@ export function workflowsRoutes(
       const path = runs[0]!.path;
       const repoPath = repoPathFromWorktree(path);
       if (repoPath === null) return c.json({ error: "worktree repository unavailable" }, 409);
-      const entry = (await listWorktrees(repoPath)).find(
-        (entry) => worktreePathKey(entry.path) === key,
-      );
+      const listing = await listWorktreesWithStatus(repoPath);
+      if (listing.error !== null) {
+        return c.json({ removed: false, branchDeleted: null, warning: listing.error });
+      }
+      const entry = listing.worktrees.find((entry) => worktreePathKey(entry.path) === key);
       if (!entry || (entry.branch !== null && !entry.branch.startsWith("keelson/"))) {
         return c.json({ error: "not a managed worktree" }, 409);
       }

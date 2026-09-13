@@ -221,7 +221,7 @@ describe("worktree prune coordination", () => {
     },
   );
 
-  test.each(["pending", "running", "paused"] as const)(
+  test.each(["running", "paused"] as const)(
     "protects a shared worktree with a %s run",
     async (status) => {
       const rig = await setup();
@@ -230,6 +230,37 @@ describe("worktree prune coordination", () => {
       expect(existsSync(rig.path)).toBe(true);
     },
   );
+
+  test("stale persisted paths do not prevent pruning another worktree", async () => {
+    const rig = await setup();
+    rig.addRun("stale-run", "failed", join(repoDir, ".worktrees", "missing", "nested"));
+
+    const response = await rig.prune();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      removed: true,
+      branchDeleted: rig.branch,
+      warning: null,
+    });
+    expect(existsSync(rig.path)).toBe(false);
+    expect((await rig.prune()).status).toBe(409);
+    expect((await rig.prune({ path: join(repoDir, ".worktrees", "unknown") })).status).toBe(404);
+  });
+
+  test("prunes a second worktree while retaining the first run's removed path", async () => {
+    const rig = await setup();
+    const path = join(repoDir, ".worktrees", "second");
+    const branch = "keelson/prune-second";
+    await worktrees.createWorktree({ repoPath: repoDir, branch, dest: path });
+    rig.addRun("second-run", "cancelled", path);
+
+    expect((await rig.prune()).status).toBe(200);
+    expect(rig.store.getRun("prune-run")?.worktreePath).toBe(rig.path);
+    const response = await rig.prune({ path });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ removed: true, branchDeleted: branch, warning: null });
+    expect(existsSync(path)).toBe(false);
+  });
 
   test("refuses prune if resume claimed a run after the status feed was read", async () => {
     const rig = await setup();
@@ -244,12 +275,14 @@ describe("worktree prune coordination", () => {
     const rig = await setup();
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
-    const original = worktrees.listWorktrees;
-    const listing = spyOn(worktrees, "listWorktrees").mockImplementation(async (repoPath) => {
-      entered.resolve();
-      await release.promise;
-      return original(repoPath);
-    });
+    const original = worktrees.listWorktreesWithStatus;
+    const listing = spyOn(worktrees, "listWorktreesWithStatus").mockImplementation(
+      async (repoPath) => {
+        entered.resolve();
+        await release.promise;
+        return original(repoPath);
+      },
+    );
     const pending = rig.prune();
     try {
       await entered.promise;
@@ -265,6 +298,26 @@ describe("worktree prune coordination", () => {
       await pending;
       listing.mockRestore();
     }
+    expect(existsSync(rig.path)).toBe(false);
+  });
+
+  test("reports Git listing errors and releases the prune claim", async () => {
+    const rig = await setup();
+    const warning = "git worktree list failed (exit 128): repository unavailable";
+    const listing = spyOn(worktrees, "listWorktreesWithStatus").mockResolvedValue({
+      worktrees: [],
+      error: warning,
+    });
+    try {
+      const response = await rig.prune();
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ removed: false, branchDeleted: null, warning });
+      expect(existsSync(rig.path)).toBe(true);
+      expect((await gitText(["branch", "--list", rig.branch], repoDir)).trim()).not.toBe("");
+    } finally {
+      listing.mockRestore();
+    }
+    expect((await rig.prune()).status).toBe(200);
     expect(existsSync(rig.path)).toBe(false);
   });
 
