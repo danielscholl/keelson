@@ -125,7 +125,8 @@ A failed or cancelled run keeps its worktree so you can inspect it. Once the run
 is finished, `keelson worktree prune` removes the worktree and its `keelson/…`
 branch (`--dry-run` lists candidates; `--force` also removes live runs' worktrees
 and ones with uncommitted changes). The server checks that no run is using the
-worktree and blocks resume during removal. If the server is unavailable or too
+worktree and blocks resume during removal. New runs targeting the same path wait
+until pruning finishes before preparing their checkout. If the server is unavailable or too
 old to coordinate pruning, tracked worktrees stay put without `--force`. A run
 whose worktree has been removed cannot be resumed. [Directories](../../reference/directories/)
 maps where they live.

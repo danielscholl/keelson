@@ -159,19 +159,23 @@ function makeRig(opts: { includeWorkspaceManager?: boolean; projectRootPath?: st
   const subscribers = createWorkflowSubscribers();
   workflowsRoutes(app, options, activeRuns, subscribers);
   const controller = createWorkflowController(options, activeRuns, subscribers);
-  return { app, store, conversationStore, controller, projectId: project.id };
+  return { app, store, conversationStore, controller, workspaceManager, projectId: project.id };
 }
 
 describe("worktree prune coordination", () => {
-  async function setup(status: WorkflowRunStatus = "failed", branch = "keelson/prune-test") {
+  async function setup(
+    status: WorkflowRunStatus = "failed",
+    branch = "keelson/prune-test",
+    includeWorkspaceManager = true,
+  ) {
     await initRepo(repoDir);
     writeWorkflow(
       "prune-test.yaml",
-      "name: prune-test\ndescription: test prune coordination\nnodes:\n  - id: work\n    bash: exit 1\n",
+      "name: prune-test\ndescription: test prune coordination\nworktree:\n  enabled: true\n  branch: keelson/prune-test\nnodes:\n  - id: work\n    bash: exit 1\n",
     );
     const path = join(repoDir, ".worktrees", "prune-test");
     await worktrees.createWorktree({ repoPath: repoDir, branch, dest: path });
-    const rig = makeRig();
+    const rig = makeRig({ includeWorkspaceManager });
     function addRun(runId: string, runStatus: WorkflowRunStatus, worktreePath = path) {
       rig.store.createRun({
         runId,
@@ -337,6 +341,93 @@ describe("worktree prune coordination", () => {
     await git(["checkout", "--", "README.md"], rig.path);
     expect((await rig.prune()).status).toBe(200);
     expect(existsSync(rig.path)).toBe(false);
+  });
+
+  test.each([true, false])(
+    "new fixed-branch runs wait for pruning before preparing their worktree (manager=%s)",
+    async (includeWorkspaceManager) => {
+      const rig = await setup("failed", "keelson/prune-test", includeWorkspaceManager);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const atSetup = Promise.withResolvers<void>();
+      const original = worktrees.listWorktreesWithStatus;
+      const listing = spyOn(worktrees, "listWorktreesWithStatus").mockImplementation(
+        async (repoPath) => {
+          entered.resolve();
+          await release.promise;
+          return original(repoPath);
+        },
+      );
+      const toplevel = spyOn(worktrees, "gitToplevel").mockImplementation(async () => {
+        atSetup.resolve();
+        return repoDir;
+      });
+      const prepare = includeWorkspaceManager
+        ? spyOn(rig.workspaceManager, "prepareWorktree")
+        : spyOn(worktrees, "createWorktree");
+      const pending = rig.prune();
+      let runId: string | undefined;
+      try {
+        await entered.promise;
+        const started = rig.controller.startRun({
+          name: "prune-test",
+          inputs: {},
+          workingDir: repoDir,
+          isolation: "worktree",
+        });
+        expect(started.ok).toBe(true);
+        if (!started.ok) throw new Error(started.message);
+        runId = started.runId;
+        await atSetup.promise;
+        await Promise.resolve();
+        expect(prepare).not.toHaveBeenCalled();
+        release.resolve();
+        expect((await pending).status).toBe(200);
+        const run = await pollUntilTerminal(rig.app, runId);
+        expect(run.worktreePath).toBe(rig.path);
+        expect(existsSync(rig.path)).toBe(true);
+        expect(prepare).toHaveBeenCalledTimes(1);
+      } finally {
+        release.resolve();
+        await pending;
+        if (runId) await pollUntilTerminal(rig.app, runId);
+        prepare.mockRestore();
+        toplevel.mockRestore();
+        listing.mockRestore();
+      }
+    },
+  );
+
+  test("prune refuses a worktree being adopted before its new run records the path", async () => {
+    const rig = await setup();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const original = rig.workspaceManager.prepareWorktree;
+    const prepare = spyOn(rig.workspaceManager, "prepareWorktree").mockImplementation(
+      async (request) => {
+        entered.resolve();
+        await release.promise;
+        return original(request);
+      },
+    );
+    const started = rig.controller.startRun({
+      name: "prune-test",
+      inputs: {},
+      workingDir: repoDir,
+      isolation: "worktree",
+    });
+    try {
+      expect(started.ok).toBe(true);
+      if (!started.ok) throw new Error(started.message);
+      await entered.promise;
+      expect(rig.store.getRun(started.runId)?.worktreePath).toBeNull();
+      expect((await rig.prune()).status).toBe(409);
+      expect(existsSync(rig.path)).toBe(true);
+    } finally {
+      release.resolve();
+      if (started.ok) await pollUntilTerminal(rig.app, started.runId);
+      prepare.mockRestore();
+    }
   });
 
   test("does not remove user-managed worktrees", async () => {

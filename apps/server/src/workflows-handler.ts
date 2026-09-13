@@ -1190,7 +1190,16 @@ export type ResumeRunResult =
       message: string;
     };
 
-const worktreePrunes = new WeakMap<WorkflowStore, Set<string>>();
+const worktreeOperations = new WeakMap<WorkflowStore, Map<string, Promise<void>>>();
+
+function worktreeOperationsFor(store: WorkflowStore): Map<string, Promise<void>> {
+  let operations = worktreeOperations.get(store);
+  if (!operations) {
+    operations = new Map();
+    worktreeOperations.set(store, operations);
+  }
+  return operations;
+}
 
 function worktreePathKey(path: string): string {
   const resolved = canonicalPath(resolve(path));
@@ -1218,8 +1227,9 @@ function resumeRunCore(
     return { ok: false, reason: "not_found", message: `unknown run '${runId}'` };
   }
   if (
-    worktreePrunes.get(store)?.has(runId) ||
-    (run.worktreePath !== null && !existsSync(run.worktreePath))
+    run.worktreePath !== null &&
+    (worktreeOperations.get(store)?.has(worktreePathKey(run.worktreePath)) ||
+      !existsSync(run.worktreePath))
   ) {
     return {
       ok: false,
@@ -2113,23 +2123,16 @@ export function workflowsRoutes(
     const key = worktreePathKey(parsed.data.path);
     const runs = store.listWorktreeRuns().filter((run) => worktreePathKey(run.path) === key);
     if (runs.length === 0) return c.json({ error: "unknown worktree" }, 404);
-    let pruning = worktreePrunes.get(store);
-    if (!pruning) {
-      pruning = new Set();
-      worktreePrunes.set(store, pruning);
-    }
+    const operations = worktreeOperationsFor(store);
     if (
-      runs.some(
-        (run) =>
-          !TERMINAL_RUN_STATUSES.includes(run.status) ||
-          activeRuns.get(run.runId) ||
-          pruning.has(run.runId),
-      )
+      operations.has(key) ||
+      runs.some((run) => !TERMINAL_RUN_STATUSES.includes(run.status) || activeRuns.get(run.runId))
     ) {
       return c.json({ error: "worktree is still in use" }, 409);
     }
     // Claim synchronously with the status check; resume shares this guard across HTTP and tools.
-    for (const run of runs) pruning.add(run.runId);
+    const done = Promise.withResolvers<void>();
+    operations.set(key, done.promise);
     try {
       const path = runs[0]!.path;
       const repoPath = repoPathFromWorktree(path);
@@ -2152,7 +2155,8 @@ export function workflowsRoutes(
       }
       return c.json({ removed: out.removed, branchDeleted, warning });
     } finally {
-      for (const run of runs) pruning.delete(run.runId);
+      operations.delete(key);
+      done.resolve();
     }
   });
 
@@ -2966,36 +2970,46 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     base: string | null;
     onCreated?: (worktreePath: string) => void;
   }) => {
-    if (workspaceManager !== undefined) {
-      return workspaceManager.prepareWorktree({
+    const key = worktreePathKey(opts.dest);
+    const operations = worktreeOperationsFor(store);
+    while (operations.has(key)) await operations.get(key);
+    const done = Promise.withResolvers<void>();
+    operations.set(key, done.promise);
+    try {
+      if (workspaceManager !== undefined) {
+        return await workspaceManager.prepareWorktree({
+          repoPath: opts.repoPath,
+          linkSourceRepoPath: opts.linkSourceRepoPath,
+          branch: opts.branch,
+          dest: opts.dest,
+          ...(opts.base !== null ? { base: opts.base } : {}),
+          ...(opts.onCreated !== undefined ? { onCreated: opts.onCreated } : {}),
+          abortSignal: abort.signal,
+        });
+      }
+      const created = await createWorktree({
         repoPath: opts.repoPath,
-        linkSourceRepoPath: opts.linkSourceRepoPath,
         branch: opts.branch,
         dest: opts.dest,
         ...(opts.base !== null ? { base: opts.base } : {}),
-        ...(opts.onCreated !== undefined ? { onCreated: opts.onCreated } : {}),
+      });
+      opts.onCreated?.(created.worktreePath);
+      const deps = await ensureWorktreeDeps({
+        worktreePath: created.worktreePath,
+        repoPath: opts.linkSourceRepoPath,
         abortSignal: abort.signal,
       });
+      return {
+        worktreePath: created.worktreePath,
+        adopted: created.adopted,
+        branchCreated: created.branchCreated,
+        deps,
+        depsError: deps.error,
+      };
+    } finally {
+      operations.delete(key);
+      done.resolve();
     }
-    const created = await createWorktree({
-      repoPath: opts.repoPath,
-      branch: opts.branch,
-      dest: opts.dest,
-      ...(opts.base !== null ? { base: opts.base } : {}),
-    });
-    opts.onCreated?.(created.worktreePath);
-    const deps = await ensureWorktreeDeps({
-      worktreePath: created.worktreePath,
-      repoPath: opts.linkSourceRepoPath,
-      abortSignal: abort.signal,
-    });
-    return {
-      worktreePath: created.worktreePath,
-      adopted: created.adopted,
-      branchCreated: created.branchCreated,
-      deps,
-      depsError: deps.error,
-    };
   };
   const removePreparedWorktree = (dest: string) => {
     if (workspaceManager !== undefined) {
