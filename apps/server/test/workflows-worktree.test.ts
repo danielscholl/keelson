@@ -311,6 +311,45 @@ describe("worktree prune coordination", () => {
     expect(existsSync(rig.path)).toBe(false);
   });
 
+  test("retries interrupted branch cleanup after the directory is gone", async () => {
+    const rig = await setup();
+    const deletion = spyOn(worktrees, "deleteBranch").mockImplementation(async () => {
+      throw new Error("interrupted branch cleanup");
+    });
+    try {
+      expect((await rig.prune()).status).toBe(500);
+      expect(existsSync(rig.path)).toBe(false);
+      const cleanup = rig.store.getRunWorktreeCleanup("prune-run");
+      expect(cleanup?.repoPath.replaceAll("\\", "/")).toBe(repoDir.replaceAll("\\", "/"));
+      expect(cleanup?.branch).toBe(rig.branch);
+      expect(rig.store.listWorktreeRuns()[0]?.cleanupPending).toBe(true);
+    } finally {
+      deletion.mockRestore();
+    }
+    const response = await rig.prune();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      removed: false,
+      branchDeleted: rig.branch,
+      warning: null,
+    });
+    expect(rig.store.getRunWorktreeCleanup("prune-run")).toBeNull();
+    expect(rig.store.isRunWorktreePruned("prune-run")).toBe(true);
+    expect((await gitText(["branch", "--list", rig.branch], repoDir)).trim()).toBe("");
+  });
+
+  test("recovers a pending prune whose Git registration outlived its directory", async () => {
+    const rig = await setup();
+    rig.store.setRunsWorktreePruned(["prune-run"], true);
+    rig.store.setRunsWorktreeCleanup(["prune-run"], { repoPath: repoDir, branch: rig.branch });
+    rmSync(rig.path, { recursive: true });
+    const response = await rig.prune();
+    expect(response.status).toBe(200);
+    expect((await response.json()).branchDeleted).toBe(rig.branch);
+    expect(rig.store.getRunWorktreeCleanup("prune-run")).toBeNull();
+    expect(await gitText(["worktree", "list", "--porcelain"], repoDir)).not.toContain(rig.branch);
+  });
+
   test("a failed prune of a replacement does not restore the old run's identity", async () => {
     const rig = await setup();
     expect((await rig.prune()).status).toBe(200);

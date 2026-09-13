@@ -85,6 +85,7 @@ describe("SQLite WorkflowStore", () => {
       store.updateRunStatus({ runId, status: "failed", completedAt: null, error: null });
     }
     expect(store.setRunsWorktreePruned(["old"], true)).toEqual(["old"]);
+    store.setRunsWorktreeCleanup(["old"], { repoPath: "/repo", branch: "keelson/fixed" });
     const newlyMarked = store.setRunsWorktreePruned(["old", "new"], true);
     expect(newlyMarked).toEqual(["new"]);
     store.setRunsWorktreePruned(newlyMarked, false);
@@ -94,6 +95,10 @@ describe("SQLite WorkflowStore", () => {
     try {
       const restored = createWorkflowStore(reopened);
       expect(restored.isRunWorktreePruned("old")).toBe(true);
+      expect(restored.getRunWorktreeCleanup("old")).toEqual({
+        repoPath: "/repo",
+        branch: "keelson/fixed",
+      });
       expect(restored.getRun("old")?.worktreePath).toBe("/repo/.worktrees/fixed");
       expect(restored.claimRunForResume("old")).toBe(false);
       expect(restored.isRunWorktreePruned("new")).toBe(false);
@@ -153,8 +158,18 @@ describe("SQLite WorkflowStore", () => {
 
     expect(store.listWorktreeRuns()).toEqual(
       expect.arrayContaining([
-        { runId: "wt-done", path: "/repo/.worktrees/wt-done", status: "cancelled" },
-        { runId: "wt-live", path: "/repo/.worktrees/wt-live", status: "running" },
+        {
+          runId: "wt-done",
+          path: "/repo/.worktrees/wt-done",
+          status: "cancelled",
+          cleanupPending: false,
+        },
+        {
+          runId: "wt-live",
+          path: "/repo/.worktrees/wt-live",
+          status: "running",
+          cleanupPending: false,
+        },
       ]),
     );
     expect(store.listWorktreeRuns()).toHaveLength(2);

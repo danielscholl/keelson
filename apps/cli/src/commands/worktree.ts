@@ -55,6 +55,7 @@ interface PruneCandidate {
   // Status of the run that owns this worktree, from the server's run table.
   // null when the server is down or no run recorded the path.
   runStatus: string | null;
+  recorded: boolean;
 }
 
 interface PruneResult {
@@ -83,8 +84,9 @@ async function classifyWorktreeDir(args: {
   projectRepoPath: string | null;
   liveByPath: Map<string, string | null>;
   runStatus: string | null;
+  recorded: boolean;
 }): Promise<PruneCandidate | null> {
-  const { path, projectName, projectRepoPath, liveByPath, runStatus } = args;
+  const { path, projectName, projectRepoPath, liveByPath, runStatus, recorded } = args;
   try {
     if (!statSync(path).isDirectory()) return null;
   } catch {
@@ -118,6 +120,7 @@ async function classifyWorktreeDir(args: {
     branch: branch ?? null,
     repoPath: effectiveRepoPath,
     runStatus,
+    recorded,
     reason:
       effectiveRepoPath === null
         ? "orphan-no-repo"
@@ -153,10 +156,12 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
 
   // Deleted projects leave FK-NULLed runs with retained paths, invisible to project scans.
   let persistedPaths: string[] = [];
+  const cleanupPaths = new Set<string>();
   const statusByPath = new Map<string, string>();
   try {
     const persisted = await listPersistedWorktrees(baseUrl);
     persistedPaths = persisted.paths;
+    for (const path of persisted.cleanupPaths) cleanupPaths.add(canonicalForCompare(path));
     for (const [path, status] of persisted.statusByPath) {
       const key = canonicalForCompare(path);
       const prior = statusByPath.get(key);
@@ -168,12 +173,9 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
   }
   const runStatusFor = (path: string): string | null =>
     statusByPath.get(canonicalForCompare(path)) ?? null;
+  const recordedPaths = new Set(persistedPaths.map(canonicalForCompare));
 
-  // Repo-local placement is `<project.rootPath>/.worktrees/<leaf>/`. This
-  // directory lives *inside the user's repo*, so we must not enqueue plain
-  // user directories the operator dropped there. Only consider entries that
-  // are genuine worktrees: either git lists them as live, or their `.git`
-  // pointer resolves to a repo. Anything else is left alone.
+  // Repo-local user directories are not managed unless Git or a persisted run identifies them.
   for (const project of projects) {
     const repoLocalRoot = join(project.rootPath, ".worktrees");
     if (!existsSync(repoLocalRoot)) continue;
@@ -183,27 +185,42 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
       if (!recordPath(path)) continue;
       const isLive = liveByPath.has(canonicalForCompare(path));
       const recovered = repoPathFromWorktree(path);
-      if (!isLive && recovered === null) continue;
+      if (!isLive && recovered === null && !recordedPaths.has(canonicalForCompare(path))) continue;
       const c = await classifyWorktreeDir({
         path,
         projectName: project.name,
         projectRepoPath: project.rootPath,
         liveByPath,
         runStatus: runStatusFor(path),
+        recorded: recordedPaths.has(canonicalForCompare(path)),
       });
       if (c !== null) candidates.push(c);
     }
   }
 
   for (const path of persistedPaths) {
-    if (!existsSync(path)) continue;
     if (!recordPath(path)) continue;
+    if (!existsSync(path)) {
+      if (cleanupPaths.has(canonicalForCompare(path))) {
+        candidates.push({
+          path,
+          projectName: basename(dirname(path)),
+          branch: null,
+          repoPath: null,
+          runStatus: runStatusFor(path),
+          recorded: true,
+          reason: "tracked",
+        });
+      }
+      continue;
+    }
     const c = await classifyWorktreeDir({
       path,
       projectName: basename(dirname(path)),
       projectRepoPath: null,
       liveByPath: new Map(),
       runStatus: runStatusFor(path),
+      recorded: true,
     });
     if (c !== null) candidates.push(c);
   }
@@ -245,8 +262,8 @@ export async function runWorktreePrune(opts: WorktreePruneOptions): Promise<neve
     if (c.reason === "tracked" && !isManaged) {
       continue;
     }
-    if (c.runStatus !== null) {
-      if (!opts.force && !isFinishedRun(c.runStatus)) continue;
+    if (c.recorded) {
+      if (!opts.force && c.runStatus !== null && !isFinishedRun(c.runStatus)) continue;
       try {
         const out = await prunePersistedWorktree(baseUrl, c.path, opts.force);
         if (out.removed) result.removed.push(c.path);

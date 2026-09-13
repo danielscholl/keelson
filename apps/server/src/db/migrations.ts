@@ -335,6 +335,8 @@ const migrations: Migration[] = [
       db.exec(
         "ALTER TABLE workflow_runs ADD COLUMN worktree_pruned INTEGER NOT NULL DEFAULT 0 CHECK (worktree_pruned IN (0, 1));",
       );
+      db.exec("ALTER TABLE workflow_runs ADD COLUMN worktree_cleanup_repo TEXT;");
+      db.exec("ALTER TABLE workflow_runs ADD COLUMN worktree_cleanup_branch TEXT;");
     },
   },
 ];

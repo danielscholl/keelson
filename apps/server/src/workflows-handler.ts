@@ -2146,7 +2146,11 @@ export function workflowsRoutes(
     operations.set(key, done.promise);
     try {
       const path = runs[0]!.path;
-      const repoPath = repoPathFromWorktree(path);
+      const cleanup = runs
+        .map((run) => store.getRunWorktreeCleanup(run.runId))
+        .find((value) => value !== null);
+      const pathExists = existsSync(path);
+      const repoPath = pathExists ? repoPathFromWorktree(path) : (cleanup?.repoPath ?? null);
       if (repoPath === null && !force) {
         return c.json({ error: "worktree repository unavailable" }, 409);
       }
@@ -2158,7 +2162,10 @@ export function workflowsRoutes(
         return c.json({ removed: false, branchDeleted: null, warning: listing.error });
       }
       const entry = listing.worktrees.find((entry) => worktreePathKey(entry.path) === key);
-      if ((!entry && !force) || (entry?.branch != null && !entry.branch.startsWith("keelson/"))) {
+      if (
+        (!entry && !force && (pathExists || !cleanup)) ||
+        (entry?.branch != null && !entry.branch.startsWith("keelson/"))
+      ) {
         return c.json({ error: "not a managed worktree" }, 409);
       }
       // Persist before deletion so a crash cannot let a recreated path revive an old run.
@@ -2166,11 +2173,23 @@ export function workflowsRoutes(
         runs.map((run) => run.runId),
         true,
       );
+      const branch = pathExists ? entry?.branch : cleanup?.branch;
+      if (repoPath !== null && branch?.startsWith("keelson/")) {
+        store.setRunsWorktreeCleanup(
+          runs.map((run) => run.runId),
+          { repoPath, branch },
+        );
+      }
       const out =
         repoPath !== null && entry
-          ? await removeWorktree({ repoPath, dest: path, force })
+          ? await removeWorktree({
+              repoPath,
+              dest: path,
+              force: force || !pathExists,
+              removeMissing: !pathExists,
+            })
           : { removed: false, warning: listing.error };
-      if (!out.removed && force) {
+      if (pathExists && !out.removed && force) {
         try {
           await rm(path, { recursive: true, force: true });
           out.removed = true;
@@ -2180,15 +2199,21 @@ export function workflowsRoutes(
             .filter(Boolean)
             .join("; ");
         }
-      } else if (!out.removed && existsSync(path)) {
+      } else if (pathExists && !out.removed && existsSync(path)) {
         store.setRunsWorktreePruned(marked, false);
+        store.setRunsWorktreeCleanup(marked, null);
       }
       let branchDeleted: string | null = null;
       let warning = out.warning;
-      if (out.removed && repoPath !== null && entry?.branch?.startsWith("keelson/")) {
-        const gone = await deleteBranch({ repoPath, branch: entry.branch });
-        if (gone.deleted) branchDeleted = entry.branch;
+      if ((!pathExists || out.removed) && repoPath !== null && branch?.startsWith("keelson/")) {
+        const gone = await deleteBranch({ repoPath, branch });
+        if (gone.deleted) branchDeleted = branch;
         warning = [warning, gone.warning].filter(Boolean).join("; ") || null;
+        if (gone.warning === null)
+          store.setRunsWorktreeCleanup(
+            runs.map((run) => run.runId),
+            null,
+          );
       }
       return c.json({ removed: out.removed, branchDeleted, warning });
     } finally {

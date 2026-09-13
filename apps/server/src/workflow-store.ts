@@ -109,6 +109,11 @@ export interface WorkflowStore {
   setRunWorktreePath(runId: string, worktreePath: string | null): void;
   isRunWorktreePruned(runId: string): boolean;
   setRunsWorktreePruned(runIds: readonly string[], pruned: boolean): string[];
+  getRunWorktreeCleanup(runId: string): { repoPath: string; branch: string } | null;
+  setRunsWorktreeCleanup(
+    runIds: readonly string[],
+    cleanup: { repoPath: string; branch: string } | null,
+  ): void;
   setRunWorktreeBase(runId: string, worktreeBase: string | null): void;
   setRunBrief(runId: string, brief: Brief | null): void;
   // Accumulated model-call spend for one run: `totalTokens` is fresh input +
@@ -139,7 +144,12 @@ export interface WorkflowStore {
   // tabs can show a pending-input count without subscribing to every run's WS.
   listRunsByStatus(status: WorkflowRunStatus): WorkflowRunSummary[];
   // Includes deleted-project runs whose FK was NULLed but worktree path was retained.
-  listWorktreeRuns(): { runId: string; path: string; status: WorkflowRunStatus }[];
+  listWorktreeRuns(): {
+    runId: string;
+    path: string;
+    status: WorkflowRunStatus;
+    cleanupPending: boolean;
+  }[];
   // Hard-delete a terminal run. FK CASCADE on workflow_node_outputs handles
   // the per-node rows. The route layer is responsible for the linked
   // conversation (FK is SET NULL, not CASCADE).
@@ -295,6 +305,19 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     const value = pruned ? 1 : 0;
     return runIds.filter((runId) => updateWorktreePruned.run(value, runId, value).changes > 0);
   });
+  const selectWorktreeCleanup = db.prepare(
+    "SELECT worktree_cleanup_repo, worktree_cleanup_branch FROM workflow_runs WHERE id = ?",
+  );
+  const updateWorktreeCleanup = db.prepare(
+    "UPDATE workflow_runs SET worktree_cleanup_repo = ?, worktree_cleanup_branch = ? WHERE id = ?",
+  );
+  const setWorktreeCleanup = db.transaction(
+    (runIds: readonly string[], cleanup: { repoPath: string; branch: string } | null) => {
+      for (const runId of runIds) {
+        updateWorktreeCleanup.run(cleanup?.repoPath ?? null, cleanup?.branch ?? null, runId);
+      }
+    },
+  );
   const updateWorktreeBase = db.prepare("UPDATE workflow_runs SET worktree_base = ? WHERE id = ?");
   const updateBrief = db.prepare("UPDATE workflow_runs SET brief_json = ? WHERE id = ?");
   const selectRun = db.prepare("SELECT * FROM workflow_runs WHERE id = ?");
@@ -385,6 +408,16 @@ export function createWorkflowStore(db: Database): WorkflowStore {
       return row?.worktree_pruned === 1;
     },
     setRunsWorktreePruned: setWorktreePruned,
+    getRunWorktreeCleanup(runId) {
+      const row = selectWorktreeCleanup.get(runId) as {
+        worktree_cleanup_repo: string | null;
+        worktree_cleanup_branch: string | null;
+      } | null;
+      return row?.worktree_cleanup_repo && row.worktree_cleanup_branch
+        ? { repoPath: row.worktree_cleanup_repo, branch: row.worktree_cleanup_branch }
+        : null;
+    },
+    setRunsWorktreeCleanup: setWorktreeCleanup,
     setRunWorktreeBase(runId, worktreeBase) {
       updateWorktreeBase.run(worktreeBase, runId);
     },
@@ -517,13 +550,19 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     listWorktreeRuns() {
       const rows = db
         .query(
-          "SELECT id, status, worktree_path FROM workflow_runs WHERE worktree_path IS NOT NULL ORDER BY started_at ASC",
+          "SELECT id, status, worktree_path, worktree_cleanup_branch FROM workflow_runs WHERE worktree_path IS NOT NULL ORDER BY started_at ASC",
         )
-        .all() as { id: string; status: string; worktree_path: string }[];
+        .all() as {
+        id: string;
+        status: string;
+        worktree_path: string;
+        worktree_cleanup_branch: string | null;
+      }[];
       return rows.map((r) => ({
         runId: r.id,
         path: r.worktree_path,
         status: r.status as WorkflowRunStatus,
+        cleanupPending: r.worktree_cleanup_branch !== null,
       }));
     },
     deleteRun(runId) {

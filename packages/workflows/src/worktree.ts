@@ -524,6 +524,7 @@ export interface RemoveWorktreeOptions {
   dest: string;
   /** When true, pass --force so an uncommitted-changes worktree is removed too. */
   force?: boolean;
+  removeMissing?: boolean;
 }
 
 export interface RemoveWorktreeResult {
@@ -539,7 +540,7 @@ export interface RemoveWorktreeResult {
  * Returns `removed: false` when the worktree didn't exist (idempotent).
  */
 export async function removeWorktree(opts: RemoveWorktreeOptions): Promise<RemoveWorktreeResult> {
-  if (!existsSync(opts.dest)) {
+  if (!opts.removeMissing && !existsSync(opts.dest)) {
     return { removed: false, warning: null };
   }
   const args = opts.force

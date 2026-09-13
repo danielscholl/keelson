@@ -77,6 +77,7 @@ export async function listWorkflows(baseUrl: string): Promise<ListWorkflowsRespo
 
 export interface PersistedWorktrees {
   paths: string[];
+  cleanupPaths: string[];
   // Run status per worktree path. A path shared by several runs (a resumed
   // run re-enters its worktree) reports the live status when any run is
   // still in flight, so prune never treats an active worktree as finished.
@@ -97,17 +98,23 @@ export async function listPersistedWorktrees(baseUrl: string): Promise<Persisted
     ? body.paths.filter((p): p is string => typeof p === "string")
     : [];
   const statusByPath = new Map<string, string>();
+  const cleanupPaths: string[] = [];
   if (Array.isArray(body.runs)) {
     for (const entry of body.runs) {
       if (typeof entry !== "object" || entry === null) continue;
-      const { path, status } = entry as { path?: unknown; status?: unknown };
+      const { path, status, cleanupPending } = entry as {
+        path?: unknown;
+        status?: unknown;
+        cleanupPending?: unknown;
+      };
       if (typeof path !== "string" || typeof status !== "string") continue;
+      if (cleanupPending === true) cleanupPaths.push(path);
       const prior = statusByPath.get(path);
       if (prior !== undefined && LIVE_RUN_STATUSES.has(prior)) continue;
       statusByPath.set(path, status);
     }
   }
-  return { paths, statusByPath };
+  return { paths, statusByPath, cleanupPaths };
 }
 
 export async function prunePersistedWorktree(
