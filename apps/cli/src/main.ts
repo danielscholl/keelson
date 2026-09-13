@@ -697,9 +697,11 @@ export function buildProgram(): Command {
 
   worktree
     .command("prune")
-    .description("remove leftover worktrees under ~/.keelson/worktrees/")
+    .description(
+      "remove worktrees left under <project>/.worktrees/ by finished runs (discovery requires a running server)",
+    )
     .option("--dry-run", "list candidates without removing anything", false)
-    .option("--force", "also remove directories with uncommitted changes", false)
+    .option("--force", "also remove worktrees of live runs and dirty directories", false)
     .option("--base-url <url>", "explicit server base URL (skips the probe)")
     .action(async function pruneAction(
       this: Command,

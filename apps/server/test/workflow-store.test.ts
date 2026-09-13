@@ -70,6 +70,44 @@ afterEach(() => {
 });
 
 describe("SQLite WorkflowStore", () => {
+  test("pruned identities survive reopening and block atomic resume claims", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    for (const runId of ["old", "new"]) {
+      store.createRun({
+        runId,
+        workflowName: "fixed-branch",
+        inputs: {},
+        startedAt: new Date().toISOString(),
+        conversationId: mintConv(db, runId),
+        worktreePath: "/repo/.worktrees/fixed",
+      });
+      store.updateRunStatus({ runId, status: "failed", completedAt: null, error: null });
+    }
+    expect(store.setRunsWorktreePruned(["old"], true)).toEqual(["old"]);
+    store.setRunsWorktreeCleanup(["old"], { repoPath: "/repo", branch: "keelson/fixed" });
+    const newlyMarked = store.setRunsWorktreePruned(["old", "new"], true);
+    expect(newlyMarked).toEqual(["new"]);
+    store.setRunsWorktreePruned(newlyMarked, false);
+    db.close();
+
+    const reopened = openDatabase({ path: dbPath });
+    try {
+      const restored = createWorkflowStore(reopened);
+      expect(restored.isRunWorktreePruned("old")).toBe(true);
+      expect(restored.getRunWorktreeCleanup("old")).toEqual({
+        repoPath: "/repo",
+        branch: "keelson/fixed",
+      });
+      expect(restored.getRun("old")?.worktreePath).toBe("/repo/.worktrees/fixed");
+      expect(restored.claimRunForResume("old")).toBe(false);
+      expect(restored.isRunWorktreePruned("new")).toBe(false);
+      expect(restored.claimRunForResume("new")).toBe(true);
+    } finally {
+      reopened.close();
+    }
+  });
+
   test("createRun seeds a running row visible to getRun", () => {
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);
@@ -94,6 +132,47 @@ describe("SQLite WorkflowStore", () => {
     expect(run!.error).toBeNull();
     expect(store.getRunProviderOverride("r1")).toBe("stub");
     expect(store.getRunProviderOverride("missing")).toBeNull();
+  });
+
+  test("listWorktreeRuns reports every worktree-bearing run with its status", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    for (const runId of ["wt-done", "wt-live", "no-wt"]) {
+      store.createRun({
+        runId,
+        workflowName: "hello-world",
+        inputs: {},
+        startedAt: `2025-01-01T00:00:0${runId.length}.000Z`,
+        conversationId: mintConv(db, runId),
+        providerOverride: null,
+      });
+    }
+    store.setRunWorktreePath("wt-done", "/repo/.worktrees/wt-done");
+    store.setRunWorktreePath("wt-live", "/repo/.worktrees/wt-live");
+    store.updateRunStatus({
+      runId: "wt-done",
+      status: "cancelled",
+      completedAt: "2025-01-01T00:01:00.000Z",
+      error: null,
+    });
+
+    expect(store.listWorktreeRuns()).toEqual(
+      expect.arrayContaining([
+        {
+          runId: "wt-done",
+          path: "/repo/.worktrees/wt-done",
+          status: "cancelled",
+          cleanupPending: false,
+        },
+        {
+          runId: "wt-live",
+          path: "/repo/.worktrees/wt-live",
+          status: "running",
+          cleanupPending: false,
+        },
+      ]),
+    );
+    expect(store.listWorktreeRuns()).toHaveLength(2);
   });
 
   test("persists resolved worktree base on the run row", () => {

@@ -9,6 +9,7 @@
 import {
   closeSync,
   constants,
+  existsSync,
   fstatSync,
   openSync,
   readFileSync,
@@ -62,11 +63,13 @@ import {
   createWorktree,
   type DagNode,
   defaultRunUntilBashProbe,
+  deleteBranch,
   ensureWorktreeDeps,
   fetchOrigin,
   gitToplevel,
   headDivergesFrom,
   isGitRepo,
+  listWorktreesWithStatus,
   type MemoryTools,
   makeApprovalHandler,
   makeCancelHandler,
@@ -81,6 +84,7 @@ import {
   type RunStreamEvent,
   type RunSummary,
   removeWorktree,
+  repoPathFromWorktree,
   resolveBranchTemplate,
   resolveDefaultBranch,
   runWorkflow,
@@ -1186,6 +1190,22 @@ export type ResumeRunResult =
       message: string;
     };
 
+const worktreeOperations = new WeakMap<WorkflowStore, Map<string, Promise<void>>>();
+
+function worktreeOperationsFor(store: WorkflowStore): Map<string, Promise<void>> {
+  let operations = worktreeOperations.get(store);
+  if (!operations) {
+    operations = new Map();
+    worktreeOperations.set(store, operations);
+  }
+  return operations;
+}
+
+function worktreePathKey(path: string): string {
+  const resolved = canonicalPath(resolve(path));
+  return process.platform === "win32" ? resolved.replaceAll("\\", "/").toLowerCase() : resolved;
+}
+
 // Resume-run core: load a terminal run, validate it's terminal (not running/paused),
 // build the seed from persisted node outputs, flip back to running, and re-enter
 // the executor. Returns a discriminated result so the HTTP route maps it to
@@ -1205,6 +1225,24 @@ function resumeRunCore(
   const run = store.getRun(runId);
   if (!run) {
     return { ok: false, reason: "not_found", message: `unknown run '${runId}'` };
+  }
+  if (store.isRunWorktreePruned(runId)) {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run '${runId}' worktree was pruned and cannot be resumed`,
+    };
+  }
+  if (
+    run.worktreePath !== null &&
+    (worktreeOperations.get(store)?.has(worktreePathKey(run.worktreePath)) ||
+      !existsSync(run.worktreePath))
+  ) {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run '${runId}' worktree is being pruned or is no longer available`,
+    };
   }
   if (run.status === "running" || run.status === "paused") {
     return {
@@ -2076,11 +2114,112 @@ export function workflowsRoutes(
     return c.json(bulkDeleteRunsResponseSchema.parse({ deleted }));
   });
 
-  // Read-only feed for `keelson worktree prune`. Returns persisted
-  // worktree_path values so worktrees from deleted projects (FK NULLed,
-  // path retained) stay prunable.
+  // Keep `paths` for older CLIs.
   app.get("/api/workflows/worktree-paths", (c) => {
-    return c.json({ paths: store.listWorktreePaths() });
+    const runs = store.listWorktreeRuns();
+    const paths = [...new Set(runs.map((r) => r.path))];
+    return c.json({ paths, runs });
+  });
+
+  app.post("/api/workflows/worktree-prune", async (c) => {
+    if (originForbidden(c)) return c.json({ error: "forbidden origin" }, 403);
+    const parsed = z
+      .object({ path: z.string().refine(isAbsolute), force: z.boolean().default(false) })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "invalid worktree path" }, 400);
+    const force = parsed.data.force;
+    const key = worktreePathKey(parsed.data.path);
+    const runs = store.listWorktreeRuns().filter((run) => worktreePathKey(run.path) === key);
+    if (runs.length === 0) return c.json({ error: "unknown worktree" }, 404);
+    const operations = worktreeOperationsFor(store);
+    if (
+      operations.has(key) ||
+      (!force &&
+        runs.some(
+          (run) => !TERMINAL_RUN_STATUSES.includes(run.status) || activeRuns.get(run.runId),
+        ))
+    ) {
+      return c.json({ error: "worktree is still in use" }, 409);
+    }
+    // Claim synchronously with the status check; resume shares this guard across HTTP and tools.
+    const done = Promise.withResolvers<void>();
+    operations.set(key, done.promise);
+    try {
+      const path = runs[0]!.path;
+      const cleanup = runs
+        .map((run) => store.getRunWorktreeCleanup(run.runId))
+        .find((value) => value !== null);
+      const pathExists = existsSync(path);
+      const repoPath = pathExists ? repoPathFromWorktree(path) : (cleanup?.repoPath ?? null);
+      if (repoPath === null && !force) {
+        return c.json({ error: "worktree repository unavailable" }, 409);
+      }
+      const listing =
+        repoPath === null
+          ? { worktrees: [], error: null }
+          : await listWorktreesWithStatus(repoPath);
+      if (listing.error !== null && !force) {
+        return c.json({ removed: false, branchDeleted: null, warning: listing.error });
+      }
+      const entry = listing.worktrees.find((entry) => worktreePathKey(entry.path) === key);
+      if (
+        (!entry && !force && (pathExists || !cleanup)) ||
+        (entry?.branch != null && !entry.branch.startsWith("keelson/"))
+      ) {
+        return c.json({ error: "not a managed worktree" }, 409);
+      }
+      // Persist before deletion so a crash cannot let a recreated path revive an old run.
+      const marked = store.setRunsWorktreePruned(
+        runs.map((run) => run.runId),
+        true,
+      );
+      const branch = pathExists ? entry?.branch : cleanup?.branch;
+      if (repoPath !== null && branch?.startsWith("keelson/")) {
+        store.setRunsWorktreeCleanup(
+          runs.map((run) => run.runId),
+          { repoPath, branch },
+        );
+      }
+      const out =
+        repoPath !== null && entry
+          ? await removeWorktree({
+              repoPath,
+              dest: path,
+              force: force || !pathExists,
+              removeMissing: !pathExists,
+            })
+          : { removed: false, warning: listing.error };
+      if (pathExists && !out.removed && force) {
+        try {
+          await rm(path, { recursive: true, force: true });
+          out.removed = true;
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
+          out.warning = [out.warning, `worktree removal failed: ${detail}`]
+            .filter(Boolean)
+            .join("; ");
+        }
+      } else if (pathExists && !out.removed && existsSync(path)) {
+        store.setRunsWorktreePruned(marked, false);
+        store.setRunsWorktreeCleanup(marked, null);
+      }
+      let branchDeleted: string | null = null;
+      let warning = out.warning;
+      if ((!pathExists || out.removed) && repoPath !== null && branch?.startsWith("keelson/")) {
+        const gone = await deleteBranch({ repoPath, branch });
+        if (gone.deleted) branchDeleted = branch;
+        warning = [warning, gone.warning].filter(Boolean).join("; ") || null;
+        if (gone.warning === null)
+          store.setRunsWorktreeCleanup(
+            runs.map((run) => run.runId),
+            null,
+          );
+      }
+      return c.json({ removed: out.removed, branchDeleted, warning });
+    } finally {
+      operations.delete(key);
+      done.resolve();
+    }
   });
 
   app.get("/api/workflows/:name", (c) => {
@@ -2893,36 +3032,46 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     base: string | null;
     onCreated?: (worktreePath: string) => void;
   }) => {
-    if (workspaceManager !== undefined) {
-      return workspaceManager.prepareWorktree({
+    const key = worktreePathKey(opts.dest);
+    const operations = worktreeOperationsFor(store);
+    while (operations.has(key)) await operations.get(key);
+    const done = Promise.withResolvers<void>();
+    operations.set(key, done.promise);
+    try {
+      if (workspaceManager !== undefined) {
+        return await workspaceManager.prepareWorktree({
+          repoPath: opts.repoPath,
+          linkSourceRepoPath: opts.linkSourceRepoPath,
+          branch: opts.branch,
+          dest: opts.dest,
+          ...(opts.base !== null ? { base: opts.base } : {}),
+          ...(opts.onCreated !== undefined ? { onCreated: opts.onCreated } : {}),
+          abortSignal: abort.signal,
+        });
+      }
+      const created = await createWorktree({
         repoPath: opts.repoPath,
-        linkSourceRepoPath: opts.linkSourceRepoPath,
         branch: opts.branch,
         dest: opts.dest,
         ...(opts.base !== null ? { base: opts.base } : {}),
-        ...(opts.onCreated !== undefined ? { onCreated: opts.onCreated } : {}),
+      });
+      opts.onCreated?.(created.worktreePath);
+      const deps = await ensureWorktreeDeps({
+        worktreePath: created.worktreePath,
+        repoPath: opts.linkSourceRepoPath,
         abortSignal: abort.signal,
       });
+      return {
+        worktreePath: created.worktreePath,
+        adopted: created.adopted,
+        branchCreated: created.branchCreated,
+        deps,
+        depsError: deps.error,
+      };
+    } finally {
+      operations.delete(key);
+      done.resolve();
     }
-    const created = await createWorktree({
-      repoPath: opts.repoPath,
-      branch: opts.branch,
-      dest: opts.dest,
-      ...(opts.base !== null ? { base: opts.base } : {}),
-    });
-    opts.onCreated?.(created.worktreePath);
-    const deps = await ensureWorktreeDeps({
-      worktreePath: created.worktreePath,
-      repoPath: opts.linkSourceRepoPath,
-      abortSignal: abort.signal,
-    });
-    return {
-      worktreePath: created.worktreePath,
-      adopted: created.adopted,
-      branchCreated: created.branchCreated,
-      deps,
-      depsError: deps.error,
-    };
   };
   const removePreparedWorktree = (dest: string) => {
     if (workspaceManager !== undefined) {

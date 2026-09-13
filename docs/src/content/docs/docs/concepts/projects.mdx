@@ -121,10 +121,24 @@ Isolation is **opt-in**, decided per run:
 - With neither flag, the workflow's own default decides; a workflow that does not
   declare isolation runs in place.
 
-Leftover worktrees, from a failed run or a project you deleted, are cleared with
-`keelson worktree prune` (`--dry-run` lists candidates, `--force` removes ones with
-uncommitted changes). [Directories](../../reference/directories/) maps where they
-live.
+A failed or cancelled run keeps its worktree so you can inspect it. Once the run
+is finished, `keelson worktree prune` removes the worktree and its `keelson/…`
+branch (`--dry-run` lists candidates; `--force` also removes live runs' worktrees
+and ones with uncommitted changes). The server checks that no run is using the
+worktree and blocks resume during removal. New runs targeting the same path wait
+until pruning finishes before preparing their checkout. Candidate discovery needs
+a running server, even with `--force`; an unavailable server means nothing is
+discovered or removed. An older server without prune coordination leaves all
+recorded worktrees alone, even with `--force`. Recorded worktrees with broken Git metadata
+also require `--force`. A run whose worktree has been removed cannot be resumed.
+The database retains that identity even if another run recreates the same path.
+Pruning records the marker before deletion, so an interrupted deletion also blocks
+resume; rerun prune to finish cleanup. A normal Git refusal to remove a dirty
+worktree leaves that run resumable. The repository and branch cleanup intent is
+also persisted before removal, so rerunning prune retries unfinished branch
+deletion even when the worktree directory is already gone.
+[Directories](../../reference/directories/)
+maps where they live.
 
 <Aside type="note" title="Isolation is not a sandbox">
 A worktree keeps a run's changes off your working tree, not off your machine. The

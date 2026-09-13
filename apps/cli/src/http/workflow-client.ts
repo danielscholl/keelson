@@ -75,16 +75,69 @@ export async function listWorkflows(baseUrl: string): Promise<ListWorkflowsRespo
   return (await res.json()) as ListWorkflowsResponse;
 }
 
-export async function listPersistedWorktreePaths(baseUrl: string): Promise<string[]> {
+export interface PersistedWorktrees {
+  paths: string[];
+  cleanupPaths: string[];
+  // Run status per worktree path. A path shared by several runs (a resumed
+  // run re-enters its worktree) reports the live status when any run is
+  // still in flight, so prune never treats an active worktree as finished.
+  statusByPath: Map<string, string>;
+}
+
+const LIVE_RUN_STATUSES: ReadonlySet<string> = new Set(["pending", "running", "paused"]);
+
+export async function listPersistedWorktrees(baseUrl: string): Promise<PersistedWorktrees> {
   const res = await fetch(url(baseUrl, "/api/workflows/worktree-paths"), {
     headers: defaultHeaders(baseUrl),
   });
   if (!res.ok) {
     throw new HttpError(res.status, `GET /api/workflows/worktree-paths failed: ${res.status}`);
   }
-  const body = (await res.json()) as { paths?: unknown };
-  if (!Array.isArray(body.paths)) return [];
-  return body.paths.filter((p): p is string => typeof p === "string");
+  const body = (await res.json()) as { paths?: unknown; runs?: unknown };
+  const paths = Array.isArray(body.paths)
+    ? body.paths.filter((p): p is string => typeof p === "string")
+    : [];
+  const statusByPath = new Map<string, string>();
+  const cleanupPaths: string[] = [];
+  if (Array.isArray(body.runs)) {
+    for (const entry of body.runs) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const { path, status, cleanupPending } = entry as {
+        path?: unknown;
+        status?: unknown;
+        cleanupPending?: unknown;
+      };
+      if (typeof path !== "string" || typeof status !== "string") continue;
+      if (cleanupPending === true) cleanupPaths.push(path);
+      const prior = statusByPath.get(path);
+      if (prior !== undefined && LIVE_RUN_STATUSES.has(prior)) continue;
+      statusByPath.set(path, status);
+    }
+  }
+  return { paths, statusByPath, cleanupPaths };
+}
+
+export async function prunePersistedWorktree(
+  baseUrl: string,
+  path: string,
+  force = false,
+): Promise<{ removed: boolean; branchDeleted: string | null; warning: string | null }> {
+  const res = await fetch(url(baseUrl, "/api/workflows/worktree-prune"), {
+    method: "POST",
+    headers: { ...defaultHeaders(baseUrl), "content-type": "application/json" },
+    body: JSON.stringify({ path, force }),
+  });
+  if (res.status === 404 || res.status === 409) {
+    return { removed: false, branchDeleted: null, warning: null };
+  }
+  if (!res.ok) {
+    throw new HttpError(res.status, `POST /api/workflows/worktree-prune failed: ${res.status}`);
+  }
+  return (await res.json()) as {
+    removed: boolean;
+    branchDeleted: string | null;
+    warning: string | null;
+  };
 }
 
 export interface StartRunBody {

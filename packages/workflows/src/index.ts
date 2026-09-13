@@ -125,6 +125,8 @@ export {
   type CreateWorktreeOptions,
   type CreateWorktreeResult,
   createWorktree,
+  type DeleteBranchResult,
+  deleteBranch,
   type EnsureWorktreeDepsResult,
   ensureWorktreeDeps,
   type FetchOriginResult,
