@@ -5,11 +5,17 @@
 import { existsSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-import type { Project } from "@keelson/shared";
-import { isGitRepo, listWorktrees, removeWorktree, repoPathFromWorktree } from "@keelson/workflows";
+import { type Project, TERMINAL_RUN_STATUSES } from "@keelson/shared";
+import {
+  deleteBranch,
+  isGitRepo,
+  listWorktrees,
+  removeWorktree,
+  repoPathFromWorktree,
+} from "@keelson/workflows";
 import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { listProjects } from "../http/projects-client.ts";
-import { isServerDownError, listPersistedWorktreePaths } from "../http/workflow-client.ts";
+import { isServerDownError, listPersistedWorktrees } from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
 import { defaultServerBaseUrl } from "../server-probe.ts";
 
@@ -42,12 +48,20 @@ interface PruneCandidate {
   branch: string | null;
   repoPath: string | null;
   reason: "tracked" | "orphan-no-repo" | "orphan-stale-record";
+  // Status of the run that owns this worktree, from the server's run table.
+  // null when the server is down or no run recorded the path.
+  runStatus: string | null;
 }
 
 interface PruneResult {
   removed: string[];
+  branchesDeleted: string[];
   failed: { path: string; error: string }[];
   inspected: number;
+}
+
+function isFinishedRun(status: string | null): boolean {
+  return status !== null && (TERMINAL_RUN_STATUSES as readonly string[]).includes(status);
 }
 
 async function buildLiveByPath(repoPath: string): Promise<Map<string, string | null>> {
@@ -64,8 +78,9 @@ async function classifyWorktreeDir(args: {
   projectName: string;
   projectRepoPath: string | null;
   liveByPath: Map<string, string | null>;
+  runStatus: string | null;
 }): Promise<PruneCandidate | null> {
-  const { path, projectName, projectRepoPath, liveByPath } = args;
+  const { path, projectName, projectRepoPath, liveByPath, runStatus } = args;
   try {
     if (!statSync(path).isDirectory()) return null;
   } catch {
@@ -98,6 +113,7 @@ async function classifyWorktreeDir(args: {
     projectName,
     branch: branch ?? null,
     repoPath: effectiveRepoPath,
+    runStatus,
     reason:
       effectiveRepoPath === null
         ? "orphan-no-repo"
@@ -131,6 +147,26 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
     return true;
   };
 
+  // Persisted worktree paths from workflow_runs, with each run's status. The
+  // status is what lets prune sweep a finished run's leftover without --force
+  // while leaving a live run's working directory alone. The path list also
+  // catches worktrees whose project row has been deleted (FK NULLed, path
+  // retained) — those dirs are otherwise invisible to the project-scoped
+  // scans below.
+  let persistedPaths: string[] = [];
+  const statusByPath = new Map<string, string>();
+  try {
+    const persisted = await listPersistedWorktrees(baseUrl);
+    persistedPaths = persisted.paths;
+    for (const [path, status] of persisted.statusByPath) {
+      statusByPath.set(canonicalForCompare(path), status);
+    }
+  } catch (err) {
+    if (!isServerDownError(err)) throw err;
+  }
+  const runStatusFor = (path: string): string | null =>
+    statusByPath.get(canonicalForCompare(path)) ?? null;
+
   // Repo-local placement is `<project.rootPath>/.worktrees/<leaf>/`. This
   // directory lives *inside the user's repo*, so we must not enqueue plain
   // user directories the operator dropped there. Only consider entries that
@@ -151,21 +187,13 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
         projectName: project.name,
         projectRepoPath: project.rootPath,
         liveByPath,
+        runStatus: runStatusFor(path),
       });
       if (c !== null) candidates.push(c);
     }
   }
 
-  // Persisted worktree paths from workflow_runs. Catches worktrees whose
-  // project row has been deleted (FK NULLed, path retained) — those dirs
-  // are otherwise invisible to the project-scoped scans above.
-  let orphanPaths: string[] = [];
-  try {
-    orphanPaths = await listPersistedWorktreePaths(baseUrl);
-  } catch (err) {
-    if (!isServerDownError(err)) throw err;
-  }
-  for (const path of orphanPaths) {
+  for (const path of persistedPaths) {
     if (!existsSync(path)) continue;
     if (!recordPath(path)) continue;
     const c = await classifyWorktreeDir({
@@ -173,6 +201,7 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
       projectName: basename(dirname(path)),
       projectRepoPath: null,
       liveByPath: new Map(),
+      runStatus: runStatusFor(path),
     });
     if (c !== null) candidates.push(c);
   }
@@ -196,7 +225,12 @@ export async function runWorktreePrune(opts: WorktreePruneOptions): Promise<neve
     process.exit(EXIT_OK);
   }
 
-  const result: PruneResult = { removed: [], failed: [], inspected: candidates.length };
+  const result: PruneResult = {
+    removed: [],
+    branchesDeleted: [],
+    failed: [],
+    inspected: candidates.length,
+  };
   for (const c of candidates) {
     // Worktrees on `keelson/...` branches are ones the executor created. They
     // can be safely removed even when git still tracks them — failed/cancelled
@@ -209,10 +243,10 @@ export async function runWorktreePrune(opts: WorktreePruneOptions): Promise<neve
     if (c.reason === "tracked" && !isManaged) {
       continue;
     }
-    if (c.reason === "tracked" && !opts.force) {
-      // Default behavior: don't touch tracked entries — `--force` is the
-      // operator saying "yes, even live worktrees" (a live run's worktree
-      // would still be a tracked managed entry until the run terminates).
+    if (c.reason === "tracked" && !opts.force && !isFinishedRun(c.runStatus)) {
+      // A tracked entry whose run is still live (or whose status is unknown
+      // because the server was down) stays put — `--force` is the operator
+      // saying "yes, even live worktrees".
       continue;
     }
     if (c.reason === "tracked" && c.repoPath !== null) {
@@ -226,6 +260,11 @@ export async function runWorktreePrune(opts: WorktreePruneOptions): Promise<neve
       });
       if (out.removed) {
         result.removed.push(c.path);
+        if (c.branch?.startsWith("keelson/")) {
+          const gone = await deleteBranch({ repoPath: c.repoPath, branch: c.branch });
+          if (gone.deleted) result.branchesDeleted.push(c.branch);
+          if (gone.warning !== null) result.failed.push({ path: c.path, error: gone.warning });
+        }
         continue;
       }
       if (out.warning !== null) {

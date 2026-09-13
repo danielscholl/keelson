@@ -75,16 +75,39 @@ export async function listWorkflows(baseUrl: string): Promise<ListWorkflowsRespo
   return (await res.json()) as ListWorkflowsResponse;
 }
 
-export async function listPersistedWorktreePaths(baseUrl: string): Promise<string[]> {
+export interface PersistedWorktrees {
+  paths: string[];
+  // Run status per worktree path. A path shared by several runs (a resumed
+  // run re-enters its worktree) reports the live status when any run is
+  // still in flight, so prune never treats an active worktree as finished.
+  statusByPath: Map<string, string>;
+}
+
+const LIVE_RUN_STATUSES: ReadonlySet<string> = new Set(["pending", "running", "paused"]);
+
+export async function listPersistedWorktrees(baseUrl: string): Promise<PersistedWorktrees> {
   const res = await fetch(url(baseUrl, "/api/workflows/worktree-paths"), {
     headers: defaultHeaders(baseUrl),
   });
   if (!res.ok) {
     throw new HttpError(res.status, `GET /api/workflows/worktree-paths failed: ${res.status}`);
   }
-  const body = (await res.json()) as { paths?: unknown };
-  if (!Array.isArray(body.paths)) return [];
-  return body.paths.filter((p): p is string => typeof p === "string");
+  const body = (await res.json()) as { paths?: unknown; runs?: unknown };
+  const paths = Array.isArray(body.paths)
+    ? body.paths.filter((p): p is string => typeof p === "string")
+    : [];
+  const statusByPath = new Map<string, string>();
+  if (Array.isArray(body.runs)) {
+    for (const entry of body.runs) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const { path, status } = entry as { path?: unknown; status?: unknown };
+      if (typeof path !== "string" || typeof status !== "string") continue;
+      const prior = statusByPath.get(path);
+      if (prior !== undefined && LIVE_RUN_STATUSES.has(prior)) continue;
+      statusByPath.set(path, status);
+    }
+  }
+  return { paths, statusByPath };
 }
 
 export interface StartRunBody {

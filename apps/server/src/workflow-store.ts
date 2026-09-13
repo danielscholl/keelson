@@ -139,7 +139,10 @@ export interface WorkflowStore {
   // Distinct non-null worktree_path values across all runs. Used by `keelson
   // worktree prune` so worktrees from deleted projects (FK NULLed but path
   // still persisted) remain reachable for cleanup.
-  listWorktreePaths(): string[];
+  // Every run that checked out a worktree, with its status, so
+  // `keelson worktree prune` can tell a finished run's leftover from a live
+  // run's working directory. Deleted-project runs (FK NULLed) are included.
+  listWorktreeRuns(): { runId: string; path: string; status: WorkflowRunStatus }[];
   // Hard-delete a terminal run. FK CASCADE on workflow_node_outputs handles
   // the per-node rows. The route layer is responsible for the linked
   // conversation (FK is SET NULL, not CASCADE).
@@ -501,11 +504,17 @@ export function createWorkflowStore(db: Database): WorkflowStore {
       }
       return out;
     },
-    listWorktreePaths() {
+    listWorktreeRuns() {
       const rows = db
-        .query("SELECT DISTINCT worktree_path FROM workflow_runs WHERE worktree_path IS NOT NULL")
-        .all() as { worktree_path: string }[];
-      return rows.map((r) => r.worktree_path);
+        .query(
+          "SELECT id, status, worktree_path FROM workflow_runs WHERE worktree_path IS NOT NULL ORDER BY started_at ASC",
+        )
+        .all() as { id: string; status: string; worktree_path: string }[];
+      return rows.map((r) => ({
+        runId: r.id,
+        path: r.worktree_path,
+        status: r.status as WorkflowRunStatus,
+      }));
     },
     deleteRun(runId) {
       return deleteRunStmt.run(runId).changes > 0;

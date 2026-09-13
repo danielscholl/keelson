@@ -2076,11 +2076,14 @@ export function workflowsRoutes(
     return c.json(bulkDeleteRunsResponseSchema.parse({ deleted }));
   });
 
-  // Read-only feed for `keelson worktree prune`. Returns persisted
-  // worktree_path values so worktrees from deleted projects (FK NULLed,
-  // path retained) stay prunable.
+  // Read-only feed for `keelson worktree prune`. `runs` carries each
+  // worktree-bearing run's status so prune can sweep finished runs without
+  // touching live ones; `paths` stays for older CLIs and covers worktrees from
+  // deleted projects (FK NULLed, path retained).
   app.get("/api/workflows/worktree-paths", (c) => {
-    return c.json({ paths: store.listWorktreePaths() });
+    const runs = store.listWorktreeRuns();
+    const paths = [...new Set(runs.map((r) => r.path))];
+    return c.json({ paths, runs });
   });
 
   app.get("/api/workflows/:name", (c) => {

@@ -96,6 +96,37 @@ describe("SQLite WorkflowStore", () => {
     expect(store.getRunProviderOverride("missing")).toBeNull();
   });
 
+  test("listWorktreeRuns reports every worktree-bearing run with its status", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    for (const runId of ["wt-done", "wt-live", "no-wt"]) {
+      store.createRun({
+        runId,
+        workflowName: "hello-world",
+        inputs: {},
+        startedAt: `2025-01-01T00:00:0${runId.length}.000Z`,
+        conversationId: mintConv(db, runId),
+        providerOverride: null,
+      });
+    }
+    store.setRunWorktreePath("wt-done", "/repo/.worktrees/wt-done");
+    store.setRunWorktreePath("wt-live", "/repo/.worktrees/wt-live");
+    store.updateRunStatus({
+      runId: "wt-done",
+      status: "cancelled",
+      completedAt: "2025-01-01T00:01:00.000Z",
+      error: null,
+    });
+
+    expect(store.listWorktreeRuns()).toEqual(
+      expect.arrayContaining([
+        { runId: "wt-done", path: "/repo/.worktrees/wt-done", status: "cancelled" },
+        { runId: "wt-live", path: "/repo/.worktrees/wt-live", status: "running" },
+      ]),
+    );
+    expect(store.listWorktreeRuns()).toHaveLength(2);
+  });
+
   test("persists resolved worktree base on the run row", () => {
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);

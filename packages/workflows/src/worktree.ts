@@ -555,6 +555,38 @@ export async function removeWorktree(opts: RemoveWorktreeOptions): Promise<Remov
   return { removed: true, warning: null };
 }
 
+export interface DeleteBranchResult {
+  deleted: boolean;
+  warning: string | null;
+}
+
+/**
+ * Delete a local branch after its worktree is gone. `git worktree remove`
+ * leaves the branch behind, so a pruned run would otherwise still show up in
+ * `git branch`. Returns `deleted: false` (no warning) when the branch does not
+ * exist, so callers can treat it as idempotent.
+ */
+export async function deleteBranch(opts: {
+  repoPath: string;
+  branch: string;
+}): Promise<DeleteBranchResult> {
+  const exists = await runGit(
+    ["show-ref", "--verify", "--quiet", `refs/heads/${opts.branch}`],
+    opts.repoPath,
+  );
+  if (exists.exitCode !== 0) {
+    return { deleted: false, warning: null };
+  }
+  const result = await runGit(["branch", "-D", opts.branch], opts.repoPath);
+  if (result.exitCode !== 0) {
+    return {
+      deleted: false,
+      warning: `git branch -D ${opts.branch} failed: ${result.stderr.trim() || result.stdout.trim()}`,
+    };
+  }
+  return { deleted: true, warning: null };
+}
+
 /**
  * Recover the source repository's path from a worktree directory by parsing
  * its `.git` file. Git stores `gitdir: <abs-path>/.git/worktrees/<name>` in

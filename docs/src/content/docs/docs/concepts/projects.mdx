@@ -121,10 +121,11 @@ Isolation is **opt-in**, decided per run:
 - With neither flag, the workflow's own default decides; a workflow that does not
   declare isolation runs in place.
 
-Leftover worktrees, from a failed run or a project you deleted, are cleared with
-`keelson worktree prune` (`--dry-run` lists candidates, `--force` removes ones with
-uncommitted changes). [Directories](../../reference/directories/) maps where they
-live.
+A failed or cancelled run keeps its worktree so you can inspect it. Once the run
+is finished, `keelson worktree prune` removes the worktree and its `keelson/…`
+branch (`--dry-run` lists candidates; `--force` also removes live runs' worktrees
+and ones with uncommitted changes). [Directories](../../reference/directories/)
+maps where they live.
 
 <Aside type="note" title="Isolation is not a sandbox">
 A worktree keeps a run's changes off your working tree, not off your machine. The
