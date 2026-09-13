@@ -10,6 +10,10 @@
 // for tests. Lazy SDK import keeps providers/ importable without spawning a
 // native binary (docs/architecture.md §4 provider rules).
 
+import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ToolContext } from "@keelson/shared";
 import { applyToolResultGate, checkToolCallGate } from "../tool-gate.ts";
 import { deriveToolParametersJsonSchema } from "../tool-params.ts";
@@ -161,6 +165,7 @@ export interface CopilotSdkModule {
     useLoggedInUser?: boolean;
     autoStart?: boolean;
     cwd?: string;
+    connection?: { kind: "stdio"; path?: string };
   }) => CopilotClientLike;
   // Required on SessionConfig/ResumeSessionConfig — createSession() and
   // resumeSession() reject synchronously if absent. `approveAll` is the
@@ -178,8 +183,107 @@ export type CopilotSdkLoader = () => Promise<CopilotSdkModule>;
 const defaultSdkLoader: CopilotSdkLoader = () =>
   import("@github/copilot-sdk") as unknown as Promise<CopilotSdkModule>;
 
+export interface CopilotCliDiagnosticsResult {
+  resolved: boolean;
+  cliPath?: string;
+  version?: string;
+  error?: string;
+}
+
+interface CopilotCliResolution {
+  cliPath?: string;
+  version?: string;
+  error?: string;
+}
+
+function copilotCliPlatformPackageNames(): string[] {
+  const variants = process.platform === "linux" ? ["linux", "linuxmusl"] : [process.platform];
+  return variants.map((variant) => `@github/copilot-${variant}-${process.arch}`);
+}
+
+function resolveFromSdk(
+  requireFromSdk: ReturnType<typeof createRequire>,
+  specifier: string,
+): string | undefined {
+  try {
+    return requireFromSdk.resolve(specifier);
+  } catch {
+    return undefined;
+  }
+}
+
+function readPackageVersion(packageJsonPath: string | undefined): string | undefined {
+  if (!packageJsonPath) return undefined;
+  try {
+    const manifest: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+    if (
+      typeof manifest === "object" &&
+      manifest !== null &&
+      "version" in manifest &&
+      typeof manifest.version === "string"
+    ) {
+      return manifest.version;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function inspectBundledCopilotCli(): CopilotCliResolution {
+  let requireFromSdk: ReturnType<typeof createRequire>;
+  try {
+    const sdkEntry = fileURLToPath(import.meta.resolve("@github/copilot-sdk"));
+    requireFromSdk = createRequire(sdkEntry);
+  } catch (error) {
+    const detail = error instanceof Error ? `: ${error.message}` : "";
+    return { error: `Could not resolve @github/copilot-sdk${detail}` };
+  }
+
+  const installedVersion = readPackageVersion(
+    resolveFromSdk(requireFromSdk, "@github/copilot/package.json"),
+  );
+  const packageNames = copilotCliPlatformPackageNames();
+  for (const packageName of packageNames) {
+    const packageJsonPath = resolveFromSdk(requireFromSdk, `${packageName}/package.json`);
+    if (!packageJsonPath) continue;
+    const cliPath = join(dirname(packageJsonPath), "index.js");
+    if (!existsSync(cliPath)) continue;
+    return {
+      cliPath,
+      version: readPackageVersion(packageJsonPath) ?? installedVersion,
+    };
+  }
+
+  return {
+    ...(installedVersion ? { version: installedVersion } : {}),
+    error: `Could not resolve a @github/copilot platform package (tried ${packageNames.join(", ")})`,
+  };
+}
+
+export function resolveBundledCopilotCliPath(): string | undefined {
+  return inspectBundledCopilotCli().cliPath;
+}
+
+export function copilotCliDiagnostics(): CopilotCliDiagnosticsResult {
+  const resolution = inspectBundledCopilotCli();
+  if (resolution.cliPath) {
+    return {
+      resolved: true,
+      cliPath: resolution.cliPath,
+      ...(resolution.version ? { version: resolution.version } : {}),
+    };
+  }
+  return {
+    resolved: false,
+    ...(resolution.version ? { version: resolution.version } : {}),
+    error: resolution.error ?? "Copilot CLI path could not be resolved",
+  };
+}
+
 export interface CopilotClientFactoryOptions {
   sdkLoader?: CopilotSdkLoader;
+  resolveCliPath?: () => string | undefined;
 }
 
 // `pushChunk` enqueues into the provider's outbound stream; `contextFactory`
@@ -313,9 +417,11 @@ async function runToolHandler(
 
 export class CopilotClientFactory {
   private readonly loadSdk: CopilotSdkLoader;
+  private readonly resolveCliPath: () => string | undefined;
 
   constructor(options: CopilotClientFactoryOptions = {}) {
     this.loadSdk = options.sdkLoader ?? defaultSdkLoader;
+    this.resolveCliPath = options.resolveCliPath ?? resolveBundledCopilotCliPath;
   }
 
   async load(): Promise<CopilotSdkModule> {
@@ -327,6 +433,8 @@ export class CopilotClientFactory {
   // onPermissionRequest without reloading the SDK module.
   async createClient(gitHubToken: string | undefined, cwd: string): Promise<CreateClientResult> {
     const sdk = await this.loadSdk();
+    const cliPath = this.resolveCliPath();
+    const connection = cliPath ? { kind: "stdio" as const, path: cliPath } : undefined;
     // Two auth modes: explicit gitHubToken (paste token) suppresses the SDK
     // CLI-OAuth fallback; absence opts into `copilot auth login` credentials.
     const client = new sdk.CopilotClient(
@@ -336,11 +444,13 @@ export class CopilotClientFactory {
             useLoggedInUser: false,
             autoStart: false,
             cwd,
+            ...(connection ? { connection } : {}),
           }
         : {
             useLoggedInUser: true,
             autoStart: false,
             cwd,
+            ...(connection ? { connection } : {}),
           },
     );
     try {

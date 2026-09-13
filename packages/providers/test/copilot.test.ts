@@ -1,10 +1,13 @@
+import { existsSync } from "node:fs";
 import { beforeEach, describe, expect, it, spyOn } from "bun:test";
 import type { ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
 import { isCopilotConnectionError } from "../src/copilot/errors.ts";
 import {
+  copilotCliDiagnostics,
   type CopilotToolProjectionContext,
   projectToolsForCopilot,
+  resolveBundledCopilotCliPath,
 } from "../src/copilot/factory.ts";
 import type {
   CopilotClientLike,
@@ -337,7 +340,10 @@ describe("CopilotProvider — credential modes", () => {
     const loader = loaderFor(sdk);
     const provider = new CopilotProvider({
       getCredential: async () => undefined,
-      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+      clientFactory: new CopilotClientFactory({
+        sdkLoader: loader.load,
+        resolveCliPath: () => "/fake/copilot/index.js",
+      }),
     });
     await drain(provider.sendQuery("hi", "/tmp"));
     // Without a saved token, the SDK is loaded and the client is asked
@@ -346,6 +352,10 @@ describe("CopilotProvider — credential modes", () => {
     const opts = sdk.lastClient()!.options;
     expect(opts.useLoggedInUser).toBe(true);
     expect("gitHubToken" in opts).toBe(false);
+    expect(opts.connection).toEqual({
+      kind: "stdio",
+      path: "/fake/copilot/index.js",
+    });
   });
 
   it("uses paste-token mode when a credential is saved", async () => {
@@ -355,12 +365,51 @@ describe("CopilotProvider — credential modes", () => {
     const loader = loaderFor(sdk);
     const provider = new CopilotProvider({
       getCredential: async () => "paste-token-xyz",
-      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+      clientFactory: new CopilotClientFactory({
+        sdkLoader: loader.load,
+        resolveCliPath: () => "/fake/copilot/index.js",
+      }),
     });
     await drain(provider.sendQuery("hi", "/tmp"));
     const opts = sdk.lastClient()!.options;
     expect(opts.gitHubToken).toBe("paste-token-xyz");
     expect(opts.useLoggedInUser).toBe(false);
+    expect(opts.connection).toEqual({
+      kind: "stdio",
+      path: "/fake/copilot/index.js",
+    });
+  });
+
+  it("leaves connection absent when the bundled CLI cannot be resolved", async () => {
+    const sdk = makeMockSdk({
+      scenario: (session) => session.emit("session.idle"),
+    });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({
+        sdkLoader: loader.load,
+        resolveCliPath: () => undefined,
+      }),
+    });
+
+    await drain(provider.sendQuery("hi", "/tmp"));
+
+    expect("connection" in sdk.lastClient()!.options).toBe(false);
+  });
+});
+
+describe("Copilot CLI resolution", () => {
+  it("resolves the installed platform CLI from the SDK module", () => {
+    const cliPath = resolveBundledCopilotCliPath();
+    expect(cliPath).toBeDefined();
+    expect(cliPath!.endsWith("index.js")).toBe(true);
+    expect(existsSync(cliPath!)).toBe(true);
+
+    const diagnostics = copilotCliDiagnostics();
+    expect(diagnostics.resolved).toBe(true);
+    expect(diagnostics.cliPath).toBe(cliPath);
+    expect(diagnostics.version).toBeDefined();
   });
 });
 
