@@ -196,6 +196,15 @@ interface CopilotCliResolution {
   error?: string;
 }
 
+function inspectConfiguredCopilotCli(
+  env: NodeJS.ProcessEnv = process.env,
+): CopilotCliResolution | undefined {
+  const cliPath = env.COPILOT_CLI_PATH;
+  if (!cliPath) return undefined;
+  if (existsSync(cliPath)) return { cliPath };
+  return { error: `COPILOT_CLI_PATH does not exist: ${cliPath}` };
+}
+
 function copilotCliPlatformPackageNames(): string[] {
   const variants = process.platform === "linux" ? ["linux", "linuxmusl"] : [process.platform];
   return variants.map((variant) => `@github/copilot-${variant}-${process.arch}`);
@@ -265,7 +274,17 @@ export function resolveBundledCopilotCliPath(): string | undefined {
   return inspectBundledCopilotCli().cliPath;
 }
 
-export function copilotCliDiagnostics(): CopilotCliDiagnosticsResult {
+export function copilotCliDiagnostics(
+  env: NodeJS.ProcessEnv = process.env,
+): CopilotCliDiagnosticsResult {
+  const configured = inspectConfiguredCopilotCli(env);
+  if (configured?.cliPath) {
+    return {
+      resolved: true,
+      cliPath: configured.cliPath,
+    };
+  }
+
   const resolution = inspectBundledCopilotCli();
   if (resolution.cliPath) {
     return {
@@ -277,7 +296,9 @@ export function copilotCliDiagnostics(): CopilotCliDiagnosticsResult {
   return {
     resolved: false,
     ...(resolution.version ? { version: resolution.version } : {}),
-    error: resolution.error ?? "Copilot CLI path could not be resolved",
+    error: [configured?.error, resolution.error ?? "Copilot CLI path could not be resolved"]
+      .filter(Boolean)
+      .join("; "),
   };
 }
 
@@ -433,7 +454,7 @@ export class CopilotClientFactory {
   // onPermissionRequest without reloading the SDK module.
   async createClient(gitHubToken: string | undefined, cwd: string): Promise<CreateClientResult> {
     const sdk = await this.loadSdk();
-    const cliPath = this.resolveCliPath();
+    const cliPath = inspectConfiguredCopilotCli()?.cliPath ?? this.resolveCliPath();
     const connection = cliPath ? { kind: "stdio" as const, path: cliPath } : undefined;
     // Two auth modes: explicit gitHubToken (paste token) suppresses the SDK
     // CLI-OAuth fallback; absence opts into `copilot auth login` credentials.

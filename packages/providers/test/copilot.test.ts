@@ -333,6 +333,56 @@ async function drain<T>(gen: AsyncGenerator<T>): Promise<T[]> {
 }
 
 describe("CopilotProvider — credential modes", () => {
+  it("prefers a valid COPILOT_CLI_PATH over the bundled resolver", async () => {
+    const originalCliPath = process.env.COPILOT_CLI_PATH;
+    process.env.COPILOT_CLI_PATH = process.execPath;
+    try {
+      const sdk = makeMockSdk();
+      const factory = new CopilotClientFactory({
+        sdkLoader: loaderFor(sdk).load,
+        resolveCliPath: () => "/fake/copilot/index.js",
+      });
+
+      await factory.createClient(undefined, "/tmp");
+
+      expect(sdk.lastClient()!.options.connection).toEqual({
+        kind: "stdio",
+        path: process.execPath,
+      });
+    } finally {
+      if (originalCliPath === undefined) {
+        delete process.env.COPILOT_CLI_PATH;
+      } else {
+        process.env.COPILOT_CLI_PATH = originalCliPath;
+      }
+    }
+  });
+
+  it("falls back to the bundled resolver when COPILOT_CLI_PATH is invalid", async () => {
+    const originalCliPath = process.env.COPILOT_CLI_PATH;
+    process.env.COPILOT_CLI_PATH = "/missing/copilot-cli";
+    try {
+      const sdk = makeMockSdk();
+      const factory = new CopilotClientFactory({
+        sdkLoader: loaderFor(sdk).load,
+        resolveCliPath: () => "/fake/copilot/index.js",
+      });
+
+      await factory.createClient(undefined, "/tmp");
+
+      expect(sdk.lastClient()!.options.connection).toEqual({
+        kind: "stdio",
+        path: "/fake/copilot/index.js",
+      });
+    } finally {
+      if (originalCliPath === undefined) {
+        delete process.env.COPILOT_CLI_PATH;
+      } else {
+        process.env.COPILOT_CLI_PATH = originalCliPath;
+      }
+    }
+  });
+
   it("falls back to useLoggedInUser: true when no paste-token is saved", async () => {
     const sdk = makeMockSdk({
       scenario: (session) => session.emit("session.idle"),
@@ -400,16 +450,33 @@ describe("CopilotProvider — credential modes", () => {
 });
 
 describe("Copilot CLI resolution", () => {
+  it("reports a valid COPILOT_CLI_PATH before the bundled CLI", () => {
+    const diagnostics = copilotCliDiagnostics({ COPILOT_CLI_PATH: process.execPath });
+
+    expect(diagnostics).toEqual({
+      resolved: true,
+      cliPath: process.execPath,
+    });
+  });
+
   it("resolves the installed platform CLI from the SDK module", () => {
     const cliPath = resolveBundledCopilotCliPath();
     expect(cliPath).toBeDefined();
     expect(cliPath!.endsWith("index.js")).toBe(true);
     expect(existsSync(cliPath!)).toBe(true);
 
-    const diagnostics = copilotCliDiagnostics();
+    const diagnostics = copilotCliDiagnostics({});
     expect(diagnostics.resolved).toBe(true);
     expect(diagnostics.cliPath).toBe(cliPath);
     expect(diagnostics.version).toBeDefined();
+  });
+
+  it("falls back to the bundled CLI when COPILOT_CLI_PATH is invalid", () => {
+    const cliPath = resolveBundledCopilotCliPath();
+    const diagnostics = copilotCliDiagnostics({ COPILOT_CLI_PATH: "/missing/copilot-cli" });
+
+    expect(diagnostics.resolved).toBe(true);
+    expect(diagnostics.cliPath).toBe(cliPath);
   });
 });
 

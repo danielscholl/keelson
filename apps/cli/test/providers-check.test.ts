@@ -88,6 +88,21 @@ describe("providers doctor check", () => {
     expect(result.checks[0]?.detail).toContain("@github/copilot 1.0.83");
   });
 
+  test("reports a resolved COPILOT_CLI_PATH without a bundled version", () => {
+    const result = runProvidersCheck({
+      loadConfig: () => config(),
+      isInstalled: notInstalled,
+      copilotDiagnostics: () => ({
+        resolved: true,
+        cliPath: "/custom/copilot",
+      }),
+      envProviders: "",
+    });
+
+    expect(result.checks[0]?.status).toBe("ok");
+    expect(result.checks[0]?.detail).toBe("copilot CLI resolved (/custom/copilot)");
+  });
+
   test("warns when the bundled Copilot CLI cannot be resolved", () => {
     const result = runProvidersCheck({
       loadConfig: () => config(),

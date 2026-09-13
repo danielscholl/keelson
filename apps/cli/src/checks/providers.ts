@@ -64,7 +64,9 @@ export function runProvidersCheck(deps: ProvidersDeps = {}): CategoryResult {
       checks.push({
         name: "copilot CLI",
         status: "ok",
-        detail: `copilot CLI resolved (@github/copilot ${version})`,
+        detail: diagnostics.version
+          ? `copilot CLI resolved (@github/copilot ${version})`
+          : `copilot CLI resolved (${diagnostics.cliPath ?? version})`,
       });
     } else {
       checks.push({
