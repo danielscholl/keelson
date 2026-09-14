@@ -3,6 +3,8 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import {
+  type CopilotCliDiagnosticsResult,
+  copilotCliDiagnostics as defaultCopilotDiagnostics,
   isProviderSdkInstalled as defaultIsInstalled,
   isOnDemandProvider,
   onDemandProviderIds,
@@ -18,6 +20,7 @@ import type { CategoryResult, CheckResult } from "./types.ts";
 export interface ProvidersDeps {
   loadConfig?: () => KeelsonConfig;
   isInstalled?: (id: string) => boolean;
+  copilotDiagnostics?: () => CopilotCliDiagnosticsResult;
   envProviders?: string;
 }
 
@@ -52,6 +55,27 @@ export function runProvidersCheck(deps: ProvidersDeps = {}): CategoryResult {
       detail: "enabled but its SDK is not installed; the server will not register it",
       hint: `run \`keelson provider add ${id}\`, or disable it in config.json (providers.${id})`,
     });
+  }
+
+  if (enabled.includes("copilot")) {
+    const diagnostics = (deps.copilotDiagnostics ?? defaultCopilotDiagnostics)();
+    const version = diagnostics.version ?? "version unknown";
+    if (diagnostics.resolved) {
+      checks.push({
+        name: "copilot CLI",
+        status: "ok",
+        detail: diagnostics.version
+          ? `copilot CLI resolved (@github/copilot ${version})`
+          : `copilot CLI resolved (${diagnostics.cliPath ?? version})`,
+      });
+    } else {
+      checks.push({
+        name: "copilot CLI",
+        status: "warn",
+        detail: `copilot CLI unresolved (@github/copilot ${version}): ${diagnostics.error ?? "unknown resolution error"}`,
+        hint: "@github/copilot 1.0.81+ changed its platform package exports; update or reinstall Keelson before using Copilot",
+      });
+    }
   }
 
   if (usable === 0) {

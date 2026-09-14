@@ -71,14 +71,54 @@ describe("providers doctor check", () => {
     expect(result.checks.some((c) => c.name === "usable provider")).toBe(false);
   });
 
-  test("skips cleanly when only bundled providers are enabled", () => {
+  test("reports a resolved bundled Copilot CLI", () => {
     const result = runProvidersCheck({
       loadConfig: () => config(),
       isInstalled: notInstalled,
+      copilotDiagnostics: () => ({
+        resolved: true,
+        cliPath: "/fake/copilot/index.js",
+        version: "1.0.83",
+      }),
       envProviders: "",
     });
     expect(result.checks).toHaveLength(1);
-    expect(result.checks[0]?.status).toBe("skip");
+    expect(result.checks[0]?.name).toBe("copilot CLI");
+    expect(result.checks[0]?.status).toBe("ok");
+    expect(result.checks[0]?.detail).toContain("@github/copilot 1.0.83");
+  });
+
+  test("reports a resolved COPILOT_CLI_PATH without a bundled version", () => {
+    const result = runProvidersCheck({
+      loadConfig: () => config(),
+      isInstalled: notInstalled,
+      copilotDiagnostics: () => ({
+        resolved: true,
+        cliPath: "/custom/copilot",
+      }),
+      envProviders: "",
+    });
+
+    expect(result.checks[0]?.status).toBe("ok");
+    expect(result.checks[0]?.detail).toBe("copilot CLI resolved (/custom/copilot)");
+  });
+
+  test("warns when the bundled Copilot CLI cannot be resolved", () => {
+    const result = runProvidersCheck({
+      loadConfig: () => config(),
+      isInstalled: notInstalled,
+      copilotDiagnostics: () => ({
+        resolved: false,
+        version: "1.0.83",
+        error: "platform package is not exported",
+      }),
+      envProviders: "",
+    });
+    const copilot = result.checks.find((c) => c.name === "copilot CLI");
+    expect(copilot?.status).toBe("warn");
+    expect(copilot?.detail).toContain("@github/copilot 1.0.83");
+    expect(copilot?.detail).toContain("platform package is not exported");
+    expect(copilot?.hint).toContain("1.0.81+");
   });
 });
 
