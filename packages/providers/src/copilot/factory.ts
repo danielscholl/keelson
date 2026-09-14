@@ -205,7 +205,7 @@ function inspectConfiguredCopilotCli(
   return { error: `COPILOT_CLI_PATH does not exist: ${cliPath}` };
 }
 
-function copilotCliPlatformPackageNames(): string[] {
+export function copilotCliPlatformPackageNames(): string[] {
   const variants = process.platform === "linux" ? ["linux", "linuxmusl"] : [process.platform];
   return variants.map((variant) => `@github/copilot-${variant}-${process.arch}`);
 }
@@ -239,10 +239,17 @@ function readPackageVersion(packageJsonPath: string | undefined): string | undef
   return undefined;
 }
 
-function inspectBundledCopilotCli(): CopilotCliResolution {
+export interface ResolveBundledCopilotCliOptions {
+  /** Module path to anchor resolution at; defaults to the installed @github/copilot-sdk entry. */
+  sdkEntry?: string;
+}
+
+function inspectBundledCopilotCli(
+  options: ResolveBundledCopilotCliOptions = {},
+): CopilotCliResolution {
   let requireFromSdk: ReturnType<typeof createRequire>;
   try {
-    const sdkEntry = fileURLToPath(import.meta.resolve("@github/copilot-sdk"));
+    const sdkEntry = options.sdkEntry ?? fileURLToPath(import.meta.resolve("@github/copilot-sdk"));
     requireFromSdk = createRequire(sdkEntry);
   } catch (error) {
     const detail = error instanceof Error ? `: ${error.message}` : "";
@@ -270,8 +277,10 @@ function inspectBundledCopilotCli(): CopilotCliResolution {
   };
 }
 
-export function resolveBundledCopilotCliPath(): string | undefined {
-  return inspectBundledCopilotCli().cliPath;
+export function resolveBundledCopilotCliPath(
+  options: ResolveBundledCopilotCliOptions = {},
+): string | undefined {
+  return inspectBundledCopilotCli(options).cliPath;
 }
 
 export function copilotCliDiagnostics(

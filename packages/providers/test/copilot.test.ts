@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, spyOn } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
 import { isCopilotConnectionError } from "../src/copilot/errors.ts";
 import {
   type CopilotToolProjectionContext,
   copilotCliDiagnostics,
+  copilotCliPlatformPackageNames,
   projectToolsForCopilot,
   resolveBundledCopilotCliPath,
 } from "../src/copilot/factory.ts";
@@ -469,6 +472,38 @@ describe("Copilot CLI resolution", () => {
     expect(diagnostics.resolved).toBe(true);
     expect(diagnostics.cliPath).toBe(cliPath);
     expect(diagnostics.version).toBeDefined();
+  });
+
+  it("resolves a platform package whose exports map exposes only '.' (copilot 1.0.81+)", () => {
+    // 1.0.81 narrowed the platform packages' exports to "." alone, which is
+    // what broke the SDK's own "<pkg>/sdk" lookup. The resolver goes through
+    // package.json instead, which Bun serves regardless of the exports map.
+    // realpath: macOS hands out /var/... for tmpdir while resolution reports /private/var/...
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "copilot-layout-")));
+    try {
+      const [platformPackage] = copilotCliPlatformPackageNames();
+      const sdkDir = join(root, "node_modules", "@github", "copilot-sdk", "dist");
+      const platformDir = join(root, "node_modules", ...platformPackage!.split("/"));
+      mkdirSync(sdkDir, { recursive: true });
+      mkdirSync(platformDir, { recursive: true });
+      writeFileSync(join(sdkDir, "client.js"), "export {};\n");
+      writeFileSync(
+        join(platformDir, "package.json"),
+        JSON.stringify({
+          name: platformPackage,
+          version: "1.0.83",
+          exports: { ".": "./copilot" },
+          bin: { copilot: "copilot" },
+        }),
+      );
+      writeFileSync(join(platformDir, "copilot"), "");
+      writeFileSync(join(platformDir, "index.js"), "");
+
+      const cliPath = resolveBundledCopilotCliPath({ sdkEntry: join(sdkDir, "client.js") });
+      expect(cliPath).toBe(join(platformDir, "index.js"));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("falls back to the bundled CLI when COPILOT_CLI_PATH is invalid", () => {
