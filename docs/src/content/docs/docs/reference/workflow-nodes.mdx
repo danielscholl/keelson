@@ -251,7 +251,7 @@ These apply across kinds (some only to agent nodes, as noted).
 | `output_schema` | agent | A JSON-Schema subset the output must satisfy, or the node fails. |
 | `output_format` | agent | Provider structured-output request (Claude). |
 | `retry` | all but `loop` | `{ max_attempts: 1-5, delay_ms: 1000-60000, on_error }`. `delay_ms` doubles each attempt; `on_error` is `transient` (default) or `all`. |
-| `always_run` | all | `true` re-executes the node on a resumed run even if it previously succeeded (default `false`). Use it for a gate or validation that should re-check rather than replay a stale pass, and on an `all_done` collector that can succeed while its upstream fails: see [resume and side effects](#resume-and-side-effects). |
+| `always_run` | all | `true` re-executes the node on a resumed run even if it previously succeeded (default `false`). Its transitive descendants also re-run, including prompt nodes that make provider calls and incur their normal token cost. Use it for a gate or validation that must re-check rather than replay a prior pass: see [resume and side effects](#resume-and-side-effects). |
 | `fail_on_tool_error` | agent | `true` fails the node if any invoked tool errored. |
 | `require_tool_call` | agent | `[tool-name, ...]` — fails the node if a listed tool was available but the turn ended without a successful call to it, so a node whose deliverable is a tool call cannot report success having produced nothing. An error followed by a successful retry satisfies it. Only registry/MCP tools are checked: a provider SDK's own built-ins (`Read`, `Bash`, …) are never in the catalog, so naming one has no effect, and providers that take no keelson tools (`codex`, gateways, `stub`) skip the check rather than fail it. |
 | `idle_timeout` | agent | Milliseconds of stream silence before the node fails. |
@@ -499,29 +499,28 @@ Reserved node ids, because they collide with substitution namespaces: `inputs`,
 
 ## Resume and side effects
 
-`keelson workflow resume` seeds every already-succeeded node as complete and
-re-enters the executor from the first incomplete one. The seed carries a node's
-**stdout**, so a node whose real product is its stdout replays correctly and an
-expensive prompt node is not paid for twice.
+`keelson workflow resume` seeds reusable succeeded nodes as complete. Failed,
+awaiting, interrupted, and absent nodes re-execute. A node with
+`always_run: true` also re-executes even when its previous result succeeded.
 
-A resumed run reuses the same artifacts directory, so a seeded node's file is
-still there and still correct. Writing a file is not by itself a reason to set
-`always_run`.
+When a node re-executes, all of its transitive descendants re-execute too. This
+keeps every derived output consistent with the new ancestor output. It also
+means a descendant prompt node makes another provider call and incurs its normal
+token cost. Independent branches remain seeded.
 
-The case that breaks is narrower: a `trigger_rule: all_done` collector runs even
-when the work it summarizes failed, so it can succeed while its upstream did
-not. On resume that upstream re-runs, and the collector, having succeeded, stays
-seeded. Its file keeps what the failed attempt produced and never sees the new
-output. Mark that node `always_run: true`.
+A resumed run reuses the same artifacts directory. Files from seeded nodes
+remain available, and files are not deleted when their owners are invalidated.
+A re-executed node may overwrite its own files. Writing a file is not by itself
+a reason to set `always_run`.
 
-Validation warns when a `bash` or `script` node combines `trigger_rule: all_done`
-with a reference to the artifacts directory and no `always_run`, the shape a
-fan-in collector takes.
+A `trigger_rule: all_done` collector can succeed while an upstream node fails.
+When that upstream node re-executes, the collector and everything derived from it
+re-execute automatically. The collector does not need `always_run` solely to
+refresh its output.
 
-Nodes inside a [converge](#converge) subgraph are exempt and should not carry the
-flag. A resumed run restarts the round counter at 1 while the rest of the seeded
-subgraph stays at the round it converged on, so a node re-run there rewrites its
-file against the wrong round.
+A fully seeded [converge](#converge) subgraph remains seeded. If invalidation
+reaches its gate, the full converge ancestor subgraph re-executes from round 1,
+and affected descendants outside the subgraph re-execute with it.
 
 ## Validation rules
 
