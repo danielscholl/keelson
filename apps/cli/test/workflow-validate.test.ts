@@ -21,6 +21,28 @@ async function runCli(args: readonly string[]): Promise<{ stdout: string; exitCo
   return { stdout, exitCode };
 }
 
+async function runLiveValidate(
+  name: string,
+  dir: string,
+  env: Record<string, string> = {},
+): Promise<{ stdout: string; exitCode: number }> {
+  const modulePath = resolve(
+    import.meta.dir,
+    "..",
+    "src",
+    "commands",
+    "workflow-validate.ts",
+  );
+  const script = `import { runWorkflowValidate } from ${JSON.stringify(modulePath)}; await runWorkflowValidate(${JSON.stringify(name)}, { json: true, dir: ${JSON.stringify(dir)}, live: true });`;
+  const proc = Bun.spawn(["bun", "-e", script], {
+    env: { ...process.env, KEELSON_PROVIDERS: "stub", ...env },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+  return { stdout, exitCode };
+}
+
 describe("workflow validate --dir (CLI)", () => {
   test("validates a named workflow from an explicit directory", async () => {
     const { stdout, exitCode } = await runCli([
@@ -35,6 +57,65 @@ describe("workflow validate --dir (CLI)", () => {
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.ok).toBe(true);
     expect(envelope.data.failed).toBe(0);
+  });
+
+  describe("workflow validate --live", () => {
+    let dir: string;
+
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    test("exits non-zero and names a retired model pin", async () => {
+      dir = mkdtempSync(join(tmpdir(), "keelson-validate-live-"));
+      writeFileSync(
+        join(dir, "bad.yaml"),
+        `name: bad-pin
+description: rejected model pin
+provider: stub
+nodes:
+  - id: pinned
+    model: retired-model
+    prompt: run
+`,
+      );
+
+      const { stdout, exitCode } = await runLiveValidate("bad-pin", dir);
+      const envelope = JSON.parse(stdout.trim());
+
+      expect(exitCode).toBe(2);
+      expect(envelope.data.results[0].preflight.violations[0]).toMatchObject({
+        nodeId: "pinned",
+        kind: "model",
+        value: "retired-model",
+        reason: "model 'retired-model' is not in stub's live catalog",
+      });
+    });
+
+    test("an unavailable effective provider is not checked and does not fail", async () => {
+      dir = mkdtempSync(join(tmpdir(), "keelson-validate-live-"));
+      writeFileSync(
+        join(dir, "offline.yaml"),
+        `name: offline-pin
+description: unavailable provider catalog
+nodes:
+  - id: pinned
+    model: retired-model
+    prompt: run
+`,
+      );
+
+      const { stdout, exitCode } = await runLiveValidate("offline-pin", dir, {
+        KEELSON_WORKFLOW_PROVIDER: "offline",
+      });
+      const envelope = JSON.parse(stdout.trim());
+
+      expect(exitCode).toBe(0);
+      expect(envelope.data.results[0].preflight).toEqual({
+        violations: [],
+        notChecked: ["offline"],
+      });
+    });
   });
 
   test("exits 4 when the name is missing from the explicit directory", async () => {
