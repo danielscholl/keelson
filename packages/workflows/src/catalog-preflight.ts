@@ -1,5 +1,5 @@
 import { resolveWorkflowResolution } from "./catalog-resolution.ts";
-import { modelCaseLiterals } from "./model-by.ts";
+import { applyModelCase } from "./model-by.ts";
 import type { WorkflowDefinition } from "./schema/index.ts";
 
 type ModelClass = "fast" | "balanced" | "deep";
@@ -89,56 +89,52 @@ export function checkWorkflowCatalog(
       continue;
     }
 
-    // Every branch of a case map is checked, not just the one this run would
-    // take: which case wins is run data, so a typo in a cold branch is only
-    // catchable here.
+    // Every branch is checked, not just the one this run would take: which case
+    // wins is run data, so a typo in a cold branch is only catchable here. The
+    // branch is applied to the node first, because a case sets only the fields it
+    // names and `model_by_provider` still outranks a case's plain `model`.
     if (node.model_by !== undefined) {
-      for (const { caseKey, model, effort: caseEffort } of modelCaseLiterals(
-        node.model_by,
-        provider,
-      )) {
-        if (!isConcreteModel(model)) continue;
-        const listed = live.find((candidate) => candidate.id === model);
-        if (listed === undefined) {
+      for (const [caseKey, branch] of Object.entries(node.model_by.cases)) {
+        const dispatched = applyModelCase(node, branch) as typeof node;
+        const caseLiteral = pinnedLiteralFor(dispatched, workflow, provider);
+        const listed =
+          caseLiteral === undefined
+            ? undefined
+            : live.find((candidate) => candidate.id === caseLiteral);
+        if (caseLiteral !== undefined && listed === undefined) {
           violations.push({
             nodeId: node.id,
             provider,
             kind: "model",
-            value: model,
-            reason: `model '${model}' (model_by case '${caseKey}') is not in ${provider}'s live catalog`,
+            value: caseLiteral,
+            reason: `model '${caseLiteral}' (model_by case '${caseKey}') is not in ${provider}'s live catalog`,
             caseKey,
           });
           continue;
         }
-        // A case's effort is judged against that case's own model, not the
-        // node's statically-resolved one: the pair is what the run will use.
-        const branchEffort = normalizeEffort(caseEffort ?? node.effort ?? workflow.effort);
-        const supported = listed.supportedReasoningEfforts;
-        if (branchEffort === undefined || supported === undefined || supported.length === 0) {
+        const caseEffort = normalizeEffort(dispatched.effort ?? workflow.effort);
+        const caseSupported = listed?.supportedReasoningEfforts;
+        if (caseEffort === undefined || caseSupported === undefined || caseSupported.length === 0) {
           continue;
         }
-        if (!supported.includes(branchEffort)) {
+        if (!caseSupported.includes(caseEffort)) {
           violations.push({
             nodeId: node.id,
             provider,
             kind: "effort",
-            value: branchEffort,
-            reason: `effort '${branchEffort}' (model_by case '${caseKey}') exceeds ${provider}/${model} (supports ${supported.join(", ")})`,
+            value: caseEffort,
+            reason: `effort '${caseEffort}' (model_by case '${caseKey}') exceeds ${provider}/${caseLiteral ?? resolved.model} (supports ${caseSupported.join(", ")})`,
             caseKey,
           });
         }
       }
+      // Every dispatch goes through a case, so the node's own model/effort are
+      // only reachable via a case that leaves them in place, which the loop
+      // above already evaluated.
+      continue;
     }
 
-    // A static pin every case replaces is not a reachable branch: a matched run
-    // uses the case's model and an unmatched one fails before dispatch.
-    const casesCoverModel =
-      node.model_by !== undefined &&
-      Object.values(node.model_by.cases).every(
-        (branch) =>
-          branch.model_by_provider?.[provider] !== undefined || branch.model !== undefined,
-      );
-    const literal = casesCoverModel ? undefined : pinnedLiteralFor(node, workflow, provider);
+    const literal = pinnedLiteralFor(node, workflow, provider);
     if (
       literal !== undefined &&
       literal === resolved.model &&

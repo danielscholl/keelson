@@ -127,17 +127,3 @@ export function applyModelCase(node: DagNode, selected: ModelCase): DagNode {
     ...(selected.effort !== undefined ? { effort: selected.effort } : {}),
   } as DagNode;
 }
-
-/** Every concrete model literal a `model_by` node can reach, for the catalog preflight. */
-export function modelCaseLiterals(
-  modelBy: ModelBy,
-  provider: string,
-): Array<{ caseKey: string; model: string; effort: string | undefined }> {
-  const out: Array<{ caseKey: string; model: string; effort: string | undefined }> = [];
-  for (const [caseKey, branch] of Object.entries(modelBy.cases)) {
-    const perProvider = branch.model_by_provider?.[provider];
-    const model = perProvider ?? branch.model;
-    if (model !== undefined) out.push({ caseKey, model, effort: branch.effort });
-  }
-  return out;
-}
