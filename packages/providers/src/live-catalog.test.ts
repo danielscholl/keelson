@@ -96,9 +96,7 @@ describe("fetchLiveModelCatalog", () => {
       builtIn: false,
     });
 
-    expect(await fetchLiveModelCatalog(["picker-only"])).toEqual(
-      new Map([["picker-only", null]]),
-    );
+    expect(await fetchLiveModelCatalog(["picker-only"])).toEqual(new Map([["picker-only", null]]));
   });
 
   test("preserves a live-catalog failure instead of using the picker fallback", async () => {

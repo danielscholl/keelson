@@ -3005,6 +3005,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     workspaceManager,
     isolationFallbackLock,
   } = args;
+  let pendingPreflightNotice: string | undefined;
   if (preflight) {
     const config = loadKeelsonConfig();
     const providers = new Map(
@@ -3045,11 +3046,9 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       console.warn(
         `[workflows] run ${runId} preflight not checked: ${result.notChecked.join(", ")}`,
       );
-      subscribers.broadcast(runId, {
-        type: "run_warning",
-        nodeId: null,
-        message: `preflight not checked: ${result.notChecked.join(", ")}`,
-      });
+      // Held until run_started rather than broadcast here: preflight runs before
+      // any client has subscribed, and broadcast drops frames with no listener.
+      pendingPreflightNotice = `preflight not checked: ${result.notChecked.join(", ")}`;
     }
     if (result.violations.length > 0) {
       const error = `preflight failed:\n${formatPreflightViolations(result)}`;
@@ -3690,6 +3689,14 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
           ...(publishRun !== undefined ? { publishStructured: publishRun } : {}),
           ...(usageStore !== undefined ? { usageStore } : {}),
         });
+        if (event.type === "run_started" && pendingPreflightNotice !== undefined) {
+          subscribers.broadcast(runId, {
+            type: "run_warning",
+            nodeId: null,
+            message: pendingPreflightNotice,
+          });
+          pendingPreflightNotice = undefined;
+        }
       },
     });
   } catch (err) {
