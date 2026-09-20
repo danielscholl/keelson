@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { describe, expect, it } from "bun:test";
-import { workflowRunDetailSchema } from "../src/workflows.ts";
+import { startWorkflowRunBodySchema, workflowRunDetailSchema } from "../src/workflows.ts";
 
 function makeRunDetail(overrides: Record<string, unknown> = {}) {
   return {
@@ -33,6 +33,18 @@ function makeRunDetail(overrides: Record<string, unknown> = {}) {
 describe("workflowRunDetailSchema", () => {
   it("defaults brief to null", () => {
     expect(workflowRunDetailSchema.parse(makeRunDetail()).brief).toBeNull();
+  });
+
+  describe("startWorkflowRunBodySchema", () => {
+    it("accepts an explicit preflight override", () => {
+      expect(
+        startWorkflowRunBodySchema.parse({
+          inputs: {},
+          workingDir: "/tmp/repo",
+          preflight: false,
+        }).preflight,
+      ).toBe(false);
+    });
   });
 
   it("accepts an attached brief", () => {

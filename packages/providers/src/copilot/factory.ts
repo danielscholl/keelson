@@ -523,16 +523,29 @@ export class CopilotClientFactory {
 
   // Throwaway-client probe symmetric to checkAuthStatus. Returns null on
   // any failure so the provider can fall back to its curated baseline.
-  async listModels(gitHubToken: string | undefined, cwd: string): Promise<ModelInfo[] | null> {
+  async listModels(
+    gitHubToken: string | undefined,
+    cwd: string,
+    signal?: AbortSignal,
+  ): Promise<ModelInfo[] | null> {
     let client: CopilotClientLike | null = null;
+    let abort: (() => void) | undefined;
     try {
+      if (signal?.aborted) return null;
       const created = await this.createClient(gitHubToken, cwd);
       client = created.client;
+      if (signal?.aborted) return null;
+      abort = () => {
+        void client?.stop().catch(() => undefined);
+      };
+      signal?.addEventListener("abort", abort, { once: true });
       const models = await client.listModels();
+      if (signal?.aborted) return null;
       return models.filter((m) => typeof m.id === "string").map(projectCopilotModel);
     } catch {
       return null;
     } finally {
+      if (abort !== undefined) signal?.removeEventListener("abort", abort);
       if (client) {
         try {
           await client.stop();

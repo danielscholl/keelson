@@ -8,11 +8,18 @@ import type { WorkflowFrame } from "@keelson/shared";
 import type { RunStreamEvent } from "@keelson/workflows";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import { listProjects } from "../http/projects-client.ts";
-import { attachRun, HttpError, isServerDownError, startRun } from "../http/workflow-client.ts";
+import {
+  attachRun,
+  getRun,
+  HttpError,
+  isServerDownError,
+  startRun,
+} from "../http/workflow-client.ts";
 import {
   MemoryRequiresServerError,
   runHeadless,
   WorkflowNotFoundError,
+  WorkflowPreflightError,
 } from "../in-process/run-workflow.ts";
 import { emit } from "../output.ts";
 import { gateSchemaSkew } from "../schema-gate.ts";
@@ -41,6 +48,7 @@ export interface WorkflowRunOptions {
   // in-place when the YAML defaulted to worktree (`false`). Undefined →
   // honor the workflow's YAML default.
   worktree?: boolean;
+  preflight?: boolean;
 }
 
 function parseInputs(pairs: readonly string[]): Record<string, string> {
@@ -159,6 +167,7 @@ async function runViaHttp(
     workingDir?: string;
     isolation?: "worktree" | "none";
     provider?: string;
+    preflight?: boolean;
   },
 ): Promise<never> {
   const projectId =
@@ -169,6 +178,7 @@ async function runViaHttp(
     ...(body.workingDir !== undefined ? { workingDir: body.workingDir } : {}),
     ...(body.isolation !== undefined ? { isolation: body.isolation } : {}),
     ...(body.provider !== undefined ? { provider: body.provider } : {}),
+    ...(body.preflight === false ? { preflight: false } : {}),
   });
   // Echo the run's target and id up front so the human-mode operator can see
   // what the run is acting against before frames start arriving. The header
@@ -193,13 +203,20 @@ async function runViaHttp(
   // JSON envelope) so scripted callers get a single concise envelope at
   // the end instead of a stream.
   const frames: WorkflowFrame[] = [];
+  const preflightWarnings: string[] = [];
   let terminalStatus: string | null = null;
   await attachRun({
     baseUrl,
     runId,
     onFrame: (frame) => {
+      const preflightWarning =
+        frame.type === "run_warning" && frame.message.startsWith("preflight not checked:");
+      if (preflightWarning) preflightWarnings.push(frame.message);
       if (watch) frames.push(frame);
       if (frame.type === "run_done") terminalStatus = frame.status;
+      if (preflightWarning && !json && !watch) {
+        process.stdout.write(`! ${frame.message}\n`);
+      }
       if (watch && !json && frame.type !== "run_started") {
         const line = formatWorkflowFrame(frame);
         if (line) process.stdout.write(`${line}\n`);
@@ -220,6 +237,23 @@ async function runViaHttp(
     );
     process.exit(EXIT_FAIL);
   }
+  if (terminalStatus === "failed") {
+    const detail = await getRun(baseUrl, runId);
+    const error =
+      detail !== null &&
+      typeof detail === "object" &&
+      "run" in detail &&
+      detail.run !== null &&
+      typeof detail.run === "object" &&
+      "error" in detail.run &&
+      typeof detail.run.error === "string"
+        ? detail.run.error
+        : undefined;
+    if (error?.startsWith("preflight failed:\n")) {
+      emit({ error, code: "PREFLIGHT_FAILED" }, { json });
+      process.exit(EXIT_FAIL);
+    }
+  }
   if (json) {
     emit(
       {
@@ -228,6 +262,7 @@ async function runViaHttp(
           mode: "http",
           status: terminalStatus,
           ...(watch ? { events: frames } : {}),
+          ...(preflightWarnings.length > 0 ? { warnings: preflightWarnings } : {}),
         },
       },
       { json },
@@ -250,6 +285,7 @@ async function runInProcess(
   // prompt workflows emit many node_chunk frames, and a --no-watch
   // scripted caller doesn't want them in the envelope.
   const events: RunStreamEvent[] = [];
+  const preflightWarnings: string[] = [];
   // In-process has no project store to consult, so --project is a no-op
   // here; --working-dir wins, falling back to the invoking process's cwd.
   // The HTTP path is where named projects resolve.
@@ -266,8 +302,15 @@ async function runInProcess(
       cwd,
       provider: opts.provider,
       isolation,
+      ...(opts.preflight !== undefined ? { preflight: opts.preflight } : {}),
       onEvent: (ev) => {
+        const preflightWarning =
+          ev.type === "run_warning" && ev.message.startsWith("preflight not checked:");
+        if (preflightWarning) preflightWarnings.push(ev.message);
         if (watch) events.push(ev);
+        if (preflightWarning && !opts.json && !watch) {
+          process.stdout.write(`! ${ev.message}\n`);
+        }
         if (!opts.json && watch) {
           const line = formatHumanEvent(ev);
           if (line) process.stdout.write(`${line}\n`);
@@ -283,6 +326,7 @@ async function runInProcess(
             status: result.summary.status,
             summary: result.summary,
             ...(watch ? { events } : {}),
+            ...(preflightWarnings.length > 0 ? { warnings: preflightWarnings } : {}),
           },
         },
         { json: true },
@@ -299,6 +343,10 @@ async function runInProcess(
     if (err instanceof MemoryRequiresServerError) {
       emit({ error: err.message, code: "NO_SERVER" }, { json: opts.json });
       process.exit(EXIT_NO_SERVER);
+    }
+    if (err instanceof WorkflowPreflightError) {
+      emit({ error: err.message, code: "PREFLIGHT_FAILED" }, { json: opts.json });
+      process.exit(EXIT_FAIL);
     }
     // Headless setup errors (unknown provider, fixture parse failures, etc.)
     // must still produce a JSON envelope in --json mode. Rethrowing would
@@ -358,6 +406,7 @@ export async function runWorkflowRun(name: string, opts: WorkflowRunOptions): Pr
         ...(cwd !== undefined ? { workingDir: cwd } : {}),
         ...(isolation !== undefined ? { isolation } : {}),
         ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
+        ...(opts.preflight === false ? { preflight: false } : {}),
       });
     } catch (err) {
       if (err instanceof ProjectNotFoundError) {

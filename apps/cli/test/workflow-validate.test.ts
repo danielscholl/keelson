@@ -15,10 +15,28 @@ const FIXTURES = resolve(import.meta.dir, "fixtures");
 // Bash, not exercised here (mirrors packages/workflows/test/forge-threads.test.ts).
 const posixDescribe = process.platform === "win32" ? describe.skip : describe;
 
-async function runCli(args: readonly string[]): Promise<{ stdout: string; exitCode: number }> {
-  const proc = Bun.spawn(["bun", BIN, ...args], { stdout: "pipe", stderr: "pipe" });
+async function runCli(
+  args: readonly string[],
+  env: Record<string, string> = {},
+): Promise<{ stdout: string; exitCode: number }> {
+  const proc = Bun.spawn(["bun", BIN, ...args], {
+    env: { ...process.env, ...env },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
   return { stdout, exitCode };
+}
+
+async function runLiveValidate(
+  name: string,
+  dir: string,
+  env: Record<string, string> = {},
+): Promise<{ stdout: string; exitCode: number }> {
+  return runCli(["--json", "workflow", "validate", name, "--dir", dir, "--live"], {
+    KEELSON_PROVIDERS: "stub",
+    ...env,
+  });
 }
 
 describe("workflow validate --dir (CLI)", () => {
@@ -35,6 +53,97 @@ describe("workflow validate --dir (CLI)", () => {
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.ok).toBe(true);
     expect(envelope.data.failed).toBe(0);
+  });
+
+  describe("workflow validate --live", () => {
+    let dir: string;
+
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    test("exits non-zero and names a retired model pin", async () => {
+      dir = mkdtempSync(join(tmpdir(), "keelson-validate-live-"));
+      writeFileSync(
+        join(dir, "bad.yaml"),
+        `name: bad-pin
+description: rejected model pin
+provider: stub
+nodes:
+  - id: pinned
+    model: retired-model
+    prompt: run
+`,
+      );
+
+      const { stdout, exitCode } = await runLiveValidate("bad-pin", dir);
+      const envelope = JSON.parse(stdout.trim());
+
+      expect(exitCode).toBe(2);
+      expect(envelope.data.results[0].preflight.violations[0]).toMatchObject({
+        nodeId: "pinned",
+        kind: "model",
+        value: "retired-model",
+        reason: "model 'retired-model' is not in stub's live catalog",
+      });
+    });
+
+    test("an unavailable effective provider is not checked and does not fail", async () => {
+      dir = mkdtempSync(join(tmpdir(), "keelson-validate-live-"));
+      writeFileSync(
+        join(dir, "offline.yaml"),
+        `name: offline-pin
+description: unavailable provider catalog
+nodes:
+  - id: pinned
+    model: retired-model
+    prompt: run
+`,
+      );
+
+      const { stdout, exitCode } = await runLiveValidate("offline-pin", dir, {
+        KEELSON_WORKFLOW_PROVIDER: "offline",
+      });
+      const envelope = JSON.parse(stdout.trim());
+
+      expect(exitCode).toBe(0);
+      expect(envelope.data.results[0].preflight).toEqual({
+        violations: [],
+        notChecked: ["offline"],
+      });
+    });
+
+    test("a workflow pinned to provider: stub is validated against stub even when KEELSON_PROVIDERS names a different, unavailable provider", async () => {
+      dir = mkdtempSync(join(tmpdir(), "keelson-validate-live-"));
+      writeFileSync(
+        join(dir, "stub-pin.yaml"),
+        `name: stub-pin
+description: pinned to stub while the configured provider set excludes it
+provider: stub
+nodes:
+  - id: pinned
+    model: retired-model
+    prompt: run
+`,
+      );
+
+      // KEELSON_PROVIDERS excludes stub, so an unregistered stub resolves to the
+      // configured default instead and the retired-model violation goes unseen.
+      const { stdout, exitCode } = await runLiveValidate("stub-pin", dir, {
+        KEELSON_PROVIDERS: "claude",
+      });
+      const envelope = JSON.parse(stdout.trim());
+
+      expect(exitCode).toBe(2);
+      expect(envelope.ok).toBe(true);
+      expect(envelope.data.results[0].preflight.violations[0]).toMatchObject({
+        nodeId: "pinned",
+        provider: "stub",
+        kind: "model",
+        value: "retired-model",
+        reason: "model 'retired-model' is not in stub's live catalog",
+      });
+    });
   });
 
   test("exits 4 when the name is missing from the explicit directory", async () => {

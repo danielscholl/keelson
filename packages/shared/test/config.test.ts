@@ -14,6 +14,7 @@ import {
   resolveDefaultProvider,
   resolveEnabledProviders,
   resolveMcpSettings,
+  resolveWorkflowPreflight,
 } from "../src/config.ts";
 
 const KNOWN = BUILT_IN_PROVIDER_IDS;
@@ -274,6 +275,41 @@ describe("resolveDefaultProvider", () => {
   test("never returns the synthetic 'workflow' provider as the default", () => {
     expect(resolveDefaultProvider({}, ["workflow"])).toBeUndefined();
     expect(resolveDefaultProvider({ defaultProvider: "workflow" }, ["workflow"])).toBeUndefined();
+  });
+});
+
+describe("resolveWorkflowPreflight", () => {
+  const envBefore = process.env.KEELSON_WORKFLOW_PREFLIGHT;
+
+  beforeEach(() => {
+    delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
+  });
+
+  afterEach(() => {
+    if (envBefore === undefined) delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
+    else process.env.KEELSON_WORKFLOW_PREFLIGHT = envBefore;
+  });
+
+  test("defaults to enabled", () => {
+    expect(resolveWorkflowPreflight({})).toBe(true);
+  });
+
+  test("honors the config value", () => {
+    expect(resolveWorkflowPreflight({ workflowPreflight: false })).toBe(false);
+    expect(resolveWorkflowPreflight({ workflowPreflight: true })).toBe(true);
+  });
+
+  test.each(["0", "false", "off", " FALSE "])(
+    "environment value %s disables a configured preflight",
+    (value) => {
+      process.env.KEELSON_WORKFLOW_PREFLIGHT = value;
+      expect(resolveWorkflowPreflight({ workflowPreflight: true })).toBe(false);
+    },
+  );
+
+  test("an explicit false overrides environment and config", () => {
+    process.env.KEELSON_WORKFLOW_PREFLIGHT = "1";
+    expect(resolveWorkflowPreflight({ workflowPreflight: true }, false)).toBe(false);
   });
 });
 

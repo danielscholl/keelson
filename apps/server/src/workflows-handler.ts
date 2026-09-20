@@ -19,7 +19,11 @@ import {
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, normalize, resolve, sep } from "node:path";
-import { isRegisteredProvider } from "@keelson/providers";
+import {
+  fetchLiveModelCatalog,
+  getProviderInfoList,
+  isRegisteredProvider,
+} from "@keelson/providers";
 import {
   bulkDeleteRunsBodySchema,
   bulkDeleteRunsResponseSchema,
@@ -57,15 +61,22 @@ import {
   writebackRequestSchema,
 } from "@keelson/shared";
 import {
+  loadKeelsonConfig,
+  readModelClassOverride,
+  resolveWorkflowPreflight,
+} from "@keelson/shared/config";
+import {
   type AwaitApproval,
   type AwaitInteraction,
   bashHandler,
+  checkWorkflowCatalog,
   createWorktree,
   type DagNode,
   defaultRunUntilBashProbe,
   deleteBranch,
   ensureWorktreeDeps,
   fetchOrigin,
+  formatPreflightViolations,
   gitToplevel,
   headDivergesFrom,
   isGitRepo,
@@ -87,6 +98,7 @@ import {
   repoPathFromWorktree,
   resolveBranchTemplate,
   resolveDefaultBranch,
+  resolveWorkflowResolution,
   runWorkflow,
   validateWorkflowInvariants,
   type WorkflowDefinition,
@@ -377,6 +389,10 @@ export interface ActiveRunEntry {
   // route resolve files while the run is live/paused; gone when the entry is
   // deleted on terminal status (the dir is cleaned at the same moment).
   artifactsDir?: string;
+  // Recorded once the run_started run_warning broadcasts, so a subscriber
+  // that attaches after that point (broadcast has no buffer) still gets it
+  // via direct replay in the WS open handler.
+  preflightNotice?: string;
   // Identity for the run-start de-dup lookup: a concurrent start with the same
   // workflow, workingDir, inputs, and provider override collapses onto this run.
   // See runDedupeKey.
@@ -813,6 +829,7 @@ interface StartRunCoreParams {
   branchTemplate: string | undefined;
   worktreeBase: string | undefined;
   providerOverride?: string;
+  preflight?: boolean;
   // Trigger provenance for the run row. Omitted → 'manual'. The owning rib id
   // (null for local workflows) is stamped so the runs feed can badge/filter and
   // bulk-delete by rib even after the rib is removed.
@@ -1114,6 +1131,7 @@ function startRunCore(
     subscribers,
     promptHandler,
     defaultProvider,
+    preflight: params.preflight === true,
     pendingApprovals,
     ...(providerOverride !== undefined ? { providerOverride } : {}),
     isolation: isolationOn
@@ -1381,6 +1399,7 @@ function resumeRunCore(
       subscribers,
       promptHandler,
       defaultProvider,
+      preflight: false,
       pendingApprovals,
       ...(providerOverride !== null ? { providerOverride } : {}),
       isolation: null,
@@ -2270,6 +2289,7 @@ export function workflowsRoutes(
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
     }
+    const preflightEnabled = resolveWorkflowPreflight(loadKeelsonConfig(), parsed.data.preflight);
     const requestedProvider = parsed.data.provider?.trim();
     const providerOverride =
       requestedProvider !== undefined && requestedProvider.length > 0
@@ -2423,6 +2443,7 @@ export function workflowsRoutes(
           branchTemplate,
           worktreeBase: workflow.worktree?.base,
           ...(providerOverride !== undefined ? { providerOverride } : {}),
+          preflight: preflightEnabled,
           origin: "manual",
           ribId: ribIdFor(catalog, workflow.name, scope),
         },
@@ -2821,6 +2842,21 @@ export function workflowRunWebSocketHandlers(deps: {
               // socket may have closed mid-send; nothing to do
             }
           }
+          // Same rationale as the pause replay above: broadcast has no buffer,
+          // so a subscriber attaching after run_started otherwise never sees
+          // the preflight notice.
+          if (entry.preflightNotice !== undefined) {
+            const frame: WorkflowFrame = {
+              type: "run_warning",
+              nodeId: null,
+              message: entry.preflightNotice,
+            };
+            try {
+              ws.send(JSON.stringify(frame));
+            } catch {
+              // socket may have closed mid-send; nothing to do
+            }
+          }
         }
       }
       // Narrow re-check: the run could have terminated between the store
@@ -2863,6 +2899,7 @@ interface ExecuteRunArgs {
   subscribers: WorkflowSubscribers;
   promptHandler: NodeHandler;
   defaultProvider: string | undefined;
+  preflight: boolean;
   providerOverride?: string;
   // Per-run pending approval map shared with the route's POST /resume and
   // DELETE handlers. The route owns the lifecycle; this function builds the
@@ -2972,6 +3009,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     subscribers,
     promptHandler,
     defaultProvider,
+    preflight,
     providerOverride,
     pendingApprovals,
     isolation,
@@ -2986,6 +3024,67 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     workspaceManager,
     isolationFallbackLock,
   } = args;
+  let pendingPreflightNotice: string | undefined;
+  if (preflight) {
+    const config = loadKeelsonConfig();
+    const providers = new Map(
+      getProviderInfoList().map(({ id, capabilities }) => [
+        id,
+        {
+          defaultModel: capabilities.defaultModel,
+          models: capabilities.models,
+          ...(capabilities.modelClasses !== undefined
+            ? { modelClasses: capabilities.modelClasses }
+            : {}),
+        },
+      ]),
+    );
+    // The same default the executor runs with, captured when the routes were
+    // built; re-resolving here could preflight one provider and run another.
+    const defaultProviderId = defaultProvider;
+    const modelClassOverride = (id: string, modelClass: "fast" | "balanced" | "deep") =>
+      readModelClassOverride(config, id)?.[modelClass];
+    const resolution = resolveWorkflowResolution(workflow, {
+      providers,
+      defaultProviderId,
+      runProviderId: providerOverride,
+      modelClassOverride,
+    });
+    const effectiveProviders = resolution.nodes
+      .map(({ effectiveProvider }) => effectiveProvider)
+      .filter((id): id is string => id !== undefined);
+    const liveCatalog = await fetchLiveModelCatalog(effectiveProviders, {
+      signal: abort.signal,
+    });
+    const result = checkWorkflowCatalog(workflow, {
+      providers,
+      defaultProviderId,
+      runProviderId: providerOverride,
+      modelClassOverride,
+      liveCatalog,
+    });
+    if (result.notChecked.length > 0 && result.violations.length === 0) {
+      console.warn(
+        `[workflows] run ${runId} preflight not checked: ${result.notChecked.join(", ")}`,
+      );
+      // Held until run_started rather than broadcast here: preflight runs before
+      // any client has subscribed, and broadcast drops frames with no listener.
+      pendingPreflightNotice = `preflight not checked: ${result.notChecked.join(", ")}`;
+    }
+    if (result.violations.length > 0) {
+      const error = `preflight failed:\n${formatPreflightViolations(result)}`;
+      store.updateRunStatus({
+        runId,
+        status: "failed",
+        completedAt: new Date().toISOString(),
+        error,
+      });
+      subscribers.broadcast(runId, { type: "run_done", status: "failed" });
+      activeRuns.delete(runId);
+      subscribers.closeRun(runId);
+      return;
+    }
+  }
   // Worktree lifecycle: create before the executor sees its first node, run
   // against the worktree path, prune on success — but keep on failure so the
   // operator can `cd` in and inspect. When the target isn't a git repo we
@@ -3611,6 +3710,15 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
           ...(publishRun !== undefined ? { publishStructured: publishRun } : {}),
           ...(usageStore !== undefined ? { usageStore } : {}),
         });
+        if (event.type === "run_started" && pendingPreflightNotice !== undefined) {
+          subscribers.broadcast(runId, {
+            type: "run_warning",
+            nodeId: null,
+            message: pendingPreflightNotice,
+          });
+          if (activeRun) activeRun.preflightNotice = pendingPreflightNotice;
+          pendingPreflightNotice = undefined;
+        }
       },
     });
   } catch (err) {

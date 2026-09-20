@@ -146,6 +146,7 @@ export interface StartRunBody {
   workingDir?: string;
   isolation?: "worktree" | "none";
   provider?: string;
+  preflight?: boolean;
 }
 
 export async function startRun(

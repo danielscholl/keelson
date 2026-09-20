@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -15,15 +15,22 @@ import {
   MemoryRequiresServerError,
   resolveHeadlessProviderId,
   runHeadless,
+  WorkflowPreflightError,
 } from "../src/in-process/run-workflow.ts";
 
 const FIXTURES = resolve(import.meta.dir, "fixtures");
+const BIN = resolve(import.meta.dir, "..", "bin", "keelson.ts");
 
 // runHeadless registers providers into the process-global registry per
 // KEELSON_PROVIDERS. Pin the env per test and clear the registry after each so
 // no SDK-backed registration leaks into other test files (their default-pick
 // assertions depend on what's registered, and file order varies by platform).
-const ENV_KEYS = ["KEELSON_PROVIDERS", "KEELSON_WORKFLOW_PROVIDER", "KEELSON_HOME"] as const;
+const ENV_KEYS = [
+  "KEELSON_PROVIDERS",
+  "KEELSON_WORKFLOW_PROVIDER",
+  "KEELSON_WORKFLOW_PREFLIGHT",
+  "KEELSON_HOME",
+] as const;
 const savedEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
 beforeAll(() => {
   for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
@@ -88,6 +95,7 @@ describe("runHeadless (in-process executor)", () => {
       cwd: process.cwd(),
       workflowsDir: FIXTURES,
       provider: "stub",
+      preflight: false,
       onEvent: (event) => events.push(event),
     });
 
@@ -108,6 +116,123 @@ describe("runHeadless (in-process executor)", () => {
     expect(providerIds).toEqual(["stub", "stub"]);
     expect(warnings).toContain("provider override 'stub' displaces workflow pin 'copilot'");
     expect(warnings).toContain("provider override 'stub' displaces node pin 'claude'");
+  });
+
+  test("rejects a retired model pin before execution", async () => {
+    const promise = runHeadless({
+      name: "preflight-bad-pin",
+      inputs: {},
+      cwd: process.cwd(),
+      workflowsDir: FIXTURES,
+    });
+
+    await expect(promise).rejects.toBeInstanceOf(WorkflowPreflightError);
+    await expect(promise).rejects.toThrow(
+      "preflight failed:\n- pinned: model 'retired-model' is not in stub's live catalog",
+    );
+  });
+
+  test("an explicit preflight disable skips a bad pin", async () => {
+    const result = await runHeadless({
+      name: "preflight-bad-pin",
+      inputs: {},
+      cwd: process.cwd(),
+      workflowsDir: FIXTURES,
+      preflight: false,
+    });
+
+    expect(result.summary.status).toBe("succeeded");
+  });
+
+  test("reports a provider whose live catalog was not checked", async () => {
+    process.env.KEELSON_WORKFLOW_PROVIDER = "offline";
+    const events: RunStreamEvent[] = [];
+
+    const result = await runHeadless({
+      name: "preflight-unavailable",
+      inputs: {},
+      cwd: process.cwd(),
+      workflowsDir: FIXTURES,
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(result.summary.status).toBe("failed");
+    expect(events).toContainEqual({
+      type: "run_warning",
+      message: "preflight not checked: offline",
+    });
+  });
+
+  test("--no-preflight reaches the in-process runner", async () => {
+    const home = mkdtempSync(join(tmpdir(), "keelson-preflight-cli-"));
+    try {
+      const proc = Bun.spawn(
+        [
+          "bun",
+          BIN,
+          "--json",
+          "workflow",
+          "run",
+          "preflight-bad-pin",
+          "--working-dir",
+          process.cwd(),
+          "--no-preflight",
+        ],
+        {
+          env: {
+            ...process.env,
+            KEELSON_HOME: home,
+            KEELSON_PROVIDERS: "stub",
+            KEELSON_SERVER_URL: "http://127.0.0.1:1",
+            KEELSON_WORKFLOWS_DIR: FIXTURES,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+
+      expect(exitCode).toBe(0);
+      expect(JSON.parse(stdout.trim()).data.status).toBe("succeeded");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("JSON output reports a live catalog that was not checked", async () => {
+    const home = mkdtempSync(join(tmpdir(), "keelson-preflight-cli-"));
+    try {
+      const proc = Bun.spawn(
+        [
+          "bun",
+          BIN,
+          "--json",
+          "workflow",
+          "run",
+          "preflight-unavailable",
+          "--working-dir",
+          process.cwd(),
+        ],
+        {
+          env: {
+            ...process.env,
+            KEELSON_HOME: home,
+            KEELSON_PROVIDERS: "stub",
+            KEELSON_SERVER_URL: "http://127.0.0.1:1",
+            KEELSON_WORKFLOW_PROVIDER: "offline",
+            KEELSON_WORKFLOWS_DIR: FIXTURES,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+
+      expect(exitCode).toBe(1);
+      expect(JSON.parse(stdout.trim()).data.warnings).toEqual(["preflight not checked: offline"]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 

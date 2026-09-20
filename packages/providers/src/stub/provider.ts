@@ -42,6 +42,12 @@ export class StubProvider implements IAgentProvider {
     return STUB_CAPABILITIES.models.map((id) => ({ id }));
   }
 
+  // The stub serves no remote catalog, so its declared list is the authoritative
+  // one rather than a picker fallback, and never the `null` that means unknown.
+  async listModelsLive(): Promise<ModelInfo[] | null> {
+    return STUB_CAPABILITIES.models.map((id) => ({ id }));
+  }
+
   async *sendQuery(
     prompt: string,
     _cwd: string,

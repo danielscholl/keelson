@@ -159,8 +159,7 @@ export class CopilotProvider implements IAgentProvider {
   }
 
   private async fetchModels(): Promise<ModelInfo[]> {
-    const token = await this.getCredential(COPILOT_CREDENTIAL_SERVICE_ID);
-    const live = await this.factory.listModels(token, process.cwd());
+    const live = await this.listModelsLive();
     // null = probe failed (signed out, CLI missing). Drop the cache so the
     // next request retries instead of serving the bare-id fallback forever.
     if (live === null) {
@@ -168,6 +167,16 @@ export class CopilotProvider implements IAgentProvider {
       return COPILOT_CAPABILITIES.models.map((id) => ({ id }));
     }
     return live;
+  }
+
+  async listModelsLive(signal?: AbortSignal): Promise<ModelInfo[] | null> {
+    try {
+      const token = await this.getCredential(COPILOT_CREDENTIAL_SERVICE_ID);
+      if (signal?.aborted) return null;
+      return await this.factory.listModels(token, process.cwd(), signal);
+    } catch {
+      return null;
+    }
   }
 
   // Stops the warm client and joins every in-flight detached teardown. Wired

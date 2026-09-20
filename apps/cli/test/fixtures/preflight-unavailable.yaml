@@ -1,0 +1,6 @@
+name: preflight-unavailable
+description: Exercises an unavailable provider catalog
+nodes:
+  - id: pinned
+    model: retired-model
+    prompt: echo this

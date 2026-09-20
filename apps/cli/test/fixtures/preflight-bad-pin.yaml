@@ -1,0 +1,7 @@
+name: preflight-bad-pin
+description: Exercises a rejected live-catalog model pin
+provider: stub
+nodes:
+  - id: pinned
+    model: retired-model
+    prompt: echo this

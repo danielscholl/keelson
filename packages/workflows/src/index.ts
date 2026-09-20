@@ -12,6 +12,15 @@ export {
   WORKFLOW_AUTHORING_GUIDE,
 } from "./authoring-guide.ts";
 export {
+  checkWorkflowCatalog,
+  formatPreflightViolations,
+  type LiveCatalog,
+  type PreflightModel,
+  type PreflightOptions,
+  type PreflightResult,
+  type PreflightViolation,
+} from "./catalog-preflight.ts";
+export {
   resolveWorkflowCatalog,
   resolveWorkflowResolution,
   type WorkflowResolution,

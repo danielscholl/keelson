@@ -12,7 +12,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isRegisteredProvider, registerStubProvider, unregisterProvider } from "@keelson/providers";
+import {
+  isRegisteredProvider,
+  registerProvider,
+  registerStubProvider,
+  unregisterProvider,
+} from "@keelson/providers";
 import { TERMINAL_RUN_STATUSES, type TokenUsage } from "@keelson/shared";
 
 import { makePromptHandler, type WorkflowDefinition } from "@keelson/workflows";
@@ -55,6 +60,7 @@ interface Rig {
   app: Hono;
   store: WorkflowStore;
   projectsStore: ProjectsStore;
+  subscribers: ReturnType<typeof createWorkflowSubscribers>;
   // Pre-created project so test bodies can target a real id without setup
   // churn. Suite-wide single project keeps the assertion surface small;
   // tests that exercise project-scoping wire their own.
@@ -67,7 +73,7 @@ interface Rig {
 // makeRig don't inherit a stale id from the previous test.
 let CURRENT_DEFAULT_PROJECT_ID: string | null = null;
 
-function makeRig(): Rig {
+function makeRig(promptHandler?: ReturnType<typeof makePromptHandler>): Rig {
   const db = openDatabase({ path: dbPath });
   const store = createWorkflowStore(db);
   const conversationStore = createConversationStore(db);
@@ -81,12 +87,39 @@ function makeRig(): Rig {
     listProjects: () => projectsStore.list(),
   });
   const app = new Hono();
-  workflowsRoutes(app, { catalog, store, conversationStore, projectsStore });
-  return { app, store, projectsStore, defaultProjectId: defaultProject.id };
+  const subscribers = createWorkflowSubscribers();
+  workflowsRoutes(
+    app,
+    {
+      catalog,
+      store,
+      conversationStore,
+      projectsStore,
+      ...(promptHandler !== undefined ? { promptHandler } : {}),
+    },
+    createActiveRuns(),
+    subscribers,
+  );
+  return { app, store, projectsStore, subscribers, defaultProjectId: defaultProject.id };
 }
 
 function writeWorkflow(filename: string, body: string): void {
   writeFileSync(join(wfDir, filename), body);
+}
+
+function makeSuccessfulPromptHandler() {
+  const provider = {
+    getCapabilities: () => ({ defaultModel: "stub-echo", models: ["stub-echo"] }),
+    async *sendQuery() {
+      yield { type: "text" as const, content: "ok" };
+      yield { type: "done" as const };
+    },
+  };
+  return makePromptHandler({
+    getProvider: () => provider,
+    resolveProviderId: (id) => id ?? "stub",
+    getRegisteredTools: () => [],
+  });
 }
 
 // Real browser fetches always send Origin; the handler refuses state-changing
@@ -1359,6 +1392,191 @@ nodes:
 
     expect(run.status).toBe("succeeded");
     expect(run.nodes.map((node) => node.provider)).toEqual(["stub", "stub"]);
+  });
+
+  test("POST .../runs fails before execution when a model pin is retired", async () => {
+    writeWorkflow(
+      "preflight-bad.yaml",
+      `name: preflight-bad
+description: rejected model pin
+provider: stub
+nodes:
+  - id: pinned
+    model: retired-model
+    prompt: run
+`,
+    );
+    const { app } = makeRig(makeSuccessfulPromptHandler());
+
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/preflight-bad/runs", { inputs: {} }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    const run = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      error: string | null;
+      nodes: unknown[];
+    };
+
+    expect(run.status).toBe("failed");
+    expect(run.error).toBe(
+      "preflight failed:\n- pinned: model 'retired-model' is not in stub's live catalog",
+    );
+    expect(run.nodes).toEqual([]);
+  });
+
+  test("POST .../runs preflight false skips a retired model check", async () => {
+    writeWorkflow(
+      "preflight-disabled.yaml",
+      `name: preflight-disabled
+description: disabled model check
+provider: stub
+nodes:
+  - id: pinned
+    model: retired-model
+    prompt: run
+`,
+    );
+    const { app } = makeRig(makeSuccessfulPromptHandler());
+
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/preflight-disabled/runs", {
+        inputs: {},
+        preflight: false,
+      }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    const run = await pollUntilTerminal(app, runId);
+
+    expect(run.status).toBe("succeeded");
+  });
+
+  test("POST .../runs proceeds when a provider catalog cannot be fetched", async () => {
+    const capabilities = {
+      sessionResume: false,
+      streaming: false,
+      tools: false,
+      reasoningEffort: false,
+      models: ["offline-model"],
+      defaultModel: "offline-model",
+    };
+    registerProvider({
+      id: "offline-catalog",
+      displayName: "Offline catalog",
+      capabilities,
+      builtIn: false,
+      factory: () => ({
+        getType: () => "offline-catalog",
+        getCapabilities: () => capabilities,
+        async *sendQuery() {
+          yield { type: "done" as const };
+        },
+        async listModels() {
+          throw new Error("offline");
+        },
+      }),
+    });
+    try {
+      writeWorkflow(
+        "preflight-offline.yaml",
+        `name: preflight-offline
+description: unavailable live catalog
+provider: offline-catalog
+nodes:
+  - id: pinned
+    model: offline-model
+    prompt: run
+`,
+      );
+      const { app, subscribers } = makeRig(makeSuccessfulPromptHandler());
+
+      const startRes = await app.fetch(
+        postRun("http://test/api/workflows/preflight-offline/runs", { inputs: {} }),
+      );
+      const { runId } = (await startRes.json()) as { runId: string };
+      const frames: Array<{ type: string; nodeId?: string | null; message?: string }> = [];
+      const unsubscribe = subscribers.onFrame(runId, (frame) => frames.push(frame));
+      const run = await pollUntilTerminal(app, runId);
+      unsubscribe();
+
+      expect(run.status).toBe("succeeded");
+      expect(frames).toContainEqual({
+        type: "run_warning",
+        nodeId: null,
+        message: "preflight not checked: offline-catalog",
+      });
+    } finally {
+      unregisterProvider("offline-catalog");
+    }
+  });
+
+  test("POST .../runs preflights against the provider the run will execute with", async () => {
+    const makeProvider = (id: string, model: string) => {
+      const capabilities = {
+        sessionResume: false,
+        streaming: false,
+        tools: false,
+        reasoningEffort: false,
+        models: [model],
+        defaultModel: model,
+      };
+      registerProvider({
+        id,
+        displayName: id,
+        capabilities,
+        builtIn: false,
+        factory: () => ({
+          getType: () => id,
+          getCapabilities: () => capabilities,
+          async *sendQuery() {
+            yield { type: "done" as const };
+          },
+          async listModels() {
+            return [{ id: model }];
+          },
+          async listModelsLive() {
+            return [{ id: model }];
+          },
+        }),
+      });
+    };
+    makeProvider("captured-default", "captured-model");
+    makeProvider("late-default", "late-model");
+    const priorProvider = process.env.KEELSON_WORKFLOW_PROVIDER;
+    try {
+      process.env.KEELSON_WORKFLOW_PROVIDER = "captured-default";
+      const { app } = makeRig(makeSuccessfulPromptHandler());
+      // Re-pointing the default after the routes are built must not move
+      // preflight off the provider the executor was handed.
+      process.env.KEELSON_WORKFLOW_PROVIDER = "late-default";
+      writeWorkflow(
+        "preflight-captured-default.yaml",
+        `name: preflight-captured-default
+description: preflight follows the captured default provider
+nodes:
+  - id: pinned
+    model: captured-model
+    prompt: run
+`,
+      );
+
+      const startRes = await app.fetch(
+        postRun("http://test/api/workflows/preflight-captured-default/runs", { inputs: {} }),
+      );
+      const { runId } = (await startRes.json()) as { runId: string };
+      const run = (await pollUntilTerminal(app, runId)) as {
+        status: string;
+        error: string | null;
+      };
+
+      expect(run.error).toBeNull();
+      expect(run.status).toBe("succeeded");
+    } finally {
+      if (priorProvider === undefined) delete process.env.KEELSON_WORKFLOW_PROVIDER;
+      else process.env.KEELSON_WORKFLOW_PROVIDER = priorProvider;
+      unregisterProvider("captured-default");
+      unregisterProvider("late-default");
+    }
   });
 
   test("POST .../runs rejects an unregistered provider override", async () => {
@@ -2918,6 +3136,124 @@ nodes:
       }),
     );
     await pollUntilTerminal(app, runId);
+  });
+
+  test("WS open replays the preflight run_warning to a subscriber attaching after run_started; an earlier subscriber gets it once via broadcast", async () => {
+    const capabilities = {
+      sessionResume: false,
+      streaming: false,
+      tools: false,
+      reasoningEffort: false,
+      models: ["slow-model"],
+      defaultModel: "slow-model",
+    };
+    registerProvider({
+      id: "slow-offline-catalog",
+      displayName: "Slow offline catalog",
+      capabilities,
+      builtIn: false,
+      factory: () => ({
+        getType: () => "slow-offline-catalog",
+        getCapabilities: () => capabilities,
+        async *sendQuery() {
+          yield { type: "done" as const };
+        },
+        async listModels() {
+          throw new Error("offline");
+        },
+        async listModelsLive() {
+          await new Promise((resolve) => setTimeout(resolve, 75));
+          throw new Error("offline");
+        },
+      }),
+    });
+    try {
+      writeWorkflow(
+        "preflight-warning-replay.yaml",
+        `name: preflight-warning-replay
+description: replay the preflight notice to a late subscriber
+provider: slow-offline-catalog
+nodes:
+  - id: pinned
+    model: slow-model
+    prompt: run
+  - id: hold
+    depends_on: [pinned]
+    bash: sleep 0.15
+`,
+      );
+      const db = openDatabase({ path: dbPath });
+      const store = createWorkflowStore(db);
+      const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+      const subscribers = createWorkflowSubscribers();
+      const activeRuns = createActiveRuns();
+      const app = new Hono();
+      workflowsRoutes(
+        app,
+        {
+          catalog,
+          store,
+          conversationStore: createConversationStore(db),
+          defaultCwd: tmpDir,
+          promptHandler: makeSuccessfulPromptHandler(),
+        },
+        activeRuns,
+        subscribers,
+      );
+      const wsHandlers = workflowRunWebSocketHandlers({ subscribers, store, activeRuns });
+
+      function makeFakeWs(runId: string) {
+        const received: Array<{ type: string; nodeId?: string | null; message?: string }> = [];
+        const ws = {
+          data: { runId, kind: "workflowRun", abort: new AbortController() },
+          send: (raw: string) => {
+            received.push(JSON.parse(raw));
+          },
+          close: () => {},
+        } as unknown as Parameters<NonNullable<typeof wsHandlers.open>>[0];
+        return { ws, received };
+      }
+
+      const startRes = await app.fetch(
+        postRun("http://test/api/workflows/preflight-warning-replay/runs", {
+          inputs: {},
+          workingDir: tmpDir,
+        }),
+      );
+      const { runId } = (await startRes.json()) as { runId: string };
+
+      // Attach immediately — the entry is registered synchronously in the POST
+      // handler, but the slow provider's listModelsLive is still pending, so
+      // run_started (and its notice) hasn't fired yet.
+      const early = makeFakeWs(runId);
+      wsHandlers.open?.(early.ws);
+
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        if (activeRuns.get(runId)?.preflightNotice !== undefined) break;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(activeRuns.get(runId)?.preflightNotice).toBe(
+        "preflight not checked: slow-offline-catalog",
+      );
+
+      // This subscriber only attaches once run_started has already broadcast —
+      // exactly the case WorkflowSubscribers.broadcast (no buffer) would drop.
+      const late = makeFakeWs(runId);
+      wsHandlers.open?.(late.ws);
+
+      await pollUntilTerminal(app, runId);
+
+      const expectedWarning = {
+        type: "run_warning",
+        nodeId: null,
+        message: "preflight not checked: slow-offline-catalog",
+      };
+      expect(early.received.filter((f) => f.type === "run_warning")).toEqual([expectedWarning]);
+      expect(late.received.filter((f) => f.type === "run_warning")).toEqual([expectedWarning]);
+    } finally {
+      unregisterProvider("slow-offline-catalog");
+    }
   });
 
   test("POST /resume rejects pauseId mismatch with 409", async () => {
