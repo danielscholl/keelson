@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it, spyOn } from "bun:test";
 import type { MessageChunk } from "../src/index.ts";
 import {
   clearRegistry,
@@ -90,6 +90,7 @@ describe("GatewayProvider.sendQuery", () => {
     ]);
     // Targets the OpenAI chat-completions path with a streaming request.
     expect(calls[0]?.url).toBe("http://host/v1/chat/completions");
+    expect((calls[0]?.init?.headers as Record<string, string>)?.authorization).toBeUndefined();
     const body = JSON.parse(String(calls[0]?.init?.body));
     expect(body).toMatchObject({ model: "m1", stream: true });
     expect(body.messages).toEqual([{ role: "user", content: "hi" }]);
@@ -300,7 +301,7 @@ describe("GatewayProvider.sendQuery", () => {
     await collect(
       new GatewayProvider({
         id: "g",
-        baseUrl: "http://h/v1",
+        baseUrl: "http://localhost/v1",
         getApiKey: async () => "secret",
         model: "m",
         fetchImpl: keyed.fn,
@@ -309,6 +310,45 @@ describe("GatewayProvider.sendQuery", () => {
     expect((keyed.calls[0]?.init?.headers as Record<string, string>)?.authorization).toBe(
       "Bearer secret",
     );
+  });
+
+  it("sends Authorization over HTTPS", async () => {
+    const apiKey = "test-api-key";
+    const { fn, calls } = mockFetch(() => sse("[DONE]"));
+    const p = new GatewayProvider({
+      id: "g",
+      baseUrl: "https://remote.example/v1",
+      getApiKey: async () => apiKey,
+      model: "m",
+      fetchImpl: fn,
+    });
+
+    expect(await collect(p.sendQuery("q", "/tmp"))).toEqual([{ type: "done" }]);
+    expect((calls[0]?.init?.headers as Record<string, string>)?.authorization).toBe(
+      `Bearer ${apiKey}`,
+    );
+  });
+
+  it("refuses a stored key over remote HTTP without making a request", async () => {
+    const { fn, calls } = mockFetch(() => sse("[DONE]"));
+    const p = new GatewayProvider({
+      id: "remote",
+      baseUrl: "http://remote.example/v1",
+      getApiKey: async () => "test-api-key",
+      model: "m",
+      fetchImpl: fn,
+    });
+
+    const chunks = await collect(p.sendQuery("q", "/tmp"));
+    expect(chunks).toEqual([
+      {
+        type: "error",
+        message:
+          "gateway 'remote' has a stored key but its baseUrl uses plain HTTP on a non-loopback host; refusing to send it in cleartext; use https:// or a loopback host",
+      },
+      { type: "done" },
+    ]);
+    expect(calls).toHaveLength(0);
   });
 
   it("yields an error chunk (then done) on an HTTP error", async () => {
@@ -376,6 +416,49 @@ describe("GatewayProvider.listModels", () => {
     });
     expect(await p.listModels()).toEqual([{ id: "qwen3:latest" }, { id: "llama3" }]);
     expect(calls[0]?.url).toBe("http://h/v1/models");
+    expect((calls[0]?.init?.headers as Record<string, string>)?.authorization).toBeUndefined();
+  });
+
+  for (const baseUrl of ["http://localhost/v1", "https://remote.example/v1"]) {
+    it(`sends Authorization when enumerating models through ${baseUrl}`, async () => {
+      const apiKey = "test-api-key";
+      const { fn, calls } = mockFetch(() => Response.json({ data: [{ id: "m1" }] }));
+      const p = new GatewayProvider({
+        id: "g",
+        baseUrl,
+        getApiKey: async () => apiKey,
+        fetchImpl: fn,
+      });
+
+      expect(await p.listModelsLive()).toEqual([{ id: "m1" }]);
+      expect((calls[0]?.init?.headers as Record<string, string>)?.authorization).toBe(
+        `Bearer ${apiKey}`,
+      );
+    });
+  }
+
+  it("reports remote HTTP credential refusal for live and fallback discovery", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { fn, calls } = mockFetch(() => Response.json({ data: [{ id: "live" }] }));
+      const p = new GatewayProvider({
+        id: "remote",
+        baseUrl: "http://remote.example/v1",
+        getApiKey: async () => "test-api-key",
+        model: "configured",
+        fetchImpl: fn,
+      });
+
+      expect(await p.listModelsLive()).toBeNull();
+      expect(await p.listModels()).toEqual([{ id: "configured" }]);
+      expect(calls).toHaveLength(0);
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn).toHaveBeenCalledWith(
+        "[keelson] gateway 'remote' has a stored key but its baseUrl uses plain HTTP on a non-loopback host; refusing to send it in cleartext; use https:// or a loopback host",
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("falls back to the configured model when the endpoint can't enumerate", async () => {
