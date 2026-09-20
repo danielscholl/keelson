@@ -118,7 +118,8 @@ describe("providers doctor check", () => {
     expect(copilot?.status).toBe("warn");
     expect(copilot?.detail).toContain("@github/copilot 1.0.83");
     expect(copilot?.detail).toContain("platform package is not exported");
-    expect(copilot?.hint).toContain("1.0.81+");
+    expect(copilot?.hint).toContain("reinstall Keelson");
+    expect(copilot?.hint).toContain("COPILOT_CLI_PATH");
   });
 });
 
