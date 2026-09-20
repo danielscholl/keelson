@@ -271,6 +271,35 @@ describe("checkWorkflowCatalog — model_by cases", () => {
     expect(result.violations.map((v) => v.kind)).toContain("effort");
   });
 
+  test("a static pin every case replaces is not reported", () => {
+    const result = check(
+      makeWorkflow({
+        model: "gpt-retired",
+        model_by: {
+          from: "$inputs.tier",
+          cases: { deep: { model: "gpt-live" }, std: { model: "gpt-live" } },
+        },
+      }),
+      LIVE,
+    );
+    expect(result.violations).toEqual([]);
+  });
+
+  test("a static pin a case leaves in place is still reported", () => {
+    const result = check(
+      makeWorkflow({
+        model: "gpt-retired",
+        // `std` sets only effort, so the static pin is reachable through it.
+        model_by: {
+          from: "$inputs.tier",
+          cases: { deep: { model: "gpt-live" }, std: { effort: "low" } },
+        },
+      }),
+      LIVE,
+    );
+    expect(result.violations.map((v) => v.value)).toContain("gpt-retired");
+  });
+
   test("an unreachable provider reports not-checked rather than violations", () => {
     const result = check(
       makeWorkflow({

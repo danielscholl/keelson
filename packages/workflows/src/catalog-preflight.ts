@@ -130,7 +130,15 @@ export function checkWorkflowCatalog(
       }
     }
 
-    const literal = pinnedLiteralFor(node, workflow, provider);
+    // A static pin every case replaces is not a reachable branch: a matched run
+    // uses the case's model and an unmatched one fails before dispatch.
+    const casesCoverModel =
+      node.model_by !== undefined &&
+      Object.values(node.model_by.cases).every(
+        (branch) =>
+          branch.model_by_provider?.[provider] !== undefined || branch.model !== undefined,
+      );
+    const literal = casesCoverModel ? undefined : pinnedLiteralFor(node, workflow, provider);
     if (
       literal !== undefined &&
       literal === resolved.model &&
