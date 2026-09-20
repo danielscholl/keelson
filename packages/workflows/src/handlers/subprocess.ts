@@ -257,10 +257,10 @@ function truncateEnvValue(value: string, note: string): string {
 
 /**
  * Build the env block for a workflow subprocess. Layers `KEELSON_INPUTS_*`,
- * `KEELSON_NODE_*_OUTPUT`, `KEELSON_ARGUMENTS`, and (when provided) the per-run
- * `KEELSON_ARTIFACTS_DIR` onto a snapshot of the parent env. Non-alphanumeric
- * chars in keys/node ids are normalized to `_` so the resulting names are
- * valid POSIX env-var identifiers.
+ * `KEELSON_NODE_*_OUTPUT`, node provenance, `KEELSON_ARGUMENTS`, and (when
+ * provided) the per-run `KEELSON_ARTIFACTS_DIR` onto a snapshot of the parent
+ * env. Non-alphanumeric chars in keys/node ids are normalized to `_` so the
+ * resulting names are valid POSIX env-var identifiers.
  *
  * Every node output is written in full to `<artifactsDir>/node-outputs/<id>.txt`
  * and the path published as `KEELSON_NODE_<id>_OUTPUT_FILE`, so a consumer can
@@ -299,6 +299,9 @@ export function buildSubprocessEnv(
     // a prior run's file.
     delete env[`${name}_FILE`];
     delete env[`${name}_TRUNCATED`];
+    const provenanceName = name.slice(0, -"_OUTPUT".length);
+    delete env[`${provenanceName}_PROVIDER`];
+    delete env[`${provenanceName}_MODEL`];
     let fileNote = "";
     if (options?.artifactsDir !== undefined) {
       try {
@@ -321,6 +324,12 @@ export function buildSubprocessEnv(
       );
     } else {
       env[name] = full;
+    }
+    if ("provider" in out && out.provider !== undefined) {
+      env[`${provenanceName}_PROVIDER`] = out.provider;
+    }
+    if ("model" in out && out.model !== undefined) {
+      env[`${provenanceName}_MODEL`] = out.model;
     }
   }
   // Two env vars for the same path: `KEELSON_ARTIFACTS_DIR` is the prefixed

@@ -446,6 +446,8 @@ export function validateWorkflowInvariants(workflow: WorkflowDefinition): string
   if (reservedError) return reservedError;
   const convergeError = validateConverge(workflow);
   if (convergeError) return convergeError;
+  const vendorReferenceError = validateDifferentVendorReferences(workflow.nodes);
+  if (vendorReferenceError) return vendorReferenceError;
   return validateOutputRefs(workflow.nodes);
 }
 
@@ -484,6 +486,26 @@ function buildAncestorMap(nodes: readonly DagNode[]): Map<string, Set<string>> {
     ancestors.set(node.id, set);
   }
   return ancestors;
+}
+
+function validateDifferentVendorReferences(nodes: readonly DagNode[]): string | null {
+  const byId = new Map(nodes.map((node) => [node.id, node] as const));
+  const ancestors = buildAncestorMap(nodes);
+  for (const node of nodes) {
+    const reference = node.different_vendor_from;
+    if (reference === undefined) continue;
+    const target = byId.get(reference);
+    if (target === undefined) {
+      return `Node '${node.id}' different_vendor_from references unknown node '${reference}'`;
+    }
+    if (!ancestors.get(node.id)?.has(reference)) {
+      return `Node '${node.id}' different_vendor_from references '${reference}', which is not in its depends_on chain`;
+    }
+    if (!("prompt" in target) || typeof target.prompt !== "string") {
+      return `Node '${node.id}' different_vendor_from target '${reference}' is not a prompt node`;
+    }
+  }
+  return null;
 }
 
 function validateOutputRefs(nodes: readonly DagNode[]): string | null {
@@ -777,6 +799,19 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
       workflow: null,
       warnings,
       error: { filename, error: reservedError, errorType: "validation_error" },
+    };
+  }
+
+  const vendorReferenceError = validateDifferentVendorReferences(nodes);
+  if (vendorReferenceError) {
+    return {
+      workflow: null,
+      warnings,
+      error: {
+        filename,
+        error: vendorReferenceError,
+        errorType: "validation_error",
+      },
     };
   }
 

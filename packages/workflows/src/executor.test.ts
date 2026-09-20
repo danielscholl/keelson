@@ -480,6 +480,111 @@ nodes:
   });
 });
 
+describe("runWorkflow — effective model vendor independence", () => {
+  const workflow = (): WorkflowDefinition =>
+    parseInline(`
+name: effective-vendors
+description: verifies an earlier prompt with a separate model vendor
+provider: copilot
+nodes:
+  - id: investigate
+    prompt: investigate
+  - id: verify
+    depends_on: [investigate]
+    different_vendor_from: investigate
+    prompt: verify
+`);
+
+  test("warns from effective fallback provenance when both turns use one vendor", async () => {
+    const handler: NodeHandler = {
+      type: "prompt",
+      async handle(node) {
+        return {
+          status: "succeeded",
+          output: { kind: "text", text: "ok" },
+          provider: "claude",
+          model: node.id === "investigate" ? "claude-opus-4-8" : "claude-sonnet-5",
+        };
+      },
+    };
+    const { events, onEvent } = recordEvents();
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow()),
+      handlers: new Map([["prompt", handler]]),
+      onEvent,
+    });
+
+    expect(summary.nodes.investigate).toMatchObject({
+      provider: "claude",
+      model: "claude-opus-4-8",
+    });
+    expect(summary.nodes.verify).toMatchObject({
+      provider: "claude",
+      model: "claude-sonnet-5",
+    });
+    expect(
+      events.filter(
+        (event): event is Extract<RunStreamEvent, { type: "run_warning" }> =>
+          event.type === "run_warning" && event.nodeId === "verify",
+      ),
+    ).toEqual([
+      {
+        type: "run_warning",
+        nodeId: "verify",
+        message:
+          "cross-vendor verification collapsed to 'anthropic': 'investigate' ran on 'claude/claude-opus-4-8' and 'verify' ran on 'claude/claude-sonnet-5'",
+      },
+    ]);
+  });
+
+  test("does not warn when recorded effective models have different vendors", async () => {
+    const handler: NodeHandler = {
+      type: "prompt",
+      async handle(node) {
+        return {
+          status: "succeeded",
+          output: { kind: "text", text: "ok" },
+          provider: "copilot",
+          model: node.id === "investigate" ? "gpt-6-astra" : "claude-sonnet-5",
+        };
+      },
+    };
+    const { events, onEvent } = recordEvents();
+
+    await runWorkflow({
+      ...baseOpts(workflow()),
+      handlers: new Map([["prompt", handler]]),
+      onEvent,
+    });
+
+    expect(
+      events.some(
+        (event) =>
+          event.type === "run_warning" && event.message.includes("cross-vendor verification"),
+      ),
+    ).toBe(false);
+  });
+
+  test("does not fabricate a warning when effective provenance is absent", async () => {
+    const { handler } = echoHandler("prompt");
+    const { events, onEvent } = recordEvents();
+
+    await runWorkflow({
+      ...baseOpts(workflow()),
+      handlers: new Map([["prompt", handler]]),
+      onEvent,
+    });
+
+    expect(
+      events.some(
+        (event) =>
+          event.type === "run_warning" && event.message.includes("cross-vendor verification"),
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("runWorkflow — status-report (2 layers, sequential)", () => {
   test("collect runs before summarize", async () => {
     const workflow = loadStarter("status-report");

@@ -158,6 +158,34 @@ describe("buildSubprocessEnv", () => {
     const env = buildSubprocessEnv({}, new Map<string, NodeOutput>());
     expect(env.KEELSON_ARGUMENTS).toBe("");
   });
+
+  test("projects effective provider and model for upstream agent nodes", () => {
+    const upstream = new Map<string, NodeOutput>([
+      [
+        "verify-seat",
+        {
+          state: "completed",
+          output: "ok",
+          provider: "claude",
+          model: "claude-sonnet-5",
+        },
+      ],
+    ]);
+    const env = buildSubprocessEnv({}, upstream);
+    expect(env.KEELSON_NODE_verify_seat_PROVIDER).toBe("claude");
+    expect(env.KEELSON_NODE_verify_seat_MODEL).toBe("claude-sonnet-5");
+  });
+
+  test("clears inherited provenance when the current upstream has none", () => {
+    const env = buildSubprocessEnv({}, upstreamOf("verify", "ok"), {
+      parentEnv: {
+        KEELSON_NODE_verify_PROVIDER: "stale-provider",
+        KEELSON_NODE_verify_MODEL: "stale-model",
+      },
+    });
+    expect(Object.hasOwn(env, "KEELSON_NODE_verify_PROVIDER")).toBe(false);
+    expect(Object.hasOwn(env, "KEELSON_NODE_verify_MODEL")).toBe(false);
+  });
 });
 
 describe("buildSubprocessEnv — env value cap (issue #442)", () => {

@@ -113,6 +113,12 @@ A case replaces only the fields it sets. The set of cases is closed, so
 validation checks every branch and `--live` checks every branch's model against
 the provider catalog.
 
+Set `different_vendor_from: <ancestor-prompt-id>` when a prompt must provide an
+independent model-vendor check of an earlier prompt. The executor compares the
+effective provider/model recorded after fallback and emits a run warning when
+both models belong to the same known vendor. Unknown model vendors are not
+treated as proof of diversity.
+
 ## Description format
 
 Use the structured block-scalar convention — the Workflows UI cards and the
@@ -280,6 +286,9 @@ warning.
   structured output from this file; the marker above corrupts JSON. Validation
   warns when a body parses the capped variable instead.
 - `KEELSON_NODE_<id>_OUTPUT_TRUNCATED` — `1` when the variable was capped.
+- `KEELSON_NODE_<id>_PROVIDER` / `KEELSON_NODE_<id>_MODEL` — the effective
+  provider and model recorded for an upstream agent node, including fallback
+  and provider-reported model changes. Unset for deterministic nodes.
 - `$converge.round` — current converge round while a node runs inside a
   `converge` subgraph; empty outside converge rounds.
 

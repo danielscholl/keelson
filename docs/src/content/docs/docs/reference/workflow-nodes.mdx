@@ -246,6 +246,7 @@ These apply across kinds (some only to agent nodes, as noted).
 | `provider` | agent | Per-node provider override. |
 | `model_by_provider` | agent | Map of provider ids to concrete model ids. The effective provider's entry takes precedence over `model`. |
 | `model_by` | agent | Pick the model and/or effort from run data: see [model_by](#model_by). |
+| `different_vendor_from` | prompt | Ancestor prompt id that should run on a different model vendor. Emits a run warning when effective provider/model attribution proves both turns used the same vendor. |
 | `context` | agent | `fresh` forces a new agent session for the node; `shared` reuses one. |
 | `allowed_tools`, `denied_tools` | agent | Tool-name filters. Rib tools are default-off; opt in with `allowed_tools`. |
 | `output_schema` | agent | A JSON-Schema subset the output must satisfy, or the node fails. |
@@ -346,6 +347,21 @@ rather than free substitution: `keelson workflow validate` checks the shape of
 every branch, and `--live` checks **every** branch's model against the
 provider's catalog, not just the one a given run would take. A typo in a cold
 branch is caught before a run reaches it.
+
+Use `different_vendor_from` when the later prompt is an independent verification
+seat:
+
+```yaml
+- id: verify
+  depends_on: [investigate]
+  different_vendor_from: investigate
+  prompt: "Re-check the claims in $investigate.output"
+```
+
+The referenced node must be an ancestor prompt. Comparison uses the effective
+provider and model recorded after fallback and provider-reported model changes.
+When both models map to the same known vendor, the run emits a warning. An
+unknown model vendor is not treated as proof that the turns are diverse.
 
 ### trigger_rule
 
@@ -453,6 +469,8 @@ environment variables, never spliced into the source:
 | `KEELSON_NODE_<id>_OUTPUT` | The upstream node's output (non-alphanumeric characters in the id are normalized to `_`). Capped, see below. |
 | `KEELSON_NODE_<id>_OUTPUT_FILE` | Path to a file holding that output in full, set for every upstream node whatever its size. Absent only when the run has no artifacts directory, which every server and CLI run creates. |
 | `KEELSON_NODE_<id>_OUTPUT_TRUNCATED` | `1` when the `_OUTPUT` value above was capped; unset otherwise. |
+| `KEELSON_NODE_<id>_PROVIDER` | Effective provider recorded for an upstream agent node, including provider fallback. Unset for deterministic nodes. |
+| `KEELSON_NODE_<id>_MODEL` | Effective model recorded for an upstream agent node, including a provider-reported model change. Unset for deterministic nodes. |
 | `KEELSON_ARTIFACTS_DIR` | The per-run scratch directory. |
 | `KEELSON_INPUTS_<key>` | One variable per workflow input; non-alphanumeric characters in the key are normalized to `_`. |
 | `KEELSON_ARGUMENTS` | The full free-form text the run was started with (equivalent to `$ARGUMENTS` in prompt substitution). |
