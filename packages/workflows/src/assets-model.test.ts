@@ -28,7 +28,10 @@ const MIGRATED_WORKFLOWS = new Set([
   "resolve-pr",
   "workflow-builder",
 ]);
-const EXPECTED_PROVIDER_PINS = new Map([["adversarial-review", "copilot"]]);
+const EXPECTED_PROVIDER_PINS = new Map([
+  ["adversarial-review", "copilot"],
+  ["investigate", "copilot"],
+]);
 const COPILOT_CAPABILITIES = {
   defaultModel: "auto",
   reasoningEffort: true,
