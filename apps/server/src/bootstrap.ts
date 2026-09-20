@@ -917,12 +917,13 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
       });
       continue;
     }
-    const where = contribution.sourcePath ?? `<rib:${contribution.ribId}>`;
-    for (const warning of collectUnguardedCollectorWarnings(
-      definition.nodes,
-      definition.converge,
-      where,
-    )) {
+    // Only code-contributed definitions: a folder YAML already passed through
+    // parseWorkflow in collectRibFolderWorkflows, whose warnings the root
+    // concatenates with these.
+    const where = `<rib:${contribution.ribId}>`;
+    for (const warning of contribution.sourcePath !== undefined
+      ? []
+      : collectUnguardedCollectorWarnings(definition.nodes, definition.converge, where)) {
       console.warn(
         `[keelson] rib '${contribution.ribId}' workflow '${definition.name}' node '${warning.nodeId ?? "?"}': ${warning.message}`,
       );

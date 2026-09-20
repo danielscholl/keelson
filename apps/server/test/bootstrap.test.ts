@@ -1287,6 +1287,18 @@ describe("bootstrapRibs", () => {
       ).toBe(false);
     });
 
+    test("a folder YAML contribution is not warned twice", () => {
+      // collectRibFolderWorkflows already ran parseWorkflow for these and the
+      // composition root concatenates both notice arrays.
+      const prepared = prepareRibWorkflows([
+        { ribId: "demo", definition: collector({}), sourcePath: "/ribs/demo/workflows/c.yaml" },
+      ] as unknown as Parameters<typeof prepareRibWorkflows>[0]);
+      expect(
+        prepared.notices.filter((n) => n.level === "warning" && /always_run/.test(n.message)),
+      ).toHaveLength(0);
+      expect(prepared.definitions).toHaveLength(1);
+    });
+
     test("the warning does not block the workflow from being registered", () => {
       const prepared = prepareRibWorkflows([
         { ribId: "demo", definition: collector({}) },
