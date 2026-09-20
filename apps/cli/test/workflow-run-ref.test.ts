@@ -72,7 +72,7 @@ describe("resolveRunRef", () => {
   });
 
   describe("startRun", () => {
-    test("includes the provider override in the run-start body", async () => {
+    test("includes provider and preflight overrides in the run-start body", async () => {
       startBody = undefined;
 
       expect(
@@ -80,12 +80,14 @@ describe("resolveRunRef", () => {
           inputs: {},
           workingDir: "/tmp",
           provider: "stub",
+          preflight: false,
         }),
       ).toEqual({ runId: RUN_B });
       expect(startBody).toEqual({
         inputs: {},
         workingDir: "/tmp",
         provider: "stub",
+        preflight: false,
       });
     });
   });
