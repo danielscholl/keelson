@@ -1,5 +1,5 @@
 import { diagnoseModelDiversity } from "./model-diversity.ts";
-import type { WorkflowDefinition } from "./schema/index.ts";
+import { nodeReachesProvider, type WorkflowDefinition } from "./schema/index.ts";
 
 type ModelClass = "fast" | "balanced" | "deep";
 
@@ -102,7 +102,7 @@ export function resolveWorkflowResolution(
   options: ResolutionOptions,
 ): WorkflowResolution {
   const nodes = workflow.nodes
-    .filter((node) => node.prompt !== undefined)
+    .filter(nodeReachesProvider)
     .map((node) => resolvePrompt(workflow, node, options));
   const effectiveProviders = new Set(
     nodes
