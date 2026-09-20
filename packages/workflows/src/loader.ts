@@ -65,6 +65,7 @@ export interface WorkflowLoadWarning {
     | "ai_fields_on_non_ai_node"
     | "ignored_capability"
     | "invalid_field_value"
+    | "all_done_collector_without_always_run"
     | "interactive_loop_in_non_interactive_workflow"
     | "json_parse_on_capped_env_output"
     // Fields the schema accepts and the executor *can* honor,
@@ -240,6 +241,64 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
   }
 
   return node;
+}
+
+// Whole-identifier match: a body naming `MY_ARTIFACTS_DIR` or
+// `ARTIFACTS_DIRECTORY` writes somewhere the harness does not own.
+const ARTIFACTS_DIR_REF = /(?<![A-Za-z0-9_])(?:KEELSON_)?ARTIFACTS_DIR(?![A-Za-z0-9_])/;
+
+/**
+ * An `all_done` collector can succeed while the work it summarizes fails, and a
+ * resume seeds it as complete, so its file keeps the failed attempt's content
+ * while that work re-runs. Converge nodes are exempt because their round
+ * counter resets on resume. Exported so the rib-contribution path reports the
+ * same shape; a typed definition never passes through `parseWorkflow`.
+ */
+export function collectUnguardedCollectorWarnings(
+  nodes: readonly DagNode[],
+  converge: unknown,
+  filename: string,
+): WorkflowLoadWarning[] {
+  const warnings: WorkflowLoadWarning[] = [];
+  const gate =
+    converge !== null && typeof converge === "object" && "gate" in converge
+      ? (converge as { gate?: unknown }).gate
+      : undefined;
+  const exempt =
+    typeof gate === "string" ? convergeAncestorClosure(nodes, gate) : new Set<string>();
+
+  for (const node of nodes) {
+    const body = isScriptNode(node)
+      ? node.script
+      : "bash" in node && typeof node.bash === "string"
+        ? node.bash
+        : undefined;
+    if (body === undefined) continue;
+    if (node.trigger_rule !== "all_done" || node.always_run === true) continue;
+    if (!ARTIFACTS_DIR_REF.test(body) || exempt.has(node.id)) continue;
+    warnings.push({
+      filename,
+      nodeId: node.id,
+      kind: "all_done_collector_without_always_run",
+      message:
+        "an 'all_done' bash or script node that touches the artifacts dir is skipped on resume once it has succeeded, so the file it owns keeps the failed attempt's content; set 'always_run: true' to re-run it",
+    });
+  }
+  return warnings;
+}
+
+// Mirrors the executor's converge subgraph: the gate plus its ancestor closure.
+function convergeAncestorClosure(nodes: readonly DagNode[], gate: string): Set<string> {
+  const byId = new Map(nodes.map((node) => [node.id, node] as const));
+  const ids = new Set<string>();
+  const stack = [gate];
+  while (stack.length > 0) {
+    const id = stack.pop();
+    if (id === undefined || ids.has(id)) continue;
+    ids.add(id);
+    stack.push(...(byId.get(id)?.depends_on ?? []));
+  }
+  return ids;
 }
 
 // Greedy `[A-Za-z0-9_]+` plus the lookahead keeps a node id containing
@@ -821,6 +880,8 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
       message: `invalid 'interactive' value (ignored); expected boolean`,
     });
   }
+  warnings.push(...collectUnguardedCollectorWarnings(nodes, obj.converge, filename));
+
   if (!interactive) {
     const hasInteractiveLoop = nodes.some((n) => isLoopNode(n) && n.loop.interactive === true);
     if (hasInteractiveLoop) {

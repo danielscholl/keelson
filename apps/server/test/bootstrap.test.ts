@@ -1250,6 +1250,63 @@ describe("bootstrapRibs", () => {
     });
   });
 
+  describe("rib-contributed collector warnings", () => {
+    const collector = (extra: Record<string, unknown>) => ({
+      name: "rib-collector",
+      description: "a code-contributed collector that owns a file",
+      nodes: [
+        { id: "work", prompt: "do the thing" },
+        {
+          id: "collect",
+          depends_on: ["work"],
+          trigger_rule: "all_done",
+          bash: 'printf "%s" "$KEELSON_NODE_work_OUTPUT" > "$KEELSON_ARTIFACTS_DIR/out.json"',
+          ...extra,
+        },
+      ],
+    });
+
+    test("a typed definition gets the same resume warning YAML would", () => {
+      const prepared = prepareRibWorkflows([
+        { ribId: "demo", definition: collector({}) },
+      ] as unknown as Parameters<typeof prepareRibWorkflows>[0]);
+      expect(prepared.definitions.map((d) => d.name)).toContain("rib-collector");
+      const warning = prepared.notices.find(
+        (n) => n.level === "warning" && /always_run/.test(n.message),
+      );
+      expect(warning).toBeDefined();
+      expect(warning?.nodeId).toBe("collect");
+    });
+
+    test("always_run silences it on the rib path too", () => {
+      const prepared = prepareRibWorkflows([
+        { ribId: "demo", definition: collector({ always_run: true }) },
+      ] as unknown as Parameters<typeof prepareRibWorkflows>[0]);
+      expect(
+        prepared.notices.some((n) => n.level === "warning" && /always_run/.test(n.message)),
+      ).toBe(false);
+    });
+
+    test("a folder YAML contribution is not warned twice", () => {
+      // collectRibFolderWorkflows already ran parseWorkflow for these and the
+      // composition root concatenates both notice arrays.
+      const prepared = prepareRibWorkflows([
+        { ribId: "demo", definition: collector({}), sourcePath: "/ribs/demo/workflows/c.yaml" },
+      ] as unknown as Parameters<typeof prepareRibWorkflows>[0]);
+      expect(
+        prepared.notices.filter((n) => n.level === "warning" && /always_run/.test(n.message)),
+      ).toHaveLength(0);
+      expect(prepared.definitions).toHaveLength(1);
+    });
+
+    test("the warning does not block the workflow from being registered", () => {
+      const prepared = prepareRibWorkflows([
+        { ribId: "demo", definition: collector({}) },
+      ] as unknown as Parameters<typeof prepareRibWorkflows>[0]);
+      expect(prepared.definitions).toHaveLength(1);
+    });
+  });
+
   describe("rib folder workflows", () => {
     const fixtureRoot = join(import.meta.dir, "fixtures", "rib-discovery");
 

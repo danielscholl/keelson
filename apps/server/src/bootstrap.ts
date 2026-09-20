@@ -74,6 +74,7 @@ import { runJSON, runText } from "@keelson/shared/exec";
 import { projectWorkflowsDir } from "@keelson/shared/paths";
 import { getRegisteredTools, isRegisteredTool, registerTool } from "@keelson/skills";
 import {
+  collectUnguardedCollectorWarnings,
   DEFAULT_TOOL_DENYLIST,
   discoverWorkflows,
   makePromptHandler,
@@ -915,6 +916,23 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
         message,
       });
       continue;
+    }
+    // Only code-contributed definitions: a folder YAML already passed through
+    // parseWorkflow in collectRibFolderWorkflows, whose warnings the root
+    // concatenates with these.
+    const where = `<rib:${contribution.ribId}>`;
+    for (const warning of contribution.sourcePath !== undefined
+      ? []
+      : collectUnguardedCollectorWarnings(definition.nodes, definition.converge, where)) {
+      console.warn(
+        `[keelson] rib '${contribution.ribId}' workflow '${definition.name}' node '${warning.nodeId ?? "?"}': ${warning.message}`,
+      );
+      notices.push({
+        level: "warning",
+        filename: where,
+        ...(warning.nodeId !== undefined ? { nodeId: warning.nodeId } : {}),
+        message: warning.message,
+      });
     }
     claimed.set(definition.name, contribution.ribId);
     definitions.push(definition);
