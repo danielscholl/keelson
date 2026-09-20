@@ -251,7 +251,7 @@ These apply across kinds (some only to agent nodes, as noted).
 | `output_schema` | agent | A JSON-Schema subset the output must satisfy, or the node fails. |
 | `output_format` | agent | Provider structured-output request (Claude). |
 | `retry` | all but `loop` | `{ max_attempts: 1-5, delay_ms: 1000-60000, on_error }`. `delay_ms` doubles each attempt; `on_error` is `transient` (default) or `all`. |
-| `always_run` | all | `true` re-executes the node on a resumed run even if it previously succeeded (default `false`). Use it for a gate or validation that should re-check rather than replay a stale pass. |
+| `always_run` | all | `true` re-executes the node on a resumed run even if it previously succeeded (default `false`). Use it for a gate or validation that should re-check rather than replay a stale pass, and on an `all_done` collector that can succeed while its upstream fails: see [resume and side effects](#resume-and-side-effects). |
 | `fail_on_tool_error` | agent | `true` fails the node if any invoked tool errored. |
 | `require_tool_call` | agent | `[tool-name, ...]` — fails the node if a listed tool was available but the turn ended without a successful call to it, so a node whose deliverable is a tool call cannot report success having produced nothing. An error followed by a successful retry satisfies it. Only registry/MCP tools are checked: a provider SDK's own built-ins (`Read`, `Bash`, …) are never in the catalog, so naming one has no effect, and providers that take no keelson tools (`codex`, gateways, `stub`) skip the check rather than fail it. |
 | `idle_timeout` | agent | Milliseconds of stream silence before the node fails. |
@@ -297,6 +297,47 @@ Ignored with a warning on any node: `agents`, `sandbox`, `betas`,
 also ignored, with a warning, on a node that does not take one: `bash`, `script`,
 `approval`, `cancel`, and `loop` (an agent kind, but one that carries its own
 `loop.prompt` and field set, so the node-level agent fields do not apply to it).
+
+### `model_by`
+
+`model`, `model_by_provider` and `effort` are fixed when the workflow is
+written. `model_by` picks among a **closed set** of them using a value the run
+produces, so one node can spend a strong model on the inputs that need it
+without being duplicated and joined back with `trigger_rule: one_success`.
+
+```yaml
+- id: intake
+  prompt: "Classify this assignment as deep or std. Return JSON: {\"tier\": ...}"
+  output_format: { type: json_object }
+- id: investigate
+  depends_on: [intake]
+  prompt: "Investigate: $ARGUMENTS"
+  model_by:
+    from: $intake.output.tier
+    cases:
+      deep: { model_by_provider: { copilot: gpt-6-astra }, effort: high }
+      std:  { model_by_provider: { copilot: gpt-5.6-terra }, effort: high }
+    default: std          # optional
+```
+
+`from` is either `$inputs.<key>` or `$<nodeId>.output[.<field>]`, and the node
+it names must be an ancestor, the same rule prompt and shell bodies follow. It
+resolves when the node starts, and its value is matched against `cases` exactly.
+
+Each case sets any of `model`, `model_by_provider` and `effort`; whatever it
+sets replaces the node's static value, and whatever it omits leaves that value
+alone, so an effort-only case keeps the node's model.
+
+**An unmatched value fails the node.** Declare `default`, naming one of the
+cases, when a fallback is wanted. A node silently running on a model nobody
+chose is the failure this exists to prevent, so the fallback is opt-in and the
+error names both the value that missed and the cases that exist.
+
+The set of reachable models stays statically known, which is the point of a map
+rather than free substitution: `keelson workflow validate` checks the shape of
+every branch, and `--live` checks **every** branch's model against the
+provider's catalog, not just the one a given run would take. A typo in a cold
+branch is caught before a run reaches it.
 
 ### trigger_rule
 
@@ -448,46 +489,31 @@ and not one.
 Reserved node ids, because they collide with substitution namespaces: `inputs`,
 `ARGUMENTS`, `ARTIFACTS_DIR`, `memory`, `converge`.
 
-### `model_by`
+## Resume and side effects
 
-`model`, `model_by_provider` and `effort` are fixed when the workflow is
-written. `model_by` picks among a **closed set** of them using a value the run
-produces, so one node can spend a strong model on the inputs that need it
-without being duplicated and joined back with `trigger_rule: one_success`.
+`keelson workflow resume` seeds every already-succeeded node as complete and
+re-enters the executor from the first incomplete one. The seed carries a node's
+**stdout**, so a node whose real product is its stdout replays correctly and an
+expensive prompt node is not paid for twice.
 
-```yaml
-- id: intake
-  prompt: "Classify this assignment as deep or std. Return JSON: {\"tier\": ...}"
-  output_format: { type: json_object }
-- id: investigate
-  depends_on: [intake]
-  prompt: "Investigate: $ARGUMENTS"
-  model_by:
-    from: $intake.output.tier
-    cases:
-      deep: { model_by_provider: { copilot: gpt-6-astra }, effort: high }
-      std:  { model_by_provider: { copilot: gpt-5.6-terra }, effort: high }
-    default: std          # optional
-```
+A resumed run reuses the same artifacts directory, so a seeded node's file is
+still there and still correct. Writing a file is not by itself a reason to set
+`always_run`.
 
-`from` is either `$inputs.<key>` or `$<nodeId>.output[.<field>]`, and the node
-it names must be an ancestor, the same rule prompt and shell bodies follow. It
-resolves when the node starts, and its value is matched against `cases` exactly.
+The case that breaks is narrower: a `trigger_rule: all_done` collector runs even
+when the work it summarizes failed, so it can succeed while its upstream did
+not. On resume that upstream re-runs, and the collector, having succeeded, stays
+seeded. Its file keeps what the failed attempt produced and never sees the new
+output. Mark that node `always_run: true`.
 
-Each case sets any of `model`, `model_by_provider` and `effort`; whatever it
-sets replaces the node's static value, and whatever it omits leaves that value
-alone, so an effort-only case keeps the node's model.
+Validation warns when a `bash` or `script` node combines `trigger_rule: all_done`
+with a reference to the artifacts directory and no `always_run`, the shape a
+fan-in collector takes.
 
-**An unmatched value fails the node.** Declare `default`, naming one of the
-cases, when a fallback is wanted. A node silently running on a model nobody
-chose is the failure this exists to prevent, so the fallback is opt-in and the
-error names both the value that missed and the cases that exist.
-
-The set of reachable models stays statically known, which is the point of a map
-rather than free substitution: `keelson workflow validate` checks the shape of
-every branch, and `--live` checks **every** branch's model against the
-provider's catalog, not just the one a given run would take. A typo in a cold
-branch is caught before a run reaches it.
+Nodes inside a [converge](#converge) subgraph are exempt and should not carry the
+flag. A resumed run restarts the round counter at 1 while the rest of the seeded
+subgraph stays at the round it converged on, so a node re-run there rewrites its
+file against the wrong round.
 
 ## Validation rules
 

@@ -102,6 +102,7 @@ export {
 } from "./handlers/script.ts";
 export { type ResolvedBash, resolveBash } from "./handlers/shell.ts";
 export {
+  collectUnguardedCollectorWarnings,
   type DiscoveryResult,
   type DiscoveryRoot,
   discoverWorkflows,
