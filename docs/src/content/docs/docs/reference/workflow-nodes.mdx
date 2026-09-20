@@ -400,7 +400,7 @@ environment variables, never spliced into the source:
 | Variable | Carries |
 | --- | --- |
 | `KEELSON_NODE_<id>_OUTPUT` | The upstream node's output (non-alphanumeric characters in the id are normalized to `_`). Capped, see below. |
-| `KEELSON_NODE_<id>_OUTPUT_FILE` | Path to a file holding that output in full, always set. Best-effort: omitted only when the run has no artifacts directory or the write fails. |
+| `KEELSON_NODE_<id>_OUTPUT_FILE` | Path to a file holding that output in full, set for every upstream node whatever its size. Absent only when the run has no artifacts directory, which every server and CLI run creates. |
 | `KEELSON_NODE_<id>_OUTPUT_TRUNCATED` | `1` when the `_OUTPUT` value above was capped; unset otherwise. |
 | `KEELSON_ARTIFACTS_DIR` | The per-run scratch directory. |
 | `KEELSON_INPUTS_<key>` | One variable per workflow input; non-alphanumeric characters in the key are normalized to `_`. |
@@ -415,13 +415,19 @@ payload that outgrows the cap stops parsing.
 Every node output is therefore written in full to
 `<artifacts dir>/node-outputs/<id>.txt` and that path published as
 `KEELSON_NODE_<id>_OUTPUT_FILE`, whether or not the value was capped. **Read
-structured output from the file, not the variable** — unconditionally, since the
-path is always set:
+structured output from the file, not the variable**:
 
 ```bash
 ISSUE_JSON=$(cat "$KEELSON_NODE_fetch_issue_OUTPUT_FILE")
 URL=$(printf '%s' "$ISSUE_JSON" | jq -r '.url')
 ```
+
+Whether the file is there is a property of the run, not of the data: it is
+written for every upstream node regardless of size, and is missing only when the
+run has no artifacts directory at all, which every server and CLI run creates
+and which fails loudly on its own. That is the difference from the old behavior,
+where the path appeared only once an output happened to outgrow the cap, so the
+same workflow worked for a dozen runs and then did not.
 
 The variable stays the right channel for prose, for a grep, and for a value you
 know is small. `KEELSON_NODE_<id>_OUTPUT_TRUNCATED` is set to `1` when the value

@@ -250,11 +250,23 @@ const JSON_PARSER_CALL = /\bJSON\.parse\b|\bjson\.loads?\b|\bjq\b/;
 // Scoped to one logical line on purpose: a body that assigns the var and parses
 // it further down is the shape bundled workflows already guard with a
 // `_FILE`-first conditional, and flagging those would bury the real hits.
+// Within a line, the var must reach the parser through a pipe or be one of its
+// arguments, so an unrelated `jq` on the same line is not a hit.
 function findJsonParseOnEnvOutput(body: string): string | null {
-  for (const line of body.replace(/\\\r?\n\s*/g, " ").split(/\r?\n/)) {
-    if (!JSON_PARSER_CALL.test(line)) continue;
-    const bare = line.match(BARE_ENV_OUTPUT_REF);
-    if (bare !== null) return bare[0];
+  for (const raw of body.replace(/\\\r?\n\s*/g, " ").split(/\r?\n/)) {
+    const line = raw.trimStart();
+    if (line.startsWith("#") || line.startsWith("//")) continue;
+    for (const segment of line.split(/[;&]{1,2}/)) {
+      if (!JSON_PARSER_CALL.test(segment)) continue;
+      const bare = segment.match(BARE_ENV_OUTPUT_REF);
+      if (bare === null) continue;
+      const parserAt = segment.search(JSON_PARSER_CALL);
+      const varAt = segment.indexOf(bare[0]);
+      // Piped into the parser, or handed to it as an argument.
+      const piped = varAt < parserAt && segment.slice(varAt, parserAt).includes("|");
+      const argument = varAt > parserAt;
+      if (piped || argument) return bare[0];
+    }
   }
   return null;
 }

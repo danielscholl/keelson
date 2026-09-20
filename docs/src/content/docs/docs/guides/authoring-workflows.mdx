@@ -184,7 +184,7 @@ so the model's text is always data and never code.
 ```
 
 The variable is capped at 16 KiB and head+tail truncated past that, with a
-marker in the middle — fine for prose, fatal for JSON. Every output is also
+marker in the middle: fine for prose, fatal for JSON. Every output is also
 written in full to `KEELSON_NODE_<id>_OUTPUT_FILE`, which is always set, so
 structured output is read from the file:
 
