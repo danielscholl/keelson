@@ -243,15 +243,24 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
   return node;
 }
 
+// Whole-identifier match: a body naming `MY_ARTIFACTS_DIR` or
+// `ARTIFACTS_DIRECTORY` writes somewhere the harness does not own.
+const ARTIFACTS_DIR_REF = /(?<![A-Za-z0-9_])(?:KEELSON_)?ARTIFACTS_DIR(?![A-Za-z0-9_])/;
+
 // A resume seeds a succeeded node's stdout, not its side effect, so a
 // file-writing collector stays stale without always_run; converge nodes are
 // exempt because their round counter resets on resume.
-function warnOnUnguardedCollectors(
+/**
+ * Collectors that will be skipped on a resume while the work they summarize
+ * re-runs. Exported so the rib-contribution path reports the same shape the
+ * YAML loader does; a typed definition never passes through `parseWorkflow`.
+ */
+export function collectUnguardedCollectorWarnings(
   nodes: readonly DagNode[],
   converge: unknown,
   filename: string,
-  warnings: WorkflowLoadWarning[],
-): void {
+): WorkflowLoadWarning[] {
+  const warnings: WorkflowLoadWarning[] = [];
   const gate =
     converge !== null && typeof converge === "object" && "gate" in converge
       ? (converge as { gate?: unknown }).gate
@@ -267,7 +276,7 @@ function warnOnUnguardedCollectors(
         : undefined;
     if (body === undefined) continue;
     if (node.trigger_rule !== "all_done" || node.always_run === true) continue;
-    if (!body.includes("ARTIFACTS_DIR") || exempt.has(node.id)) continue;
+    if (!ARTIFACTS_DIR_REF.test(body) || exempt.has(node.id)) continue;
     warnings.push({
       filename,
       nodeId: node.id,
@@ -276,6 +285,7 @@ function warnOnUnguardedCollectors(
         "an 'all_done' bash or script node that touches the artifacts dir is skipped on resume once it has succeeded, so the file it owns keeps the failed attempt's content; set 'always_run: true' to re-run it",
     });
   }
+  return warnings;
 }
 
 // Mirrors the executor's converge subgraph: the gate plus its ancestor closure.
@@ -871,7 +881,7 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
       message: `invalid 'interactive' value (ignored); expected boolean`,
     });
   }
-  warnOnUnguardedCollectors(nodes, obj.converge, filename, warnings);
+  warnings.push(...collectUnguardedCollectorWarnings(nodes, obj.converge, filename));
 
   if (!interactive) {
     const hasInteractiveLoop = nodes.some((n) => isLoopNode(n) && n.loop.interactive === true);

@@ -1076,6 +1076,63 @@ nodes:
     );
   });
 
+  test("a similarly named variable is not the artifacts dir", () => {
+    const yaml = `
+name: other-dir
+description: writes somewhere the harness does not own
+nodes:
+  - id: work
+    prompt: do the thing
+  - id: collect
+    depends_on: [work]
+    trigger_rule: all_done
+    bash: 'printf "%s" "$KEELSON_NODE_work_OUTPUT" > "$MY_ARTIFACTS_DIR/out.json"'
+`;
+    const result = parseWorkflow(yaml, "other-dir.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "all_done_collector_without_always_run")).toBe(
+      false,
+    );
+  });
+
+  test("a longer identifier sharing the prefix does not match either", () => {
+    const yaml = `
+name: dir-suffix
+description: ARTIFACTS_DIRECTORY is a different variable
+nodes:
+  - id: work
+    prompt: do the thing
+  - id: collect
+    depends_on: [work]
+    trigger_rule: all_done
+    bash: 'printf "%s" "$KEELSON_NODE_work_OUTPUT" > "$ARTIFACTS_DIRECTORY/out.json"'
+`;
+    const result = parseWorkflow(yaml, "dir-suffix.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "all_done_collector_without_always_run")).toBe(
+      false,
+    );
+  });
+
+  test("the unprefixed ARTIFACTS_DIR still matches", () => {
+    const yaml = `
+name: unprefixed
+description: the Archon-compatible variable name
+nodes:
+  - id: work
+    prompt: do the thing
+  - id: collect
+    depends_on: [work]
+    trigger_rule: all_done
+    bash: 'printf "%s" "$KEELSON_NODE_work_OUTPUT" > "$ARTIFACTS_DIR/out.json"'
+`;
+    const result = parseWorkflow(yaml, "unprefixed.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "all_done_collector_without_always_run")).toBe(
+      true,
+    );
+  });
+
   test("a collector inside a converge subgraph is exempt", () => {
     const yaml = `
 name: converging

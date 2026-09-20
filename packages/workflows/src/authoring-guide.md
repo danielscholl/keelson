@@ -214,10 +214,11 @@ must already exist on disk; from chat, use an inline `prompt` node instead.
 - `always_run: true` — re-execute this node on a resumed run even if it
   succeeded before (a gate/validation re-checks instead of replaying a stale
   pass). Off by default: a succeeded node is skipped on resume. Required on a
-  `bash` or `script` collector whose product is a **file**: the resume seed
-  carries a node's stdout, not its side effect, so a skipped collector leaves
-  whatever the failed attempt wrote. Validation warns on an `all_done` `bash`
-  or `script` node that touches `$KEELSON_ARTIFACTS_DIR` without it.
+  `bash` or `script` collector under `trigger_rule: all_done` that writes to
+  `$KEELSON_ARTIFACTS_DIR`: it runs even when the work it summarizes failed, so
+  it can succeed against a failed attempt and then stay seeded while that work
+  re-runs. A resume reuses the artifacts dir, so writing a file is not on its
+  own a reason to set this. Validation warns on the `all_done` shape.
 - Do **not** set it inside a converge subgraph (the gate and its ancestors).
   A resume restarts the round counter at 1 while the rest of the seeded
   subgraph stays at the round it converged on, so the node would rewrite its
