@@ -16,6 +16,15 @@ export {
   resolveWorkflowResolution,
   type WorkflowResolution,
 } from "./catalog-resolution.ts";
+export {
+  checkWorkflowCatalog,
+  formatPreflightViolations,
+  type LiveCatalog,
+  type PreflightModel,
+  type PreflightOptions,
+  type PreflightResult,
+  type PreflightViolation,
+} from "./catalog-preflight.ts";
 export { evaluateCondition } from "./conditions.ts";
 export {
   ExecutorValidationError,
