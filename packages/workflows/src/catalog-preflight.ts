@@ -1,4 +1,4 @@
-import { resolveWorkflowResolution } from "./catalog-resolution.ts";
+import { resolvePrompt, resolveWorkflowResolution } from "./catalog-resolution.ts";
 import { applyModelCase } from "./model-by.ts";
 import type { WorkflowDefinition } from "./schema/index.ts";
 
@@ -97,12 +97,10 @@ export function checkWorkflowCatalog(
       for (const [caseKey, branch] of Object.entries(node.model_by.cases)) {
         const dispatched = applyModelCase(node, branch) as typeof node;
         const caseLiteral = pinnedLiteralFor(dispatched, workflow, provider);
-        // A branch naming no model of its own runs on the node's resolved model,
-        // so its effort is judged against that. A branch naming a model class is
-        // left alone, the same way the static path leaves one alone.
-        const branchNamesModel =
-          branch.model !== undefined || branch.model_by_provider?.[provider] !== undefined;
-        const effectiveModel = caseLiteral ?? (branchNamesModel ? undefined : resolved.model);
+        // Resolved from the dispatched node, not the original: a case replaces the
+        // whole `model_by_provider` map, so the node's resolution can name a pin
+        // the case just removed.
+        const effectiveModel = resolvePrompt(workflow, dispatched, options).model;
         const listed =
           effectiveModel === undefined
             ? undefined

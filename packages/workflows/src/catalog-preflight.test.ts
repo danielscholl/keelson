@@ -367,14 +367,75 @@ describe("checkWorkflowCatalog — model_by cases", () => {
     expect(result.violations[0]?.caseKey).toBe("deep");
   });
 
-  test("a case naming a model class is not judged on effort", () => {
-    const result = check(
+  test("a case naming a model class is judged on what the class resolves to", () => {
+    // Mirrors the static path, which checks effort against the resolved model
+    // whether or not the pin was a class.
+    const providers = new Map([
+      [
+        "copilot",
+        {
+          defaultModel: "gpt-default",
+          models: ["gpt-deep", "gpt-default"],
+          modelClasses: { fast: "gpt-default", balanced: "gpt-default", deep: "gpt-deep" },
+        },
+      ],
+    ]);
+    const result = checkWorkflowCatalog(
       makeWorkflow({
         model_by: { from: "$inputs.tier", cases: { deep: { model: "deep", effort: "xhigh" } } },
       }),
-      new Map([["copilot", [{ id: "gpt-live", supportedReasoningEfforts: ["low"] }]]]),
+      {
+        providers,
+        defaultProviderId: "copilot",
+        liveCatalog: new Map([
+          ["copilot", [{ id: "gpt-deep", supportedReasoningEfforts: ["low", "high"] }]],
+        ]),
+      },
     );
-    expect(result.violations).toEqual([]);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.kind).toBe("effort");
+    expect(result.violations[0]?.reason).toContain("gpt-deep");
+  });
+
+  test("a case that drops the provider from model_by_provider is judged on the fallback", () => {
+    // applyModelCase replaces the whole map, so the node's own resolution names
+    // a pin the case removed.
+    const providers = new Map([
+      [
+        "copilot",
+        {
+          defaultModel: "gpt-default",
+          models: ["gpt-pinned", "gpt-default"],
+          modelClasses: { fast: "gpt-default", balanced: "gpt-default", deep: "gpt-default" },
+        },
+      ],
+    ]);
+    const result = checkWorkflowCatalog(
+      makeWorkflow({
+        model_by_provider: { copilot: "gpt-pinned" },
+        model_by: {
+          from: "$inputs.tier",
+          cases: { deep: { model_by_provider: { claude: "other" }, effort: "xhigh" } },
+        },
+      }),
+      {
+        providers,
+        defaultProviderId: "copilot",
+        liveCatalog: new Map([
+          [
+            "copilot",
+            [
+              { id: "gpt-pinned", supportedReasoningEfforts: ["low", "high", "xhigh"] },
+              { id: "gpt-default", supportedReasoningEfforts: ["low", "high"] },
+            ],
+          ],
+        ]),
+      },
+    );
+    // gpt-pinned would have allowed xhigh; the fallback gpt-default does not.
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.kind).toBe("effort");
+    expect(result.violations[0]?.reason).toContain("gpt-default");
   });
 
   test("an unreachable provider reports not-checked rather than violations", () => {
