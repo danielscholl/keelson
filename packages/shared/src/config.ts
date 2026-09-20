@@ -183,6 +183,7 @@ const keelsonConfigSchema = z.object({
   // Preferred provider for new chats and the workflow fallback. Honored only
   // when that provider is actually registered.
   defaultProvider: z.string().optional(),
+  workflowPreflight: z.boolean().optional(),
   copilot: providerSettingsSchema.optional(),
   pi: providerSettingsSchema.optional(),
   claude: claudeSettingsSchema.optional(),
@@ -197,6 +198,16 @@ const keelsonConfigSchema = z.object({
 });
 
 export type KeelsonConfig = z.infer<typeof keelsonConfigSchema>;
+
+export function resolveWorkflowPreflight(
+  config: KeelsonConfig,
+  explicit?: boolean,
+): boolean {
+  if (explicit === false) return false;
+  const env = process.env.KEELSON_WORKFLOW_PREFLIGHT?.trim().toLowerCase();
+  if (env === "0" || env === "false" || env === "off") return false;
+  return config.workflowPreflight ?? true;
+}
 
 export function readModelClassOverride(
   config: KeelsonConfig,
