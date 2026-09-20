@@ -44,6 +44,7 @@ export {
 } from "./executor.ts";
 export {
   buildTopologicalLayers,
+  collectTransitiveDependents,
   type DagShapeError,
   validateDagShape,
 } from "./graph.ts";

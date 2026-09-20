@@ -1,7 +1,11 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
-import { buildTopologicalLayers, validateDagShape } from "./graph.ts";
+import {
+  buildTopologicalLayers,
+  collectTransitiveDependents,
+  validateDagShape,
+} from "./graph.ts";
 import type { DagNode } from "./schema/index.ts";
 
 function p(id: string, depends_on?: string[]): DagNode {
@@ -107,5 +111,30 @@ describe("buildTopologicalLayers", () => {
   test("throws on a runtime cycle (loader should reject earlier)", () => {
     const nodes = [p("a", ["b"]), p("b", ["a"])];
     expect(() => buildTopologicalLayers(nodes)).toThrow(/cycle/i);
+  });
+});
+
+describe("collectTransitiveDependents", () => {
+  test("collects roots and every reachable fan-out and diamond descendant", () => {
+    const nodes = [
+      p("root"),
+      p("left", ["root"]),
+      p("right", ["root"]),
+      p("join", ["left", "right"]),
+      p("tail", ["join"]),
+      p("independent"),
+    ];
+
+    expect(collectTransitiveDependents(nodes, ["root"])).toEqual(
+      new Set(["root", "left", "right", "join", "tail"]),
+    );
+  });
+
+  test("handles overlapping and unknown roots without revisiting nodes", () => {
+    const nodes = [p("a"), p("b", ["a"]), p("c", ["b"])];
+
+    expect(collectTransitiveDependents(nodes, ["a", "b", "missing"])).toEqual(
+      new Set(["missing", "b", "c", "a"]),
+    );
   });
 });
