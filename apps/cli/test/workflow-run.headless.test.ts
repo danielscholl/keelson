@@ -15,6 +15,7 @@ import {
   MemoryRequiresServerError,
   resolveHeadlessProviderId,
   runHeadless,
+  WorkflowPreflightError,
 } from "../src/in-process/run-workflow.ts";
 
 const FIXTURES = resolve(import.meta.dir, "fixtures");
@@ -23,7 +24,12 @@ const FIXTURES = resolve(import.meta.dir, "fixtures");
 // KEELSON_PROVIDERS. Pin the env per test and clear the registry after each so
 // no SDK-backed registration leaks into other test files (their default-pick
 // assertions depend on what's registered, and file order varies by platform).
-const ENV_KEYS = ["KEELSON_PROVIDERS", "KEELSON_WORKFLOW_PROVIDER", "KEELSON_HOME"] as const;
+const ENV_KEYS = [
+  "KEELSON_PROVIDERS",
+  "KEELSON_WORKFLOW_PROVIDER",
+  "KEELSON_WORKFLOW_PREFLIGHT",
+  "KEELSON_HOME",
+] as const;
 const savedEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
 beforeAll(() => {
   for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
@@ -88,6 +94,7 @@ describe("runHeadless (in-process executor)", () => {
       cwd: process.cwd(),
       workflowsDir: FIXTURES,
       provider: "stub",
+      preflight: false,
       onEvent: (event) => events.push(event),
     });
 
@@ -108,6 +115,32 @@ describe("runHeadless (in-process executor)", () => {
     expect(providerIds).toEqual(["stub", "stub"]);
     expect(warnings).toContain("provider override 'stub' displaces workflow pin 'copilot'");
     expect(warnings).toContain("provider override 'stub' displaces node pin 'claude'");
+  });
+
+  test("rejects a retired model pin before execution", async () => {
+    const promise = runHeadless({
+      name: "preflight-bad-pin",
+      inputs: {},
+      cwd: process.cwd(),
+      workflowsDir: FIXTURES,
+    });
+
+    await expect(promise).rejects.toBeInstanceOf(WorkflowPreflightError);
+    await expect(promise).rejects.toThrow(
+      "preflight failed:\n- pinned: model 'retired-model' is not in stub's live catalog",
+    );
+  });
+
+  test("an explicit preflight disable skips a bad pin", async () => {
+    const result = await runHeadless({
+      name: "preflight-bad-pin",
+      inputs: {},
+      cwd: process.cwd(),
+      workflowsDir: FIXTURES,
+      preflight: false,
+    });
+
+    expect(result.summary.status).toBe("succeeded");
   });
 });
 

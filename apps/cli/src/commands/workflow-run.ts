@@ -13,6 +13,7 @@ import {
   MemoryRequiresServerError,
   runHeadless,
   WorkflowNotFoundError,
+  WorkflowPreflightError,
 } from "../in-process/run-workflow.ts";
 import { emit } from "../output.ts";
 import { gateSchemaSkew } from "../schema-gate.ts";
@@ -299,6 +300,10 @@ async function runInProcess(
     if (err instanceof MemoryRequiresServerError) {
       emit({ error: err.message, code: "NO_SERVER" }, { json: opts.json });
       process.exit(EXIT_NO_SERVER);
+    }
+    if (err instanceof WorkflowPreflightError) {
+      emit({ error: err.message, code: "PREFLIGHT_FAILED" }, { json: opts.json });
+      process.exit(EXIT_FAIL);
     }
     // Headless setup errors (unknown provider, fixture parse failures, etc.)
     // must still produce a JSON envelope in --json mode. Rethrowing would

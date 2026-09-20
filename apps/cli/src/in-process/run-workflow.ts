@@ -8,21 +8,28 @@ import { join } from "node:path";
 
 import {
   disposeAllProviders,
+  fetchLiveModelCatalog,
   getAgentProvider,
   getProviderInfoList,
   isRegisteredProvider,
   registerStubProvider,
 } from "@keelson/providers";
-import { loadKeelsonConfig, readModelClassOverride } from "@keelson/shared/config";
+import {
+  loadKeelsonConfig,
+  readModelClassOverride,
+  resolveWorkflowPreflight,
+} from "@keelson/shared/config";
 import { getRegisteredTools } from "@keelson/skills";
 import {
   bashHandler,
+  checkWorkflowCatalog,
   createWorktree,
   type DiscoveryRoot,
   defaultRunUntilBashProbe,
   discoverWorkflows,
   ensureWorktreeDeps,
   fetchOrigin,
+  formatPreflightViolations,
   gitToplevel,
   headDivergesFrom,
   isGitRepo,
@@ -40,6 +47,7 @@ import {
   removeWorktree,
   resolveBranchTemplate,
   resolveDefaultBranch,
+  resolveWorkflowResolution,
   runWorkflow,
   type WorkflowDefinition,
   worktreePathForRepoLocal,
@@ -61,6 +69,7 @@ export interface RunHeadlessOptions {
   // requests sent through the server-down fallback would silently downgrade
   // to in-place runs.
   isolation?: "worktree" | "none" | "auto";
+  preflight?: boolean;
 }
 
 export interface RunHeadlessResult {
@@ -77,6 +86,13 @@ export class WorkflowNotFoundError extends Error {
       `no workflow named '${name}' under ${searched} (project-scoped workflows need the server — run \`keelson start\`)`,
     );
     this.name = "WorkflowNotFoundError";
+  }
+}
+
+export class WorkflowPreflightError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkflowPreflightError";
   }
 }
 
@@ -176,6 +192,47 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
     );
   }
 
+  const config = loadKeelsonConfig();
+  if (resolveWorkflowPreflight(config, opts.preflight)) {
+    const providers = new Map(
+      getProviderInfoList().map(({ id, capabilities }) => [
+        id,
+        {
+          defaultModel: capabilities.defaultModel,
+          models: capabilities.models,
+          ...(capabilities.modelClasses !== undefined
+            ? { modelClasses: capabilities.modelClasses }
+            : {}),
+        },
+      ]),
+    );
+    const modelClassOverride = (id: string, modelClass: "fast" | "balanced" | "deep") =>
+      readModelClassOverride(config, id)?.[modelClass];
+    const resolution = resolveWorkflowResolution(workflow, {
+      providers,
+      defaultProviderId: providerId,
+      runProviderId: providerOverride,
+      modelClassOverride,
+    });
+    const effectiveProviders = resolution.nodes
+      .map(({ effectiveProvider }) => effectiveProvider)
+      .filter((id): id is string => id !== undefined);
+    const liveCatalog = await fetchLiveModelCatalog(effectiveProviders);
+    const result = checkWorkflowCatalog(workflow, {
+      providers,
+      defaultProviderId: providerId,
+      runProviderId: providerOverride,
+      modelClassOverride,
+      liveCatalog,
+    });
+    if (result.violations.length > 0) {
+      await disposeAllProviders();
+      throw new WorkflowPreflightError(
+        `preflight failed:\n${formatPreflightViolations(result)}`,
+      );
+    }
+  }
+
   const abort = new AbortController();
   if (opts.abortSignal) {
     if (opts.abortSignal.aborted) abort.abort();
@@ -186,7 +243,6 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   // a pause callout and no second client to resume the run, so an approval
   // node fails immediately with a clear message. Operators who need
   // approval should route through `keelson start` + the SPA.
-  const config = loadKeelsonConfig();
   const promptHandler = makePromptHandler({
     getProvider: (id) => {
       const target = id ?? providerId;
