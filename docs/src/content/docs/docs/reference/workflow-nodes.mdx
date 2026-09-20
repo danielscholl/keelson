@@ -436,6 +436,11 @@ Validation warns when a `bash` or `script` node combines `trigger_rule: all_done
 with a reference to the artifacts directory and no `always_run`, the shape a
 fan-in collector takes.
 
+Nodes inside a [converge](#converge) subgraph are exempt and should not carry the
+flag. A resumed run restarts the round counter at 1 while the rest of the seeded
+subgraph stays at the round it converged on, so a node re-run there rewrites its
+file against the wrong round.
+
 ## Validation rules
 
 `keelson workflow validate` (and the `workflow_save` tool) run the real loader.

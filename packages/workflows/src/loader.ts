@@ -221,30 +221,60 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
     });
   }
 
-  const shellBody = isScriptNode(node)
-    ? node.script
-    : "bash" in node && typeof node.bash === "string"
-      ? node.bash
+  return node;
+}
+
+// A resume seeds every succeeded node as complete, and the seed carries the
+// node's stdout, not its side effect, so a collector whose real product is a
+// file replays nothing and downstream nodes read the failed attempt's copy.
+//
+// Converge-subgraph nodes are exempt: the round loop restarts at 1 on resume
+// while the rest of the seeded subgraph stays at the round it converged on, so
+// re-running one node there rewrites its file against the wrong round.
+function warnOnUnguardedCollectors(
+  nodes: readonly DagNode[],
+  converge: unknown,
+  filename: string,
+  warnings: WorkflowLoadWarning[],
+): void {
+  const gate =
+    converge !== null && typeof converge === "object" && "gate" in converge
+      ? (converge as { gate?: unknown }).gate
       : undefined;
-  // A resume seeds every succeeded node as complete, and the seed carries the
-  // node's stdout, not its side effect — so a collector whose real product is a
-  // file replays nothing and downstream nodes read the failed attempt's copy.
-  if (
-    shellBody !== undefined &&
-    node.trigger_rule === "all_done" &&
-    node.always_run !== true &&
-    shellBody.includes("ARTIFACTS_DIR")
-  ) {
-    ctx.warnings.push({
-      filename: ctx.filename,
+  const exempt =
+    typeof gate === "string" ? convergeAncestorClosure(nodes, gate) : new Set<string>();
+
+  for (const node of nodes) {
+    const body = isScriptNode(node)
+      ? node.script
+      : "bash" in node && typeof node.bash === "string"
+        ? node.bash
+        : undefined;
+    if (body === undefined) continue;
+    if (node.trigger_rule !== "all_done" || node.always_run === true) continue;
+    if (!body.includes("ARTIFACTS_DIR") || exempt.has(node.id)) continue;
+    warnings.push({
+      filename,
       nodeId: node.id,
       kind: "all_done_collector_without_always_run",
       message:
         "an 'all_done' shell node that touches the artifacts dir is skipped on resume once it has succeeded, so the file it owns keeps the failed attempt's content; set 'always_run: true' to re-run it",
     });
   }
+}
 
-  return node;
+// Mirrors the executor's converge subgraph: the gate plus its ancestor closure.
+function convergeAncestorClosure(nodes: readonly DagNode[], gate: string): Set<string> {
+  const byId = new Map(nodes.map((node) => [node.id, node] as const));
+  const ids = new Set<string>();
+  const stack = [gate];
+  while (stack.length > 0) {
+    const id = stack.pop();
+    if (id === undefined || ids.has(id)) continue;
+    ids.add(id);
+    stack.push(...(byId.get(id)?.depends_on ?? []));
+  }
+  return ids;
 }
 
 // ---------------------------------------------------------------------------
@@ -762,6 +792,8 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
       message: `invalid 'interactive' value (ignored); expected boolean`,
     });
   }
+  warnOnUnguardedCollectors(nodes, obj.converge, filename, warnings);
+
   if (!interactive) {
     const hasInteractiveLoop = nodes.some((n) => isLoopNode(n) && n.loop.interactive === true);
     if (hasInteractiveLoop) {

@@ -1076,6 +1076,56 @@ nodes:
     );
   });
 
+  test("a collector inside a converge subgraph is exempt", () => {
+    const yaml = `
+name: converging
+description: the collector is an ancestor of the converge gate
+converge:
+  gate: check
+  max_rounds: 3
+nodes:
+  - id: work
+    prompt: do the thing
+  - id: collect
+    depends_on: [work]
+    trigger_rule: all_done
+    bash: 'printf "%s" "$KEELSON_NODE_work_OUTPUT" > "$KEELSON_ARTIFACTS_DIR/audit.json"'
+  - id: check
+    depends_on: [collect]
+    bash: 'test -s "$KEELSON_ARTIFACTS_DIR/audit.json"'
+`;
+    const result = parseWorkflow(yaml, "converging.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "all_done_collector_without_always_run")).toBe(
+      false,
+    );
+  });
+
+  test("a collector outside the converge subgraph still warns", () => {
+    const yaml = `
+name: converging-outside
+description: the collector runs after the gate converges
+converge:
+  gate: check
+  max_rounds: 3
+nodes:
+  - id: work
+    prompt: do the thing
+  - id: check
+    depends_on: [work]
+    bash: 'true'
+  - id: collect
+    depends_on: [check]
+    trigger_rule: all_done
+    bash: 'printf "%s" "$KEELSON_NODE_work_OUTPUT" > "$KEELSON_ARTIFACTS_DIR/audit.json"'
+`;
+    const result = parseWorkflow(yaml, "converging-outside.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "all_done_collector_without_always_run")).toBe(
+      true,
+    );
+  });
+
   test("an artifacts write under the default trigger rule does not warn", () => {
     const yaml = `
 name: plain-write

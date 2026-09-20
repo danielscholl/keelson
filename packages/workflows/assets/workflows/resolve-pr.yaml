@@ -788,7 +788,6 @@ nodes:
   - id: reply-audit
     depends_on: [reply-gate, reply-resolve]
     trigger_rule: all_done
-    always_run: true
     bash: |
       set -euo pipefail
       ROUND="$converge.round"
