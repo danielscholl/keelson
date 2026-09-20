@@ -1112,26 +1112,25 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     ...(ctx.memoryTools !== undefined ? { memory: ctx.memoryTools } : {}),
     ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
   };
-  // A `model_by` map picks the node's model/effort from run data, so it can only
-  // resolve here — after upstream outputs exist and before the handler reads
-  // node.model. Prompt and command nodes are the only ones whose model is read.
-  let dispatchNode = node;
-  const modelBy = "model_by" in node ? node.model_by : undefined;
-  const modelBySelectable = "prompt" in node || "command" in node;
-  if (modelBy !== undefined && modelBySelectable) {
-    const selection = selectModelCase(modelBy, ctx.inputs, nodeOutputs);
-    if (!selection.ok) {
-      emit({ type: "run_warning", nodeId: node.id, message: selection.error });
-      layerResults.set(node.id, { state: "failed", output: "", error: selection.error });
-      emit({ type: "node_done", nodeId: node.id, result: failedResult(selection.error) });
-      return;
-    }
-    dispatchNode = applyModelCase(node, selection.selected);
-  }
-
   emit({ type: "node_started", nodeId: node.id });
   const startedAtMs = Date.now();
   try {
+    // A `model_by` map picks the node's model/effort from run data, so it can
+    // only resolve here: after upstream outputs exist and before the handler
+    // reads node.model. Throwing rather than returning keeps an unmatched
+    // selector on the same path as any other node failure, so `on: always`
+    // memory and notebook hooks still fire.
+    let dispatchNode = node;
+    const modelBy = "model_by" in node ? node.model_by : undefined;
+    if (modelBy !== undefined && ("prompt" in node || "command" in node)) {
+      const selection = selectModelCase(modelBy, ctx.inputs, nodeOutputs);
+      if (!selection.ok) {
+        emit({ type: "run_warning", nodeId: node.id, message: selection.error });
+        throw new Error(selection.error);
+      }
+      dispatchNode = applyModelCase(node, selection.selected);
+    }
+
     let result = await runHandlerWithRetry(handler, dispatchNode, nodeCtx, abortSignal, emit);
     // Validate structured output is JSON-serializable. JSON.stringify returns
     // undefined for top-level undefined / functions / symbols — those would
