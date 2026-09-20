@@ -12,7 +12,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isRegisteredProvider, registerStubProvider, unregisterProvider } from "@keelson/providers";
+import {
+  isRegisteredProvider,
+  registerProvider,
+  registerStubProvider,
+  unregisterProvider,
+} from "@keelson/providers";
 import { TERMINAL_RUN_STATUSES, type TokenUsage } from "@keelson/shared";
 
 import { makePromptHandler, type WorkflowDefinition } from "@keelson/workflows";
@@ -67,7 +72,7 @@ interface Rig {
 // makeRig don't inherit a stale id from the previous test.
 let CURRENT_DEFAULT_PROJECT_ID: string | null = null;
 
-function makeRig(): Rig {
+function makeRig(promptHandler?: ReturnType<typeof makePromptHandler>): Rig {
   const db = openDatabase({ path: dbPath });
   const store = createWorkflowStore(db);
   const conversationStore = createConversationStore(db);
@@ -81,12 +86,33 @@ function makeRig(): Rig {
     listProjects: () => projectsStore.list(),
   });
   const app = new Hono();
-  workflowsRoutes(app, { catalog, store, conversationStore, projectsStore });
+  workflowsRoutes(app, {
+    catalog,
+    store,
+    conversationStore,
+    projectsStore,
+    ...(promptHandler !== undefined ? { promptHandler } : {}),
+  });
   return { app, store, projectsStore, defaultProjectId: defaultProject.id };
 }
 
 function writeWorkflow(filename: string, body: string): void {
   writeFileSync(join(wfDir, filename), body);
+}
+
+function makeSuccessfulPromptHandler() {
+  const provider = {
+    getCapabilities: () => ({ defaultModel: "stub-echo", models: ["stub-echo"] }),
+    async *sendQuery() {
+      yield { type: "text" as const, content: "ok" };
+      yield { type: "done" as const };
+    },
+  };
+  return makePromptHandler({
+    getProvider: () => provider,
+    resolveProviderId: (id) => id ?? "stub",
+    getRegisteredTools: () => [],
+  });
 }
 
 // Real browser fetches always send Origin; the handler refuses state-changing
@@ -1359,6 +1385,114 @@ nodes:
 
     expect(run.status).toBe("succeeded");
     expect(run.nodes.map((node) => node.provider)).toEqual(["stub", "stub"]);
+  });
+
+  test("POST .../runs fails before execution when a model pin is retired", async () => {
+    writeWorkflow(
+      "preflight-bad.yaml",
+      `name: preflight-bad
+description: rejected model pin
+provider: stub
+nodes:
+  - id: pinned
+    model: retired-model
+    prompt: run
+`,
+    );
+    const { app } = makeRig(makeSuccessfulPromptHandler());
+
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/preflight-bad/runs", { inputs: {} }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    const run = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      error: string | null;
+      nodes: unknown[];
+    };
+
+    expect(run.status).toBe("failed");
+    expect(run.error).toBe(
+      "preflight failed:\n- pinned: model 'retired-model' is not in stub's live catalog",
+    );
+    expect(run.nodes).toEqual([]);
+  });
+
+  test("POST .../runs preflight false skips a retired model check", async () => {
+    writeWorkflow(
+      "preflight-disabled.yaml",
+      `name: preflight-disabled
+description: disabled model check
+provider: stub
+nodes:
+  - id: pinned
+    model: retired-model
+    prompt: run
+`,
+    );
+    const { app } = makeRig(makeSuccessfulPromptHandler());
+
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/preflight-disabled/runs", {
+        inputs: {},
+        preflight: false,
+      }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    const run = await pollUntilTerminal(app, runId);
+
+    expect(run.status).toBe("succeeded");
+  });
+
+  test("POST .../runs proceeds when a provider catalog cannot be fetched", async () => {
+    const capabilities = {
+      sessionResume: false,
+      streaming: false,
+      tools: false,
+      reasoningEffort: false,
+      models: ["offline-model"],
+      defaultModel: "offline-model",
+    };
+    registerProvider({
+      id: "offline-catalog",
+      displayName: "Offline catalog",
+      capabilities,
+      builtIn: false,
+      factory: () => ({
+        getType: () => "offline-catalog",
+        getCapabilities: () => capabilities,
+        async *sendQuery() {
+          yield { type: "done" as const };
+        },
+        async listModels() {
+          throw new Error("offline");
+        },
+      }),
+    });
+    try {
+      writeWorkflow(
+        "preflight-offline.yaml",
+        `name: preflight-offline
+description: unavailable live catalog
+provider: offline-catalog
+nodes:
+  - id: pinned
+    model: offline-model
+    prompt: run
+`,
+      );
+      const { app } = makeRig(makeSuccessfulPromptHandler());
+
+      const startRes = await app.fetch(
+        postRun("http://test/api/workflows/preflight-offline/runs", { inputs: {} }),
+      );
+      const { runId } = (await startRes.json()) as { runId: string };
+      const run = await pollUntilTerminal(app, runId);
+
+      expect(run.status).toBe("succeeded");
+    } finally {
+      unregisterProvider("offline-catalog");
+    }
   });
 
   test("POST .../runs rejects an unregistered provider override", async () => {
