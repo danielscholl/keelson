@@ -171,10 +171,7 @@ describe("runHeadless (in-process executor)", () => {
           stderr: "pipe",
         },
       );
-      const [stdout, exitCode] = await Promise.all([
-        new Response(proc.stdout).text(),
-        proc.exited,
-      ]);
+      const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
 
       expect(exitCode).toBe(0);
       expect(JSON.parse(stdout.trim()).data.status).toBe("succeeded");

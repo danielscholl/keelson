@@ -87,9 +87,7 @@ describe("checkWorkflowCatalog", () => {
   test("normalizes max effort to xhigh", () => {
     const result = check(
       makeWorkflow({ model: "current-model", effort: "max" }),
-      new Map([
-        ["copilot", [{ id: "current-model", supportedReasoningEfforts: ["high"] }]],
-      ]),
+      new Map([["copilot", [{ id: "current-model", supportedReasoningEfforts: ["high"] }]]]),
     );
 
     expect(result.violations[0]).toMatchObject({

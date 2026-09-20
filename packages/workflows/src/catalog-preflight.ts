@@ -120,9 +120,7 @@ export function checkWorkflowCatalog(
 }
 
 export function formatPreflightViolations(result: PreflightResult): string {
-  const lines = result.violations.map(
-    (violation) => `- ${violation.nodeId}: ${violation.reason}`,
-  );
+  const lines = result.violations.map((violation) => `- ${violation.nodeId}: ${violation.reason}`);
   if (result.notChecked.length > 0) {
     lines.push(`not checked: ${[...result.notChecked].sort().join(", ")}`);
   }

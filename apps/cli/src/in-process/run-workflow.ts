@@ -227,9 +227,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
     });
     if (result.violations.length > 0) {
       await disposeAllProviders();
-      throw new WorkflowPreflightError(
-        `preflight failed:\n${formatPreflightViolations(result)}`,
-      );
+      throw new WorkflowPreflightError(`preflight failed:\n${formatPreflightViolations(result)}`);
     }
   }
 

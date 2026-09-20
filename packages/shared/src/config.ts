@@ -199,10 +199,7 @@ const keelsonConfigSchema = z.object({
 
 export type KeelsonConfig = z.infer<typeof keelsonConfigSchema>;
 
-export function resolveWorkflowPreflight(
-  config: KeelsonConfig,
-  explicit?: boolean,
-): boolean {
+export function resolveWorkflowPreflight(config: KeelsonConfig, explicit?: boolean): boolean {
   if (explicit === false) return false;
   const env = process.env.KEELSON_WORKFLOW_PREFLIGHT?.trim().toLowerCase();
   if (env === "0" || env === "false" || env === "off") return false;

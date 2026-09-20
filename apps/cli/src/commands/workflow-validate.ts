@@ -13,8 +13,8 @@ import {
 } from "@keelson/shared/config";
 import {
   checkWorkflowCatalog,
-  parseWorkflow,
   type PreflightViolation,
+  parseWorkflow,
   resolveWorkflowResolution,
   type WorkflowDefinition,
 } from "@keelson/workflows";

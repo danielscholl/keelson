@@ -12,11 +12,6 @@ export {
   WORKFLOW_AUTHORING_GUIDE,
 } from "./authoring-guide.ts";
 export {
-  resolveWorkflowCatalog,
-  resolveWorkflowResolution,
-  type WorkflowResolution,
-} from "./catalog-resolution.ts";
-export {
   checkWorkflowCatalog,
   formatPreflightViolations,
   type LiveCatalog,
@@ -25,6 +20,11 @@ export {
   type PreflightResult,
   type PreflightViolation,
 } from "./catalog-preflight.ts";
+export {
+  resolveWorkflowCatalog,
+  resolveWorkflowResolution,
+  type WorkflowResolution,
+} from "./catalog-resolution.ts";
 export { evaluateCondition } from "./conditions.ts";
 export {
   ExecutorValidationError,

@@ -2285,10 +2285,7 @@ export function workflowsRoutes(
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
     }
-    const preflightEnabled = resolveWorkflowPreflight(
-      loadKeelsonConfig(),
-      parsed.data.preflight,
-    );
+    const preflightEnabled = resolveWorkflowPreflight(loadKeelsonConfig(), parsed.data.preflight);
     const requestedProvider = parsed.data.provider?.trim();
     const providerOverride =
       requestedProvider !== undefined && requestedProvider.length > 0
