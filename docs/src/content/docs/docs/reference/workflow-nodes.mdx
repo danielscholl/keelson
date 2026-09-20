@@ -273,9 +273,12 @@ Model selection starts with the node's `model`, then the workflow's `model`. A
 `model_by_provider` entry for the effective provider takes precedence. A model
 tier resolves through the operator's configured class override, the provider's
 `modelClasses`, then the provider default. `auto` also uses the provider default.
-For prompt nodes, a new run checks pinned literal model ids and effort against
-the effective provider's live catalog before executing its first node. Run the
-same check without executing with
+For prompt nodes, a new run started from the CLI, the SPA, or the API checks
+pinned literal model ids and effort against the effective provider's live
+catalog before executing its first node. A resumed run keeps the result it
+already passed rather than re-checking, and a run started by a rib, such as a
+region's cadence refresh, skips the check entirely. Run the same check without
+executing with
 `keelson workflow validate <name> --live`. An unavailable catalog is reported as
 `not checked` and does not block the run. A model that reports no effort list is
 not judged on effort.

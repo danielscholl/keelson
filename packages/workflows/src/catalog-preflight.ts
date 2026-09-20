@@ -86,7 +86,11 @@ export function checkWorkflowCatalog(
     }
 
     const literal = pinnedLiteralFor(node, workflow, provider);
-    if (literal !== undefined && !live.some((model) => model.id === literal)) {
+    if (
+      literal !== undefined &&
+      literal === resolved.model &&
+      !live.some((model) => model.id === literal)
+    ) {
       violations.push({
         nodeId: node.id,
         provider,
@@ -100,7 +104,7 @@ export function checkWorkflowCatalog(
     const effort = normalizeEffort(rawEffort);
     if (effort === undefined) continue;
 
-    const modelId = literal ?? resolved.model;
+    const modelId = resolved.model;
     const model = live.find((candidate) => candidate.id === modelId);
     const supported = model?.supportedReasoningEfforts;
     // An absent or empty effort list is not evidence that the requested effort is invalid.

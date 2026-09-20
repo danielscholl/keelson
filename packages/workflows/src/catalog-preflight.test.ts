@@ -41,6 +41,18 @@ function check(workflow: WorkflowDefinition, liveCatalog: LiveCatalog) {
   });
 }
 
+const PROVIDERS_WITH_CLAUDE = new Map([
+  ...PROVIDERS,
+  [
+    "claude",
+    {
+      defaultModel: "claude-model",
+      models: ["claude-model"],
+      modelClasses: { fast: "claude-model", balanced: "claude-model", deep: "claude-model" },
+    },
+  ],
+]);
+
 describe("checkWorkflowCatalog", () => {
   test("flags a retired provider-specific model on its pinned provider", () => {
     const result = check(
@@ -60,6 +72,38 @@ describe("checkWorkflowCatalog", () => {
       ],
       notChecked: [],
     });
+  });
+
+  test("does not flag a pinned literal once resolution fell back to another provider's default", () => {
+    const result = checkWorkflowCatalog(makeWorkflow({ model: "retired-model" }), {
+      providers: PROVIDERS_WITH_CLAUDE,
+      defaultProviderId: "copilot",
+      runProviderId: "claude",
+      liveCatalog: new Map([["claude", [{ id: "claude-model" }]]]),
+    });
+
+    expect(result).toEqual({ violations: [], notChecked: [] });
+  });
+
+  test("judges effort against the resolved model, not a stale literal it fell back from", () => {
+    const result = checkWorkflowCatalog(makeWorkflow({ model: "retired-model", effort: "xhigh" }), {
+      providers: PROVIDERS_WITH_CLAUDE,
+      defaultProviderId: "copilot",
+      runProviderId: "claude",
+      liveCatalog: new Map([
+        ["claude", [{ id: "claude-model", supportedReasoningEfforts: ["low"] }]],
+      ]),
+    });
+
+    expect(result.violations).toEqual([
+      {
+        nodeId: "review",
+        provider: "claude",
+        kind: "effort",
+        value: "xhigh",
+        reason: "effort 'xhigh' exceeds claude/claude-model (supports low)",
+      },
+    ]);
   });
 
   test("flags an effort outside the model's reported support", () => {

@@ -389,6 +389,10 @@ export interface ActiveRunEntry {
   // route resolve files while the run is live/paused; gone when the entry is
   // deleted on terminal status (the dir is cleaned at the same moment).
   artifactsDir?: string;
+  // Recorded once the run_started run_warning broadcasts, so a subscriber
+  // that attaches after that point (broadcast has no buffer) still gets it
+  // via direct replay in the WS open handler.
+  preflightNotice?: string;
   // Identity for the run-start de-dup lookup: a concurrent start with the same
   // workflow, workingDir, inputs, and provider override collapses onto this run.
   // See runDedupeKey.
@@ -2838,6 +2842,21 @@ export function workflowRunWebSocketHandlers(deps: {
               // socket may have closed mid-send; nothing to do
             }
           }
+          // Same rationale as the pause replay above: broadcast has no buffer,
+          // so a subscriber attaching after run_started otherwise never sees
+          // the preflight notice.
+          if (entry.preflightNotice !== undefined) {
+            const frame: WorkflowFrame = {
+              type: "run_warning",
+              nodeId: null,
+              message: entry.preflightNotice,
+            };
+            try {
+              ws.send(JSON.stringify(frame));
+            } catch {
+              // socket may have closed mid-send; nothing to do
+            }
+          }
         }
       }
       // Narrow re-check: the run could have terminated between the store
@@ -3695,6 +3714,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
             nodeId: null,
             message: pendingPreflightNotice,
           });
+          if (activeRun) activeRun.preflightNotice = pendingPreflightNotice;
           pendingPreflightNotice = undefined;
         }
       },

@@ -3069,6 +3069,124 @@ nodes:
     await pollUntilTerminal(app, runId);
   });
 
+  test("WS open replays the preflight run_warning to a subscriber attaching after run_started; an earlier subscriber gets it once via broadcast", async () => {
+    const capabilities = {
+      sessionResume: false,
+      streaming: false,
+      tools: false,
+      reasoningEffort: false,
+      models: ["slow-model"],
+      defaultModel: "slow-model",
+    };
+    registerProvider({
+      id: "slow-offline-catalog",
+      displayName: "Slow offline catalog",
+      capabilities,
+      builtIn: false,
+      factory: () => ({
+        getType: () => "slow-offline-catalog",
+        getCapabilities: () => capabilities,
+        async *sendQuery() {
+          yield { type: "done" as const };
+        },
+        async listModels() {
+          throw new Error("offline");
+        },
+        async listModelsLive() {
+          await new Promise((resolve) => setTimeout(resolve, 75));
+          throw new Error("offline");
+        },
+      }),
+    });
+    try {
+      writeWorkflow(
+        "preflight-warning-replay.yaml",
+        `name: preflight-warning-replay
+description: replay the preflight notice to a late subscriber
+provider: slow-offline-catalog
+nodes:
+  - id: pinned
+    model: slow-model
+    prompt: run
+  - id: hold
+    depends_on: [pinned]
+    bash: sleep 0.15
+`,
+      );
+      const db = openDatabase({ path: dbPath });
+      const store = createWorkflowStore(db);
+      const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+      const subscribers = createWorkflowSubscribers();
+      const activeRuns = createActiveRuns();
+      const app = new Hono();
+      workflowsRoutes(
+        app,
+        {
+          catalog,
+          store,
+          conversationStore: createConversationStore(db),
+          defaultCwd: tmpDir,
+          promptHandler: makeSuccessfulPromptHandler(),
+        },
+        activeRuns,
+        subscribers,
+      );
+      const wsHandlers = workflowRunWebSocketHandlers({ subscribers, store, activeRuns });
+
+      function makeFakeWs(runId: string) {
+        const received: Array<{ type: string; nodeId?: string | null; message?: string }> = [];
+        const ws = {
+          data: { runId, kind: "workflowRun", abort: new AbortController() },
+          send: (raw: string) => {
+            received.push(JSON.parse(raw));
+          },
+          close: () => {},
+        } as unknown as Parameters<NonNullable<typeof wsHandlers.open>>[0];
+        return { ws, received };
+      }
+
+      const startRes = await app.fetch(
+        postRun("http://test/api/workflows/preflight-warning-replay/runs", {
+          inputs: {},
+          workingDir: tmpDir,
+        }),
+      );
+      const { runId } = (await startRes.json()) as { runId: string };
+
+      // Attach immediately — the entry is registered synchronously in the POST
+      // handler, but the slow provider's listModelsLive is still pending, so
+      // run_started (and its notice) hasn't fired yet.
+      const early = makeFakeWs(runId);
+      wsHandlers.open?.(early.ws);
+
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        if (activeRuns.get(runId)?.preflightNotice !== undefined) break;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(activeRuns.get(runId)?.preflightNotice).toBe(
+        "preflight not checked: slow-offline-catalog",
+      );
+
+      // This subscriber only attaches once run_started has already broadcast —
+      // exactly the case WorkflowSubscribers.broadcast (no buffer) would drop.
+      const late = makeFakeWs(runId);
+      wsHandlers.open?.(late.ws);
+
+      await pollUntilTerminal(app, runId);
+
+      const expectedWarning = {
+        type: "run_warning",
+        nodeId: null,
+        message: "preflight not checked: slow-offline-catalog",
+      };
+      expect(early.received.filter((f) => f.type === "run_warning")).toEqual([expectedWarning]);
+      expect(late.received.filter((f) => f.type === "run_warning")).toEqual([expectedWarning]);
+    } finally {
+      unregisterProvider("slow-offline-catalog");
+    }
+  });
+
   test("POST /resume rejects pauseId mismatch with 409", async () => {
     writeWorkflow(
       "pa-pauseid.yaml",

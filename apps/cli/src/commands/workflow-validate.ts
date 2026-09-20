@@ -5,7 +5,11 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { fetchLiveModelCatalog, getProviderInfoList } from "@keelson/providers";
+import {
+  fetchLiveModelCatalog,
+  getProviderInfoList,
+  registerStubProvider,
+} from "@keelson/providers";
 import {
   loadKeelsonConfig,
   readModelClassOverride,
@@ -123,6 +127,7 @@ export async function runWorkflowValidate(
 
   if (opts.live) {
     bootstrapCliProviders();
+    registerStubProvider();
     const providerInfos = getProviderInfoList();
     if (providerInfos.length === 0) {
       emit(

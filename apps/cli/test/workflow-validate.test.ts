@@ -112,6 +112,38 @@ nodes:
         notChecked: ["offline"],
       });
     });
+
+    test("a workflow pinned to provider: stub is validated against stub even when KEELSON_PROVIDERS names a different, unavailable provider", async () => {
+      dir = mkdtempSync(join(tmpdir(), "keelson-validate-live-"));
+      writeFileSync(
+        join(dir, "stub-pin.yaml"),
+        `name: stub-pin
+description: pinned to stub while the configured provider set excludes it
+provider: stub
+nodes:
+  - id: pinned
+    model: retired-model
+    prompt: run
+`,
+      );
+
+      // KEELSON_PROVIDERS excludes stub, so an unregistered stub resolves to the
+      // configured default instead and the retired-model violation goes unseen.
+      const { stdout, exitCode } = await runLiveValidate("stub-pin", dir, {
+        KEELSON_PROVIDERS: "claude",
+      });
+      const envelope = JSON.parse(stdout.trim());
+
+      expect(exitCode).toBe(2);
+      expect(envelope.ok).toBe(true);
+      expect(envelope.data.results[0].preflight.violations[0]).toMatchObject({
+        nodeId: "pinned",
+        provider: "stub",
+        kind: "model",
+        value: "retired-model",
+        reason: "model 'retired-model' is not in stub's live catalog",
+      });
+    });
   });
 
   test("exits 4 when the name is missing from the explicit directory", async () => {
