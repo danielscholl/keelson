@@ -432,7 +432,6 @@ describe("checkWorkflowCatalog — model_by cases", () => {
         ]),
       },
     );
-    // gpt-pinned would have allowed xhigh; the fallback gpt-default does not.
     expect(result.violations).toHaveLength(1);
     expect(result.violations[0]?.kind).toBe("effort");
     expect(result.violations[0]?.reason).toContain("gpt-default");
