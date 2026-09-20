@@ -214,10 +214,14 @@ must already exist on disk; from chat, use an inline `prompt` node instead.
 - `always_run: true` — re-execute this node on a resumed run even if it
   succeeded before (a gate/validation re-checks instead of replaying a stale
   pass). Off by default: a succeeded node is skipped on resume. Required on a
-  collector whose product is a **file**: the resume seed carries a node's
-  stdout, not its side effect, so a skipped collector leaves whatever the
-  failed attempt wrote. Validation warns on an `all_done` shell node that
-  touches `$KEELSON_ARTIFACTS_DIR` without it.
+  `bash` or `script` collector whose product is a **file**: the resume seed
+  carries a node's stdout, not its side effect, so a skipped collector leaves
+  whatever the failed attempt wrote. Validation warns on an `all_done` `bash`
+  or `script` node that touches `$KEELSON_ARTIFACTS_DIR` without it.
+- Do **not** set it inside a converge subgraph (the gate and its ancestors).
+  A resume restarts the round counter at 1 while the rest of the seeded
+  subgraph stays at the round it converged on, so the node would rewrite its
+  file against the wrong round. Validation exempts those nodes for this reason.
 - `require_tool_call: [tool-name, ...]` — fail if a listed tool is available to
   the node but the turn ends without a successful tool result. An error followed
   by a successful retry satisfies it. Only registry/MCP tools are checked: a

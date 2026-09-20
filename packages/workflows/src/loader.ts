@@ -224,13 +224,9 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
   return node;
 }
 
-// A resume seeds every succeeded node as complete, and the seed carries the
-// node's stdout, not its side effect, so a collector whose real product is a
-// file replays nothing and downstream nodes read the failed attempt's copy.
-//
-// Converge-subgraph nodes are exempt: the round loop restarts at 1 on resume
-// while the rest of the seeded subgraph stays at the round it converged on, so
-// re-running one node there rewrites its file against the wrong round.
+// A resume seeds a succeeded node's stdout, not its side effect, so a
+// file-writing collector stays stale without always_run; converge nodes are
+// exempt because their round counter resets on resume.
 function warnOnUnguardedCollectors(
   nodes: readonly DagNode[],
   converge: unknown,
@@ -258,7 +254,7 @@ function warnOnUnguardedCollectors(
       nodeId: node.id,
       kind: "all_done_collector_without_always_run",
       message:
-        "an 'all_done' shell node that touches the artifacts dir is skipped on resume once it has succeeded, so the file it owns keeps the failed attempt's content; set 'always_run: true' to re-run it",
+        "an 'all_done' bash or script node that touches the artifacts dir is skipped on resume once it has succeeded, so the file it owns keeps the failed attempt's content; set 'always_run: true' to re-run it",
     });
   }
 }
