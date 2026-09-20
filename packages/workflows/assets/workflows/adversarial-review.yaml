@@ -14,8 +14,9 @@
 # The three attack lenses use distinct vendor mappings so blind spots do not
 # align; single-vendor runs are a degraded mode and emit a collapse warning.
 # Verification and synthesis use mappings no lens uses.
-# All run `effort: xhigh` with a generous idle budget: a no-tool xhigh node is
-# maximally chunk-sparse (one long think, then text), so the default idle
+# Each runs the highest reasoning tier its model serves (`xhigh`, or `high`
+# where the model caps there) with a generous idle budget: a no-tool deep-reason
+# node is maximally chunk-sparse (one long think, then text), so the default idle
 # timeout would kill exactly the depth the tier buys.
 
 name: adversarial-review
@@ -284,8 +285,8 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gemini-3.1-pro-preview
-    effort: xhigh
+      copilot: grok-4.6
+    effort: high
     idle_timeout: 1800000
     allowed_tools: []
     prompt: |
@@ -415,7 +416,7 @@ nodes:
       # a real verification still carries claim records.
       OUT="${KEELSON_NODE_verify_OUTPUT:-}"
       CLAIMS=$(printf '%s' "$OUT" | grep -Eic '^[^[:alnum:]]*claim\**[[:space:]]*:' || true)
-      RESULTS=$(printf '%s' "$OUT" | grep -Eic '^[^[:alnum:]]*result\**[[:space:]]*:[[:space:]]*(confirmed|refuted|unverifiable-here)' || true)
+      RESULTS=$(printf '%s' "$OUT" | grep -Eic '^[^[:alnum:]]*result\**[[:space:]]*:[[:space:]*]*(confirmed|refuted|unverifiable-here)' || true)
       if [ "$CLAIMS" -lt 1 ] || [ "$RESULTS" -lt 1 ]; then
         echo "verify produced no per-claim record (found ${CLAIMS} Claim: line(s), ${RESULTS} Result: line(s) carrying CONFIRMED/REFUTED/UNVERIFIABLE-HERE) — the verification layer is absent, not clean. Run 'keelson workflow resume <runId>' to re-run verify; do not synthesize an unchecked panel." >&2
         exit 1

@@ -69,19 +69,20 @@ crosses between stages is each node's output.
 | `intake` | bash | Captures the artifact (file path, evidence directory, or inline text), rejects empty or truncated input, snapshots the optional `subject` ref read-only via `git archive`, and emits the artifact as its output for the rest to inline. |
 | `reviewer-logic` | prompt | **`model: claude-opus-5`**, **`effort: xhigh`**: attacks internal soundness (does the conclusion follow, what is assumed) with a per-claim verdict. No tools. |
 | `reviewer-evidence` | prompt | **`model: gpt-5.6-sol`**, **`effort: xhigh`**: separates what the artifact *shows* from what it *asserts*, and lists the checkable claims. No tools. |
-| `reviewer-risk` | prompt | **`model: gemini-3.1-pro-preview`**, **`effort: xhigh`**: assumes the artifact is adopted and finds what breaks, tracing bad inputs, retries, and partial completion through the proposal, weighted by cost of failure; where the artifact chooses an approach, it also names the strongest alternative ignored. No tools. |
+| `reviewer-risk` | prompt | **`model: grok-4.6`**, **`effort: high`**: assumes the artifact is adopted and finds what breaks, tracing bad inputs, retries, and partial completion through the proposal, weighted by cost of failure; where the artifact chooses an approach, it also names the strongest alternative ignored. No tools. |
 | `verify` | prompt | **`model: gpt-5.6-terra`**, **`effort: xhigh`**: re-checks the reviewers' load-bearing claims against real source with `Read`/`Glob`/`Grep`, trusting no one. Checks against the `subject` snapshot when one was taken, else the working directory (where absence of the change is `UNVERIFIABLE-HERE`, never refutation). |
 | `synthesize` | prompt | **`model: claude-opus-4.8`**, **`effort: xhigh`**: weighs the lenses against the verification and issues the verdict as structured output (`verdict` / `headline` / `must_fix` / `open_questions` + full prose `report`), a terse ship/no-ship call with dissent; a comparative artifact must get a choice, not a fence-sit. No tools. |
 
-Every prompt node is pinned with an explicit `effort: xhigh` and a generous
-`idle_timeout`: a no-tool reviewer at high effort is one long think followed by
-text, exactly the chunk-sparse shape a default idle timeout kills. The pins put
-each lens on a different vendor, because lenses sharing one model share its
-blind spots and can wave the same flaw through unanimously; the verifier
-re-derives their claims on `gpt-5.6-terra` and the judge presides on
-`claude-opus-4.8`, models no lens uses, so no node checks or judges its own
-reasoning. All five ids are account-dependent: swap or drop any to `auto`
-(dropping its `effort:` tier with it) if your Copilot list lacks it.
+Every prompt node is pinned to the highest effort tier its model serves (`xhigh`,
+or `high` for `grok-4.6`) with a generous `idle_timeout`: a no-tool reviewer at
+high effort is one long think followed by text, exactly the chunk-sparse shape a
+default idle timeout kills. The pins put each lens on a different vendor,
+because lenses sharing one model share its blind spots and can wave the same
+flaw through unanimously; the verifier re-derives their claims on
+`gpt-5.6-terra` and the judge presides on `claude-opus-4.8`, models no lens uses,
+so no node checks or judges its own reasoning. All five ids are
+account-dependent: swap or drop any to `auto` (dropping its `effort:` tier with
+it) if your Copilot list lacks it.
 
 ### The parts worth a second look
 
@@ -123,7 +124,7 @@ smooth it over: a split panel reads as a split verdict, not a false consensus.
 - **Re-seat the panel.** The pins are choices, not requirements: any model in
   your Copilot list can hold a lens. Keep the seating rule when you swap: no
   two lenses on one model, and the verifier and judge on models no lens uses.
-- **Cheaper runs.** The xhigh-everywhere posture buys depth; for a quick
+- **Cheaper runs.** The maximum-effort posture buys depth; for a quick
   pressure-test, drop the lenses to a lighter `effort:` tier (or `auto`) and
   keep `verify` and `synthesize` strong; the verdict degrades last.
 

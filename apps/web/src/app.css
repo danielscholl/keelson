@@ -5241,8 +5241,10 @@ a.cvb-card-title::after {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  min-width: 18px;
   height: 18px;
+  padding: 0 5px;
+  white-space: nowrap;
   border-radius: 4px;
   font-size: 10px;
   font-weight: 700;
