@@ -37,6 +37,12 @@ class CatalogProvider implements IAgentProvider {
   }
 }
 
+class LiveCatalogProvider extends CatalogProvider {
+  async listModelsLive() {
+    return this.listModels();
+  }
+}
+
 class FallbackCatalogProvider extends CatalogProvider {
   async listModelsLive() {
     return null;
@@ -59,7 +65,7 @@ describe("fetchLiveModelCatalog", () => {
     registerProvider({
       id: "live",
       displayName: "Live",
-      factory: () => new CatalogProvider(models),
+      factory: () => new LiveCatalogProvider(models),
       capabilities: CAPABILITIES,
       builtIn: false,
     });
@@ -73,12 +79,26 @@ describe("fetchLiveModelCatalog", () => {
     registerProvider({
       id: "broken",
       displayName: "Broken",
-      factory: () => new CatalogProvider([], new Error("offline")),
+      factory: () => new LiveCatalogProvider([], new Error("offline")),
       capabilities: CAPABILITIES,
       builtIn: false,
     });
 
     expect(await fetchLiveModelCatalog(["broken"])).toEqual(new Map([["broken", null]]));
+  });
+
+  test("maps a provider without a live catalog to null", async () => {
+    registerProvider({
+      id: "picker-only",
+      displayName: "Picker only",
+      factory: () => new CatalogProvider([{ id: "curated-model" }]),
+      capabilities: CAPABILITIES,
+      builtIn: false,
+    });
+
+    expect(await fetchLiveModelCatalog(["picker-only"])).toEqual(
+      new Map([["picker-only", null]]),
+    );
   });
 
   test("preserves a live-catalog failure instead of using the picker fallback", async () => {

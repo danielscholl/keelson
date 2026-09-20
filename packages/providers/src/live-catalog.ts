@@ -20,10 +20,8 @@ export async function fetchLiveModelCatalog(
       });
       try {
         const provider = getAgentProvider(id);
-        const request =
-          provider.listModelsLive !== undefined
-            ? provider.listModelsLive(signal)
-            : provider.listModels();
+        if (provider.listModelsLive === undefined) return [id, null] as const;
+        const request = provider.listModelsLive(signal);
         const models = await Promise.race([request, aborted]);
         return [id, models] as const;
       } catch {
