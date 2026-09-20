@@ -117,7 +117,7 @@ export class CopilotProvider implements IAgentProvider {
   private readonly factory: CopilotClientFactory;
   private readonly idleMs: number;
   // Process-lifetime cache; CLI spawn for listModels costs ~1s.
-  private modelListCache: Promise<ModelInfo[]> | null = null;
+  private liveModelListCache: Promise<ModelInfo[] | null> | null = null;
   // The single warm client reused across turns, or null when none is resident.
   private warm: WarmClient | null = null;
   // In-flight spawn, so concurrent first turns coalesce onto one subprocess
@@ -152,21 +152,23 @@ export class CopilotProvider implements IAgentProvider {
   }
 
   async listModels(): Promise<ModelInfo[]> {
-    if (!this.modelListCache) {
-      this.modelListCache = this.fetchModels();
-    }
-    return this.modelListCache;
+    return (await this.listModelsLive()) ?? COPILOT_CAPABILITIES.models.map((id) => ({ id }));
   }
 
-  private async fetchModels(): Promise<ModelInfo[]> {
-    const token = await this.getCredential(COPILOT_CREDENTIAL_SERVICE_ID);
-    const live = await this.factory.listModels(token, process.cwd());
-    // null = probe failed (signed out, CLI missing). Drop the cache so the
-    // next request retries instead of serving the bare-id fallback forever.
-    if (live === null) {
-      this.modelListCache = null;
-      return COPILOT_CAPABILITIES.models.map((id) => ({ id }));
+  async listModelsLive(): Promise<ModelInfo[] | null> {
+    if (!this.liveModelListCache) {
+      this.liveModelListCache = (async () => {
+        try {
+          const token = await this.getCredential(COPILOT_CREDENTIAL_SERVICE_ID);
+          return await this.factory.listModels(token, process.cwd());
+        } catch {
+          return null;
+        }
+      })();
     }
+    const live = await this.liveModelListCache;
+    // Retry an unavailable source rather than caching uncertainty for the process lifetime.
+    if (live === null) this.liveModelListCache = null;
     return live;
   }
 

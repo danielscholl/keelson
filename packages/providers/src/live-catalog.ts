@@ -8,7 +8,12 @@ export async function fetchLiveModelCatalog(
     [...new Set(ids)].map(async (id) => {
       if (!isRegisteredProvider(id)) return [id, null] as const;
       try {
-        return [id, await getAgentProvider(id).listModels()] as const;
+        const provider = getAgentProvider(id);
+        const models =
+          provider.listModelsLive !== undefined
+            ? await provider.listModelsLive()
+            : await provider.listModels();
+        return [id, models] as const;
       } catch {
         return [id, null] as const;
       }

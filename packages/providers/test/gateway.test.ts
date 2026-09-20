@@ -387,6 +387,7 @@ describe("GatewayProvider.listModels", () => {
       model: "m1",
       fetchImpl: fn,
     });
+    expect(await p.listModelsLive()).toBeNull();
     expect(await p.listModels()).toEqual([{ id: "m1" }]);
   });
 
@@ -400,6 +401,7 @@ describe("GatewayProvider.listModels", () => {
       getApiKey: noKey,
       fetchImpl: fn,
     });
+    expect(await p.listModelsLive()).toBeNull();
     expect(await p.listModels()).toEqual([]);
   });
 });

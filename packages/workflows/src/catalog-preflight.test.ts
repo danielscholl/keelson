@@ -112,6 +112,15 @@ describe("checkWorkflowCatalog", () => {
     expect(result).toEqual({ violations: [], notChecked: [] });
   });
 
+  test("does not inherit a workflow literal when the node selects auto", () => {
+    const result = check(
+      makeWorkflow({ model: "auto" }, { model: "retired-workflow-model" }),
+      new Map([["copilot", []]]),
+    );
+
+    expect(result).toEqual({ violations: [], notChecked: [] });
+  });
+
   test("accepts a literal present in the live catalog", () => {
     const result = check(
       makeWorkflow({ model: "current-model" }),

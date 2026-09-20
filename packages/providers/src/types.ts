@@ -143,6 +143,10 @@ export interface IAgentProvider {
   // `capabilities.models` so the picker never empties out.
   listModels(): Promise<ModelInfo[]>;
 
+  // Unlike listModels(), null preserves an unavailable live source for callers
+  // that must not mistake the picker fallback for authoritative catalog data.
+  listModelsLive?(): Promise<ModelInfo[] | null>;
+
   // Release any process-lifetime resources (warm subprocesses, in-flight
   // teardowns). Drained by the registry's disposeAllProviders() during server
   // shutdown / CLI exit. Optional: stateless per-turn providers omit it.

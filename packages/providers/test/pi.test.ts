@@ -340,6 +340,16 @@ describe("PiProvider", () => {
     expect(models.map((m) => m.id)).toEqual(PI_CAPABILITIES.models);
   });
 
+  test("listModelsLive preserves an unavailable source as null", async () => {
+    const models = await new PiProvider({
+      factory: fakeFactory([]),
+      catalogSource: async () => {
+        throw new Error("pi not installed");
+      },
+    }).listModelsLive();
+    expect(models).toBeNull();
+  });
+
   test("listModels falls back to the curated baseline when the source is empty", async () => {
     const models = await new PiProvider({
       factory: fakeFactory([]),

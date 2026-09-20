@@ -59,7 +59,7 @@ function pinnedLiteralFor(
 ): string | undefined {
   const perProvider = node.model_by_provider?.[provider];
   if (perProvider !== undefined) return perProvider;
-  if (isConcreteModel(node.model)) return node.model;
+  if (node.model !== undefined) return isConcreteModel(node.model) ? node.model : undefined;
   return isConcreteModel(workflow.model) ? workflow.model : undefined;
 }
 

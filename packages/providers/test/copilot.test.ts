@@ -1870,6 +1870,7 @@ describe("CopilotProvider — defaultModel + listModels", () => {
       getCredential: async () => undefined,
       clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
     });
+    expect(await provider.listModelsLive()).toBeNull();
     const models = await provider.listModels();
     expect(models.map((m) => m.id)).toEqual([...COPILOT_CAPABILITIES.models]);
     // Fallback carries no metadata — only the id.

@@ -37,6 +37,12 @@ class CatalogProvider implements IAgentProvider {
   }
 }
 
+class FallbackCatalogProvider extends CatalogProvider {
+  async listModelsLive() {
+    return null;
+  }
+}
+
 beforeEach(() => {
   clearRegistry();
 });
@@ -67,6 +73,18 @@ describe("fetchLiveModelCatalog", () => {
     });
 
     expect(await fetchLiveModelCatalog(["broken"])).toEqual(new Map([["broken", null]]));
+  });
+
+  test("preserves a live-catalog failure instead of using the picker fallback", async () => {
+    registerProvider({
+      id: "fallback",
+      displayName: "Fallback",
+      factory: () => new FallbackCatalogProvider([{ id: "fallback-model" }]),
+      capabilities: CAPABILITIES,
+      builtIn: false,
+    });
+
+    expect(await fetchLiveModelCatalog(["fallback"])).toEqual(new Map([["fallback", null]]));
   });
 
   test("maps an unregistered provider to null", async () => {

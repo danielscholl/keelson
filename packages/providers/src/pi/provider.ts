@@ -111,13 +111,17 @@ export class PiProvider implements IAgentProvider {
   // baseline when the source can't run — a missing pi install, an unreadable
   // auth.json, or an empty result — so the picker is never left blank.
   async listModels(): Promise<ModelInfo[]> {
+    return (await this.listModelsLive()) ?? curatedModels();
+  }
+
+  async listModelsLive(): Promise<ModelInfo[] | null> {
     try {
       const dynamic = await this.catalogSource();
       if (dynamic.length > 0) return dynamic;
     } catch {
-      // fall through to the curated baseline below
+      return null;
     }
-    return curatedModels();
+    return null;
   }
 
   async *sendQuery(

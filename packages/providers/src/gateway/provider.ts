@@ -183,6 +183,11 @@ export class GatewayProvider implements IAgentProvider {
   // empty for a gateway with a model, and merely sparse for one without.
   async listModels(): Promise<ModelInfo[]> {
     const fallback: ModelInfo[] = this.capabilities.models.map((id) => ({ id }));
+    const live = await this.listModelsLive();
+    return live !== null && live.length > 0 ? live : fallback;
+  }
+
+  async listModelsLive(): Promise<ModelInfo[] | null> {
     try {
       const key = await this.getApiKey();
       const res = await this.fetchImpl(joinUrl(this.baseUrl, "models"), {
@@ -191,15 +196,15 @@ export class GatewayProvider implements IAgentProvider {
           ...(key ? { authorization: `Bearer ${key}` } : {}),
         },
       });
-      if (!res.ok) return fallback;
+      if (!res.ok) return null;
       const body = (await res.json()) as { data?: unknown };
-      if (!Array.isArray(body.data)) return fallback;
+      if (!Array.isArray(body.data)) return null;
       const ids = body.data
         .map((m) => (m && typeof m === "object" ? (m as { id?: unknown }).id : undefined))
         .filter((id): id is string => typeof id === "string" && id.length > 0);
-      return ids.length > 0 ? ids.map((id) => ({ id })) : fallback;
+      return ids.map((id) => ({ id }));
     } catch {
-      return fallback;
+      return null;
     }
   }
 
