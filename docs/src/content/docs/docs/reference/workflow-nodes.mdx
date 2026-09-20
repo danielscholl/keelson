@@ -425,9 +425,7 @@ URL=$(printf '%s' "$ISSUE_JSON" | jq -r '.url')
 Whether the file is there is a property of the run, not of the data: it is
 written for every upstream node regardless of size, and is missing only when the
 run has no artifacts directory at all, which every server and CLI run creates
-and which fails loudly on its own. That is the difference from the old behavior,
-where the path appeared only once an output happened to outgrow the cap, so the
-same workflow worked for a dozen runs and then did not.
+and which fails loudly on its own.
 
 The variable stays the right channel for prose, for a grep, and for a value you
 know is small. `KEELSON_NODE_<id>_OUTPUT_TRUNCATED` is set to `1` when the value

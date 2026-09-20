@@ -247,6 +247,41 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
 const BARE_ENV_OUTPUT_REF = /KEELSON_NODE_[A-Za-z0-9_]+_OUTPUT(?![A-Z_])/;
 const JSON_PARSER_CALL = /\bJSON\.parse\b|\bjson\.loads?\b|\bjq\b/;
 
+// Split a line on command separators that are not inside quotes, so a `;` in a
+// quoted parser program (`jq 'map(.a; .b)'`) does not detach the parser from the
+// variable it reads.
+function splitUnquotedCommands(line: string): string[] {
+  const out: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i] as string;
+    if (quote !== null) {
+      if (ch === "\\" && quote === '"') {
+        current += ch + (line[i + 1] ?? "");
+        i++;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === ";" || ch === "&") {
+      out.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  out.push(current);
+  return out;
+}
+
 // Scoped to one logical line on purpose: a body that assigns the var and parses
 // it further down is the shape bundled workflows already guard with a
 // `_FILE`-first conditional, and flagging those would bury the real hits.
@@ -256,7 +291,7 @@ function findJsonParseOnEnvOutput(body: string): string | null {
   for (const raw of body.replace(/\\\r?\n\s*/g, " ").split(/\r?\n/)) {
     const line = raw.trimStart();
     if (line.startsWith("#") || line.startsWith("//")) continue;
-    for (const segment of line.split(/[;&]{1,2}/)) {
+    for (const segment of splitUnquotedCommands(line)) {
       if (!JSON_PARSER_CALL.test(segment)) continue;
       const bare = segment.match(BARE_ENV_OUTPUT_REF);
       if (bare === null) continue;

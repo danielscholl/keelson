@@ -1040,6 +1040,23 @@ nodes:
     expect(result.warnings.some((w) => w.kind === "json_parse_on_capped_env_output")).toBe(false);
   });
 
+  test("a separator inside a quoted parser program does not hide the read", () => {
+    const yaml = `
+name: json-quoted-sep
+description: the jq program itself contains a semicolon
+nodes:
+  - id: gather
+    prompt: emit json
+  - id: count
+    depends_on: [gather]
+    bash: |
+      jq 'map(.a; .b)' <<< "$KEELSON_NODE_gather_OUTPUT"
+`;
+    const result = parseWorkflow(yaml, "json-quoted-sep.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "json_parse_on_capped_env_output")).toBe(true);
+  });
+
   test("an unrelated parser call on the same line does not warn", () => {
     const yaml = `
 name: json-unrelated
