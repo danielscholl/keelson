@@ -273,8 +273,15 @@ Model selection starts with the node's `model`, then the workflow's `model`. A
 `model_by_provider` entry for the effective provider takes precedence. A model
 tier resolves through the operator's configured class override, the provider's
 `modelClasses`, then the provider default. `auto` also uses the provider default.
-A literal id is checked against the effective provider's catalog when that
-provider differs from the provider used to select the model.
+A new run checks pinned literal model ids and effort against the effective
+provider's live catalog before executing its first node. Run the same check
+without executing with `keelson workflow validate <name> --live`. An unavailable
+catalog is reported as `not checked` and does not block the run. A model that
+reports no effort list is not judged on effort.
+
+Use `--no-preflight` for one run, set `"workflowPreflight": false` in
+`config.json`, or set `KEELSON_WORKFLOW_PREFLIGHT=0` to disable the run-start
+check.
 
 Ignored with a warning on any node: `agents`, `sandbox`, `betas`,
 `fallbackModel`, `maxBudgetUsd`, `mcp`, `skills`. The per-turn agent fields are

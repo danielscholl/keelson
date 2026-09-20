@@ -84,7 +84,7 @@ exact: it never touches a sibling MCP server or a config file you already had. S
 | Command | Does |
 | --- | --- |
 | `keelson workflow list [--dir <path>]` | List workflows in the home catalog, or in an explicit directory such as a project's `.keelson/workflows`. |
-| `keelson workflow validate [name] [--dir <path>]` | Validate one workflow or all of them, from the home catalog or an explicit directory. |
+| `keelson workflow validate [name] [--dir <path>] [--live]` | Validate one workflow or all of them. `--live` also checks pinned models and effort against provider catalogs. |
 | `keelson workflow run <name>` | Run a workflow. Server-up over HTTP, server-down in-process. |
 | `keelson workflow respond <runId> <nodeId> <text>` | Resume a paused run by replying to its approval node. Server-required. |
 | `keelson workflow resume <runId>` | Resume an interrupted (failed or cancelled) run from the last completed node. Server-required. |
@@ -101,6 +101,7 @@ exact: it never touches a sibling MCP server or a config file you already had. S
 | `--project <name>` | Run against a named project; the server resolves its root path. |
 | `--working-dir <path>` | Override the working directory directly. |
 | `--worktree` / `--no-worktree` | Force or forbid a git-worktree isolated run, overriding the workflow default. |
+| `--no-preflight` | Skip the live model and effort check at run start. |
 | `--base-url <url>` | An explicit server URL, skipping the probe. |
 
 Use `--arguments` for free-form text and reserve `--inputs` for named key-value inputs.
