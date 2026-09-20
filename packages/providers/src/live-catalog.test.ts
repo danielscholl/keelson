@@ -43,6 +43,12 @@ class FallbackCatalogProvider extends CatalogProvider {
   }
 }
 
+class HangingCatalogProvider extends CatalogProvider {
+  async listModelsLive() {
+    return new Promise<ModelInfo[] | null>(() => {});
+  }
+}
+
 beforeEach(() => {
   clearRegistry();
 });
@@ -85,6 +91,20 @@ describe("fetchLiveModelCatalog", () => {
     });
 
     expect(await fetchLiveModelCatalog(["fallback"])).toEqual(new Map([["fallback", null]]));
+  });
+
+  test("maps a timed-out live catalog to null", async () => {
+    registerProvider({
+      id: "hanging",
+      displayName: "Hanging",
+      factory: () => new HangingCatalogProvider([]),
+      capabilities: CAPABILITIES,
+      builtIn: false,
+    });
+
+    expect(await fetchLiveModelCatalog(["hanging"], { timeoutMs: 1 })).toEqual(
+      new Map([["hanging", null]]),
+    );
   });
 
   test("maps an unregistered provider to null", async () => {

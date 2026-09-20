@@ -217,7 +217,9 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
     const effectiveProviders = resolution.nodes
       .map(({ effectiveProvider }) => effectiveProvider)
       .filter((id): id is string => id !== undefined);
-    const liveCatalog = await fetchLiveModelCatalog(effectiveProviders);
+    const liveCatalog = await fetchLiveModelCatalog(effectiveProviders, {
+      ...(opts.abortSignal !== undefined ? { signal: opts.abortSignal } : {}),
+    });
     const result = checkWorkflowCatalog(workflow, {
       providers,
       defaultProviderId: providerId,

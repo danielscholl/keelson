@@ -3031,7 +3031,9 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     const effectiveProviders = resolution.nodes
       .map(({ effectiveProvider }) => effectiveProvider)
       .filter((id): id is string => id !== undefined);
-    const liveCatalog = await fetchLiveModelCatalog(effectiveProviders);
+    const liveCatalog = await fetchLiveModelCatalog(effectiveProviders, {
+      signal: abort.signal,
+    });
     const result = checkWorkflowCatalog(workflow, {
       providers,
       defaultProviderId,

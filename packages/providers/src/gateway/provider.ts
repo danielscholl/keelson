@@ -187,10 +187,11 @@ export class GatewayProvider implements IAgentProvider {
     return live !== null && live.length > 0 ? live : fallback;
   }
 
-  async listModelsLive(): Promise<ModelInfo[] | null> {
+  async listModelsLive(signal?: AbortSignal): Promise<ModelInfo[] | null> {
     try {
       const key = await this.getApiKey();
       const res = await this.fetchImpl(joinUrl(this.baseUrl, "models"), {
+        ...(signal !== undefined ? { signal } : {}),
         headers: {
           accept: "application/json",
           ...(key ? { authorization: `Bearer ${key}` } : {}),
