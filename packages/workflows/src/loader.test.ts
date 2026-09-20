@@ -1013,6 +1013,50 @@ ${extra}    bash: |
     );
   });
 
+  test("a script node collector warns the same as a bash one", () => {
+    const yaml = `
+name: script-collector
+description: an all_done script node that owns a file
+nodes:
+  - id: work
+    prompt: do the thing
+  - id: collect
+    depends_on: [work]
+    trigger_rule: all_done
+    runtime: bun
+    script: |
+      import { writeFileSync } from "node:fs"
+      writeFileSync(\`\${process.env.KEELSON_ARTIFACTS_DIR}/verdict.json\`, "{}")
+`;
+    const result = parseWorkflow(yaml, "script-collector.yaml");
+    expect(result.error).toBeNull();
+    const warning = result.warnings.find((w) => w.kind === "all_done_collector_without_always_run");
+    expect(warning?.nodeId).toBe("collect");
+  });
+
+  test("always_run: true silences it on a script node too", () => {
+    const yaml = `
+name: script-collector-ok
+description: an all_done script node that re-runs on resume
+nodes:
+  - id: work
+    prompt: do the thing
+  - id: collect
+    depends_on: [work]
+    trigger_rule: all_done
+    always_run: true
+    runtime: bun
+    script: |
+      import { writeFileSync } from "node:fs"
+      writeFileSync(\`\${process.env.KEELSON_ARTIFACTS_DIR}/verdict.json\`, "{}")
+`;
+    const result = parseWorkflow(yaml, "script-collector-ok.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "all_done_collector_without_always_run")).toBe(
+      false,
+    );
+  });
+
   test("an all_done shell node that never touches the artifacts dir does not warn", () => {
     const yaml = `
 name: no-artifacts

@@ -247,7 +247,7 @@ These apply across kinds (some only to agent nodes, as noted).
 | `output_schema` | agent | A JSON-Schema subset the output must satisfy, or the node fails. |
 | `output_format` | agent | Provider structured-output request (Claude). |
 | `retry` | all but `loop` | `{ max_attempts: 1-5, delay_ms: 1000-60000, on_error }`. `delay_ms` doubles each attempt; `on_error` is `transient` (default) or `all`. |
-| `always_run` | all | `true` re-executes the node on a resumed run even if it previously succeeded (default `false`). Use it for a gate or validation that should re-check rather than replay a stale pass, and for any node whose real product is a file — see [resume and side effects](#resume-and-side-effects). |
+| `always_run` | all | `true` re-executes the node on a resumed run even if it previously succeeded (default `false`). Use it for a gate or validation that should re-check rather than replay a stale pass, and for any node whose real product is a file: see [resume and side effects](#resume-and-side-effects). |
 | `fail_on_tool_error` | agent | `true` fails the node if any invoked tool errored. |
 | `require_tool_call` | agent | `[tool-name, ...]` — fails the node if a listed tool was available but the turn ended without a successful call to it, so a node whose deliverable is a tool call cannot report success having produced nothing. An error followed by a successful retry satisfies it. Only registry/MCP tools are checked: a provider SDK's own built-ins (`Read`, `Bash`, …) are never in the catalog, so naming one has no effect, and providers that take no keelson tools (`codex`, gateways, `stub`) skip the check rather than fail it. |
 | `idle_timeout` | agent | Milliseconds of stream silence before the node fails. |
@@ -433,7 +433,7 @@ skipped on resume, so the file it owns still holds what the failed attempt left
 there, and downstream nodes read that. Mark such a node `always_run: true`.
 
 Validation warns when a `bash` or `script` node combines `trigger_rule: all_done`
-with a reference to the artifacts directory and no `always_run` — the shape a
+with a reference to the artifacts directory and no `always_run`, the shape a
 fan-in collector takes.
 
 ## Validation rules
