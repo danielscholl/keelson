@@ -72,6 +72,11 @@ shimDescribe("adversarial-review verify gate", () => {
     expect(runVerifyGate(output).exitCode).toBe(0);
   });
 
+  test("accepts a bold label whose markers close after the colon", () => {
+    const output = ["- **Claim:** deploy routes launches", "- **Result:** CONFIRMED"].join("\n");
+    expect(runVerifyGate(output).exitCode).toBe(0);
+  });
+
   test("accepts a plain per-claim record", () => {
     expect(runVerifyGate("Claim: the import is dead\nResult: UNVERIFIABLE-HERE").exitCode).toBe(0);
   });
@@ -87,6 +92,11 @@ shimDescribe("adversarial-review verify gate", () => {
 
   test("rejects a claim list with no recognized verdict", () => {
     expect(runVerifyGate("- **Claim**: x holds\n- **Result**: probably fine").exitCode).not.toBe(0);
+  });
+
+  test("rejects an after-colon bold label with no recognized verdict", () => {
+    const output = ["- **Claim:** x holds", "- **Result:** probably fine"].join("\n");
+    expect(runVerifyGate(output).exitCode).not.toBe(0);
   });
 
   test("ignores an inherited spill file and judges only the current output", () => {

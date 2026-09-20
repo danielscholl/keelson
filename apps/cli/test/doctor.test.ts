@@ -5,6 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { KeelsonConfig } from "@keelson/shared/config";
 import type { ExecResult } from "@keelson/shared/exec";
 import { type ProviderSummary, runAuthCheck } from "../src/checks/auth.ts";
 import { type DbReader, LATEST_MIGRATION_VERSION, runDbCheck } from "../src/checks/db.ts";
@@ -441,6 +442,18 @@ describe("runDoctor exit-code rollup", () => {
       // probe), so the rollup counts stay stable.
       ribs: {
         probeServer: async () => null,
+      },
+      // The providers check otherwise reads the real config and resolves the
+      // bundled Copilot CLI, which varies per machine and perturbs the counts.
+      providers: {
+        loadConfig: () => ({}) as KeelsonConfig,
+        isInstalled: () => true,
+        copilotDiagnostics: () => ({
+          resolved: true,
+          cliPath: "/fake/copilot/index.js",
+          version: "1.0.83",
+        }),
+        envProviders: "",
       },
     };
   }

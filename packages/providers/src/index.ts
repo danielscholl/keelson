@@ -59,6 +59,7 @@ export {
 export { buildFriendlyCopilotError } from "./copilot/errors.ts";
 export {
   type CopilotAuthStatus,
+  type CopilotCliDiagnosticsResult,
   CopilotClientFactory,
   type CopilotClientFactoryOptions,
   type CopilotClientLike,
@@ -68,6 +69,8 @@ export {
   type CopilotSdkModule,
   type CopilotSessionLike,
   type CreateClientResult,
+  copilotCliDiagnostics,
+  resolveBundledCopilotCliPath,
 } from "./copilot/factory.ts";
 export {
   COPILOT_CAPABILITIES,
