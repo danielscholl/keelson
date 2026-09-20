@@ -983,6 +983,107 @@ nodes:
       result.warnings.some((w) => w.kind === "interactive_loop_in_non_interactive_workflow"),
     ).toBe(true);
   });
+
+  const modelByYaml = (body: string) => `
+name: tiered
+description: picks a model from an upstream classification
+nodes:
+  - id: intake
+    prompt: classify this assignment
+    output_format: { type: json_object }
+  - id: investigate
+    depends_on: [intake]
+    prompt: investigate it
+${body}`;
+
+  test("a well-formed model_by map parses", () => {
+    const result = parseWorkflow(
+      modelByYaml(`    model_by:
+      from: $intake.output.tier
+      cases:
+        deep: { model_by_provider: { copilot: gpt-6-astra }, effort: high }
+        std: { model: balanced }
+`),
+      "tiered.yaml",
+    );
+    expect(result.error).toBeNull();
+    const node = result.workflow?.nodes.find((n) => n.id === "investigate");
+    expect(node?.model_by?.from).toBe("$intake.output.tier");
+    expect(Object.keys(node?.model_by?.cases ?? {}).sort()).toEqual(["deep", "std"]);
+  });
+
+  test("model_by.from must be a selector expression", () => {
+    const result = parseWorkflow(
+      modelByYaml(`    model_by:
+      from: intake.tier
+      cases:
+        deep: { model: deep }
+`),
+      "tiered.yaml",
+    );
+    expect(result.error?.error).toContain("model_by.from must be");
+  });
+
+  test("model_by.from referencing a non-ancestor is rejected", () => {
+    const result = parseWorkflow(
+      modelByYaml(`    model_by:
+      from: $nowhere.output.tier
+      cases:
+        deep: { model: deep }
+`),
+      "tiered.yaml",
+    );
+    expect(result.error?.error).toContain("nowhere");
+  });
+
+  test("model_by.default must name a declared case", () => {
+    const result = parseWorkflow(
+      modelByYaml(`    model_by:
+      from: $intake.output.tier
+      cases:
+        deep: { model: deep }
+      default: std
+`),
+      "tiered.yaml",
+    );
+    expect(result.error?.error).toContain("default");
+  });
+
+  test("a case that sets nothing is rejected", () => {
+    const result = parseWorkflow(
+      modelByYaml(`    model_by:
+      from: $inputs.tier
+      cases:
+        deep: {}
+`),
+      "tiered.yaml",
+    );
+    expect(result.error).not.toBeNull();
+  });
+
+  test("model_by on a bash node warns as an ignored AI field", () => {
+    const yaml = `
+name: shell-model-by
+description: model_by has no meaning on a shell node
+nodes:
+  - id: pick
+    prompt: classify
+  - id: run
+    depends_on: [pick]
+    model_by:
+      from: $pick.output
+      cases:
+        deep: { model: deep }
+    bash: 'echo hi'
+`;
+    const result = parseWorkflow(yaml, "shell-model-by.yaml");
+    expect(result.error).toBeNull();
+    expect(
+      result.warnings.some(
+        (w) => w.kind === "ai_fields_on_non_ai_node" && /model_by/.test(w.message),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("discoverWorkflows", () => {

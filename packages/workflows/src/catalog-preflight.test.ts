@@ -184,6 +184,76 @@ describe("checkWorkflowCatalog", () => {
   });
 });
 
+describe("checkWorkflowCatalog — model_by cases", () => {
+  const LIVE: LiveCatalog = new Map([["copilot", [{ id: "gpt-live" }]]]);
+
+  test("a retired model in any branch is a violation, not just the one a run would take", () => {
+    const result = check(
+      makeWorkflow({
+        model_by: {
+          from: "$inputs.tier",
+          cases: {
+            deep: { model: "gpt-retired" },
+            std: { model: "gpt-live" },
+          },
+        },
+      }),
+      LIVE,
+    );
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.value).toBe("gpt-retired");
+    expect(result.violations[0]?.caseKey).toBe("deep");
+    expect(result.violations[0]?.reason).toContain("model_by case 'deep'");
+  });
+
+  test("every branch on the live catalog is clean", () => {
+    const result = check(
+      makeWorkflow({
+        model_by: {
+          from: "$inputs.tier",
+          cases: { deep: { model: "gpt-live" }, std: { model: "gpt-live" } },
+        },
+      }),
+      LIVE,
+    );
+    expect(result.violations).toEqual([]);
+  });
+
+  test("a branch's model_by_provider pin is checked for that provider", () => {
+    const result = check(
+      makeWorkflow({
+        model_by: {
+          from: "$inputs.tier",
+          cases: { deep: { model_by_provider: { copilot: "gpt-retired" } } },
+        },
+      }),
+      LIVE,
+    );
+    expect(result.violations.map((v) => v.value)).toEqual(["gpt-retired"]);
+  });
+
+  test("a model class in a branch is not judged against the catalog", () => {
+    const result = check(
+      makeWorkflow({
+        model_by: { from: "$inputs.tier", cases: { deep: { model: "deep" } } },
+      }),
+      LIVE,
+    );
+    expect(result.violations).toEqual([]);
+  });
+
+  test("an unreachable provider reports not-checked rather than violations", () => {
+    const result = check(
+      makeWorkflow({
+        model_by: { from: "$inputs.tier", cases: { deep: { model: "gpt-retired" } } },
+      }),
+      new Map([["copilot", null]]),
+    );
+    expect(result.violations).toEqual([]);
+    expect(result.notChecked).toEqual(["copilot"]);
+  });
+});
+
 describe("formatPreflightViolations", () => {
   test("formats violations and unavailable providers deterministically", () => {
     expect(

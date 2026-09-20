@@ -1,4 +1,5 @@
 import { resolveWorkflowResolution } from "./catalog-resolution.ts";
+import { modelCaseLiterals } from "./model-by.ts";
 import type { WorkflowDefinition } from "./schema/index.ts";
 
 type ModelClass = "fast" | "balanced" | "deep";
@@ -22,6 +23,9 @@ export interface PreflightViolation {
   kind: "model" | "effort";
   value: string;
   reason: string;
+  // Set when the violation came from one branch of a `model_by` map rather than
+  // the node's static pin, so the message can name the branch to fix.
+  caseKey?: string;
 }
 
 export interface PreflightResult {
@@ -83,6 +87,23 @@ export function checkWorkflowCatalog(
     if (live === null || live === undefined) {
       notChecked.add(provider);
       continue;
+    }
+
+    // Every branch of a case map is checked, not just the one this run would
+    // take: which case wins is run data, so a typo in a cold branch is only
+    // catchable here.
+    if (node.model_by !== undefined) {
+      for (const { caseKey, model } of modelCaseLiterals(node.model_by, provider)) {
+        if (!isConcreteModel(model) || live.some((candidate) => candidate.id === model)) continue;
+        violations.push({
+          nodeId: node.id,
+          provider,
+          kind: "model",
+          value: model,
+          reason: `model '${model}' (model_by case '${caseKey}') is not in ${provider}'s live catalog`,
+          caseKey,
+        });
+      }
     }
 
     const literal = pinnedLiteralFor(node, workflow, provider);

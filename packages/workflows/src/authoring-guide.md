@@ -94,6 +94,25 @@ tier.
 Use a literal model id only for an install-specific workflow pinned to one
 account's catalog.
 
+To vary the model or effort by something the run produces, use a `model_by`
+case map rather than duplicating the node and joining with `one_success`:
+
+```yaml
+- id: investigate
+  depends_on: [intake]
+  prompt: "Investigate: $ARGUMENTS"
+  model_by:
+    from: $intake.output.tier      # or $inputs.<key>; must be an ancestor
+    cases:
+      deep: { model_by_provider: { copilot: gpt-6-astra }, effort: high }
+      std:  { model: balanced, effort: low }
+    default: std                   # optional; without it an unmatched value fails the node
+```
+
+A case replaces only the fields it sets. The set of cases is closed, so
+validation checks every branch and `--live` checks every branch's model against
+the provider catalog.
+
 ## Description format
 
 Use the structured block-scalar convention — the Workflows UI cards and the
