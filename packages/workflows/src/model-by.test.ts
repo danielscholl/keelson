@@ -55,6 +55,49 @@ describe("resolveModelSelector", () => {
   });
 });
 
+describe("prototype-named keys are misses, not inherited members", () => {
+  test("an input named for a prototype member reads empty instead of throwing", () => {
+    for (const key of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
+      expect(resolveModelSelector(`$inputs.${key}`, {}, outputs({}))).toBe("");
+    }
+  });
+
+  test("an own input that shadows a prototype member still resolves", () => {
+    expect(resolveModelSelector("$inputs.constructor", { constructor: "deep" }, outputs({}))).toBe(
+      "deep",
+    );
+  });
+
+  test("a selector yielding a prototype name matches no case", () => {
+    const r = selectModelCase(MAP, { tier: "constructor" }, outputs({ intake: "constructor" }));
+    expect(r.ok).toBe(false);
+  });
+
+  test("a prototype-named value takes the default rather than an inherited member", () => {
+    const withDefault: ModelBy = { ...MAP, default: "std" };
+    const r = selectModelCase(withDefault, {}, outputs({ intake: "toString" }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.caseKey).toBe("std");
+    expect(r.selected.model).toBe("balanced");
+  });
+});
+
+describe("a substitution namespace is not a node", () => {
+  test.each([
+    "$inputs.output.tier",
+    "$ARTIFACTS_DIR.output",
+    "$memory.output.x",
+    "$converge.output",
+  ])("%s is rejected as a selector", (expr) => {
+    expect(isModelSelector(expr as string)).toBe(false);
+  });
+
+  test("and resolves empty if one reaches the resolver anyway", () => {
+    expect(resolveModelSelector("$inputs.output.tier", { tier: "deep" }, outputs({}))).toBe("");
+  });
+});
+
 describe("isModelSelector", () => {
   test.each([
     ["$inputs.tier", true],

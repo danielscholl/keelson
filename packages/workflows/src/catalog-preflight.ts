@@ -93,16 +93,40 @@ export function checkWorkflowCatalog(
     // take: which case wins is run data, so a typo in a cold branch is only
     // catchable here.
     if (node.model_by !== undefined) {
-      for (const { caseKey, model } of modelCaseLiterals(node.model_by, provider)) {
-        if (!isConcreteModel(model) || live.some((candidate) => candidate.id === model)) continue;
-        violations.push({
-          nodeId: node.id,
-          provider,
-          kind: "model",
-          value: model,
-          reason: `model '${model}' (model_by case '${caseKey}') is not in ${provider}'s live catalog`,
-          caseKey,
-        });
+      for (const { caseKey, model, effort: caseEffort } of modelCaseLiterals(
+        node.model_by,
+        provider,
+      )) {
+        if (!isConcreteModel(model)) continue;
+        const listed = live.find((candidate) => candidate.id === model);
+        if (listed === undefined) {
+          violations.push({
+            nodeId: node.id,
+            provider,
+            kind: "model",
+            value: model,
+            reason: `model '${model}' (model_by case '${caseKey}') is not in ${provider}'s live catalog`,
+            caseKey,
+          });
+          continue;
+        }
+        // A case's effort is judged against that case's own model, not the
+        // node's statically-resolved one: the pair is what the run will use.
+        const branchEffort = normalizeEffort(caseEffort ?? node.effort ?? workflow.effort);
+        const supported = listed.supportedReasoningEfforts;
+        if (branchEffort === undefined || supported === undefined || supported.length === 0) {
+          continue;
+        }
+        if (!supported.includes(branchEffort)) {
+          violations.push({
+            nodeId: node.id,
+            provider,
+            kind: "effort",
+            value: branchEffort,
+            reason: `effort '${branchEffort}' (model_by case '${caseKey}') exceeds ${provider}/${model} (supports ${supported.join(", ")})`,
+            caseKey,
+          });
+        }
       }
     }
 

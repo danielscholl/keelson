@@ -30,7 +30,6 @@ import * as path from "node:path";
 import { parse as parseYamlString } from "yaml";
 import type { z } from "zod";
 import { validateDagShape } from "./graph.ts";
-import { isModelSelector } from "./model-by.ts";
 import {
   BASH_NODE_AI_FIELDS,
   convergeConfigSchema,
@@ -219,15 +218,6 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
       kind: "provider_specific_capability",
       message: `These node fields are fully honored only by the claude provider (copilot covers PreToolUse / PostToolUse hooks; other events and providers ignore the rest): ${claudeOnlyPresent.join(", ")}`,
     });
-  }
-
-  // A malformed selector would resolve to "" at runtime and either take the
-  // default or fail the node, long after the typo was cheap to see.
-  if (node.model_by !== undefined && !isModelSelector(node.model_by.from)) {
-    ctx.errors.push(
-      `Node '${node.id}': model_by.from must be '$inputs.<key>' or '$<nodeId>.output[.<field>]', got '${node.model_by.from}'`,
-    );
-    return null;
   }
 
   return node;

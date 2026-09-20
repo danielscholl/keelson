@@ -1012,6 +1012,18 @@ ${body}`;
     expect(Object.keys(node?.model_by?.cases ?? {}).sort()).toEqual(["deep", "std"]);
   });
 
+  test("model_by.from naming a substitution namespace is rejected", () => {
+    const result = parseWorkflow(
+      modelByYaml(`    model_by:
+      from: $inputs.output.tier
+      cases:
+        deep: { model: deep }
+`),
+      "tiered.yaml",
+    );
+    expect(result.error).not.toBeNull();
+  });
+
   test("model_by.from must be a selector expression", () => {
     const result = parseWorkflow(
       modelByYaml(`    model_by:
@@ -1021,7 +1033,8 @@ ${body}`;
 `),
       "tiered.yaml",
     );
-    expect(result.error?.error).toContain("model_by.from must be");
+    expect(result.error?.error).toContain("'model_by.from'");
+    expect(result.error?.error).toContain("$inputs.<key>");
   });
 
   test("model_by.from referencing a non-ancestor is rejected", () => {

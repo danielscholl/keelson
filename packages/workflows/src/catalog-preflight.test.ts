@@ -242,6 +242,35 @@ describe("checkWorkflowCatalog — model_by cases", () => {
     expect(result.violations).toEqual([]);
   });
 
+  test("a branch's effort is judged against that branch's own model", () => {
+    const result = check(
+      makeWorkflow({
+        model_by: {
+          from: "$inputs.tier",
+          cases: {
+            deep: { model: "gpt-live", effort: "xhigh" },
+            std: { model: "gpt-live", effort: "high" },
+          },
+        },
+      }),
+      new Map([["copilot", [{ id: "gpt-live", supportedReasoningEfforts: ["low", "high"] }]]]),
+    );
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.kind).toBe("effort");
+    expect(result.violations[0]?.caseKey).toBe("deep");
+  });
+
+  test("a branch without its own effort inherits the node's and is still judged", () => {
+    const result = check(
+      makeWorkflow({
+        effort: "xhigh",
+        model_by: { from: "$inputs.tier", cases: { deep: { model: "gpt-live" } } },
+      }),
+      new Map([["copilot", [{ id: "gpt-live", supportedReasoningEfforts: ["low", "high"] }]]]),
+    );
+    expect(result.violations.map((v) => v.kind)).toContain("effort");
+  });
+
   test("an unreachable provider reports not-checked rather than violations", () => {
     const result = check(
       makeWorkflow({

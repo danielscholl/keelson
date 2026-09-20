@@ -242,7 +242,7 @@ These apply across kinds (some only to agent nodes, as noted).
 | `model` | agent | Per-node override: `fast`, `balanced`, `deep`, `auto`, or a literal model id. |
 | `provider` | agent | Per-node provider override. |
 | `model_by_provider` | agent | Map of provider ids to concrete model ids. The effective provider's entry takes precedence over `model`. |
-| `model_by` | agent | Pick the model and/or effort from run data — see [model_by](#model_by). |
+| `model_by` | agent | Pick the model and/or effort from run data: see [model_by](#model_by). |
 | `context` | agent | `fresh` forces a new agent session for the node; `shared` reuses one. |
 | `allowed_tools`, `denied_tools` | agent | Tool-name filters. Rib tools are default-off; opt in with `allowed_tools`. |
 | `output_schema` | agent | A JSON-Schema subset the output must satisfy, or the node fails. |
@@ -445,7 +445,7 @@ without being duplicated and joined back with `trigger_rule: one_success`.
 ```
 
 `from` is either `$inputs.<key>` or `$<nodeId>.output[.<field>]`, and the node
-it names must be an ancestor — the same rule prompt and shell bodies follow. It
+it names must be an ancestor, the same rule prompt and shell bodies follow. It
 resolves when the node starts, and its value is matched against `cases` exactly.
 
 Each case sets any of `model`, `model_by_provider` and `effort`; whatever it

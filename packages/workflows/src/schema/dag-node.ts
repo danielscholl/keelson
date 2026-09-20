@@ -13,6 +13,7 @@
  * so a flat schema with superRefine is cleaner than a z.union() with implicit discriminants.
  */
 import { z } from "zod";
+import { isModelSelector } from "../model-by.ts";
 import { isValidCommandName } from "./command-validation.ts";
 import { workflowNodeHooksSchema } from "./hooks.ts";
 import { loopNodeConfigSchema } from "./loop.ts";
@@ -160,7 +161,10 @@ export type ModelCase = z.infer<typeof modelCaseSchema>;
 
 export const modelBySchema = z
   .object({
-    from: z.string().min(1, "'model_by.from' is required"),
+    from: z.string().min(1, "'model_by.from' is required").refine(isModelSelector, {
+      message:
+        "must be '$inputs.<key>' or '$<nodeId>.output[.<field>]' (a substitution namespace is not a node)",
+    }),
     cases: z
       .record(z.string().min(1), modelCaseSchema)
       .refine((m) => Object.keys(m).length > 0, "'model_by.cases' must have at least one entry"),
