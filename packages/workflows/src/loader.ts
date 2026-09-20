@@ -247,13 +247,12 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
 // `ARTIFACTS_DIRECTORY` writes somewhere the harness does not own.
 const ARTIFACTS_DIR_REF = /(?<![A-Za-z0-9_])(?:KEELSON_)?ARTIFACTS_DIR(?![A-Za-z0-9_])/;
 
-// A resume seeds a succeeded node's stdout, not its side effect, so a
-// file-writing collector stays stale without always_run; converge nodes are
-// exempt because their round counter resets on resume.
 /**
- * Collectors that will be skipped on a resume while the work they summarize
- * re-runs. Exported so the rib-contribution path reports the same shape the
- * YAML loader does; a typed definition never passes through `parseWorkflow`.
+ * An `all_done` collector can succeed while the work it summarizes fails, and a
+ * resume seeds it as complete, so its file keeps the failed attempt's content
+ * while that work re-runs. Converge nodes are exempt because their round
+ * counter resets on resume. Exported so the rib-contribution path reports the
+ * same shape; a typed definition never passes through `parseWorkflow`.
  */
 export function collectUnguardedCollectorWarnings(
   nodes: readonly DagNode[],
