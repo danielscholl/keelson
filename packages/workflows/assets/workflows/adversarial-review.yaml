@@ -415,7 +415,7 @@ nodes:
       # a real verification still carries claim records.
       OUT="${KEELSON_NODE_verify_OUTPUT:-}"
       CLAIMS=$(printf '%s' "$OUT" | grep -Eic '^[^[:alnum:]]*claim\**[[:space:]]*:' || true)
-      RESULTS=$(printf '%s' "$OUT" | grep -Eic '^[^[:alnum:]]*result\**[[:space:]]*:[[:space:]]*(confirmed|refuted|unverifiable-here)' || true)
+      RESULTS=$(printf '%s' "$OUT" | grep -Eic '^[^[:alnum:]]*result\**[[:space:]]*:[[:space:]*]*(confirmed|refuted|unverifiable-here)' || true)
       if [ "$CLAIMS" -lt 1 ] || [ "$RESULTS" -lt 1 ]; then
         echo "verify produced no per-claim record (found ${CLAIMS} Claim: line(s), ${RESULTS} Result: line(s) carrying CONFIRMED/REFUTED/UNVERIFIABLE-HERE) — the verification layer is absent, not clean. Run 'keelson workflow resume <runId>' to re-run verify; do not synthesize an unchecked panel." >&2
         exit 1
