@@ -1097,6 +1097,131 @@ nodes:
       ),
     ).toBe(true);
   });
+
+  test("warns when a shell body hands a capped _OUTPUT var to a JSON parser", () => {
+    const yaml = `
+name: json-from-env
+description: parses an upstream output straight from the env channel
+nodes:
+  - id: gather
+    prompt: emit json
+  - id: count
+    depends_on: [gather]
+    runtime: bun
+    script: |
+      const r = JSON.parse(process.env.KEELSON_NODE_gather_OUTPUT)
+      console.log(r.length)
+`;
+    const result = parseWorkflow(yaml, "json-env.yaml");
+    expect(result.error).toBeNull();
+    const warning = result.warnings.find((w) => w.kind === "json_parse_on_capped_env_output");
+    expect(warning?.nodeId).toBe("count");
+    expect(warning?.message).toContain("KEELSON_NODE_gather_OUTPUT_FILE");
+  });
+
+  test("reading the _FILE companion instead does not warn", () => {
+    const yaml = `
+name: json-from-file
+description: parses an upstream output from the spill file
+nodes:
+  - id: gather
+    prompt: emit json
+  - id: count
+    depends_on: [gather]
+    bash: |
+      jq '.|length' "$KEELSON_NODE_gather_OUTPUT_FILE"
+`;
+    const result = parseWorkflow(yaml, "json-file.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "json_parse_on_capped_env_output")).toBe(false);
+  });
+
+  test("a comment mentioning the var and a parser does not warn", () => {
+    const yaml = `
+name: json-comment
+description: the parser reference is in a comment
+nodes:
+  - id: gather
+    prompt: emit json
+  - id: count
+    depends_on: [gather]
+    bash: |
+      # historically this used jq on $KEELSON_NODE_gather_OUTPUT
+      cat "$KEELSON_NODE_gather_OUTPUT_FILE"
+`;
+    const result = parseWorkflow(yaml, "json-comment.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "json_parse_on_capped_env_output")).toBe(false);
+  });
+
+  test("a separator inside a quoted parser program does not hide the read", () => {
+    const yaml = `
+name: json-quoted-sep
+description: the jq program itself contains a semicolon
+nodes:
+  - id: gather
+    prompt: emit json
+  - id: count
+    depends_on: [gather]
+    bash: |
+      jq 'map(.a; .b)' <<< "$KEELSON_NODE_gather_OUTPUT"
+`;
+    const result = parseWorkflow(yaml, "json-quoted-sep.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "json_parse_on_capped_env_output")).toBe(true);
+  });
+
+  test("an unrelated parser call on the same line does not warn", () => {
+    const yaml = `
+name: json-unrelated
+description: jq reads a file while the var is echoed
+nodes:
+  - id: gather
+    prompt: emit text
+  - id: show
+    depends_on: [gather]
+    bash: 'jq . config.json; echo "$KEELSON_NODE_gather_OUTPUT"'
+`;
+    const result = parseWorkflow(yaml, "json-unrelated.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "json_parse_on_capped_env_output")).toBe(false);
+  });
+
+  test("the var handed to a parser as an argument warns", () => {
+    const yaml = `
+name: json-arg
+description: python reads the var straight from the environment
+nodes:
+  - id: gather
+    prompt: emit json
+  - id: count
+    depends_on: [gather]
+    runtime: uv
+    script: |
+      import json, os
+      d = json.loads(os.environ["KEELSON_NODE_gather_OUTPUT"])
+      print(len(d))
+`;
+    const result = parseWorkflow(yaml, "json-arg.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "json_parse_on_capped_env_output")).toBe(true);
+  });
+
+  test("a shell body that reads _OUTPUT without parsing JSON does not warn", () => {
+    const yaml = `
+name: plain-env-read
+description: echoes an upstream output
+nodes:
+  - id: gather
+    prompt: emit text
+  - id: show
+    depends_on: [gather]
+    bash: 'printf "%s\\n" "$KEELSON_NODE_gather_OUTPUT"'
+`;
+    const result = parseWorkflow(yaml, "plain-env.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "json_parse_on_capped_env_output")).toBe(false);
+  });
 });
 
 describe("discoverWorkflows", () => {

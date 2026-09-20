@@ -740,11 +740,19 @@ nodes:
       PR=$(cat "$ART/.pr-number" 2>/dev/null || true)
       BASE=$(cat "$ART/.default-branch" 2>/dev/null || echo main)
 
-      # Mode from select-mode's JSON output (jq, then a grep fallback).
-      MODE=$(printf '%s' "${KEELSON_NODE_select_mode_OUTPUT:-}" | jq -r '.mode' 2>/dev/null || true)
+      # Mode from select-mode's JSON output (jq, then a grep fallback). Read
+      # from the spill file: the env value is head+tail truncated past 16 KiB,
+      # which puts a marker inside the JSON.
+      MODE_SRC="${KEELSON_NODE_select_mode_OUTPUT_FILE:-}"
+      if [ -n "$MODE_SRC" ] && [ -f "$MODE_SRC" ]; then
+        MODE_JSON=$(cat "$MODE_SRC")
+      else
+        MODE_JSON="${KEELSON_NODE_select_mode_OUTPUT:-}"
+      fi
+      MODE=$(printf '%s' "$MODE_JSON" | jq -r '.mode' 2>/dev/null || true)
       case "$MODE" in
         local|delegate) ;;
-        *) MODE=$(printf '%s' "${KEELSON_NODE_select_mode_OUTPUT:-}" \
+        *) MODE=$(printf '%s' "$MODE_JSON" \
              | grep -oE '"mode"[[:space:]]*:[[:space:]]*"(local|delegate)"' \
              | grep -oE '(local|delegate)' | head -1 || true) ;;
       esac

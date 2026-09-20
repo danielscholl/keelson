@@ -186,7 +186,8 @@ mangle (JSON parsing, structured data).
 ```yaml
 - id: count-failures
   script: |
-    const r = JSON.parse(process.env.KEELSON_NODE_run_tests_OUTPUT)
+    import { readFileSync } from "node:fs"
+    const r = JSON.parse(readFileSync(process.env.KEELSON_NODE_run_tests_OUTPUT_FILE, "utf8"))
     console.log(r.failures.length)
   runtime: bun            # 'bun' (.ts/.js) or 'uv' (.py); required
   deps: [zod]             # optional packages, importable for this run
@@ -194,8 +195,10 @@ mangle (JSON parsing, structured data).
 ```
 
 `runtime` is required. Like `bash`, a script reads upstream output from the
-`KEELSON_NODE_*` env channel, not `$<id>.output`. `uv` installs `deps` per run;
-`bun` auto-installs an imported package.
+`KEELSON_NODE_*` env channel, not `$<id>.output`. Structured output comes from
+`KEELSON_NODE_<id>_OUTPUT_FILE` rather than the variable, which is
+[capped at 16 KiB](#data-flow). `uv` installs `deps` per run; `bun`
+auto-installs an imported package.
 
 ## Control nodes
 
@@ -399,7 +402,8 @@ environment variables, never spliced into the source:
 | Variable | Carries |
 | --- | --- |
 | `KEELSON_NODE_<id>_OUTPUT` | The upstream node's output (non-alphanumeric characters in the id are normalized to `_`). Capped, see below. |
-| `KEELSON_NODE_<id>_OUTPUT_FILE` | Path to the untruncated output, set only when that output was capped. Best-effort: omitted when the run has no artifacts directory or the write fails. |
+| `KEELSON_NODE_<id>_OUTPUT_FILE` | Path to a file holding that output in full, set for every upstream node whatever its size. Absent only when the run has no artifacts directory, which every server and CLI run creates. |
+| `KEELSON_NODE_<id>_OUTPUT_TRUNCATED` | `1` when the `_OUTPUT` value above was capped; unset otherwise. |
 | `KEELSON_ARTIFACTS_DIR` | The per-run scratch directory. |
 | `KEELSON_INPUTS_<key>` | One variable per workflow input; non-alphanumeric characters in the key are normalized to `_`. |
 | `KEELSON_ARGUMENTS` | The full free-form text the run was started with (equivalent to `$ARGUMENTS` in prompt substitution). |
@@ -407,10 +411,32 @@ environment variables, never spliced into the source:
 
 An env value over 16 KiB is truncated to its first 8 KiB and last 8 KiB, joined
 by an inline `[keelson: ...]` marker, because the OS caps the size of a single
-environment entry. A truncated node output is also written in full to
+environment entry. That marker lands in the middle of the value, so a JSON
+payload that outgrows the cap stops parsing.
+
+Every node output is therefore written in full to
 `<artifacts dir>/node-outputs/<id>.txt` and that path published as
-`KEELSON_NODE_<id>_OUTPUT_FILE`, so a node that needs the whole text reads the
-file instead of the variable.
+`KEELSON_NODE_<id>_OUTPUT_FILE`, whether or not the value was capped. **Read
+structured output from the file, not the variable**:
+
+```bash
+ISSUE_JSON=$(cat "$KEELSON_NODE_fetch_issue_OUTPUT_FILE")
+URL=$(printf '%s' "$ISSUE_JSON" | jq -r '.url')
+```
+
+Whether the file is there is a property of the run, not of the data: it is
+written for every upstream node regardless of size, and is missing only when the
+run has no artifacts directory at all, which every server and CLI run creates
+and which fails loudly on its own.
+
+The variable stays the right channel for prose, for a grep, and for a value you
+know is small. `KEELSON_NODE_<id>_OUTPUT_TRUNCATED` is set to `1` when the value
+was capped, so a consumer that must use the variable can fail with a clear
+message instead of on a parse error.
+
+`keelson workflow validate` warns when a shell body hands a capped `_OUTPUT`
+variable straight to `jq`, `JSON.parse` or `json.loads` and points at the
+`_FILE` companion.
 
 <Aside type="note" title="Why two channels">
 Prompt text is interpreted by a model that treats it as language; shell source
