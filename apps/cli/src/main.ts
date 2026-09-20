@@ -294,14 +294,19 @@ export function buildProgram(): Command {
     .command("validate [name]")
     .description("validate one or all workflow YAML files")
     .option("--dir <path>", "workflows directory to read (default: the keelson home catalog)")
+    .option("--live", "check pinned models/effort against each provider's live catalog")
     .action(async function validateAction(
       this: Command,
       name: string | undefined,
-      validateOpts: { dir?: string },
+      validateOpts: { dir?: string; live?: boolean },
     ) {
       const { json } = globalOpts(this);
       const dir = requireNonEmpty(json, "--dir", validateOpts.dir);
-      await runWorkflowValidate(name, { json, ...(dir ? { dir } : {}) });
+      await runWorkflowValidate(name, {
+        json,
+        ...(dir ? { dir } : {}),
+        ...(validateOpts.live === true ? { live: true } : {}),
+      });
     });
 
   workflow
@@ -322,6 +327,7 @@ export function buildProgram(): Command {
     .option("--working-dir <path>", "override cwd directly (defaults to current shell cwd)")
     .option("--worktree", "force a git-worktree isolated run (overrides workflow default)")
     .option("--no-worktree", "force an in-place run (overrides workflow default)")
+    .option("--no-preflight", "skip the live model/effort preflight check at run start")
     .action(async function runAction(
       this: Command,
       name: string,
@@ -334,6 +340,7 @@ export function buildProgram(): Command {
         project?: string;
         workingDir?: string;
         worktree?: boolean;
+        preflight?: boolean;
       },
     ) {
       const { json } = globalOpts(this);
@@ -347,6 +354,7 @@ export function buildProgram(): Command {
         ...(runOpts.project ? { project: runOpts.project } : {}),
         ...(runOpts.workingDir ? { workingDir: runOpts.workingDir } : {}),
         ...(runOpts.worktree !== undefined ? { worktree: runOpts.worktree } : {}),
+        ...(runOpts.preflight !== undefined ? { preflight: runOpts.preflight } : {}),
       });
     });
 

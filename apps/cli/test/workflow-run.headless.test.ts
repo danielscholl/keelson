@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -19,6 +19,7 @@ import {
 } from "../src/in-process/run-workflow.ts";
 
 const FIXTURES = resolve(import.meta.dir, "fixtures");
+const BIN = resolve(import.meta.dir, "..", "bin", "keelson.ts");
 
 // runHeadless registers providers into the process-global registry per
 // KEELSON_PROVIDERS. Pin the env per test and clear the registry after each so
@@ -141,6 +142,45 @@ describe("runHeadless (in-process executor)", () => {
     });
 
     expect(result.summary.status).toBe("succeeded");
+  });
+
+  test("--no-preflight reaches the in-process runner", async () => {
+    const home = mkdtempSync(join(tmpdir(), "keelson-preflight-cli-"));
+    try {
+      const proc = Bun.spawn(
+        [
+          "bun",
+          BIN,
+          "--json",
+          "workflow",
+          "run",
+          "preflight-bad-pin",
+          "--working-dir",
+          process.cwd(),
+          "--no-preflight",
+        ],
+        {
+          env: {
+            ...process.env,
+            KEELSON_HOME: home,
+            KEELSON_PROVIDERS: "stub",
+            KEELSON_SERVER_URL: "http://127.0.0.1:1",
+            KEELSON_WORKFLOWS_DIR: FIXTURES,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      const [stdout, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        proc.exited,
+      ]);
+
+      expect(exitCode).toBe(0);
+      expect(JSON.parse(stdout.trim()).data.status).toBe("succeeded");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 

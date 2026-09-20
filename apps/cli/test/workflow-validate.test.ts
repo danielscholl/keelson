@@ -15,8 +15,15 @@ const FIXTURES = resolve(import.meta.dir, "fixtures");
 // Bash, not exercised here (mirrors packages/workflows/test/forge-threads.test.ts).
 const posixDescribe = process.platform === "win32" ? describe.skip : describe;
 
-async function runCli(args: readonly string[]): Promise<{ stdout: string; exitCode: number }> {
-  const proc = Bun.spawn(["bun", BIN, ...args], { stdout: "pipe", stderr: "pipe" });
+async function runCli(
+  args: readonly string[],
+  env: Record<string, string> = {},
+): Promise<{ stdout: string; exitCode: number }> {
+  const proc = Bun.spawn(["bun", BIN, ...args], {
+    env: { ...process.env, ...env },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
   return { stdout, exitCode };
 }
@@ -26,21 +33,10 @@ async function runLiveValidate(
   dir: string,
   env: Record<string, string> = {},
 ): Promise<{ stdout: string; exitCode: number }> {
-  const modulePath = resolve(
-    import.meta.dir,
-    "..",
-    "src",
-    "commands",
-    "workflow-validate.ts",
-  );
-  const script = `import { runWorkflowValidate } from ${JSON.stringify(modulePath)}; await runWorkflowValidate(${JSON.stringify(name)}, { json: true, dir: ${JSON.stringify(dir)}, live: true });`;
-  const proc = Bun.spawn(["bun", "-e", script], {
-    env: { ...process.env, KEELSON_PROVIDERS: "stub", ...env },
-    stdout: "pipe",
-    stderr: "pipe",
+  return runCli(["--json", "workflow", "validate", name, "--dir", dir, "--live"], {
+    KEELSON_PROVIDERS: "stub",
+    ...env,
   });
-  const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-  return { stdout, exitCode };
 }
 
 describe("workflow validate --dir (CLI)", () => {
