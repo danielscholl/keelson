@@ -30,6 +30,7 @@ import * as path from "node:path";
 import { parse as parseYamlString } from "yaml";
 import type { z } from "zod";
 import { validateDagShape } from "./graph.ts";
+import { ENV_VALUE_MAX_CHARS } from "./handlers/subprocess.ts";
 import {
   BASH_NODE_AI_FIELDS,
   convergeConfigSchema,
@@ -65,6 +66,7 @@ export interface WorkflowLoadWarning {
     | "ignored_capability"
     | "invalid_field_value"
     | "interactive_loop_in_non_interactive_workflow"
+    | "json_parse_on_capped_env_output"
     // Fields the schema accepts and the executor *can* honor,
     // but only when paired with the claude provider. Emitted at load
     // time so the warning surfaces even if the workflow never runs.
@@ -220,7 +222,88 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
     });
   }
 
+  const shellBody = isScriptNode(node)
+    ? node.script
+    : "bash" in node && typeof node.bash === "string"
+      ? node.bash
+      : undefined;
+  if (shellBody !== undefined) {
+    const flagged = findJsonParseOnEnvOutput(shellBody);
+    if (flagged !== null) {
+      ctx.warnings.push({
+        filename: ctx.filename,
+        nodeId: node.id,
+        kind: "json_parse_on_capped_env_output",
+        message: `${flagged} is capped at ${ENV_VALUE_MAX_CHARS / 1024} KiB and head+tail truncated past it, which corrupts JSON; read ${flagged}_FILE instead`,
+      });
+    }
+  }
+
   return node;
+}
+
+// Greedy `[A-Za-z0-9_]+` plus the lookahead keeps a node id containing
+// underscores matching while `_OUTPUT_FILE` and `_OUTPUT_TRUNCATED` do not.
+const BARE_ENV_OUTPUT_REF = /KEELSON_NODE_[A-Za-z0-9_]+_OUTPUT(?![A-Z_])/;
+const JSON_PARSER_CALL = /\bJSON\.parse\b|\bjson\.loads?\b|\bjq\b/;
+
+// Split a line on command separators that are not inside quotes, so a `;` in a
+// quoted parser program (`jq 'map(.a; .b)'`) does not detach the parser from the
+// variable it reads.
+function splitUnquotedCommands(line: string): string[] {
+  const out: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i] as string;
+    if (quote !== null) {
+      if (ch === "\\" && quote === '"') {
+        current += ch + (line[i + 1] ?? "");
+        i++;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === ";" || ch === "&") {
+      out.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  out.push(current);
+  return out;
+}
+
+// Scoped to one logical line on purpose: a body that assigns the var and parses
+// it further down is the shape bundled workflows already guard with a
+// `_FILE`-first conditional, and flagging those would bury the real hits.
+// Within a line, the var must reach the parser through a pipe or be one of its
+// arguments, so an unrelated `jq` on the same line is not a hit.
+function findJsonParseOnEnvOutput(body: string): string | null {
+  for (const raw of body.replace(/\\\r?\n\s*/g, " ").split(/\r?\n/)) {
+    const line = raw.trimStart();
+    if (line.startsWith("#") || line.startsWith("//")) continue;
+    for (const segment of splitUnquotedCommands(line)) {
+      if (!JSON_PARSER_CALL.test(segment)) continue;
+      const bare = segment.match(BARE_ENV_OUTPUT_REF);
+      if (bare === null) continue;
+      const parserAt = segment.search(JSON_PARSER_CALL);
+      const varAt = segment.indexOf(bare[0]);
+      // Piped into the parser, or handed to it as an argument.
+      const piped = varAt < parserAt && segment.slice(varAt, parserAt).includes("|");
+      const argument = varAt > parserAt;
+      if (piped || argument) return bare[0];
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
