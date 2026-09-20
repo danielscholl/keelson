@@ -233,6 +233,7 @@ export const startWorkflowRunBodySchema = z
     workingDir: z.string().optional(),
     isolation: isolationOverrideSchema.optional(),
     provider: z.string().optional(),
+    preflight: z.boolean().optional(),
   })
   .strict()
   .refine((v) => Boolean(v.projectId || v.workingDir), {
