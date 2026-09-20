@@ -3042,6 +3042,9 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       liveCatalog,
     });
     if (result.notChecked.length > 0 && result.violations.length === 0) {
+      console.warn(
+        `[workflows] run ${runId} preflight not checked: ${result.notChecked.join(", ")}`,
+      );
       subscribers.broadcast(runId, {
         type: "run_warning",
         nodeId: null,

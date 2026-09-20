@@ -203,13 +203,20 @@ async function runViaHttp(
   // JSON envelope) so scripted callers get a single concise envelope at
   // the end instead of a stream.
   const frames: WorkflowFrame[] = [];
+  const preflightWarnings: string[] = [];
   let terminalStatus: string | null = null;
   await attachRun({
     baseUrl,
     runId,
     onFrame: (frame) => {
+      const preflightWarning =
+        frame.type === "run_warning" && frame.message.startsWith("preflight not checked:");
+      if (preflightWarning) preflightWarnings.push(frame.message);
       if (watch) frames.push(frame);
       if (frame.type === "run_done") terminalStatus = frame.status;
+      if (preflightWarning && !json && !watch) {
+        process.stdout.write(`! ${frame.message}\n`);
+      }
       if (watch && !json && frame.type !== "run_started") {
         const line = formatWorkflowFrame(frame);
         if (line) process.stdout.write(`${line}\n`);
@@ -255,6 +262,7 @@ async function runViaHttp(
           mode: "http",
           status: terminalStatus,
           ...(watch ? { events: frames } : {}),
+          ...(preflightWarnings.length > 0 ? { warnings: preflightWarnings } : {}),
         },
       },
       { json },
@@ -277,6 +285,7 @@ async function runInProcess(
   // prompt workflows emit many node_chunk frames, and a --no-watch
   // scripted caller doesn't want them in the envelope.
   const events: RunStreamEvent[] = [];
+  const preflightWarnings: string[] = [];
   // In-process has no project store to consult, so --project is a no-op
   // here; --working-dir wins, falling back to the invoking process's cwd.
   // The HTTP path is where named projects resolve.
@@ -295,7 +304,13 @@ async function runInProcess(
       isolation,
       ...(opts.preflight !== undefined ? { preflight: opts.preflight } : {}),
       onEvent: (ev) => {
+        const preflightWarning =
+          ev.type === "run_warning" && ev.message.startsWith("preflight not checked:");
+        if (preflightWarning) preflightWarnings.push(ev.message);
         if (watch) events.push(ev);
+        if (preflightWarning && !opts.json && !watch) {
+          process.stdout.write(`! ${ev.message}\n`);
+        }
         if (!opts.json && watch) {
           const line = formatHumanEvent(ev);
           if (line) process.stdout.write(`${line}\n`);
@@ -311,6 +326,7 @@ async function runInProcess(
             status: result.summary.status,
             summary: result.summary,
             ...(watch ? { events } : {}),
+            ...(preflightWarnings.length > 0 ? { warnings: preflightWarnings } : {}),
           },
         },
         { json: true },

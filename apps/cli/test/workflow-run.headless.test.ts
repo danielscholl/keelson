@@ -198,6 +198,42 @@ describe("runHeadless (in-process executor)", () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  test("JSON output reports a live catalog that was not checked", async () => {
+    const home = mkdtempSync(join(tmpdir(), "keelson-preflight-cli-"));
+    try {
+      const proc = Bun.spawn(
+        [
+          "bun",
+          BIN,
+          "--json",
+          "workflow",
+          "run",
+          "preflight-unavailable",
+          "--working-dir",
+          process.cwd(),
+        ],
+        {
+          env: {
+            ...process.env,
+            KEELSON_HOME: home,
+            KEELSON_PROVIDERS: "stub",
+            KEELSON_SERVER_URL: "http://127.0.0.1:1",
+            KEELSON_WORKFLOW_PROVIDER: "offline",
+            KEELSON_WORKFLOWS_DIR: FIXTURES,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+
+      expect(exitCode).toBe(1);
+      expect(JSON.parse(stdout.trim()).data.warnings).toEqual(["preflight not checked: offline"]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("headless provider registration", () => {
