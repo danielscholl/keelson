@@ -64,6 +64,7 @@ export interface WorkflowLoadWarning {
     | "ai_fields_on_non_ai_node"
     | "ignored_capability"
     | "invalid_field_value"
+    | "all_done_collector_without_always_run"
     | "interactive_loop_in_non_interactive_workflow"
     // Fields the schema accepts and the executor *can* honor,
     // but only when paired with the claude provider. Emitted at load
@@ -217,6 +218,29 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
       nodeId: node.id,
       kind: "provider_specific_capability",
       message: `These node fields are fully honored only by the claude provider (copilot covers PreToolUse / PostToolUse hooks; other events and providers ignore the rest): ${claudeOnlyPresent.join(", ")}`,
+    });
+  }
+
+  const shellBody = isScriptNode(node)
+    ? node.script
+    : "bash" in node && typeof node.bash === "string"
+      ? node.bash
+      : undefined;
+  // A resume seeds every succeeded node as complete, and the seed carries the
+  // node's stdout, not its side effect — so a collector whose real product is a
+  // file replays nothing and downstream nodes read the failed attempt's copy.
+  if (
+    shellBody !== undefined &&
+    node.trigger_rule === "all_done" &&
+    node.always_run !== true &&
+    shellBody.includes("ARTIFACTS_DIR")
+  ) {
+    ctx.warnings.push({
+      filename: ctx.filename,
+      nodeId: node.id,
+      kind: "all_done_collector_without_always_run",
+      message:
+        "an 'all_done' shell node that touches the artifacts dir is skipped on resume once it has succeeded, so the file it owns keeps the failed attempt's content; set 'always_run: true' to re-run it",
     });
   }
 

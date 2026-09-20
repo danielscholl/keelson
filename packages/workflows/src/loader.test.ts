@@ -983,6 +983,72 @@ nodes:
       result.warnings.some((w) => w.kind === "interactive_loop_in_non_interactive_workflow"),
     ).toBe(true);
   });
+
+  const collectorYaml = (extra: string) => `
+name: collector
+description: an all_done collector that owns a file
+nodes:
+  - id: work
+    prompt: do the thing
+  - id: collect
+    depends_on: [work]
+    trigger_rule: all_done
+${extra}    bash: |
+      printf '%s' "$KEELSON_NODE_work_OUTPUT" > "$KEELSON_ARTIFACTS_DIR/verdict.json"
+`;
+
+  test("warns when an all_done shell node touches the artifacts dir without always_run", () => {
+    const result = parseWorkflow(collectorYaml(""), "collector.yaml");
+    expect(result.error).toBeNull();
+    const warning = result.warnings.find((w) => w.kind === "all_done_collector_without_always_run");
+    expect(warning?.nodeId).toBe("collect");
+    expect(warning?.message).toContain("always_run: true");
+  });
+
+  test("always_run: true silences the all_done collector warning", () => {
+    const result = parseWorkflow(collectorYaml("    always_run: true\n"), "collector.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "all_done_collector_without_always_run")).toBe(
+      false,
+    );
+  });
+
+  test("an all_done shell node that never touches the artifacts dir does not warn", () => {
+    const yaml = `
+name: no-artifacts
+description: an all_done node with no side effect on disk
+nodes:
+  - id: work
+    prompt: do the thing
+  - id: collect
+    depends_on: [work]
+    trigger_rule: all_done
+    bash: 'printf "%s" "$KEELSON_NODE_work_OUTPUT"'
+`;
+    const result = parseWorkflow(yaml, "no-artifacts.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "all_done_collector_without_always_run")).toBe(
+      false,
+    );
+  });
+
+  test("an artifacts write under the default trigger rule does not warn", () => {
+    const yaml = `
+name: plain-write
+description: writes an artifact without all_done
+nodes:
+  - id: work
+    prompt: do the thing
+  - id: collect
+    depends_on: [work]
+    bash: 'printf "%s" "$KEELSON_NODE_work_OUTPUT" > "$KEELSON_ARTIFACTS_DIR/out.txt"'
+`;
+    const result = parseWorkflow(yaml, "plain-write.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "all_done_collector_without_always_run")).toBe(
+      false,
+    );
+  });
 });
 
 describe("discoverWorkflows", () => {
