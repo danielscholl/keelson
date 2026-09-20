@@ -3039,7 +3039,9 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         },
       ]),
     );
-    const defaultProviderId = resolveWorkflowDefaultProviderId();
+    // The same default the executor runs with, captured when the routes were
+    // built; re-resolving here could preflight one provider and run another.
+    const defaultProviderId = defaultProvider;
     const modelClassOverride = (id: string, modelClass: "fast" | "balanced" | "deep") =>
       readModelClassOverride(config, id)?.[modelClass];
     const resolution = resolveWorkflowResolution(workflow, {

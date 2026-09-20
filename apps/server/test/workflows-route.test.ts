@@ -1510,6 +1510,75 @@ nodes:
     }
   });
 
+  test("POST .../runs preflights against the provider the run will execute with", async () => {
+    const makeProvider = (id: string, model: string) => {
+      const capabilities = {
+        sessionResume: false,
+        streaming: false,
+        tools: false,
+        reasoningEffort: false,
+        models: [model],
+        defaultModel: model,
+      };
+      registerProvider({
+        id,
+        displayName: id,
+        capabilities,
+        builtIn: false,
+        factory: () => ({
+          getType: () => id,
+          getCapabilities: () => capabilities,
+          async *sendQuery() {
+            yield { type: "done" as const };
+          },
+          async listModels() {
+            return [{ id: model }];
+          },
+          async listModelsLive() {
+            return [{ id: model }];
+          },
+        }),
+      });
+    };
+    makeProvider("captured-default", "captured-model");
+    makeProvider("late-default", "late-model");
+    const priorProvider = process.env.KEELSON_WORKFLOW_PROVIDER;
+    try {
+      process.env.KEELSON_WORKFLOW_PROVIDER = "captured-default";
+      const { app } = makeRig(makeSuccessfulPromptHandler());
+      // Re-pointing the default after the routes are built must not move
+      // preflight off the provider the executor was handed.
+      process.env.KEELSON_WORKFLOW_PROVIDER = "late-default";
+      writeWorkflow(
+        "preflight-captured-default.yaml",
+        `name: preflight-captured-default
+description: preflight follows the captured default provider
+nodes:
+  - id: pinned
+    model: captured-model
+    prompt: run
+`,
+      );
+
+      const startRes = await app.fetch(
+        postRun("http://test/api/workflows/preflight-captured-default/runs", { inputs: {} }),
+      );
+      const { runId } = (await startRes.json()) as { runId: string };
+      const run = (await pollUntilTerminal(app, runId)) as {
+        status: string;
+        error: string | null;
+      };
+
+      expect(run.error).toBeNull();
+      expect(run.status).toBe("succeeded");
+    } finally {
+      if (priorProvider === undefined) delete process.env.KEELSON_WORKFLOW_PROVIDER;
+      else process.env.KEELSON_WORKFLOW_PROVIDER = priorProvider;
+      unregisterProvider("captured-default");
+      unregisterProvider("late-default");
+    }
+  });
+
   test("POST .../runs rejects an unregistered provider override", async () => {
     writeWorkflow(
       "unknown-provider.yaml",
