@@ -579,6 +579,13 @@ function validateOutputRefs(nodes: readonly DagNode[]): string | null {
         }
       }
     }
+    if (node.model_by !== undefined) {
+      sources.push({
+        text: node.model_by.from,
+        label: "model_by.from",
+        allowReservedNamespace: true,
+      });
+    }
     // notebook.append flows through the same resolveBody (with the current
     // node's output added before substitution, like writeback), so validate
     // $nodeId.output refs here — a typo or missing depends_on would otherwise
@@ -739,7 +746,7 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
   const nodes = (obj.nodes as unknown[])
     .map((n, i) => parseDagNode(n, i, ctx))
     .filter((n): n is DagNode => n !== null);
-  if (nodes.length !== (obj.nodes as unknown[]).length) {
+  if (nodes.length !== (obj.nodes as unknown[]).length || nodeErrors.length > 0) {
     return {
       workflow: null,
       warnings,

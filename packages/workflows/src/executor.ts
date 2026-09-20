@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 import { evaluateCondition } from "./conditions.ts";
 import { buildTopologicalLayers, type DagShapeError, validateDagShape } from "./graph.ts";
+import { applyModelCase, selectModelCase } from "./model-by.ts";
 import { diagnoseModelDiversity } from "./model-diversity.ts";
 import type {
   DagNode,
@@ -1114,7 +1115,23 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
   emit({ type: "node_started", nodeId: node.id });
   const startedAtMs = Date.now();
   try {
-    let result = await runHandlerWithRetry(handler, node, nodeCtx, abortSignal, emit);
+    // A `model_by` map picks the node's model/effort from run data, so it can
+    // only resolve here: after upstream outputs exist and before the handler
+    // reads node.model. Throwing rather than returning keeps an unmatched
+    // selector on the same path as any other node failure, so `on: always`
+    // memory and notebook hooks still fire.
+    let dispatchNode = node;
+    const modelBy = "model_by" in node ? node.model_by : undefined;
+    if (modelBy !== undefined && ("prompt" in node || "command" in node)) {
+      const selection = selectModelCase(modelBy, ctx.inputs, nodeOutputs);
+      if (!selection.ok) {
+        emit({ type: "run_warning", nodeId: node.id, message: selection.error });
+        throw new Error(selection.error);
+      }
+      dispatchNode = applyModelCase(node, selection.selected);
+    }
+
+    let result = await runHandlerWithRetry(handler, dispatchNode, nodeCtx, abortSignal, emit);
     // Validate structured output is JSON-serializable. JSON.stringify returns
     // undefined for top-level undefined / functions / symbols — those would
     // leave NodeOutput.output non-string, violating the schema and breaking

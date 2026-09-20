@@ -13,6 +13,7 @@
  * so a flat schema with superRefine is cleaner than a z.union() with implicit discriminants.
  */
 import { z } from "zod";
+import { isModelSelector } from "../model-by.ts";
 import { isValidCommandName } from "./command-validation.ts";
 import { workflowNodeHooksSchema } from "./hooks.ts";
 import { loopNodeConfigSchema } from "./loop.ts";
@@ -138,6 +139,46 @@ const AGENT_ID_REGEX = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 // DagNodeBase — common fields shared by all node types
 // ---------------------------------------------------------------------------
 
+/**
+ * One branch of a `model_by` case map: the model and/or effort a node uses when
+ * the selector resolves to this key. Closed rather than free substitution so the
+ * set of models a workflow can reach stays statically known, which validation
+ * and the live-catalog preflight both rely on.
+ */
+export const modelCaseSchema = z
+  .object({
+    model: z.string().min(1).optional(),
+    model_by_provider: z.record(z.string(), z.string().min(1)).optional(),
+    effort: effortLevelSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (c) => c.model !== undefined || c.model_by_provider !== undefined || c.effort !== undefined,
+    { message: "a case must set at least one of 'model', 'model_by_provider' or 'effort'" },
+  );
+
+export type ModelCase = z.infer<typeof modelCaseSchema>;
+
+export const modelBySchema = z
+  .object({
+    from: z.string().min(1, "'model_by.from' is required").refine(isModelSelector, {
+      message:
+        "must be '$inputs.<key>' or '$<nodeId>.output[.<field>]' (a substitution namespace is not a node)",
+    }),
+    cases: z
+      .record(z.string().min(1), modelCaseSchema)
+      .refine((m) => Object.keys(m).length > 0, "'model_by.cases' must have at least one entry"),
+    // Names a key in `cases`. Absent means an unmatched selector fails the node
+    // rather than silently taking a branch the author did not choose.
+    default: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine((mb) => mb.default === undefined || Object.hasOwn(mb.cases, mb.default), {
+    message: "'model_by.default' must name one of the declared cases",
+  });
+
+export type ModelBy = z.infer<typeof modelBySchema>;
+
 export const dagNodeBaseSchema = z.object({
   id: z.string(),
   depends_on: z.array(z.string()).optional(),
@@ -145,6 +186,7 @@ export const dagNodeBaseSchema = z.object({
   trigger_rule: triggerRuleSchema.optional(),
   model: z.string().optional(),
   model_by_provider: z.record(z.string(), z.string().min(1)).optional(),
+  model_by: modelBySchema.optional(),
   provider: z.string().trim().min(1).optional(),
   context: z.enum(["fresh", "shared"]).optional(),
   output_format: z.record(z.string(), z.unknown()).optional(),
@@ -349,6 +391,7 @@ export const BASH_NODE_AI_FIELDS: readonly string[] = [
   "provider",
   "model",
   "model_by_provider",
+  "model_by",
   "context",
   "output_format",
   "allowed_tools",
@@ -581,6 +624,7 @@ export const dagNodeSchema = dagNodeBaseSchema
       ...(data.model_by_provider !== undefined
         ? { model_by_provider: data.model_by_provider }
         : {}),
+      ...(data.model_by !== undefined ? { model_by: data.model_by } : {}),
       ...(data.provider !== undefined ? { provider: data.provider } : {}),
       ...(data.context !== undefined ? { context: data.context } : {}),
       ...(data.output_format !== undefined ? { output_format: data.output_format } : {}),

@@ -183,6 +183,204 @@ function baseOpts(workflow: WorkflowDefinition): Omit<RunOptions, "handlers"> {
 // Tests
 // ---------------------------------------------------------------------------
 
+describe("runWorkflow — model_by case map", () => {
+  const tiered = (extra: string): WorkflowDefinition => {
+    const parsed = parseWorkflow(
+      `
+name: tiered
+description: picks a model from an upstream classification
+nodes:
+  - id: intake
+    prompt: classify
+  - id: investigate
+    depends_on: [intake]
+    prompt: investigate
+    model: fast
+    model_by:
+      from: $intake.output.tier
+      cases:
+        deep: { model: deep, effort: high }
+        std: { model: balanced, effort: low }
+${extra}`,
+      "tiered.yaml",
+    );
+    if (parsed.workflow === null) throw new Error(parsed.error?.error ?? "parse failed");
+    return parsed.workflow;
+  };
+
+  // Reports the model/effort the executor actually handed the handler.
+  function capturingHandler(intakeOutput: string): {
+    handler: NodeHandler;
+    seen: Array<{ nodeId: string; model?: unknown; effort?: unknown }>;
+  } {
+    const seen: Array<{ nodeId: string; model?: unknown; effort?: unknown }> = [];
+    const handler: NodeHandler = {
+      type: "prompt",
+      async handle(node) {
+        const n = node as unknown as Record<string, unknown>;
+        seen.push({ nodeId: node.id, model: n.model, effort: n.effort });
+        return {
+          status: "succeeded",
+          output: { kind: "text", text: node.id === "intake" ? intakeOutput : "done" },
+        };
+      },
+    };
+    return { handler, seen };
+  }
+
+  test("the matching case's model and effort reach the handler", async () => {
+    const { handler, seen } = capturingHandler('{"tier":"deep"}');
+    const summary = await runWorkflow({
+      ...baseOpts(tiered("")),
+      handlers: new Map([["prompt", handler]]),
+    });
+    expect(summary.status).toBe("succeeded");
+    const investigate = seen.find((s) => s.nodeId === "investigate");
+    expect(investigate?.model).toBe("deep");
+    expect(investigate?.effort).toBe("high");
+  });
+
+  test("a different upstream value selects the other case", async () => {
+    const { handler, seen } = capturingHandler('{"tier":"std"}');
+    await runWorkflow({ ...baseOpts(tiered("")), handlers: new Map([["prompt", handler]]) });
+    const investigate = seen.find((s) => s.nodeId === "investigate");
+    expect(investigate?.model).toBe("balanced");
+    expect(investigate?.effort).toBe("low");
+  });
+
+  test("an unmatched value fails the node instead of running on the static pin", async () => {
+    const { handler, seen } = capturingHandler('{"tier":"surprise"}');
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(tiered("")),
+      handlers: new Map([["prompt", handler]]),
+      onEvent,
+    });
+    expect(summary.status).toBe("failed");
+    expect(summary.nodes.investigate.state).toBe("failed");
+    const done = events.find((e) => e.type === "node_done" && e.nodeId === "investigate");
+    expect(done?.type === "node_done" ? done.result.error : undefined).toContain("surprise");
+    expect(seen.some((s) => s.nodeId === "investigate")).toBe(false);
+    expect(events.some((e) => e.type === "run_warning" && /matches no case/.test(e.message))).toBe(
+      true,
+    );
+  });
+
+  test("a declared default runs the node instead of failing it", async () => {
+    const { handler, seen } = capturingHandler('{"tier":"surprise"}');
+    const summary = await runWorkflow({
+      ...baseOpts(tiered("      default: std\n")),
+      handlers: new Map([["prompt", handler]]),
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(seen.find((s) => s.nodeId === "investigate")?.model).toBe("balanced");
+  });
+});
+
+describe("runWorkflow — model_by on a command node", () => {
+  test("the selected model and effort survive the command handler hop", async () => {
+    const parsed = parseWorkflow(
+      `
+name: tiered-command
+description: a command node whose model comes from an upstream classification
+nodes:
+  - id: intake
+    prompt: classify
+  - id: run-it
+    depends_on: [intake]
+    command: e2e-echo-command
+    model: fast
+    model_by:
+      from: $intake.output.tier
+      cases:
+        deep: { model: deep, effort: high }
+        std: { model: balanced, effort: low }
+`,
+      "tiered-command.yaml",
+    );
+    if (parsed.workflow === null) throw new Error(parsed.error?.error ?? "parse failed");
+
+    // The command handler synthesizes a prompt node and delegates; record what
+    // the delegated prompt handler actually receives.
+    const seen: Array<{ nodeId: string; model?: unknown; effort?: unknown }> = [];
+    const promptHandler: NodeHandler = {
+      type: "prompt",
+      async handle(node) {
+        const n = node as unknown as Record<string, unknown>;
+        seen.push({ nodeId: node.id, model: n.model, effort: n.effort });
+        return {
+          status: "succeeded",
+          output: { kind: "text", text: node.id === "intake" ? '{"tier":"deep"}' : "ran" },
+        };
+      },
+    };
+
+    const cwd = mkdtempSync(join(tmpdir(), "keelson-modelby-cmd-"));
+    seedStarterAssets(join(cwd, ".keelson"));
+    const summary = await runWorkflow({
+      workflow: parsed.workflow,
+      runId: "run-cmd-1",
+      inputs: {},
+      cwd,
+      handlers: new Map<string, NodeHandler>([
+        ["prompt", promptHandler],
+        ["command", makeCommandHandler({ promptHandler })],
+      ]),
+    });
+
+    expect(summary.status).toBe("succeeded");
+    const delegated = seen.find((entry) => entry.nodeId !== "intake");
+    expect(delegated?.model).toBe("deep");
+    expect(delegated?.effort).toBe("high");
+  });
+});
+
+describe("runWorkflow — model_by failure runs post-node hooks", () => {
+  test("an unmatched selector still fires notebook append with on: always", async () => {
+    const parsed = parseWorkflow(
+      `
+name: tiered-hooks
+description: an unmatched selector must not skip always-hooks
+nodes:
+  - id: intake
+    prompt: classify
+  - id: investigate
+    depends_on: [intake]
+    prompt: investigate
+    model_by:
+      from: $intake.output.tier
+      cases:
+        deep: { model: deep }
+    notebook:
+      append: "attempted investigate"
+      on: always
+`,
+      "tiered-hooks.yaml",
+    );
+    if (parsed.workflow === null) throw new Error(parsed.error?.error ?? "parse failed");
+
+    const nb = mockNotebook();
+    const handler: NodeHandler = {
+      type: "prompt",
+      async handle(node) {
+        return {
+          status: "succeeded",
+          output: { kind: "text", text: node.id === "intake" ? '{"tier":"surprise"}' : "x" },
+        };
+      },
+    };
+    const summary = await runWorkflow({
+      ...baseOpts(parsed.workflow),
+      handlers: new Map([["prompt", handler]]),
+      notebook: nb.notebook,
+    });
+
+    expect(summary.status).toBe("failed");
+    expect(summary.nodes.investigate.state).toBe("failed");
+    expect(nb.appends.map((a) => a.entry).join("\n")).toContain("attempted investigate");
+  });
+});
+
 describe("runWorkflow — hello-world (1 layer, 1 prompt node)", () => {
   test("emits run_started → node_started → node_done → run_done", async () => {
     const workflow = loadStarter("hello-world");

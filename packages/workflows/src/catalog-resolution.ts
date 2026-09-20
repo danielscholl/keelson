@@ -39,7 +39,7 @@ function isModelClass(value: string): value is ModelClass {
   return MODEL_CLASSES.has(value as ModelClass);
 }
 
-function resolvePrompt(
+export function resolvePrompt(
   workflow: WorkflowDefinition,
   node: WorkflowDefinition["nodes"][number],
   options: ResolutionOptions,

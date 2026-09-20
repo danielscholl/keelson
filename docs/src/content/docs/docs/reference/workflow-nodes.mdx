@@ -245,6 +245,7 @@ These apply across kinds (some only to agent nodes, as noted).
 | `model` | agent | Per-node override: `fast`, `balanced`, `deep`, `auto`, or a literal model id. |
 | `provider` | agent | Per-node provider override. |
 | `model_by_provider` | agent | Map of provider ids to concrete model ids. The effective provider's entry takes precedence over `model`. |
+| `model_by` | agent | Pick the model and/or effort from run data: see [model_by](#model_by). |
 | `context` | agent | `fresh` forces a new agent session for the node; `shared` reuses one. |
 | `allowed_tools`, `denied_tools` | agent | Tool-name filters. Rib tools are default-off; opt in with `allowed_tools`. |
 | `output_schema` | agent | A JSON-Schema subset the output must satisfy, or the node fails. |
@@ -272,8 +273,12 @@ Provider selection follows this order:
 `--provider` wins over the environment default. Node and workflow pins also
 override that default.
 
-Model selection starts with the node's `model`, then the workflow's `model`. A
-`model_by_provider` entry for the effective provider takes precedence. A model
+A matched [`model_by`](#model_by) case is applied first, replacing only the
+fields it declares. Model selection then runs as usual: the node's `model`, then
+the workflow's `model`, with a `model_by_provider` entry for the effective
+provider taking precedence over both. A case that sets `model` but no
+`model_by_provider` therefore leaves a static per-provider entry in place, and
+that entry still wins. A model
 tier resolves through the operator's configured class override, the provider's
 `modelClasses`, then the provider default. `auto` also uses the provider default.
 For prompt nodes, a new run started from the CLI, the SPA, or the API checks
@@ -295,6 +300,52 @@ Ignored with a warning on any node: `agents`, `sandbox`, `betas`,
 also ignored, with a warning, on a node that does not take one: `bash`, `script`,
 `approval`, `cancel`, and `loop` (an agent kind, but one that carries its own
 `loop.prompt` and field set, so the node-level agent fields do not apply to it).
+
+### `model_by`
+
+`model`, `model_by_provider` and `effort` are fixed when the workflow is
+written. `model_by` picks among a **closed set** of them using a value the run
+produces, so one node can spend a strong model on the inputs that need it
+without being duplicated and joined back with `trigger_rule: one_success`.
+
+```yaml
+- id: intake
+  prompt: "Classify this assignment as deep or std. Return JSON: {\"tier\": ...}"
+  output_format: { type: json_object }
+- id: investigate
+  depends_on: [intake]
+  prompt: "Investigate: $ARGUMENTS"
+  model_by:
+    from: $intake.output.tier
+    cases:
+      deep: { model_by_provider: { copilot: gpt-6-astra }, effort: high }
+      std:  { model_by_provider: { copilot: gpt-5.6-terra }, effort: high }
+    default: std          # optional
+```
+
+`from` is either `$inputs.<key>` or `$<nodeId>.output[.<field>]`, and the node
+it names must be an ancestor, the same rule prompt and shell bodies follow. It
+resolves when the node starts, and its value is matched against `cases` exactly.
+
+Each case sets any of `model`, `model_by_provider` and `effort`; whatever it
+sets replaces the node's static value, and whatever it omits leaves that value
+alone, so an effort-only case keeps the node's model.
+
+Because a case replaces only what it declares, a case that sets `model` on a
+node that also pins `model_by_provider` does **not** displace that map, and the
+map still wins for its provider. Set `model_by_provider` in the case when the
+branch needs to override a per-provider pin.
+
+**An unmatched value fails the node.** Declare `default`, naming one of the
+cases, when a fallback is wanted. A node silently running on a model nobody
+chose is the failure this exists to prevent, so the fallback is opt-in and the
+error names both the value that missed and the cases that exist.
+
+The set of reachable models stays statically known, which is the point of a map
+rather than free substitution: `keelson workflow validate` checks the shape of
+every branch, and `--live` checks **every** branch's model against the
+provider's catalog, not just the one a given run would take. A typo in a cold
+branch is caught before a run reaches it.
 
 ### trigger_rule
 

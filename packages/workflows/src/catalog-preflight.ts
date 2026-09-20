@@ -1,4 +1,5 @@
-import { resolveWorkflowResolution } from "./catalog-resolution.ts";
+import { resolvePrompt, resolveWorkflowResolution } from "./catalog-resolution.ts";
+import { applyModelCase } from "./model-by.ts";
 import type { WorkflowDefinition } from "./schema/index.ts";
 
 type ModelClass = "fast" | "balanced" | "deep";
@@ -22,6 +23,9 @@ export interface PreflightViolation {
   kind: "model" | "effort";
   value: string;
   reason: string;
+  // Set when the violation came from one branch of a `model_by` map rather than
+  // the node's static pin, so the message can name the branch to fix.
+  caseKey?: string;
 }
 
 export interface PreflightResult {
@@ -82,6 +86,55 @@ export function checkWorkflowCatalog(
     const live = options.liveCatalog.get(provider);
     if (live === null || live === undefined) {
       notChecked.add(provider);
+      continue;
+    }
+
+    // Every branch is checked, not just the one this run would take: which case
+    // wins is run data, so a typo in a cold branch is only catchable here. The
+    // branch is applied to the node first, because a case sets only the fields it
+    // names and `model_by_provider` still outranks a case's plain `model`.
+    if (node.model_by !== undefined) {
+      for (const [caseKey, branch] of Object.entries(node.model_by.cases)) {
+        const dispatched = applyModelCase(node, branch) as typeof node;
+        const caseLiteral = pinnedLiteralFor(dispatched, workflow, provider);
+        // Resolved from the dispatched node, not the original: a case replaces the
+        // whole `model_by_provider` map, so the node's resolution can name a pin
+        // the case just removed.
+        const effectiveModel = resolvePrompt(workflow, dispatched, options).model;
+        const listed =
+          effectiveModel === undefined
+            ? undefined
+            : live.find((candidate) => candidate.id === effectiveModel);
+        if (caseLiteral !== undefined && live.every((c) => c.id !== caseLiteral)) {
+          violations.push({
+            nodeId: node.id,
+            provider,
+            kind: "model",
+            value: caseLiteral,
+            reason: `model '${caseLiteral}' (model_by case '${caseKey}') is not in ${provider}'s live catalog`,
+            caseKey,
+          });
+          continue;
+        }
+        const caseEffort = normalizeEffort(dispatched.effort ?? workflow.effort);
+        const caseSupported = listed?.supportedReasoningEfforts;
+        if (caseEffort === undefined || caseSupported === undefined || caseSupported.length === 0) {
+          continue;
+        }
+        if (!caseSupported.includes(caseEffort)) {
+          violations.push({
+            nodeId: node.id,
+            provider,
+            kind: "effort",
+            value: caseEffort,
+            reason: `effort '${caseEffort}' (model_by case '${caseKey}') exceeds ${provider}/${effectiveModel} (supports ${caseSupported.join(", ")})`,
+            caseKey,
+          });
+        }
+      }
+      // Every dispatch goes through a case, so the node's own model/effort are
+      // only reachable via a case that leaves them in place, which the loop
+      // above already evaluated.
       continue;
     }
 

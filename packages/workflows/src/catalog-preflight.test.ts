@@ -184,6 +184,271 @@ describe("checkWorkflowCatalog", () => {
   });
 });
 
+describe("checkWorkflowCatalog — model_by cases", () => {
+  const LIVE: LiveCatalog = new Map([["copilot", [{ id: "gpt-live" }]]]);
+
+  test("a retired model in any branch is a violation, not just the one a run would take", () => {
+    const result = check(
+      makeWorkflow({
+        model_by: {
+          from: "$inputs.tier",
+          cases: {
+            deep: { model: "gpt-retired" },
+            std: { model: "gpt-live" },
+          },
+        },
+      }),
+      LIVE,
+    );
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.value).toBe("gpt-retired");
+    expect(result.violations[0]?.caseKey).toBe("deep");
+    expect(result.violations[0]?.reason).toContain("model_by case 'deep'");
+  });
+
+  test("every branch on the live catalog is clean", () => {
+    const result = check(
+      makeWorkflow({
+        model_by: {
+          from: "$inputs.tier",
+          cases: { deep: { model: "gpt-live" }, std: { model: "gpt-live" } },
+        },
+      }),
+      LIVE,
+    );
+    expect(result.violations).toEqual([]);
+  });
+
+  test("a branch's model_by_provider pin is checked for that provider", () => {
+    const result = check(
+      makeWorkflow({
+        model_by: {
+          from: "$inputs.tier",
+          cases: { deep: { model_by_provider: { copilot: "gpt-retired" } } },
+        },
+      }),
+      LIVE,
+    );
+    expect(result.violations.map((v) => v.value)).toEqual(["gpt-retired"]);
+  });
+
+  test("a model class in a branch is not judged against the catalog", () => {
+    const result = check(
+      makeWorkflow({
+        model_by: { from: "$inputs.tier", cases: { deep: { model: "deep" } } },
+      }),
+      LIVE,
+    );
+    expect(result.violations).toEqual([]);
+  });
+
+  test("a branch's effort is judged against that branch's own model", () => {
+    const result = check(
+      makeWorkflow({
+        model_by: {
+          from: "$inputs.tier",
+          cases: {
+            deep: { model: "gpt-live", effort: "xhigh" },
+            std: { model: "gpt-live", effort: "high" },
+          },
+        },
+      }),
+      new Map([["copilot", [{ id: "gpt-live", supportedReasoningEfforts: ["low", "high"] }]]]),
+    );
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.kind).toBe("effort");
+    expect(result.violations[0]?.caseKey).toBe("deep");
+  });
+
+  test("a branch without its own effort inherits the node's and is still judged", () => {
+    const result = check(
+      makeWorkflow({
+        effort: "xhigh",
+        model_by: { from: "$inputs.tier", cases: { deep: { model: "gpt-live" } } },
+      }),
+      new Map([["copilot", [{ id: "gpt-live", supportedReasoningEfforts: ["low", "high"] }]]]),
+    );
+    expect(result.violations.map((v) => v.kind)).toContain("effort");
+  });
+
+  test("a static pin every case replaces is not reported", () => {
+    const result = check(
+      makeWorkflow({
+        model: "gpt-retired",
+        model_by: {
+          from: "$inputs.tier",
+          cases: { deep: { model: "gpt-live" }, std: { model: "gpt-live" } },
+        },
+      }),
+      LIVE,
+    );
+    expect(result.violations).toEqual([]);
+  });
+
+  test("a static pin a case leaves in place is still reported", () => {
+    const result = check(
+      makeWorkflow({
+        model: "gpt-retired",
+        // `std` sets only effort, so the static pin is reachable through it.
+        model_by: {
+          from: "$inputs.tier",
+          cases: { deep: { model: "gpt-live" }, std: { effort: "low" } },
+        },
+      }),
+      LIVE,
+    );
+    expect(result.violations.map((v) => v.value)).toContain("gpt-retired");
+  });
+
+  test("an effort-only case is judged against the model it inherits", () => {
+    const result = check(
+      makeWorkflow({
+        model: "gpt-live",
+        model_by: { from: "$inputs.tier", cases: { deep: { effort: "xhigh" } } },
+      }),
+      new Map([["copilot", [{ id: "gpt-live", supportedReasoningEfforts: ["low", "high"] }]]]),
+    );
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.kind).toBe("effort");
+    expect(result.violations[0]?.caseKey).toBe("deep");
+  });
+
+  test("a case's plain model does not mask a static model_by_provider pin", () => {
+    // applyModelCase leaves model_by_provider in place, and the prompt handler
+    // gives it precedence, so the retired per-provider pin is what runs.
+    const result = check(
+      makeWorkflow({
+        model_by_provider: { copilot: "gpt-retired" },
+        model_by: { from: "$inputs.tier", cases: { deep: { model: "gpt-live" } } },
+      }),
+      LIVE,
+    );
+    expect(result.violations.map((v) => v.value)).toEqual(["gpt-retired"]);
+  });
+
+  test("a static effort every case replaces is not reported", () => {
+    const result = check(
+      makeWorkflow({
+        model: "gpt-live",
+        effort: "xhigh",
+        model_by: {
+          from: "$inputs.tier",
+          cases: { deep: { effort: "high" }, std: { effort: "low" } },
+        },
+      }),
+      new Map([["copilot", [{ id: "gpt-live", supportedReasoningEfforts: ["low", "high"] }]]]),
+    );
+    expect(result.violations).toEqual([]);
+  });
+
+  test("an effort-only case on an inherited model is still judged", () => {
+    const providers = new Map([
+      [
+        "copilot",
+        {
+          defaultModel: "gpt-default",
+          models: ["gpt-default"],
+          modelClasses: { fast: "gpt-default", balanced: "gpt-default", deep: "gpt-default" },
+        },
+      ],
+    ]);
+    const workflow = makeWorkflow({
+      model_by: { from: "$inputs.tier", cases: { deep: { effort: "xhigh" } } },
+    });
+    const result = checkWorkflowCatalog(workflow, {
+      providers,
+      defaultProviderId: "copilot",
+      liveCatalog: new Map([
+        ["copilot", [{ id: "gpt-default", supportedReasoningEfforts: ["low", "high"] }]],
+      ]),
+    });
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.kind).toBe("effort");
+    expect(result.violations[0]?.caseKey).toBe("deep");
+  });
+
+  test("a case naming a model class is judged on what the class resolves to", () => {
+    // Mirrors the static path, which checks effort against the resolved model
+    // whether or not the pin was a class.
+    const providers = new Map([
+      [
+        "copilot",
+        {
+          defaultModel: "gpt-default",
+          models: ["gpt-deep", "gpt-default"],
+          modelClasses: { fast: "gpt-default", balanced: "gpt-default", deep: "gpt-deep" },
+        },
+      ],
+    ]);
+    const result = checkWorkflowCatalog(
+      makeWorkflow({
+        model_by: { from: "$inputs.tier", cases: { deep: { model: "deep", effort: "xhigh" } } },
+      }),
+      {
+        providers,
+        defaultProviderId: "copilot",
+        liveCatalog: new Map([
+          ["copilot", [{ id: "gpt-deep", supportedReasoningEfforts: ["low", "high"] }]],
+        ]),
+      },
+    );
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.kind).toBe("effort");
+    expect(result.violations[0]?.reason).toContain("gpt-deep");
+  });
+
+  test("a case that drops the provider from model_by_provider is judged on the fallback", () => {
+    // applyModelCase replaces the whole map, so the node's own resolution names
+    // a pin the case removed.
+    const providers = new Map([
+      [
+        "copilot",
+        {
+          defaultModel: "gpt-default",
+          models: ["gpt-pinned", "gpt-default"],
+          modelClasses: { fast: "gpt-default", balanced: "gpt-default", deep: "gpt-default" },
+        },
+      ],
+    ]);
+    const result = checkWorkflowCatalog(
+      makeWorkflow({
+        model_by_provider: { copilot: "gpt-pinned" },
+        model_by: {
+          from: "$inputs.tier",
+          cases: { deep: { model_by_provider: { claude: "other" }, effort: "xhigh" } },
+        },
+      }),
+      {
+        providers,
+        defaultProviderId: "copilot",
+        liveCatalog: new Map([
+          [
+            "copilot",
+            [
+              { id: "gpt-pinned", supportedReasoningEfforts: ["low", "high", "xhigh"] },
+              { id: "gpt-default", supportedReasoningEfforts: ["low", "high"] },
+            ],
+          ],
+        ]),
+      },
+    );
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.kind).toBe("effort");
+    expect(result.violations[0]?.reason).toContain("gpt-default");
+  });
+
+  test("an unreachable provider reports not-checked rather than violations", () => {
+    const result = check(
+      makeWorkflow({
+        model_by: { from: "$inputs.tier", cases: { deep: { model: "gpt-retired" } } },
+      }),
+      new Map([["copilot", null]]),
+    );
+    expect(result.violations).toEqual([]);
+    expect(result.notChecked).toEqual(["copilot"]);
+  });
+});
+
 describe("formatPreflightViolations", () => {
   test("formats violations and unavailable providers deterministically", () => {
     expect(
