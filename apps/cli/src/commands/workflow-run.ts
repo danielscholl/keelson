@@ -8,7 +8,13 @@ import type { WorkflowFrame } from "@keelson/shared";
 import type { RunStreamEvent } from "@keelson/workflows";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import { listProjects } from "../http/projects-client.ts";
-import { attachRun, HttpError, isServerDownError, startRun } from "../http/workflow-client.ts";
+import {
+  attachRun,
+  getRun,
+  HttpError,
+  isServerDownError,
+  startRun,
+} from "../http/workflow-client.ts";
 import {
   MemoryRequiresServerError,
   runHeadless,
@@ -223,6 +229,23 @@ async function runViaHttp(
       { json },
     );
     process.exit(EXIT_FAIL);
+  }
+  if (terminalStatus === "failed") {
+    const detail = await getRun(baseUrl, runId);
+    const error =
+      detail !== null &&
+      typeof detail === "object" &&
+      "run" in detail &&
+      detail.run !== null &&
+      typeof detail.run === "object" &&
+      "error" in detail.run &&
+      typeof detail.run.error === "string"
+        ? detail.run.error
+        : undefined;
+    if (error?.startsWith("preflight failed:\n")) {
+      emit({ error, code: "PREFLIGHT_FAILED" }, { json });
+      process.exit(EXIT_FAIL);
+    }
   }
   if (json) {
     emit(

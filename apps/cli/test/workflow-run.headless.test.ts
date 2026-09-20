@@ -144,6 +144,25 @@ describe("runHeadless (in-process executor)", () => {
     expect(result.summary.status).toBe("succeeded");
   });
 
+  test("reports a provider whose live catalog was not checked", async () => {
+    process.env.KEELSON_WORKFLOW_PROVIDER = "offline";
+    const events: RunStreamEvent[] = [];
+
+    const result = await runHeadless({
+      name: "preflight-unavailable",
+      inputs: {},
+      cwd: process.cwd(),
+      workflowsDir: FIXTURES,
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(result.summary.status).toBe("failed");
+    expect(events).toContainEqual({
+      type: "run_warning",
+      message: "preflight not checked: offline",
+    });
+  });
+
   test("--no-preflight reaches the in-process runner", async () => {
     const home = mkdtempSync(join(tmpdir(), "keelson-preflight-cli-"));
     try {

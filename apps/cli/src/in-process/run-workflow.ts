@@ -227,6 +227,12 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
       modelClassOverride,
       liveCatalog,
     });
+    if (result.notChecked.length > 0 && result.violations.length === 0) {
+      opts.onEvent?.({
+        type: "run_warning",
+        message: `preflight not checked: ${result.notChecked.join(", ")}`,
+      });
+    }
     if (result.violations.length > 0) {
       await disposeAllProviders();
       throw new WorkflowPreflightError(`preflight failed:\n${formatPreflightViolations(result)}`);

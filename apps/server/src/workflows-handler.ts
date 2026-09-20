@@ -3041,6 +3041,13 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       modelClassOverride,
       liveCatalog,
     });
+    if (result.notChecked.length > 0 && result.violations.length === 0) {
+      subscribers.broadcast(runId, {
+        type: "run_warning",
+        nodeId: null,
+        message: `preflight not checked: ${result.notChecked.join(", ")}`,
+      });
+    }
     if (result.violations.length > 0) {
       const error = `preflight failed:\n${formatPreflightViolations(result)}`;
       store.updateRunStatus({

@@ -60,6 +60,7 @@ interface Rig {
   app: Hono;
   store: WorkflowStore;
   projectsStore: ProjectsStore;
+  subscribers: ReturnType<typeof createWorkflowSubscribers>;
   // Pre-created project so test bodies can target a real id without setup
   // churn. Suite-wide single project keeps the assertion surface small;
   // tests that exercise project-scoping wire their own.
@@ -86,14 +87,20 @@ function makeRig(promptHandler?: ReturnType<typeof makePromptHandler>): Rig {
     listProjects: () => projectsStore.list(),
   });
   const app = new Hono();
-  workflowsRoutes(app, {
-    catalog,
-    store,
-    conversationStore,
-    projectsStore,
-    ...(promptHandler !== undefined ? { promptHandler } : {}),
-  });
-  return { app, store, projectsStore, defaultProjectId: defaultProject.id };
+  const subscribers = createWorkflowSubscribers();
+  workflowsRoutes(
+    app,
+    {
+      catalog,
+      store,
+      conversationStore,
+      projectsStore,
+      ...(promptHandler !== undefined ? { promptHandler } : {}),
+    },
+    createActiveRuns(),
+    subscribers,
+  );
+  return { app, store, projectsStore, subscribers, defaultProjectId: defaultProject.id };
 }
 
 function writeWorkflow(filename: string, body: string): void {
@@ -1481,15 +1488,23 @@ nodes:
     prompt: run
 `,
       );
-      const { app } = makeRig(makeSuccessfulPromptHandler());
+      const { app, subscribers } = makeRig(makeSuccessfulPromptHandler());
 
       const startRes = await app.fetch(
         postRun("http://test/api/workflows/preflight-offline/runs", { inputs: {} }),
       );
       const { runId } = (await startRes.json()) as { runId: string };
+      const frames: Array<{ type: string; nodeId?: string | null; message?: string }> = [];
+      const unsubscribe = subscribers.onFrame(runId, (frame) => frames.push(frame));
       const run = await pollUntilTerminal(app, runId);
+      unsubscribe();
 
       expect(run.status).toBe("succeeded");
+      expect(frames).toContainEqual({
+        type: "run_warning",
+        nodeId: null,
+        message: "preflight not checked: offline-catalog",
+      });
     } finally {
       unregisterProvider("offline-catalog");
     }
