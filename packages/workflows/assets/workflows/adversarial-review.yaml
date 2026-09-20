@@ -284,8 +284,8 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gemini-3.1-pro-preview
-    effort: xhigh
+      copilot: grok-4.6
+    effort: high
     idle_timeout: 1800000
     allowed_tools: []
     prompt: |
