@@ -9,6 +9,7 @@ import { join } from "node:path";
 import {
   gatewayConfigSchema,
   gatewayCredentialServiceId,
+  gatewayCredentialTransportSafe,
   loadKeelsonConfig,
   updateKeelsonConfigGateways,
 } from "../src/config.ts";
@@ -48,6 +49,24 @@ describe("gatewayCredentialServiceId", () => {
     expect(gatewayCredentialServiceId("ollama")).toBe("gateway-ollama");
     expect(gatewayCredentialServiceId("open-router")).toBe("gateway-open-router");
   });
+});
+
+describe("gatewayCredentialTransportSafe", () => {
+  test.each([
+    "https://remote.example/v1",
+    "http://localhost:11434/v1",
+    "http://127.0.0.1/v1",
+    "http://[::1]/v1",
+  ])("accepts %s", (baseUrl) => {
+    expect(gatewayCredentialTransportSafe(baseUrl)).toBe(true);
+  });
+
+  test.each(["http://remote.example/v1", "ftp://remote.example/v1", "not a url"])(
+    "rejects %s",
+    (baseUrl) => {
+      expect(gatewayCredentialTransportSafe(baseUrl)).toBe(false);
+    },
+  );
 });
 
 describe("updateKeelsonConfigGateways", () => {
