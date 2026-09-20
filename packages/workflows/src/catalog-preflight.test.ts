@@ -24,12 +24,19 @@ function makeWorkflow(
   node: Record<string, unknown>,
   fields: Record<string, unknown> = {},
 ): WorkflowDefinition {
+  return makeWorkflowWithNodes([{ id: "review", prompt: "Review.", ...node }], fields);
+}
+
+function makeWorkflowWithNodes(
+  nodes: Array<Record<string, unknown>>,
+  fields: Record<string, unknown> = {},
+): WorkflowDefinition {
   return workflowDefinitionSchema.parse({
     name: "preflight-test",
     description: "Exercises live catalog preflight.",
     provider: "copilot",
     ...fields,
-    nodes: [{ id: "review", prompt: "Review.", ...node }],
+    nodes,
   });
 }
 
@@ -178,6 +185,98 @@ describe("checkWorkflowCatalog", () => {
     const result = check(
       makeWorkflow({ model: "current-model", effort: "xhigh" }),
       new Map([["copilot", [{ id: "current-model" }]]]),
+    );
+
+    expect(result).toEqual({ violations: [], notChecked: [] });
+  });
+
+  test("flags a command node's retired provider-specific model", () => {
+    const result = check(
+      makeWorkflowWithNodes([
+        {
+          id: "command-review",
+          command: "review",
+          model_by_provider: { copilot: "retired-model" },
+        },
+      ]),
+      new Map([["copilot", [{ id: "current-model" }]]]),
+    );
+
+    expect(result.violations).toEqual([
+      {
+        nodeId: "command-review",
+        provider: "copilot",
+        kind: "model",
+        value: "retired-model",
+        reason: "model 'retired-model' is not in copilot's live catalog",
+      },
+    ]);
+  });
+
+  test("checks every model_by branch on a command node", () => {
+    const result = check(
+      makeWorkflowWithNodes([
+        {
+          id: "command-review",
+          command: "review",
+          model_by: {
+            from: "$inputs.tier",
+            cases: {
+              retired: { model: "retired-model" },
+              excessive: { model: "current-model", effort: "xhigh" },
+            },
+          },
+        },
+      ]),
+      new Map([
+        ["copilot", [{ id: "current-model", supportedReasoningEfforts: ["low", "high"] }]],
+      ]),
+    );
+
+    expect(result.violations).toMatchObject([
+      { nodeId: "command-review", kind: "model", value: "retired-model", caseKey: "retired" },
+      { nodeId: "command-review", kind: "effort", value: "xhigh", caseKey: "excessive" },
+    ]);
+  });
+
+  test("checks a loop node's inherited workflow model and effort", () => {
+    const loop = {
+      id: "loop-review",
+      loop: { prompt: "Review again.", until: "DONE", max_iterations: 2 },
+    };
+    const modelResult = check(
+      makeWorkflowWithNodes([loop], { model: "retired-model" }),
+      new Map([["copilot", [{ id: "current-model" }]]]),
+    );
+    const effortResult = check(
+      makeWorkflowWithNodes([loop], { model: "current-model", effort: "xhigh" }),
+      new Map([
+        ["copilot", [{ id: "current-model", supportedReasoningEfforts: ["low", "high"] }]],
+      ]),
+    );
+
+    expect(modelResult.violations).toMatchObject([
+      { nodeId: "loop-review", kind: "model", value: "retired-model" },
+    ]);
+    expect(effortResult.violations).toMatchObject([
+      { nodeId: "loop-review", kind: "effort", value: "xhigh" },
+    ]);
+  });
+
+  test("continues to exclude deterministic and control nodes", () => {
+    const result = check(
+      makeWorkflowWithNodes(
+        [
+          { id: "bash", bash: "true" },
+          { id: "script", script: "console.log('done')", runtime: "bun" },
+          { id: "approval", approval: { message: "Continue?" } },
+          { id: "cancel", cancel: "Stop." },
+        ],
+        { model: "retired-model", effort: "xhigh" },
+      ),
+      new Map([
+        ["copilot", [{ id: "current-model", supportedReasoningEfforts: ["low", "high"] }]],
+      ]),
     );
 
     expect(result).toEqual({ violations: [], notChecked: [] });
