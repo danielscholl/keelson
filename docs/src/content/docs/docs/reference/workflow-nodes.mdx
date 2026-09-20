@@ -273,9 +273,12 @@ Provider selection follows this order:
 `--provider` wins over the environment default. Node and workflow pins also
 override that default.
 
-Model selection starts with the node's `model`, then the workflow's `model`. A
-`model_by_provider` entry for the effective provider takes precedence, and a
-[`model_by`](#model_by) case that matched replaces both. A model
+A matched [`model_by`](#model_by) case is applied first, replacing only the
+fields it declares. Model selection then runs as usual: the node's `model`, then
+the workflow's `model`, with a `model_by_provider` entry for the effective
+provider taking precedence over both. A case that sets `model` but no
+`model_by_provider` therefore leaves a static per-provider entry in place, and
+that entry still wins. A model
 tier resolves through the operator's configured class override, the provider's
 `modelClasses`, then the provider default. `auto` also uses the provider default.
 For prompt nodes, a new run started from the CLI, the SPA, or the API checks
@@ -327,6 +330,11 @@ resolves when the node starts, and its value is matched against `cases` exactly.
 Each case sets any of `model`, `model_by_provider` and `effort`; whatever it
 sets replaces the node's static value, and whatever it omits leaves that value
 alone, so an effort-only case keeps the node's model.
+
+Because a case replaces only what it declares, a case that sets `model` on a
+node that also pins `model_by_provider` does **not** displace that map, and the
+map still wins for its provider. Set `model_by_provider` in the case when the
+branch needs to override a per-provider pin.
 
 **An unmatched value fails the node.** Declare `default`, naming one of the
 cases, when a fallback is wanted. A node silently running on a model nobody

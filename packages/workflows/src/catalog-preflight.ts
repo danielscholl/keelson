@@ -97,11 +97,17 @@ export function checkWorkflowCatalog(
       for (const [caseKey, branch] of Object.entries(node.model_by.cases)) {
         const dispatched = applyModelCase(node, branch) as typeof node;
         const caseLiteral = pinnedLiteralFor(dispatched, workflow, provider);
+        // A branch naming no model of its own runs on the node's resolved model,
+        // so its effort is judged against that. A branch naming a model class is
+        // left alone, the same way the static path leaves one alone.
+        const branchNamesModel =
+          branch.model !== undefined || branch.model_by_provider?.[provider] !== undefined;
+        const effectiveModel = caseLiteral ?? (branchNamesModel ? undefined : resolved.model);
         const listed =
-          caseLiteral === undefined
+          effectiveModel === undefined
             ? undefined
-            : live.find((candidate) => candidate.id === caseLiteral);
-        if (caseLiteral !== undefined && listed === undefined) {
+            : live.find((candidate) => candidate.id === effectiveModel);
+        if (caseLiteral !== undefined && live.every((c) => c.id !== caseLiteral)) {
           violations.push({
             nodeId: node.id,
             provider,
@@ -123,7 +129,7 @@ export function checkWorkflowCatalog(
             provider,
             kind: "effort",
             value: caseEffort,
-            reason: `effort '${caseEffort}' (model_by case '${caseKey}') exceeds ${provider}/${caseLiteral ?? resolved.model} (supports ${caseSupported.join(", ")})`,
+            reason: `effort '${caseEffort}' (model_by case '${caseKey}') exceeds ${provider}/${effectiveModel} (supports ${caseSupported.join(", ")})`,
             caseKey,
           });
         }

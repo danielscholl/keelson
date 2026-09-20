@@ -142,8 +142,8 @@ const AGENT_ID_REGEX = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 /**
  * One branch of a `model_by` case map: the model and/or effort a node uses when
  * the selector resolves to this key. Closed rather than free substitution so the
- * set of models a workflow can reach stays statically known — validation, the
- * live-catalog preflight and the usage estimate all read it.
+ * set of models a workflow can reach stays statically known, which validation
+ * and the live-catalog preflight both rely on.
  */
 export const modelCaseSchema = z
   .object({

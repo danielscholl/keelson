@@ -260,7 +260,6 @@ ${extra}`,
     expect(summary.nodes.investigate.state).toBe("failed");
     const done = events.find((e) => e.type === "node_done" && e.nodeId === "investigate");
     expect(done?.type === "node_done" ? done.result.error : undefined).toContain("surprise");
-    // The node never ran, so the static `model: fast` was never used.
     expect(seen.some((s) => s.nodeId === "investigate")).toBe(false);
     expect(events.some((e) => e.type === "run_warning" && /matches no case/.test(e.message))).toBe(
       true,

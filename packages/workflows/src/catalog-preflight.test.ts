@@ -341,6 +341,42 @@ describe("checkWorkflowCatalog — model_by cases", () => {
     expect(result.violations).toEqual([]);
   });
 
+  test("an effort-only case on an inherited model is still judged", () => {
+    const providers = new Map([
+      [
+        "copilot",
+        {
+          defaultModel: "gpt-default",
+          models: ["gpt-default"],
+          modelClasses: { fast: "gpt-default", balanced: "gpt-default", deep: "gpt-default" },
+        },
+      ],
+    ]);
+    const workflow = makeWorkflow({
+      model_by: { from: "$inputs.tier", cases: { deep: { effort: "xhigh" } } },
+    });
+    const result = checkWorkflowCatalog(workflow, {
+      providers,
+      defaultProviderId: "copilot",
+      liveCatalog: new Map([
+        ["copilot", [{ id: "gpt-default", supportedReasoningEfforts: ["low", "high"] }]],
+      ]),
+    });
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.kind).toBe("effort");
+    expect(result.violations[0]?.caseKey).toBe("deep");
+  });
+
+  test("a case naming a model class is not judged on effort", () => {
+    const result = check(
+      makeWorkflow({
+        model_by: { from: "$inputs.tier", cases: { deep: { model: "deep", effort: "xhigh" } } },
+      }),
+      new Map([["copilot", [{ id: "gpt-live", supportedReasoningEfforts: ["low"] }]]]),
+    );
+    expect(result.violations).toEqual([]);
+  });
+
   test("an unreachable provider reports not-checked rather than violations", () => {
     const result = check(
       makeWorkflow({
