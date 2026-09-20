@@ -1,11 +1,7 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
-import {
-  buildTopologicalLayers,
-  collectTransitiveDependents,
-  validateDagShape,
-} from "./graph.ts";
+import { buildTopologicalLayers, collectTransitiveDependents, validateDagShape } from "./graph.ts";
 import type { DagNode } from "./schema/index.ts";
 
 function p(id: string, depends_on?: string[]): DagNode {
