@@ -94,7 +94,7 @@
       "name": "@keelson/providers",
       "version": "0.104.0",
       "dependencies": {
-        "@github/copilot": "^1.0.80",
+        "@github/copilot": "1.0.83",
         "@github/copilot-sdk": "1.0.13",
         "@keelson/shared": "workspace:*",
         "zod": "^4.4.3",
