@@ -42,6 +42,7 @@ export interface WorkflowRunOptions {
   // in-place when the YAML defaulted to worktree (`false`). Undefined →
   // honor the workflow's YAML default.
   worktree?: boolean;
+  preflight?: boolean;
 }
 
 function parseInputs(pairs: readonly string[]): Record<string, string> {
@@ -160,6 +161,7 @@ async function runViaHttp(
     workingDir?: string;
     isolation?: "worktree" | "none";
     provider?: string;
+    preflight?: boolean;
   },
 ): Promise<never> {
   const projectId =
@@ -170,6 +172,7 @@ async function runViaHttp(
     ...(body.workingDir !== undefined ? { workingDir: body.workingDir } : {}),
     ...(body.isolation !== undefined ? { isolation: body.isolation } : {}),
     ...(body.provider !== undefined ? { provider: body.provider } : {}),
+    ...(body.preflight === false ? { preflight: false } : {}),
   });
   // Echo the run's target and id up front so the human-mode operator can see
   // what the run is acting against before frames start arriving. The header
@@ -267,6 +270,7 @@ async function runInProcess(
       cwd,
       provider: opts.provider,
       isolation,
+      ...(opts.preflight !== undefined ? { preflight: opts.preflight } : {}),
       onEvent: (ev) => {
         if (watch) events.push(ev);
         if (!opts.json && watch) {
@@ -363,6 +367,7 @@ export async function runWorkflowRun(name: string, opts: WorkflowRunOptions): Pr
         ...(cwd !== undefined ? { workingDir: cwd } : {}),
         ...(isolation !== undefined ? { isolation } : {}),
         ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
+        ...(opts.preflight === false ? { preflight: false } : {}),
       });
     } catch (err) {
       if (err instanceof ProjectNotFoundError) {
