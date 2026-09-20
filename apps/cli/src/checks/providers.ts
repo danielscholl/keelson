@@ -73,7 +73,7 @@ export function runProvidersCheck(deps: ProvidersDeps = {}): CategoryResult {
         name: "copilot CLI",
         status: "warn",
         detail: `copilot CLI unresolved (@github/copilot ${version}): ${diagnostics.error ?? "unknown resolution error"}`,
-        hint: "@github/copilot 1.0.81+ changed its platform package exports; update or reinstall Keelson before using Copilot",
+        hint: "reinstall Keelson to restore the bundled CLI, or set COPILOT_CLI_PATH to a working Copilot CLI",
       });
     }
   }
