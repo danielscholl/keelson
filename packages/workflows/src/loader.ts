@@ -30,6 +30,7 @@ import * as path from "node:path";
 import { parse as parseYamlString } from "yaml";
 import type { z } from "zod";
 import { validateDagShape } from "./graph.ts";
+import { ENV_VALUE_MAX_CHARS } from "./handlers/subprocess.ts";
 import {
   BASH_NODE_AI_FIELDS,
   convergeConfigSchema,
@@ -65,6 +66,7 @@ export interface WorkflowLoadWarning {
     | "ignored_capability"
     | "invalid_field_value"
     | "interactive_loop_in_non_interactive_workflow"
+    | "json_parse_on_capped_env_output"
     // Fields the schema accepts and the executor *can* honor,
     // but only when paired with the claude provider. Emitted at load
     // time so the warning surfaces even if the workflow never runs.
@@ -220,7 +222,41 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
     });
   }
 
+  const shellBody = isScriptNode(node)
+    ? node.script
+    : "bash" in node && typeof node.bash === "string"
+      ? node.bash
+      : undefined;
+  if (shellBody !== undefined) {
+    const flagged = findJsonParseOnEnvOutput(shellBody);
+    if (flagged !== null) {
+      ctx.warnings.push({
+        filename: ctx.filename,
+        nodeId: node.id,
+        kind: "json_parse_on_capped_env_output",
+        message: `${flagged} is capped at ${ENV_VALUE_MAX_CHARS / 1024} KiB and head+tail truncated past it, which corrupts JSON; read ${flagged}_FILE instead`,
+      });
+    }
+  }
+
   return node;
+}
+
+// Greedy `[A-Za-z0-9_]+` plus the lookahead keeps a node id containing
+// underscores matching while `_OUTPUT_FILE` and `_OUTPUT_TRUNCATED` do not.
+const BARE_ENV_OUTPUT_REF = /KEELSON_NODE_[A-Za-z0-9_]+_OUTPUT(?![A-Z_])/;
+const JSON_PARSER_CALL = /\bJSON\.parse\b|\bjson\.loads?\b|\bjq\b/;
+
+// Scoped to one logical line on purpose: a body that assigns the var and parses
+// it further down is the shape bundled workflows already guard with a
+// `_FILE`-first conditional, and flagging those would bury the real hits.
+function findJsonParseOnEnvOutput(body: string): string | null {
+  for (const line of body.replace(/\\\r?\n\s*/g, " ").split(/\r?\n/)) {
+    if (!JSON_PARSER_CALL.test(line)) continue;
+    const bare = line.match(BARE_ENV_OUTPUT_REF);
+    if (bare !== null) return bare[0];
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

@@ -983,6 +983,60 @@ nodes:
       result.warnings.some((w) => w.kind === "interactive_loop_in_non_interactive_workflow"),
     ).toBe(true);
   });
+
+  test("warns when a shell body hands a capped _OUTPUT var to a JSON parser", () => {
+    const yaml = `
+name: json-from-env
+description: parses an upstream output straight from the env channel
+nodes:
+  - id: gather
+    prompt: emit json
+  - id: count
+    depends_on: [gather]
+    runtime: bun
+    script: |
+      const r = JSON.parse(process.env.KEELSON_NODE_gather_OUTPUT)
+      console.log(r.length)
+`;
+    const result = parseWorkflow(yaml, "json-env.yaml");
+    expect(result.error).toBeNull();
+    const warning = result.warnings.find((w) => w.kind === "json_parse_on_capped_env_output");
+    expect(warning?.nodeId).toBe("count");
+    expect(warning?.message).toContain("KEELSON_NODE_gather_OUTPUT_FILE");
+  });
+
+  test("reading the _FILE companion instead does not warn", () => {
+    const yaml = `
+name: json-from-file
+description: parses an upstream output from the spill file
+nodes:
+  - id: gather
+    prompt: emit json
+  - id: count
+    depends_on: [gather]
+    bash: |
+      jq '.|length' "$KEELSON_NODE_gather_OUTPUT_FILE"
+`;
+    const result = parseWorkflow(yaml, "json-file.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "json_parse_on_capped_env_output")).toBe(false);
+  });
+
+  test("a shell body that reads _OUTPUT without parsing JSON does not warn", () => {
+    const yaml = `
+name: plain-env-read
+description: echoes an upstream output
+nodes:
+  - id: gather
+    prompt: emit text
+  - id: show
+    depends_on: [gather]
+    bash: 'printf "%s\\n" "$KEELSON_NODE_gather_OUTPUT"'
+`;
+    const result = parseWorkflow(yaml, "plain-env.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "json_parse_on_capped_env_output")).toBe(false);
+  });
 });
 
 describe("discoverWorkflows", () => {

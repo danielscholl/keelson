@@ -245,7 +245,8 @@ const PARENT_ENV: Readonly<Record<string, string>> = (() => {
 // caps a single "KEY=value" string at 128KiB — failing posix_spawn with E2BIG.
 // 16KiB/value keeps a 25-node closure near 400KiB worst case. Truncation keeps
 // head + tail (leaders like `PLAN_FILE=` and trailers like `VALIDATION_STATUS:`
-// are what bash nodes grep); the full text is spilled to an artifacts file.
+// are what bash nodes grep); the full text is always in the artifacts file, so
+// structured output is read from there rather than the variable.
 export const ENV_VALUE_MAX_CHARS = 16 * 1024;
 const ENV_VALUE_HEAD_CHARS = 8 * 1024;
 const ENV_VALUE_TAIL_CHARS = 8 * 1024;
@@ -261,11 +262,13 @@ function truncateEnvValue(value: string, note: string): string {
  * chars in keys/node ids are normalized to `_` so the resulting names are
  * valid POSIX env-var identifiers.
  *
- * Values over `ENV_VALUE_MAX_CHARS` are head+tail truncated with an inline
- * marker. A truncated node output is additionally spilled in full to
- * `<artifactsDir>/node-outputs/<id>.txt`, with the path published as
- * `KEELSON_NODE_<id>_OUTPUT_FILE` (omitted when there is no artifacts dir or
- * the write fails — the truncated env value is always still set).
+ * Every node output is written in full to `<artifactsDir>/node-outputs/<id>.txt`
+ * and the path published as `KEELSON_NODE_<id>_OUTPUT_FILE`, so a consumer can
+ * read the file unconditionally (omitted only when there is no artifacts dir or
+ * the write fails). Values over `ENV_VALUE_MAX_CHARS` are additionally head+tail
+ * truncated in the env value with an inline marker, and flagged with
+ * `KEELSON_NODE_<id>_OUTPUT_TRUNCATED=1` so a consumer can fail with a clear
+ * message instead of parsing a value with a marker in the middle.
  */
 export function buildSubprocessEnv(
   inputs: Readonly<Record<string, string>>,
@@ -291,12 +294,11 @@ export function buildSubprocessEnv(
   for (const [id, out] of upstream.entries()) {
     const full = out.output ?? "";
     const name = `KEELSON_NODE_${envSafe(id)}_OUTPUT`;
-    // An inherited spill path must not outlive the output that created it.
+    // An inherited path or truncation flag must not outlive the output that
+    // produced it: a node reached without an artifacts dir would otherwise read
+    // a prior run's file.
     delete env[`${name}_FILE`];
-    if (full.length <= ENV_VALUE_MAX_CHARS) {
-      env[name] = full;
-      continue;
-    }
+    delete env[`${name}_TRUNCATED`];
     let fileNote = "";
     if (options?.artifactsDir !== undefined) {
       try {
@@ -307,11 +309,19 @@ export function buildSubprocessEnv(
         env[`${name}_FILE`] = spillPath;
         fileNote = `; full output at $${name}_FILE`;
       } catch {
-        // Spill is best-effort: an unwritable artifacts dir must not fail the
-        // node, and the truncated env value below still carries head + tail.
+        // Best-effort: an unwritable artifacts dir must not fail the node, and
+        // the env value below still carries the output (head + tail if capped).
       }
     }
-    env[name] = truncateEnvValue(full, `output truncated — ${full.length} chars total${fileNote}`);
+    if (full.length > ENV_VALUE_MAX_CHARS) {
+      env[`${name}_TRUNCATED`] = "1";
+      env[name] = truncateEnvValue(
+        full,
+        `output truncated — ${full.length} chars total${fileNote}`,
+      );
+    } else {
+      env[name] = full;
+    }
   }
   // Two env vars for the same path: `KEELSON_ARTIFACTS_DIR` is the prefixed
   // channel that matches the rest of our env contract (KEELSON_INPUTS_*,

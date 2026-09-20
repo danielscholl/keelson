@@ -183,6 +183,24 @@ so the model's text is always data and never code.
     depends_on: [fix-it]
 ```
 
+The variable is capped at 16 KiB and head+tail truncated past that, with a
+marker in the middle — fine for prose, fatal for JSON. Every output is also
+written in full to `KEELSON_NODE_<id>_OUTPUT_FILE`, which is always set, so
+structured output is read from the file:
+
+```yaml
+  - id: plan
+    prompt: "Return a JSON plan for: $ARGUMENTS"
+    output_format: { type: json_object }
+  - id: count-steps
+    bash: 'jq -r ".steps | length" "$KEELSON_NODE_plan_OUTPUT_FILE"'
+    depends_on: [plan]
+```
+
+`keelson workflow validate` warns when a shell body parses the capped variable
+directly. See [the env channel](../../reference/workflow-nodes/#data-flow) for
+the full table.
+
 ## Related
 
 - [Workflow nodes](../../reference/workflow-nodes/): the full schema, every

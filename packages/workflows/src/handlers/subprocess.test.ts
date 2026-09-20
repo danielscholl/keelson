@@ -226,6 +226,39 @@ describe("buildSubprocessEnv — env value cap (issue #442)", () => {
     }
   });
 
+  test("an under-cap output is still written to _FILE so a consumer can read it unconditionally", () => {
+    const dir = mkdtempSync(join(tmpdir(), "keelson-envcap-"));
+    try {
+      const small = '{"failures":[]}';
+      const env = buildSubprocessEnv({}, upstreamOf("run-tests", small), { artifactsDir: dir });
+      const spillPath = env.KEELSON_NODE_run_tests_OUTPUT_FILE as string;
+      expect(spillPath).toBe(join(dir, "node-outputs", "run_tests.txt"));
+      expect(readFileSync(spillPath, "utf8")).toBe(small);
+      expect(env.KEELSON_NODE_run_tests_OUTPUT).toBe(small);
+      expect(Object.hasOwn(env, "KEELSON_NODE_run_tests_OUTPUT_TRUNCATED")).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an over-cap output flags _TRUNCATED while _FILE holds the whole text", () => {
+    const dir = mkdtempSync(join(tmpdir(), "keelson-envcap-"));
+    try {
+      const env = buildSubprocessEnv({}, upstreamOf("validate", big), { artifactsDir: dir });
+      expect(env.KEELSON_NODE_validate_OUTPUT_TRUNCATED).toBe("1");
+      expect(readFileSync(env.KEELSON_NODE_validate_OUTPUT_FILE as string, "utf8")).toBe(big);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an inherited _TRUNCATED is cleared when the fresh output fits", () => {
+    const env = buildSubprocessEnv({}, upstreamOf("validate", "short"), {
+      parentEnv: { KEELSON_NODE_validate_OUTPUT_TRUNCATED: "1" },
+    });
+    expect(Object.hasOwn(env, "KEELSON_NODE_validate_OUTPUT_TRUNCATED")).toBe(false);
+  });
+
   test("oversized inputs and ARGUMENTS are capped the same way (no file spill)", () => {
     const env = buildSubprocessEnv({ ARGUMENTS: big, notes: big }, new Map<string, NodeOutput>());
     for (const key of ["KEELSON_ARGUMENTS", "KEELSON_INPUTS_ARGUMENTS", "KEELSON_INPUTS_notes"]) {
