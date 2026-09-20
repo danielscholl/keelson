@@ -228,9 +228,7 @@ describe("checkWorkflowCatalog", () => {
           },
         },
       ]),
-      new Map([
-        ["copilot", [{ id: "current-model", supportedReasoningEfforts: ["low", "high"] }]],
-      ]),
+      new Map([["copilot", [{ id: "current-model", supportedReasoningEfforts: ["low", "high"] }]]]),
     );
 
     expect(result.violations).toMatchObject([
@@ -250,9 +248,7 @@ describe("checkWorkflowCatalog", () => {
     );
     const effortResult = check(
       makeWorkflowWithNodes([loop], { model: "current-model", effort: "xhigh" }),
-      new Map([
-        ["copilot", [{ id: "current-model", supportedReasoningEfforts: ["low", "high"] }]],
-      ]),
+      new Map([["copilot", [{ id: "current-model", supportedReasoningEfforts: ["low", "high"] }]]]),
     );
 
     expect(modelResult.violations).toMatchObject([
@@ -274,9 +270,7 @@ describe("checkWorkflowCatalog", () => {
         ],
         { model: "retired-model", effort: "xhigh" },
       ),
-      new Map([
-        ["copilot", [{ id: "current-model", supportedReasoningEfforts: ["low", "high"] }]],
-      ]),
+      new Map([["copilot", [{ id: "current-model", supportedReasoningEfforts: ["low", "high"] }]]]),
     );
 
     expect(result).toEqual({ violations: [], notChecked: [] });
