@@ -340,6 +340,54 @@ describe("investigate finalizer", () => {
     expect(run().exitCode).toBe(0);
     expect(readFileSync(out, "utf8")).toBe(once);
     expect(once.match(/## Verification summary/g)).toHaveLength(1);
+    expect(once.match(/keelson:generated:investigate-verification-summary:start/g)).toHaveLength(1);
+    expect(once.match(/keelson:generated:investigate-verification-summary:end/g)).toHaveLength(1);
+  });
+
+  test("preserves matching headings in prose, quotes, and fenced examples", () => {
+    const collisionEvidence = evidence.replace(
+      "## Not checked",
+      `## Verification summary
+
+This is source evidence, not generated output.
+
+> ## Verification summary
+>
+> This heading is quoted evidence.
+
+\`\`\`md
+## Verification summary
+This heading is part of a fenced example.
+\`\`\`
+
+## Not checked`,
+    );
+    const { out, run } = runFinalizer(collisionEvidence);
+    expect(run().exitCode).toBe(0);
+    const finalized = readFileSync(out, "utf8");
+    expect(finalized).toContain("This is source evidence, not generated output.");
+    expect(finalized).toContain("> This heading is quoted evidence.");
+    expect(finalized).toContain("This heading is part of a fenced example.");
+    expect(finalized).toContain("- External deployment state.");
+    expect(finalized.match(/## Verification summary/g)).toHaveLength(4);
+  });
+
+  test("preserves trailing material when replacing its generated block", () => {
+    const { out, run } = runFinalizer(evidence);
+    expect(run().exitCode).toBe(0);
+    writeFileSync(out, `${readFileSync(out, "utf8")}\n## Follow-up evidence\n\nStill relevant.\n`);
+
+    expect(run().exitCode).toBe(0);
+    const replaced = readFileSync(out, "utf8");
+    expect(replaced).toContain("## Follow-up evidence\n\nStill relevant.");
+    expect(replaced.indexOf("Still relevant.")).toBeLessThan(
+      replaced.indexOf("<!-- keelson:generated:investigate-verification-summary:start -->"),
+    );
+    expect(
+      replaced.match(/keelson:generated:investigate-verification-summary:start/g),
+    ).toHaveLength(1);
+    expect(run().exitCode).toBe(0);
+    expect(readFileSync(out, "utf8")).toBe(replaced);
   });
 
   test.each([

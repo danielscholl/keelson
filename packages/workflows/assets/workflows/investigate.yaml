@@ -344,6 +344,10 @@ nodes:
         "not checked",
       ];
       const HEADING = "## Verification summary";
+      const GENERATED_START =
+        "<!-- keelson:generated:investigate-verification-summary:start -->";
+      const GENERATED_END =
+        "<!-- keelson:generated:investigate-verification-summary:end -->";
 
       function fail(message) {
         console.error(message);
@@ -367,6 +371,19 @@ nodes:
 
       function separator(row, width) {
         return row !== null && row.length === width && row.every((cell) => /^:?-{3,}:?$/.test(cell));
+      }
+
+      function removeGeneratedBlocks(value) {
+        let result = value;
+        const startMarker = `\n${GENERATED_START}\n${HEADING}\n`;
+        const endMarker = `\n${GENERATED_END}`;
+        while (true) {
+          const start = result.indexOf(startMarker);
+          if (start < 0) return result;
+          const end = result.indexOf(endMarker, start + startMarker.length);
+          if (end < 0) return result;
+          result = `${result.slice(0, start)}${result.slice(end + endMarker.length)}`;
+        }
       }
 
       const out = requiredEnv("KEELSON_INPUTS_out");
@@ -439,9 +456,7 @@ nodes:
         );
       }
 
-      const headingMarker = `\n${HEADING}\n`;
-      const headingIndex = text.lastIndexOf(headingMarker);
-      text = (headingIndex >= 0 ? text.slice(0, headingIndex) : text).trimEnd();
+      text = removeGeneratedBlocks(text).trimEnd();
 
       const runId = requiredEnv("KEELSON_RUN_ID").slice(0, 8);
       const date = new Date().toISOString().slice(0, 10);
@@ -454,5 +469,8 @@ nodes:
         `\`${investigatorProvider}\`; rows added or changed in this run were verified by ` +
         `\`${verifierModel}\` via \`${verifierProvider}\`.`;
       const tally = `Tally: ${VERDICTS.map((name) => `${name}=${counts[name]}`).join("; ")}.`;
-      writeFileSync(out, `${text}\n\n${HEADING}\n\n${attribution}\n\n${tally}\n`);
+      writeFileSync(
+        out,
+        `${text}\n\n${GENERATED_START}\n${HEADING}\n\n${attribution}\n\n${tally}\n${GENERATED_END}\n`,
+      );
       console.log(`Finalized ${claims} claims for run ${runId}: ${tally}`);
