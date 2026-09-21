@@ -193,6 +193,15 @@ export async function gitToplevel(path: string): Promise<string | null> {
   return top.length > 0 ? top : null;
 }
 
+/** The checked-out branch at `path`, or null for a detached HEAD or a non-repo. */
+export async function currentBranch(path: string): Promise<string | null> {
+  if (!existsSync(path)) return null;
+  const out = await runGit(["symbolic-ref", "--short", "-q", "HEAD"], path);
+  if (out.exitCode !== 0) return null;
+  const branch = out.stdout.trim();
+  return branch.length > 0 ? branch : null;
+}
+
 export interface CreateWorktreeOptions {
   /** Source repo (project's root path). */
   repoPath: string;

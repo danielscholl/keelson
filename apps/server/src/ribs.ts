@@ -24,6 +24,7 @@ import {
   type AcquireWorkspaceRequest,
   type AgentSummary,
   type CallToolResult,
+  type CancelRunResult,
   type CommandCompletion,
   type CommandInvokeResult,
   columnRegions,
@@ -45,6 +46,7 @@ import {
   type RibDocsSource,
   type RibProviderInfo,
   type RibRunEvent,
+  type RibRunStatus,
   type RibSurfaceDescriptor,
   type RibSurfaceRegion,
   type RibViewDescriptor,
@@ -56,6 +58,7 @@ import {
   ribViewDescriptorSchema,
   type SnapshotManager,
   type SnapshotValidator,
+  type StartWorkflowOptions,
   type ToolDefinition,
   type ToolReachability,
   type WorkflowDiscoveryNotice,
@@ -204,6 +207,16 @@ export interface ApplyRibsOptions {
     inputs: Record<string, string>,
     opts?: { cwd?: string },
   ) => Promise<RibWorkflowRunResult>;
+  // Back RibContext.startWorkflow / getRunStatus / cancelRun, each scoped to the
+  // calling rib. Optional so test rigs without a controller omit the seams.
+  readonly startWorkflow?: (
+    ribId: string,
+    name: string,
+    inputs?: Record<string, string>,
+    opts?: StartWorkflowOptions,
+  ) => Promise<{ runId: string }>;
+  readonly getRunStatus?: (ribId: string, runId: string) => Promise<RibRunStatus | undefined>;
+  readonly cancelRun?: (ribId: string, runId: string) => Promise<CancelRunResult>;
   // Backs RibContext.getMemory: a MemoryTools handle the rib uses to recall/writeback
   // governed memory rows. Rib-id-scoped for parity/future per-rib policy. Optional so
   // applyRibs unit tests without a memory store stay deterministic.
@@ -407,6 +420,19 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
               opts.getProviders!().map(({ id, displayName }) => ({ id, displayName })),
           }
         : {}),
+      ...(opts.startWorkflow
+        ? {
+            startWorkflow: (
+              name: string,
+              inputs?: Record<string, string>,
+              o?: StartWorkflowOptions,
+            ) => opts.startWorkflow!(rib.id, name, inputs, o),
+          }
+        : {}),
+      ...(opts.getRunStatus
+        ? { getRunStatus: (runId: string) => opts.getRunStatus!(rib.id, runId) }
+        : {}),
+      ...(opts.cancelRun ? { cancelRun: (runId: string) => opts.cancelRun!(rib.id, runId) } : {}),
       ...(opts.callTool
         ? {
             callTool: (

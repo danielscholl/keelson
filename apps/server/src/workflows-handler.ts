@@ -751,7 +751,8 @@ interface StartRunCoreDeps {
 // into the run path.
 function emitRibRunEvents(opts: {
   onRibRunEvent: (ribId: string, event: RibRunEvent) => void;
-  ribId: string;
+  ownerRibId: string | null;
+  startedByRibId: string | null;
   store: WorkflowStore;
   subscribers: WorkflowSubscribers;
   workflowName: string;
@@ -760,7 +761,21 @@ function emitRibRunEvents(opts: {
   startedAt: string;
   done: Promise<void>;
 }): void {
-  const { onRibRunEvent, ribId, store, subscribers, workflowName, runId, startedAt, done } = opts;
+  const {
+    onRibRunEvent,
+    startedByRibId,
+    store,
+    subscribers,
+    workflowName,
+    runId,
+    startedAt,
+    done,
+  } = opts;
+  const recipients = [...new Set([opts.ownerRibId, startedByRibId])].filter(
+    (id): id is string => id !== null,
+  );
+  if (recipients.length === 0) return;
+  const provenance = startedByRibId !== null ? { startedByRibId } : {};
   // Pristine snapshot taken before the hook can run, dealt as a fresh copy per
   // event — the executor's own inputs object is never exposed, and a hook that
   // mutates its copy can't leak into the run or the terminal event.
@@ -768,19 +783,41 @@ function emitRibRunEvents(opts: {
   // Reads nothing from the rejection value (even Error.name is writable): the
   // emitter chain ends in rib code that can read credentials, and this log
   // runs outside any runWithRedaction scope.
-  const warn = (): void => {
+  const warn = (ribId: string): void => {
     console.warn(`[workflows] onRibRunEvent(${ribId}) threw for run ${runId}`);
   };
   // An async callback is assignable to the void-returning seam, so guard the
-  // rejection path as well as the synchronous throw.
-  const emit = (event: RibRunEvent): void => {
-    try {
-      void Promise.resolve(onRibRunEvent(ribId, event)).catch(warn);
-    } catch {
-      warn();
+  // rejection path as well as the synchronous throw. Each recipient gets its own
+  // copy so one rib's hook can't mutate what the other observes.
+  const emit = (build: () => RibRunEvent): void => {
+    for (const ribId of recipients) {
+      try {
+        void Promise.resolve(onRibRunEvent(ribId, build())).catch(() => warn(ribId));
+      } catch {
+        warn(ribId);
+      }
     }
   };
-  emit({ workflowName, runId, status: "running", inputs: { ...inputsSnapshot }, startedAt });
+  const running = (): RibRunEvent => ({
+    workflowName,
+    runId,
+    status: "running",
+    inputs: { ...inputsSnapshot },
+    startedAt,
+    ...provenance,
+  });
+  emit(running);
+  const emitPaused = (pendingApproval: { nodeId: string; prompt: string }): void => {
+    emit(() => ({
+      workflowName,
+      runId,
+      status: "paused",
+      inputs: { ...inputsSnapshot },
+      startedAt,
+      pendingApproval: { ...pendingApproval },
+      ...provenance,
+    }));
+  };
   const readTerminal = (): RibRunEvent | null => {
     const run = store.getRun(runId);
     if (!run || !isTerminalStatus(run.status)) return null;
@@ -792,6 +829,7 @@ function emitRibRunEvents(opts: {
       startedAt: run.startedAt,
       ...(run.completedAt !== null ? { completedAt: run.completedAt } : {}),
       ...(run.error !== null ? { error: run.error } : {}),
+      ...provenance,
     };
   };
   // Deliver the terminal event synchronously inside the run_done broadcast —
@@ -804,12 +842,29 @@ function emitRibRunEvents(opts: {
   // awaits a final recompose between persisting and resolving `done`).
   let emitted = false;
   const unsubscribe = subscribers.onFrame(runId, (frame) => {
-    if (frame.type !== "run_done" || emitted) return;
+    if (emitted) return;
+    if (frame.type === "approval_awaiting") {
+      emitPaused({ nodeId: frame.nodeId, prompt: frame.message });
+      return;
+    }
+    if (frame.type === "approval_resolved") {
+      // Parallel gates: the run stays paused until the last one is answered, so
+      // the event has to follow the store rather than the frame.
+      const run = store.getRun(runId);
+      const remaining = run?.nodes.find((n) => n.status === "awaiting");
+      if (run?.status === "paused" && remaining) {
+        emitPaused({ nodeId: remaining.nodeId, prompt: remaining.outputText ?? "" });
+      } else {
+        emit(running);
+      }
+      return;
+    }
+    if (frame.type !== "run_done") return;
     const event = readTerminal();
     if (event === null) return;
     emitted = true;
     unsubscribe();
-    emit(event);
+    emit(() => ({ ...event, inputs: { ...inputsSnapshot } }));
   });
   const observeSettle = (): void => {
     unsubscribe();
@@ -817,7 +872,7 @@ function emitRibRunEvents(opts: {
     emitted = true;
     // Fallback for terminal paths that never broadcast a run_done frame.
     const event = readTerminal();
-    if (event !== null) emit(event);
+    if (event !== null) emit(() => ({ ...event, inputs: { ...inputsSnapshot } }));
   };
   void done.then(observeSettle, observeSettle);
 }
@@ -883,6 +938,7 @@ interface StartRunCoreParams {
   // bulk-delete by rib even after the rib is removed.
   origin?: WorkflowRunOrigin;
   ribId?: string | null;
+  startedByRibId?: string | null;
 }
 
 // Persisted skips are re-derived because a failure-cascade skip can change on
@@ -1093,6 +1149,7 @@ function startRunCore(
   } = params;
   const origin: WorkflowRunOrigin = params.origin ?? "manual";
   const ribId = params.ribId ?? null;
+  const startedByRibId = params.startedByRibId ?? null;
   const notebook = buildNotebookAdapter(
     projectNotebookStore,
     projectId,
@@ -1173,6 +1230,7 @@ function startRunCore(
       workingDir,
       origin,
       ribId,
+      startedByRibId,
       providerOverride: providerOverride ?? null,
       isolationEnabled: isolationOn,
     });
@@ -1258,10 +1316,11 @@ function startRunCore(
     releaseMutationLockOnSettle(runId, lockHandle, done);
     lockHandle = undefined;
   }
-  if (ribId !== null && deps.onRibRunEvent !== undefined) {
+  if (deps.onRibRunEvent !== undefined) {
     emitRibRunEvents({
       onRibRunEvent: deps.onRibRunEvent,
-      ribId,
+      ownerRibId: ribId,
+      startedByRibId,
       store,
       subscribers,
       workflowName: name,
@@ -1559,12 +1618,13 @@ function resumeRunCore(
     releaseMutationLockOnSettle(runId, lockHandle, done);
     lockHandle = undefined;
   }
-  // A resume re-launches the (already-stamped) run, so the owning rib sees the
-  // same running → terminal pair a fresh start emits.
-  if (run.ribId !== null && deps.onRibRunEvent !== undefined) {
+  // A resume re-launches the (already-stamped) run, so the owning and starting
+  // ribs see the same running → terminal pair a fresh start emits.
+  if (deps.onRibRunEvent !== undefined) {
     emitRibRunEvents({
       onRibRunEvent: deps.onRibRunEvent,
-      ribId: run.ribId,
+      ownerRibId: run.ribId,
+      startedByRibId: store.getRunStartedByRibId(runId),
       store,
       subscribers,
       workflowName: workflow.name,
@@ -1682,7 +1742,16 @@ export interface WorkflowController {
     // Defaults to 'manual'. The heartbeat passes 'scheduled' so producer runs
     // stay out of the default feed and get retention-pruned.
     origin?: WorkflowRunOrigin;
+    // Set only by RibContext.startWorkflow: stamps the run so the starting rib
+    // receives its events and may cancel it.
+    startedByRibId?: string;
   }): StartRunResult;
+  // Whether the named workflow declares `requiresProject`, resolved in the same
+  // scope startRun would use; undefined for an unknown name.
+  requiresProject(name: string, projectId?: string): boolean | undefined;
+  // Abort a live run. False when the run is unknown or already settled.
+  cancelRun(runId: string): boolean;
+  getRunStartedByRibId(runId: string): string | null;
   // The live run for an identical (name, workingDir, inputs), or undefined — the
   // heartbeat scheduler's pre-check so it won't re-fire a collector still running.
   findActiveRun(
@@ -1927,7 +1996,15 @@ export function createWorkflowController(
         }
       }
     },
-    startRun({ name, inputs, workingDir: rawWorkingDir, project, isolation, origin }) {
+    startRun({
+      name,
+      inputs,
+      workingDir: rawWorkingDir,
+      project,
+      isolation,
+      origin,
+      startedByRibId,
+    }) {
       try {
         if (!statSync(rawWorkingDir).isDirectory()) {
           return { ok: false, message: `workingDir is not a directory: ${rawWorkingDir}` };
@@ -1983,12 +2060,29 @@ export function createWorkflowController(
             preflight: resolveWorkflowPreflight(loadKeelsonConfig()),
             origin: origin ?? "manual",
             ribId: ribIdFor(catalog, workflow.name, scope),
+            ...(startedByRibId !== undefined ? { startedByRibId } : {}),
           },
         );
         return { ok: true, runId, conversationId };
       } catch (err) {
         return { ok: false, message: err instanceof Error ? err.message : String(err) };
       }
+    },
+
+    requiresProject(name, projectId) {
+      const workflow = catalog.get(name, projectId !== undefined ? { projectId } : undefined);
+      return workflow === undefined ? undefined : workflow.requiresProject === true;
+    },
+
+    cancelRun(runId) {
+      const entry = activeRuns.get(runId);
+      if (!entry) return false;
+      cancelActiveRun(entry);
+      return true;
+    },
+
+    getRunStartedByRibId(runId) {
+      return store.getRunStartedByRibId(runId);
     },
 
     findActiveRun(name, workingDir, inputs) {

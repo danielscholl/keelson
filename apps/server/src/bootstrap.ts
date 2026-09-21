@@ -32,6 +32,7 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
   CallToolResult,
+  CancelRunResult,
   CommandCompletion,
   CommandInvokeResult,
   MemoryTools,
@@ -51,8 +52,10 @@ import type {
   RibContext,
   RibProviderInfo,
   RibRunEvent,
+  RibRunStatus,
   RibWorkflowRunResult,
   SnapshotManager,
+  StartWorkflowOptions,
   ToolContext,
   ToolDefinition,
   WorkflowDiscoveryNotice,
@@ -64,18 +67,23 @@ import {
   BUILT_IN_PROVIDER_IDS,
   type CrossRibGrants,
   isCrossRibGrantAllowed,
+  isRibWorkflowGrantAllowed,
   loadKeelsonConfig,
+  type RibWorkflowGrants,
   readModelClassOverride,
   resolveCrossRibGrants,
   resolveDefaultProvider,
   resolveEnabledProviders,
+  resolveRibWorkflowGrants,
 } from "@keelson/shared/config";
 import { runJSON, runText } from "@keelson/shared/exec";
 import { projectWorkflowsDir } from "@keelson/shared/paths";
 import { getRegisteredTools, isRegisteredTool, registerTool } from "@keelson/skills";
 import {
+  currentBranch,
   DEFAULT_TOOL_DENYLIST,
   discoverWorkflows,
+  isGitRepo,
   makePromptHandler,
   type NodeHandler,
   type PromptHandlerProvider,
@@ -254,6 +262,9 @@ export interface BootstrapRibsOptions {
   // grants, so a machine that holds a durable grant can't turn a default-deny
   // assertion green.
   crossRibGrants?: CrossRibGrants;
+  // Which ribs may start which catalog workflows. Same default and the same
+  // reason to inject as crossRibGrants.
+  ribWorkflowGrants?: RibWorkflowGrants;
   // Lazy resolver for the policy engine the default makeRibAgentTurn consults
   // when gating a turn's projected tools. Lazy because the engine is built from
   // these same ribs' policies AFTER bootstrapRibs returns — the getter reads the
@@ -473,6 +484,151 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
           }
         }
       : undefined;
+  // RibContext.startWorkflow resolver. The grant check comes first, ahead of the
+  // name and project lookups, so an ungranted rib learns nothing about the catalog
+  // and never reaches a gate that could prompt the operator.
+  const ribWorkflowGrants =
+    options.ribWorkflowGrants ?? resolveRibWorkflowGrants(loadKeelsonConfig());
+  const getProjectsForStart = options.getProjects;
+  const startWorkflowSeam =
+    getWorkflowController && refreshCwd !== undefined
+      ? async (
+          ribId: string,
+          name: string,
+          inputs?: Record<string, string>,
+          opts?: StartWorkflowOptions,
+        ): Promise<{ runId: string }> => {
+          if (typeof name !== "string" || name.length === 0) {
+            throw new Error("startWorkflow: name must be a non-empty string");
+          }
+          if (!isRibWorkflowGrantAllowed(ribWorkflowGrants, ribId, name)) {
+            throw new Error(
+              `rib '${ribId}' is not granted workflow '${name}' (config.json ribWorkflowGrants)`,
+            );
+          }
+          if (
+            inputs !== undefined &&
+            (typeof inputs !== "object" ||
+              inputs === null ||
+              Array.isArray(inputs) ||
+              Object.values(inputs).some((v) => typeof v !== "string"))
+          ) {
+            throw new Error(`startWorkflow '${name}': inputs must be a string record`);
+          }
+          const controller = getWorkflowController();
+          if (!controller) throw new Error("workflow controller unavailable");
+          const projectId = opts?.projectId;
+          const project =
+            projectId !== undefined
+              ? getProjectsForStart?.().find((p) => p.id === projectId)
+              : undefined;
+          if (projectId !== undefined && project === undefined) {
+            throw new Error(`unknown project '${projectId}'`);
+          }
+          const requiresProject = controller.requiresProject(name, project?.id);
+          if (requiresProject === undefined) throw new Error(`unknown workflow '${name}'`);
+          if (requiresProject) {
+            if (project === undefined) {
+              throw new Error(`workflow '${name}' requires a project; pass projectId`);
+            }
+            if (!(await isGitRepo(project.rootPath).catch(() => false))) {
+              throw new Error(
+                `workflow '${name}' requires a git repository; '${project.rootPath}' is not one`,
+              );
+            }
+          }
+          const workingDir = project?.rootPath ?? refreshCwd;
+          const engine = options.getPolicyEngine?.();
+          if (!engine) throw new Error("policy engine unavailable");
+          // A policy may ASK the operator; bound the wait like a cross-rib call so
+          // an unanswered prompt can't hold the rib forever.
+          const ask = new AbortController();
+          const askTimer = setTimeout(
+            () => ask.abort(),
+            parseCrossRibCallTimeoutMs(process.env.KEELSON_CROSS_RIB_CALL_TIMEOUT_MS),
+          );
+          let allowed = false;
+          try {
+            const decision = await engine.evaluateToolCall(
+              {
+                tool: "workflow_run",
+                args: { name, inputs: inputs ?? {}, ...(project ? { project: project.id } : {}) },
+              },
+              { surface: "rib", ribId, cwd: workingDir, signal: ask.signal },
+            );
+            allowed = decision.outcome === "allow" && !ask.signal.aborted;
+          } catch {
+            allowed = false;
+          } finally {
+            clearTimeout(askTimer);
+          }
+          if (!allowed) {
+            throw new Error(`rib '${ribId}' starting workflow '${name}' was denied by policy`);
+          }
+          const started = controller.startRun({
+            name,
+            inputs: inputs ?? {},
+            workingDir,
+            ...(project ? { project: { id: project.id, rootPath: project.rootPath } } : {}),
+            startedByRibId: ribId,
+          });
+          if (!started.ok) throw new Error(started.message);
+          return { runId: started.runId };
+        }
+      : undefined;
+  // A rib sees only runs it started or whose workflow it owns; any other id reads
+  // as absent rather than as a denial, so run ids can't be probed.
+  const getRunStatusSeam = getWorkflowController
+    ? async (ribId: string, runId: string): Promise<RibRunStatus | undefined> => {
+        const controller = getWorkflowController();
+        const run = controller?.getRun(runId);
+        if (!controller || !run) return undefined;
+        const startedByRibId = controller.getRunStartedByRibId(runId);
+        if (startedByRibId !== ribId && run.ribId !== ribId) return undefined;
+        const awaiting = run.nodes.find((n) => n.status === "awaiting");
+        const path = run.worktreePath ?? run.workingDir;
+        return {
+          runId: run.runId,
+          workflowName: run.workflowName,
+          status: run.status,
+          startedAt: run.startedAt,
+          ...(run.completedAt !== null ? { completedAt: run.completedAt } : {}),
+          ...(run.error !== null ? { error: run.error } : {}),
+          ...(run.projectId !== null ? { projectId: run.projectId } : {}),
+          ...(startedByRibId !== null ? { startedByRibId } : {}),
+          ...(run.status === "paused" && awaiting
+            ? { pendingApproval: { nodeId: awaiting.nodeId, prompt: awaiting.outputText ?? "" } }
+            : {}),
+          checkout: {
+            path,
+            branch: path !== null ? await currentBranch(path).catch(() => null) : null,
+            worktreeEstablished: run.worktreePath !== null,
+          },
+          nodes: run.nodes.map((n) => ({
+            nodeId: n.nodeId,
+            status: n.status,
+            ...(n.outputText !== null ? { output: n.outputText } : {}),
+            ...(n.error !== null ? { error: n.error } : {}),
+          })),
+        };
+      }
+    : undefined;
+  const cancelRunSeam = getWorkflowController
+    ? async (ribId: string, runId: string): Promise<CancelRunResult> => {
+        try {
+          const controller = getWorkflowController();
+          if (!controller) return { ok: false, error: "workflow controller unavailable" };
+          if (controller.getRunStartedByRibId(runId) !== ribId) {
+            return { ok: false, error: `rib '${ribId}' did not start run '${runId}'` };
+          }
+          return controller.cancelRun(runId)
+            ? { ok: true }
+            : { ok: false, error: `run '${runId}' is not live` };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+    : undefined;
   // RibContext.getMemory resolver: a MemoryTools handle bridging the rib to the governed
   // memory ledger. recall/writeback re-parse with the wire schemas at this adapter
   // boundary (matching the executor's memoryTools) before reaching the store; an absent
@@ -680,6 +836,9 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(options.invalidateManifest ? { invalidateManifest: options.invalidateManifest } : {}),
     ...(refreshWorkflow ? { refreshWorkflow } : {}),
     ...(runWorkflowSeam ? { runWorkflow: runWorkflowSeam } : {}),
+    ...(startWorkflowSeam ? { startWorkflow: startWorkflowSeam } : {}),
+    ...(getRunStatusSeam ? { getRunStatus: getRunStatusSeam } : {}),
+    ...(cancelRunSeam ? { cancelRun: cancelRunSeam } : {}),
     ...(getMemory ? { getMemory } : {}),
     ...(acquireWorkspaceSeam ? { acquireWorkspace: acquireWorkspaceSeam } : {}),
     ...(registerOpSeam ? { registerOp: registerOpSeam } : {}),

@@ -355,6 +355,13 @@ const migrations: Migration[] = [
       );
     },
   },
+  {
+    version: 17,
+    description: "persist the rib that started a workflow run",
+    up: (db) => {
+      db.exec("ALTER TABLE workflow_runs ADD COLUMN started_by_rib_id TEXT;");
+    },
+  },
 ];
 
 // The lowest version this build can apply. A database stamped below it was

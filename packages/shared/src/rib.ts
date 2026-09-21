@@ -165,20 +165,59 @@ export interface RibWorkflowRunResult {
 // LAUNCH, not per run: resuming a failed/cancelled run emits a fresh pair
 // with the same runId. Launches of one run never interleave: a launch's
 // terminal event is delivered before any later launch's running event, so a
-// rib reducing the stream can treat the latest event as current. Delivery is
-// launch-source-agnostic (a board effect, the Workflows surface, a cadence
-// refresh). `inputs` are the run's inputs, so a rib can reconstruct dispatch
-// context for runs it didn't launch; `error` carries the run-level failure
-// message on a failed run. See Rib.onRunEvent.
+// rib reducing the stream can treat the latest event as current. Within a
+// launch, `paused` fires each time the run stops on a human gate (carrying
+// `pendingApproval`) and `running` fires again when that gate is answered.
+// Delivery is launch-source-agnostic (a board effect, the Workflows surface, a
+// cadence refresh). The rib that started a run through RibContext.startWorkflow
+// receives the same events as the owner, with `startedByRibId` set, so it can
+// follow a catalog workflow it does not own. `inputs` are the run's inputs, so
+// a rib can reconstruct dispatch context for runs it didn't launch; `error`
+// carries the run-level failure message on a failed run. See Rib.onRunEvent.
 export interface RibRunEvent {
   workflowName: string;
   runId: string;
-  status: "running" | "succeeded" | "failed" | "cancelled";
+  status: "running" | "paused" | "succeeded" | "failed" | "cancelled";
   inputs: Record<string, string>;
   startedAt: string;
   completedAt?: string;
   error?: string;
+  pendingApproval?: RibPendingApproval;
+  startedByRibId?: string;
 }
+
+// The human gate a paused run is waiting on. A rib can surface it; only the
+// operator can answer it.
+export interface RibPendingApproval {
+  nodeId: string;
+  prompt: string;
+}
+
+export interface StartWorkflowOptions {
+  // A registered project's id. The run resolves that project's workflow scope
+  // and uses its root as the working dir; absent runs at the keelson home.
+  projectId?: string;
+}
+
+// What RibContext.getRunStatus reports. `checkout` is the isolation the run
+// actually established, not what its workflow requested: `worktreeEstablished`
+// is false while a worktree-enabled run is still in the project's live checkout.
+// `branch` is null when the path is gone or is not a git checkout.
+export interface RibRunStatus {
+  runId: string;
+  workflowName: string;
+  status: "running" | "paused" | "succeeded" | "failed" | "cancelled";
+  startedAt: string;
+  completedAt?: string;
+  error?: string;
+  projectId?: string;
+  startedByRibId?: string;
+  pendingApproval?: RibPendingApproval;
+  checkout: { path: string | null; branch: string | null; worktreeEstablished: boolean };
+  nodes: readonly { nodeId: string; status: string; output?: string; error?: string }[];
+}
+
+export type CancelRunResult = { ok: true } | { ok: false; error: string };
 
 export interface WorkspaceLease {
   id: string;
@@ -338,6 +377,30 @@ export interface RibContext {
     inputs?: Record<string, string>,
     opts?: { cwd?: string },
   ) => Promise<RibWorkflowRunResult>;
+  // Start a CATALOG workflow by name, exactly as the workflow_run tool would, and
+  // resolve with its run id as soon as the run is registered — the rib follows it
+  // through onRunEvent / getRunStatus rather than blocking on it. Denied by default:
+  // the operator grants each rib the workflow names it may start (config.json
+  // `ribWorkflowGrants`), and the grant is checked before anything else, so an
+  // ungranted rib gets a plain rejection. A granted start then passes policy as a
+  // `workflow_run` call, where an ASK waits on the operator up to the cross-rib
+  // call timeout. The grant names a workflow, not a definition: with `projectId`
+  // the name resolves in that project's scope, where a project file can shadow the
+  // global one. Rejects for a denied, unknown, or unstartable workflow and for an
+  // unknown project. Optional so a rib built against an older harness degrades,
+  // not throws.
+  startWorkflow?: (
+    name: string,
+    inputs?: Record<string, string>,
+    opts?: StartWorkflowOptions,
+  ) => Promise<{ runId: string }>;
+  // Status of a run THIS rib started or whose workflow it owns; undefined for any
+  // other run id. There is no seam that answers an approval — see RibRunStatus.
+  getRunStatus?: (runId: string) => Promise<RibRunStatus | undefined>;
+  // Cancel a live run THIS rib started, so a rib that owns child runs can stop them
+  // when its own op is cancelled. Resolves (never throws); a run the rib did not
+  // start, or one that already settled, is `ok: false`.
+  cancelRun?: (runId: string) => Promise<CancelRunResult>;
   // Governed-memory handle: recall prior decisions/lessons/work-log rows and write new
   // ones back to the keelson memory ledger — the same `MemoryTools` the workflow
   // executor binds to. recall/writeback are scoped by each request's `scope` (project +
