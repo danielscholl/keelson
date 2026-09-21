@@ -182,7 +182,16 @@ bashDescribe("resolve-pr review base across converge attempts", () => {
 
   function git(cwd: string, ...args: string[]): string {
     const proc = Bun.spawnSync({
-      cmd: ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", ...args],
+      cmd: [
+        "git",
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.com",
+        "-c",
+        "safe.bareRepository=all",
+        ...args,
+      ],
       cwd,
       stdout: "pipe",
       stderr: "pipe",

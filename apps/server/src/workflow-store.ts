@@ -219,8 +219,7 @@ function rowToRunSummary(row: RunRow): WorkflowRunSummary {
     workingDir: row.working_dir,
     worktreePath: row.worktree_path,
     worktreeBase: row.worktree_base,
-    isolationEnabled:
-      row.isolation_enabled === null ? null : row.isolation_enabled === 1,
+    isolationEnabled: row.isolation_enabled === null ? null : row.isolation_enabled === 1,
     worktreeEstablished: row.worktree_established === 1,
     origin: row.origin === "scheduled" ? "scheduled" : "manual",
     ribId: row.rib_id,
