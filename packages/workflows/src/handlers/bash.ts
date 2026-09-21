@@ -8,13 +8,15 @@
 
 /**
  * `bash` NodeHandler. Authors reach inputs and upstream outputs through the
- * safe-quoted env-var channel (`"$KEELSON_NODE_<id>_OUTPUT"`,
- * `"$KEELSON_INPUTS_<key>"`, `"$KEELSON_ARGUMENTS"`); authors who want raw
- * text-substitution can keep using `$collect.output` directly (see
- * executor.ts §resolveBody for the trade-off it documents). Dispatch reads
- * `ctx.rawBody` deliberately: the executor's resolveBody expands refs by
- * raw text-replace, which would make `$(...)` and backticks in upstream
- * output executable when bash parses the body.
+ * safe-quoted env-var channel (`"$KEELSON_RUN_ID"`,
+ * `"$KEELSON_NODE_<id>_OUTPUT"`, `"$KEELSON_NODE_<id>_STATE"` /
+ * `_ERROR` / `_PROVIDER` / `_MODEL`, `"$KEELSON_INPUTS_<key>"`, and
+ * `"$KEELSON_ARGUMENTS"`); authors who want raw text-substitution can keep
+ * using `$collect.output` directly (see executor.ts §resolveBody for the
+ * trade-off it documents). Dispatch reads `ctx.rawBody` deliberately: the
+ * executor's resolveBody expands refs by raw text-replace, which would make
+ * `$(...)` and backticks in upstream output executable when bash parses the
+ * body.
  */
 
 import { type NodeHandler, type NodeResult, resolveConvergeRound } from "../executor.ts";

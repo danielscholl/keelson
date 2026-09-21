@@ -17,9 +17,8 @@
  * the documented timeout, and a script that traps SIGTERM can't deadlock
  * the run.
  *
- * The env channel (`KEELSON_INPUTS_*`, `KEELSON_NODE_*_OUTPUT`, `KEELSON_ARGUMENTS`)
- * is the contract documented in `bash.ts` — single source here so future
- * additions (e.g. `KEELSON_RUN_ID`) reach both surfaces.
+ * The env channel (`KEELSON_INPUTS_*`, `KEELSON_NODE_*`, `KEELSON_ARGUMENTS`,
+ * `KEELSON_RUN_ID`) is the contract documented in `bash.ts`.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -258,7 +257,7 @@ function truncateEnvValue(value: string, note: string): string {
 
 /**
  * Build the env block for a workflow subprocess. Layers `KEELSON_INPUTS_*`,
- * `KEELSON_NODE_*_{STATE,OUTPUT}`, node provenance, `KEELSON_ARGUMENTS`,
+ * `KEELSON_NODE_*_{STATE,ERROR,OUTPUT}`, node provenance, `KEELSON_ARGUMENTS`,
  * `KEELSON_RUN_ID`, and (when provided) the per-run
  * `KEELSON_ARTIFACTS_DIR` onto a snapshot of the parent env. Non-alphanumeric
  * chars in keys/node ids are normalized to `_` so the resulting names are valid
@@ -298,18 +297,26 @@ export function buildSubprocessEnv(
     env[`KEELSON_INPUTS_${envSafe(k)}`] = capInput(v);
   }
   env.KEELSON_ARGUMENTS = capInput(inputs.ARGUMENTS ?? "");
+  if (options?.runId !== undefined) env.KEELSON_RUN_ID = options.runId;
   for (const [id, out] of upstream.entries()) {
     const full = out.output ?? "";
     const name = `KEELSON_NODE_${envSafe(id)}_OUTPUT`;
-    env[`KEELSON_NODE_${envSafe(id)}_STATE`] = out.state;
-    // An inherited path or truncation flag must not outlive the output that
-    // produced it: a node reached without an artifacts dir would otherwise read
-    // a prior run's file.
-    delete env[`${name}_FILE`];
-    delete env[`${name}_TRUNCATED`];
     const provenanceName = name.slice(0, -"_OUTPUT".length);
-    delete env[`${provenanceName}_PROVIDER`];
-    delete env[`${provenanceName}_MODEL`];
+    // An inherited value must not outlive the output that produced it: a node
+    // reached without an artifacts dir (or without a failure/provenance this
+    // time) would otherwise read a prior run's stale value.
+    for (const suffix of [
+      "OUTPUT_FILE",
+      "OUTPUT_TRUNCATED",
+      "STATE",
+      "ERROR",
+      "PROVIDER",
+      "MODEL",
+    ]) {
+      delete env[`${provenanceName}_${suffix}`];
+    }
+    env[`${provenanceName}_STATE`] = out.state;
+    if (out.state === "failed") env[`${provenanceName}_ERROR`] = capInput(out.error);
     let fileNote = "";
     if (options?.artifactsDir !== undefined) {
       try {

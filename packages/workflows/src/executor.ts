@@ -834,12 +834,19 @@ function emitVendorCollapseWarning(
 function emitSucceededNodeDone(
   emit: (event: RunStreamEvent) => void,
   nodeId: string,
-  output: string,
+  output: NodeOutput,
 ): void {
   emit({
     type: "node_done",
     nodeId,
-    result: { status: "succeeded", output: { kind: "text", text: output } },
+    result: {
+      status: "succeeded",
+      output: { kind: "text", text: output.output },
+      ...("provider" in output && output.provider !== undefined
+        ? { provider: output.provider }
+        : {}),
+      ...("model" in output && output.model !== undefined ? { model: output.model } : {}),
+    },
   });
 }
 
@@ -855,7 +862,7 @@ function absorbConvergeSubgraphFailures(
     if (output?.state !== "failed") continue;
     const absorbed = toCompletedOutput(output);
     nodeOutputs.set(id, absorbed);
-    emitSucceededNodeDone(emit, id, absorbed.output);
+    emitSucceededNodeDone(emit, id, absorbed);
   }
 }
 
@@ -899,7 +906,7 @@ async function runConvergeExhaustApproval(
   absorbConvergeSubgraphFailures(subgraphIds, gate, nodeOutputs, sharedCtx.emit);
   const acceptedGateOutput = toCompletedOutput(approvalOutput);
   nodeOutputs.set(gate, acceptedGateOutput);
-  emitSucceededNodeDone(sharedCtx.emit, gate, acceptedGateOutput.output);
+  emitSucceededNodeDone(sharedCtx.emit, gate, acceptedGateOutput);
   return true;
 }
 

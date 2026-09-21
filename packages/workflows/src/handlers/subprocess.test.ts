@@ -100,7 +100,7 @@ describe("killProcessTree", () => {
 });
 
 describe("buildSubprocessEnv", () => {
-  test("layers KEELSON_INPUTS_*, KEELSON_NODE_*_OUTPUT, and KEELSON_ARGUMENTS over PARENT_ENV", () => {
+  test("layers inputs, run metadata, and upstream output provenance over PARENT_ENV", () => {
     const upstream = new Map<string, NodeOutput>([
       [
         "fetch-stats",
@@ -110,15 +110,49 @@ describe("buildSubprocessEnv", () => {
           startedAt: "2026-05-22T00:00:00Z",
           completedAt: "2026-05-22T00:00:01Z",
           durationMs: 1000,
+          provider: "copilot",
+          model: "gpt-5.6-sol",
         },
       ],
     ]);
-    const env = buildSubprocessEnv({ ARGUMENTS: "hi", flag: "yes" }, upstream);
+    const env = buildSubprocessEnv({ ARGUMENTS: "hi", flag: "yes" }, upstream, {
+      runId: "run-123",
+    });
     expect(env.KEELSON_ARGUMENTS).toBe("hi");
     expect(env.KEELSON_INPUTS_ARGUMENTS).toBe("hi");
     expect(env.KEELSON_INPUTS_flag).toBe("yes");
-    // dashes in node ids normalize to underscores (POSIX env-var ident rule).
+    expect(env.KEELSON_RUN_ID).toBe("run-123");
     expect(env.KEELSON_NODE_fetch_stats_OUTPUT).toBe("ok");
+    expect(env.KEELSON_NODE_fetch_stats_STATE).toBe("completed");
+    expect(env.KEELSON_NODE_fetch_stats_PROVIDER).toBe("copilot");
+    expect(env.KEELSON_NODE_fetch_stats_MODEL).toBe("gpt-5.6-sol");
+  });
+
+  test("exposes failed output state and clears inherited provenance", () => {
+    const upstream = new Map<string, NodeOutput>([
+      [
+        "review",
+        {
+          state: "failed",
+          output: "partial",
+          error: "provider stopped",
+          provider: "claude",
+          model: "claude-opus-5",
+        },
+      ],
+    ]);
+    const env = buildSubprocessEnv({}, upstream, {
+      parentEnv: {
+        KEELSON_RUN_ID: "stale-run",
+        KEELSON_NODE_review_PROVIDER: "stale-provider",
+        KEELSON_NODE_review_MODEL: "stale-model",
+      },
+    });
+    expect(Object.hasOwn(env, "KEELSON_RUN_ID")).toBe(false);
+    expect(env.KEELSON_NODE_review_STATE).toBe("failed");
+    expect(env.KEELSON_NODE_review_ERROR).toBe("provider stopped");
+    expect(env.KEELSON_NODE_review_PROVIDER).toBe("claude");
+    expect(env.KEELSON_NODE_review_MODEL).toBe("claude-opus-5");
   });
 
   test("sets both KEELSON_ARTIFACTS_DIR and ARTIFACTS_DIR when options.artifactsDir is provided", () => {

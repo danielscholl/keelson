@@ -483,13 +483,14 @@ environment variables, never spliced into the source:
 
 | Variable | Carries |
 | --- | --- |
+| `KEELSON_RUN_ID` | The current workflow run identifier. |
 | `KEELSON_NODE_<id>_OUTPUT` | The upstream node's output (non-alphanumeric characters in the id are normalized to `_`). Capped, see below. |
 | `KEELSON_NODE_<id>_STATE` | The upstream node's `NodeOutput` state: `pending`, `running`, `completed`, `failed`, or `skipped`. |
 | `KEELSON_NODE_<id>_OUTPUT_FILE` | Path to a file holding that output in full, set for every upstream node whatever its size. Absent only when the run has no artifacts directory, which every server and CLI run creates. |
 | `KEELSON_NODE_<id>_OUTPUT_TRUNCATED` | `1` when the `_OUTPUT` value above was capped; unset otherwise. |
+| `KEELSON_NODE_<id>_ERROR` | The upstream node's error text when its state is `failed`; unset otherwise. |
 | `KEELSON_NODE_<id>_PROVIDER` | Effective provider recorded for an upstream agent node, including provider fallback. Unset for deterministic nodes. |
 | `KEELSON_NODE_<id>_MODEL` | Effective model recorded for an upstream agent node, including a provider-reported model change. Unset for deterministic nodes. |
-| `KEELSON_RUN_ID` | The current workflow run id. |
 | `KEELSON_ARTIFACTS_DIR` | The per-run scratch directory. |
 | `KEELSON_INPUTS_<key>` | One variable per workflow input; non-alphanumeric characters in the key are normalized to `_`. |
 | `KEELSON_ARGUMENTS` | The full free-form text the run was started with (equivalent to `$ARGUMENTS` in prompt substitution). |
