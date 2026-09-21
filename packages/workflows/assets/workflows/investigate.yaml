@@ -226,6 +226,9 @@ nodes:
       | --- | --- | --- | --- | --- | --- |
       | n | ... | documented / source-verified / runtime-tested | ... | NOT CHECKED | |
 
+      Write `\|` for every literal `|` inside a table cell, including inside
+      backticks, so GitHub renders the row with the intended columns.
+
       Include a `## Not checked` section. Do not publish or post the result.
       Do not write a tally or model attribution. Reply only with JSON containing
       `claims`, `done_when_met`, and `not_checked`.
@@ -324,8 +327,10 @@ nodes:
       position. Put exactly CONFIRMED, CONFIRMED in part, REFUTED, UNVERIFIABLE,
       or NOT CHECKED in each `Verified` cell. Put the verifier's explanation in
       `Verification note`; keep refuted claims in place. Preserve the claim
-      number, claim, level, and citation. Do not add a count, verification
-      summary, run id, date, provider, or model attribution.
+      number, claim, level, and citation. Write `\|` for every literal `|` inside
+      a table cell, including inside backticks, so GitHub renders the row with
+      the intended columns. Do not add a count, verification summary, run id,
+      date, provider, or model attribution.
 
       Verifier output:
       $verify.output
