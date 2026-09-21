@@ -783,6 +783,8 @@ function toCompletedOutput(output: NodeOutput, text = output.output): NodeOutput
       ? { sessionId: output.sessionId }
       : {}),
     ...("usage" in output && output.usage !== undefined ? { usage: output.usage } : {}),
+    ...("provider" in output && output.provider !== undefined ? { provider: output.provider } : {}),
+    ...("model" in output && output.model !== undefined ? { model: output.model } : {}),
     ...("startedAt" in output && output.startedAt !== undefined
       ? { startedAt: output.startedAt }
       : {}),

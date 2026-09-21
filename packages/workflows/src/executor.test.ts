@@ -2079,7 +2079,7 @@ nodes:
     expect(gateDoneStatuses).toEqual(["failed", "succeeded"]);
   });
 
-  test("on_exhaust approval absorbs failed converge ancestors", async () => {
+  test("on_exhaust approval absorbs failed converge ancestors with provenance", async () => {
     const workflow = parseInline(`
 name: converge-approval-ancestor-failed
 description: ancestor failures are absorbed on approval
@@ -2102,6 +2102,7 @@ nodes:
     });
     const { handler: echoBash, calls } = echoHandler("bash");
     let gateCalls = 0;
+    let downstreamFixOutput: NodeOutput | undefined;
     const summary = await runWorkflow({
       ...baseOpts(workflow),
       handlers: new Map<string, NodeHandler>([
@@ -2115,10 +2116,15 @@ nodes:
                   status: "failed",
                   output: { kind: "text", text: "fix-output" },
                   error: "still red",
+                  provider: "copilot",
+                  model: "gpt-5.6-terra",
                 };
               }
               if (node.id === "gate") {
                 gateCalls++;
+              }
+              if (node.id === "after") {
+                downstreamFixOutput = ctx.upstreamOutputs.get("fix");
               }
               return echoBash.handle(node, ctx);
             },
@@ -2130,7 +2136,17 @@ nodes:
 
     expect(summary.status).toBe("succeeded");
     expect(gateCalls).toBe(0);
-    expect(summary.nodes.fix).toMatchObject({ state: "completed", output: "fix-output" });
+    expect(summary.nodes.fix).toMatchObject({
+      state: "completed",
+      output: "fix-output",
+      provider: "copilot",
+      model: "gpt-5.6-terra",
+    });
+    expect(downstreamFixOutput).toMatchObject({
+      state: "completed",
+      provider: "copilot",
+      model: "gpt-5.6-terra",
+    });
     expect(summary.nodes.gate).toMatchObject({
       state: "completed",
       output: "approved by human",
