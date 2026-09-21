@@ -24,12 +24,19 @@ function makeWorkflow(
   node: Record<string, unknown>,
   fields: Record<string, unknown> = {},
 ): WorkflowDefinition {
+  return makeWorkflowWithNodes([{ id: "review", prompt: "Review.", ...node }], fields);
+}
+
+function makeWorkflowWithNodes(
+  nodes: Array<Record<string, unknown>>,
+  fields: Record<string, unknown> = {},
+): WorkflowDefinition {
   return workflowDefinitionSchema.parse({
     name: "preflight-test",
     description: "Exercises live catalog preflight.",
     provider: "copilot",
     ...fields,
-    nodes: [{ id: "review", prompt: "Review.", ...node }],
+    nodes,
   });
 }
 
@@ -156,6 +163,71 @@ describe("checkWorkflowCatalog", () => {
     expect(result).toEqual({ violations: [], notChecked: [] });
   });
 
+  test("flags a tier the operator override pins to a retired model", () => {
+    const result = checkWorkflowCatalog(makeWorkflow({ model: "deep" }), {
+      providers: PROVIDERS,
+      defaultProviderId: "copilot",
+      modelClassOverride: (providerId, modelClass) =>
+        providerId === "copilot" && modelClass === "deep" ? "retired-deep" : undefined,
+      liveCatalog: new Map([["copilot", [{ id: "current-model" }]]]),
+    });
+
+    expect(result.violations).toEqual([
+      {
+        nodeId: "review",
+        provider: "copilot",
+        kind: "model",
+        value: "retired-deep",
+        reason:
+          "model class 'deep' resolves via config.json modelClasses to 'retired-deep', which is not in copilot's live catalog",
+      },
+    ]);
+  });
+
+  test("does not flag a tier resolved only by provider-owned fallbacks", () => {
+    const providers = new Map([
+      [
+        "copilot",
+        {
+          defaultModel: "gone",
+          models: ["gone"],
+          modelClasses: { fast: "gone", balanced: "gone", deep: "gone" },
+        },
+      ],
+    ]);
+    const result = checkWorkflowCatalog(makeWorkflow({ model: "deep" }), {
+      providers,
+      defaultProviderId: "copilot",
+      liveCatalog: new Map([["copilot", [{ id: "current-model" }]]]),
+    });
+
+    expect(result).toEqual({ violations: [], notChecked: [] });
+  });
+
+  test("accepts a tier the operator override pins to a live model", () => {
+    const result = checkWorkflowCatalog(makeWorkflow({ model: "deep" }), {
+      providers: PROVIDERS,
+      defaultProviderId: "copilot",
+      modelClassOverride: () => "current-model",
+      liveCatalog: new Map([["copilot", [{ id: "current-model" }]]]),
+    });
+
+    expect(result).toEqual({ violations: [], notChecked: [] });
+  });
+
+  test("applies a class override only to its provider", () => {
+    const result = checkWorkflowCatalog(makeWorkflow({ model: "deep" }), {
+      providers: PROVIDERS_WITH_CLAUDE,
+      defaultProviderId: "copilot",
+      runProviderId: "claude",
+      modelClassOverride: (providerId) =>
+        providerId === "copilot" ? "retired-copilot-deep" : undefined,
+      liveCatalog: new Map([["claude", [{ id: "claude-model" }]]]),
+    });
+
+    expect(result).toEqual({ violations: [], notChecked: [] });
+  });
+
   test("does not inherit a workflow literal when the node selects auto", () => {
     const result = check(
       makeWorkflow({ model: "auto" }, { model: "retired-workflow-model" }),
@@ -178,6 +250,147 @@ describe("checkWorkflowCatalog", () => {
     const result = check(
       makeWorkflow({ model: "current-model", effort: "xhigh" }),
       new Map([["copilot", [{ id: "current-model" }]]]),
+    );
+
+    expect(result).toEqual({ violations: [], notChecked: [] });
+  });
+
+  test("flags a command node's retired provider-specific model", () => {
+    const result = check(
+      makeWorkflowWithNodes([
+        {
+          id: "command-review",
+          command: "review",
+          model_by_provider: { copilot: "retired-model" },
+        },
+      ]),
+      new Map([["copilot", [{ id: "current-model" }]]]),
+    );
+
+    expect(result.violations).toEqual([
+      {
+        nodeId: "command-review",
+        provider: "copilot",
+        kind: "model",
+        value: "retired-model",
+        reason: "model 'retired-model' is not in copilot's live catalog",
+      },
+    ]);
+  });
+
+  test("flags a command tier the operator override pins to a retired model", () => {
+    const result = checkWorkflowCatalog(
+      makeWorkflowWithNodes([{ id: "command-review", command: "review", model: "deep" }]),
+      {
+        providers: PROVIDERS,
+        defaultProviderId: "copilot",
+        modelClassOverride: () => "retired-deep",
+        liveCatalog: new Map([["copilot", [{ id: "current-model" }]]]),
+      },
+    );
+
+    expect(result.violations).toMatchObject([
+      {
+        nodeId: "command-review",
+        kind: "model",
+        value: "retired-deep",
+      },
+    ]);
+    expect(result.violations[0]?.reason).toContain("model class 'deep'");
+  });
+
+  test("checks every model_by branch on a command node", () => {
+    const result = checkWorkflowCatalog(
+      makeWorkflowWithNodes([
+        {
+          id: "command-review",
+          command: "review",
+          model_by: {
+            from: "$inputs.tier",
+            cases: {
+              retired: { model: "retired-model" },
+              classed: { model: "deep" },
+              excessive: { model: "current-model", effort: "xhigh" },
+            },
+          },
+        },
+      ]),
+      {
+        providers: PROVIDERS,
+        defaultProviderId: "copilot",
+        modelClassOverride: (_providerId, modelClass) =>
+          modelClass === "deep" ? "retired-deep" : undefined,
+        liveCatalog: new Map([
+          ["copilot", [{ id: "current-model", supportedReasoningEfforts: ["low", "high"] }]],
+        ]),
+      },
+    );
+
+    expect(result.violations).toMatchObject([
+      {
+        nodeId: "command-review",
+        kind: "model",
+        value: "retired-model",
+        caseKey: "retired",
+      },
+      {
+        nodeId: "command-review",
+        kind: "model",
+        value: "retired-deep",
+        caseKey: "classed",
+      },
+      {
+        nodeId: "command-review",
+        kind: "effort",
+        value: "xhigh",
+        caseKey: "excessive",
+      },
+    ]);
+  });
+
+  test("checks a loop node's inherited workflow model and effort", () => {
+    const loop = {
+      id: "loop-review",
+      loop: { prompt: "Review again.", until: "DONE", max_iterations: 2 },
+    };
+    const modelResult = check(
+      makeWorkflowWithNodes([loop], { model: "retired-model" }),
+      new Map([["copilot", [{ id: "current-model" }]]]),
+    );
+    const effortResult = check(
+      makeWorkflowWithNodes([loop], { model: "current-model", effort: "xhigh" }),
+      new Map([["copilot", [{ id: "current-model", supportedReasoningEfforts: ["low", "high"] }]]]),
+    );
+    const overrideResult = checkWorkflowCatalog(makeWorkflowWithNodes([loop], { model: "deep" }), {
+      providers: PROVIDERS,
+      defaultProviderId: "copilot",
+      modelClassOverride: () => "retired-deep",
+      liveCatalog: new Map([["copilot", [{ id: "current-model" }]]]),
+    });
+
+    expect(modelResult.violations).toMatchObject([
+      { nodeId: "loop-review", kind: "model", value: "retired-model" },
+    ]);
+    expect(effortResult.violations).toMatchObject([
+      { nodeId: "loop-review", kind: "effort", value: "xhigh" },
+    ]);
+    expect(overrideResult.violations).toMatchObject([
+      { nodeId: "loop-review", kind: "model", value: "retired-deep" },
+    ]);
+  });
+
+  test("continues to exclude deterministic and control nodes", () => {
+    const result = check(
+      makeWorkflowWithNodes(
+        [
+          { id: "bash", bash: "true" },
+          { id: "script", script: "console.log('done')", runtime: "bun" },
+          { id: "approval", approval: { message: "Continue?" } },
+          { id: "cancel", cancel: "Stop." },
+        ],
+        { model: "retired-model", effort: "xhigh" },
+      ),
+      new Map([["copilot", [{ id: "current-model", supportedReasoningEfforts: ["low", "high"] }]]]),
     );
 
     expect(result).toEqual({ violations: [], notChecked: [] });
@@ -240,6 +453,33 @@ describe("checkWorkflowCatalog — model_by cases", () => {
       LIVE,
     );
     expect(result.violations).toEqual([]);
+  });
+
+  test("an operator-pinned model class in a branch is judged against the catalog", () => {
+    const result = checkWorkflowCatalog(
+      makeWorkflow({
+        model_by: { from: "$inputs.tier", cases: { deep: { model: "deep" } } },
+      }),
+      {
+        providers: PROVIDERS,
+        defaultProviderId: "copilot",
+        modelClassOverride: (_providerId, modelClass) =>
+          modelClass === "deep" ? "retired-deep" : undefined,
+        liveCatalog: LIVE,
+      },
+    );
+
+    expect(result.violations).toMatchObject([
+      {
+        nodeId: "review",
+        kind: "model",
+        value: "retired-deep",
+        caseKey: "deep",
+      },
+    ]);
+    expect(result.violations[0]?.reason).toContain("model class 'deep'");
+    expect(result.violations[0]?.reason).toContain("model_by case 'deep'");
+    expect(result.violations[0]?.reason).toContain("config.json modelClasses");
   });
 
   test("a branch's effort is judged against that branch's own model", () => {

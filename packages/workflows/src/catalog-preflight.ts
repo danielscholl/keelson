@@ -1,6 +1,6 @@
 import { resolvePrompt, resolveWorkflowResolution } from "./catalog-resolution.ts";
 import { applyModelCase } from "./model-by.ts";
-import type { WorkflowDefinition } from "./schema/index.ts";
+import { nodeReachesProvider, type WorkflowDefinition } from "./schema/index.ts";
 
 type ModelClass = "fast" | "balanced" | "deep";
 
@@ -56,15 +56,29 @@ function normalizeEffort(value: unknown): Effort | undefined {
   return EFFORTS.includes(level as Effort) ? (level as Effort) : undefined;
 }
 
+interface PinnedLiteral {
+  literal: string;
+  classKey?: ModelClass;
+}
+
 function pinnedLiteralFor(
   node: WorkflowDefinition["nodes"][number],
   workflow: WorkflowDefinition,
   provider: string,
-): string | undefined {
+  modelClassOverride: PreflightOptions["modelClassOverride"],
+): PinnedLiteral | undefined {
   const perProvider = node.model_by_provider?.[provider];
-  if (perProvider !== undefined) return perProvider;
-  if (node.model !== undefined) return isConcreteModel(node.model) ? node.model : undefined;
-  return isConcreteModel(workflow.model) ? workflow.model : undefined;
+  if (perProvider !== undefined) return { literal: perProvider };
+  const model = node.model ?? workflow.model;
+  if (model === undefined) return undefined;
+  if (isConcreteModel(model)) return { literal: model };
+  if (MODEL_CLASSES.has(model)) {
+    const overridden = modelClassOverride?.(provider, model as ModelClass);
+    return overridden === undefined
+      ? undefined
+      : { literal: overridden, classKey: model as ModelClass };
+  }
+  return undefined;
 }
 
 export function checkWorkflowCatalog(
@@ -72,15 +86,15 @@ export function checkWorkflowCatalog(
   options: PreflightOptions,
 ): PreflightResult {
   const resolution = resolveWorkflowResolution(workflow, options);
-  const promptNodes = new Map(
-    workflow.nodes.filter((node) => node.prompt !== undefined).map((node) => [node.id, node]),
+  const providerNodes = new Map(
+    workflow.nodes.filter(nodeReachesProvider).map((node) => [node.id, node]),
   );
   const violations: PreflightViolation[] = [];
   const notChecked = new Set<string>();
 
   for (const resolved of resolution.nodes) {
     const provider = resolved.effectiveProvider;
-    const node = promptNodes.get(resolved.nodeId);
+    const node = providerNodes.get(resolved.nodeId);
     if (provider === undefined || node === undefined) continue;
 
     const live = options.liveCatalog.get(provider);
@@ -96,7 +110,12 @@ export function checkWorkflowCatalog(
     if (node.model_by !== undefined) {
       for (const [caseKey, branch] of Object.entries(node.model_by.cases)) {
         const dispatched = applyModelCase(node, branch) as typeof node;
-        const caseLiteral = pinnedLiteralFor(dispatched, workflow, provider);
+        const casePinned = pinnedLiteralFor(
+          dispatched,
+          workflow,
+          provider,
+          options.modelClassOverride,
+        );
         // Resolved from the dispatched node, not the original: a case replaces the
         // whole `model_by_provider` map, so the node's resolution can name a pin
         // the case just removed.
@@ -105,13 +124,16 @@ export function checkWorkflowCatalog(
           effectiveModel === undefined
             ? undefined
             : live.find((candidate) => candidate.id === effectiveModel);
-        if (caseLiteral !== undefined && live.every((c) => c.id !== caseLiteral)) {
+        if (casePinned !== undefined && live.every((c) => c.id !== casePinned.literal)) {
           violations.push({
             nodeId: node.id,
             provider,
             kind: "model",
-            value: caseLiteral,
-            reason: `model '${caseLiteral}' (model_by case '${caseKey}') is not in ${provider}'s live catalog`,
+            value: casePinned.literal,
+            reason:
+              casePinned.classKey === undefined
+                ? `model '${casePinned.literal}' (model_by case '${caseKey}') is not in ${provider}'s live catalog`
+                : `model class '${casePinned.classKey}' (model_by case '${caseKey}') resolves via config.json modelClasses to '${casePinned.literal}', which is not in ${provider}'s live catalog`,
             caseKey,
           });
           continue;
@@ -138,18 +160,21 @@ export function checkWorkflowCatalog(
       continue;
     }
 
-    const literal = pinnedLiteralFor(node, workflow, provider);
+    const pinned = pinnedLiteralFor(node, workflow, provider, options.modelClassOverride);
     if (
-      literal !== undefined &&
-      literal === resolved.model &&
-      !live.some((model) => model.id === literal)
+      pinned !== undefined &&
+      pinned.literal === resolved.model &&
+      !live.some((model) => model.id === pinned.literal)
     ) {
       violations.push({
         nodeId: node.id,
         provider,
         kind: "model",
-        value: literal,
-        reason: `model '${literal}' is not in ${provider}'s live catalog`,
+        value: pinned.literal,
+        reason:
+          pinned.classKey === undefined
+            ? `model '${pinned.literal}' is not in ${provider}'s live catalog`
+            : `model class '${pinned.classKey}' resolves via config.json modelClasses to '${pinned.literal}', which is not in ${provider}'s live catalog`,
       });
     }
 
