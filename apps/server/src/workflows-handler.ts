@@ -3353,6 +3353,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
           ...(opts.base !== null ? { base: opts.base } : {}),
           ...(opts.onCreated !== undefined ? { onCreated: opts.onCreated } : {}),
           abortSignal: abort.signal,
+          rejectAdopted: true,
         });
       }
       const created = await createWorktree({
@@ -3361,6 +3362,11 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         dest: opts.dest,
         ...(opts.base !== null ? { base: opts.base } : {}),
       });
+      if (created.adopted) {
+        throw new Error(
+          `workspace destination already exists at ${opts.dest} — refusing to adopt another owner's checkout`,
+        );
+      }
       opts.onCreated?.(created.worktreePath);
       const deps = await ensureWorktreeDeps({
         worktreePath: created.worktreePath,
@@ -3508,6 +3514,10 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       return;
     }
   } catch (err) {
+    if (worktreePathForCleanup !== null && !existsSync(worktreePathForCleanup)) {
+      store.setRunWorktreePath(runId, null);
+      worktreePathForCleanup = null;
+    }
     if (abort.signal.aborted) {
       closeBeforeStart("cancelled", null);
       return;

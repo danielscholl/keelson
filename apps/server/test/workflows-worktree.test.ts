@@ -543,7 +543,7 @@ describe("worktree prune coordination", () => {
     },
   );
 
-  test("prune refuses a worktree being adopted before its new run records the path", async () => {
+  test("prune refuses a worktree while a colliding fresh run checks it", async () => {
     const rig = await setup();
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -780,6 +780,65 @@ nodes:
     }
   });
 
+  test("clears a setup-cleaned path and resumes into a fresh worktree", async () => {
+    await initRepo(repoDir);
+    writeWorkflow(
+      "post-create-retry.yaml",
+      `name: post-create-retry
+description: retry after dependency preparation removes the checkout
+worktree:
+  enabled: true
+nodes:
+  - id: work
+    bash: pwd
+`,
+    );
+    const rig = makeRig();
+    const original = rig.workspaceManager.prepareDeps;
+    let depsCalls = 0;
+    const deps = spyOn(rig.workspaceManager, "prepareDeps").mockImplementation(async (opts) => {
+      depsCalls += 1;
+      if (depsCalls === 1) throw new Error("injected dependency preparation failure");
+      return original(opts);
+    });
+    try {
+      const started = rig.controller.startRun({
+        name: "post-create-retry",
+        inputs: {},
+        workingDir: repoDir,
+      });
+      expect(started.ok).toBe(true);
+      if (!started.ok) throw new Error(started.message);
+      const branch = worktrees.resolveBranchTemplate(undefined, {
+        workflow: "post-create-retry",
+        runId: started.runId,
+      });
+      const removedPath = worktrees.worktreePathForRepoLocal({
+        projectRootPath: repoDir,
+        branch,
+      });
+
+      const failed = await pollUntilStoredStatus(rig.store, started.runId, new Set(["failed"]));
+      expect(failed.error).toContain("injected dependency preparation failure");
+      expect(failed.worktreeEstablished).toBe(true);
+      expect(failed.worktreePath).toBeNull();
+      expect(failed.nodes).toEqual([]);
+      expect(existsSync(removedPath)).toBe(false);
+
+      expect(rig.controller.resumeRun(started.runId)).toEqual({ ok: true });
+      const completed = await pollUntilStoredStatus(
+        rig.store,
+        started.runId,
+        new Set(["succeeded"]),
+      );
+      expect(completed.nodes[0]?.outputText?.replaceAll("\\", "/")).toContain("/.worktrees/");
+      expect(depsCalls).toBe(2);
+    } finally {
+      deps.mockRestore();
+      await rig.activeRuns.abortAll();
+    }
+  });
+
   test("fails when worktree identity cannot be persisted and preserves the checkout", async () => {
     await initRepo(repoDir);
     writeWorkflow(
@@ -927,6 +986,69 @@ nodes:
     }
     expect(existsSync(lease.path)).toBe(false);
   });
+
+  test.each([true, false])(
+    "fresh fixed-branch runs reject another run's checkout (workspaceManager=%s)",
+    async (includeWorkspaceManager) => {
+      await initRepo(repoDir);
+      writeWorkflow(
+        "fixed-branch.yaml",
+        `name: fixed-branch
+description: hold a static worktree destination
+worktree:
+  enabled: true
+  branch: keelson/fixed-branch
+nodes:
+  - id: where
+    bash: pwd
+  - id: hold
+    depends_on: [where]
+    approval:
+      message: hold checkout
+`,
+      );
+      const rig = makeRig({ includeWorkspaceManager });
+      try {
+        const first = rig.controller.startRun({
+          name: "fixed-branch",
+          inputs: {},
+          workingDir: repoDir,
+        });
+        expect(first.ok).toBe(true);
+        if (!first.ok) throw new Error(first.message);
+        const held = await pollUntilStoredStatus(
+          rig.store,
+          first.runId,
+          new Set(["paused"]),
+          10_000,
+        );
+        expect(held.worktreePath).not.toBeNull();
+
+        const second = rig.controller.startRun({
+          name: "fixed-branch",
+          inputs: {},
+          workingDir: repoDir,
+        });
+        expect(second.ok).toBe(true);
+        if (!second.ok) throw new Error(second.message);
+        const rejected = await pollUntilStoredStatus(
+          rig.store,
+          second.runId,
+          new Set(["failed"]),
+          10_000,
+        );
+
+        expect(rejected.error).toContain("refusing to adopt another owner's checkout");
+        expect(rejected.nodes).toEqual([]);
+        expect(rejected.worktreePath).toBeNull();
+        expect(existsSync(held.worktreePath ?? "")).toBe(true);
+        expect(rig.store.getRun(first.runId)?.status).toBe("paused");
+      } finally {
+        await rig.activeRuns.abortAll();
+      }
+    },
+    15_000,
+  );
 
   for (const injectFailure of [false, true]) {
     test(`concurrent isolated starts keep distinct checkout identity (injectedFailure=${injectFailure})`, async () => {

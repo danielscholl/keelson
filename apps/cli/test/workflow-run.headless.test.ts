@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { clearRegistry, isRegisteredProvider, registerStubProvider } from "@keelson/providers";
-import type { RunStreamEvent } from "@keelson/workflows";
+import { createWorktree, type RunStreamEvent, worktreePathForRepoLocal } from "@keelson/workflows";
 
 import { getCliCredential } from "../src/in-process/providers.ts";
 import {
@@ -310,6 +310,42 @@ nodes:
       ).rejects.toThrow("worktree setup failed:");
       expect(existsSync(join(root, "sentinel.txt"))).toBe(false);
       expect([...artifactsDirs()].filter((path) => !before.has(path))).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("fresh fixed-branch runs reject an existing checkout", async () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-headless-isolation-"));
+    initRepo(root);
+    try {
+      const branch = "keelson/headless-held";
+      const dest = worktreePathForRepoLocal({ projectRootPath: root, branch });
+      await createWorktree({ repoPath: root, branch, dest });
+      const workflowsDir = writeWorkflow(
+        root,
+        "fixed-branch",
+        `name: fixed-branch
+description: reject another owner's static checkout
+worktree:
+  enabled: true
+  branch: ${branch}
+nodes:
+  - id: work
+    bash: touch claimed.txt
+`,
+      );
+
+      await expect(
+        runHeadless({
+          name: "fixed-branch",
+          inputs: {},
+          cwd: root,
+          workflowsDir,
+        }),
+      ).rejects.toThrow("refusing to adopt another owner's checkout");
+      expect(existsSync(dest)).toBe(true);
+      expect(existsSync(join(dest, "claimed.txt"))).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

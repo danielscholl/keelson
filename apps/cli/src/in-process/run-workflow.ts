@@ -379,6 +379,11 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
           dest,
           base: base ?? undefined,
         });
+        if (created.adopted) {
+          throw new Error(
+            `workspace destination already exists at ${dest} — refusing to adopt another owner's checkout`,
+          );
+        }
         effectiveCwd = created.worktreePath;
         cleanupWorktree = { repoPath: repoRoot, dest: created.worktreePath };
         const deps = await ensureWorktreeDeps({
