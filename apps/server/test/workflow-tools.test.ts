@@ -617,7 +617,7 @@ nodes:
     await toolByName(tools, "workflow_resume").execute({ runId }, ctx);
     const result = lastToolResult(chunks);
     expect(result.isError).toBe(true);
-    expect(result.content).toContain("start a fresh isolated run instead");
+    expect(result.content).toContain("Start a fresh run with worktree isolation");
     expect(result.content).toContain("prior outputs cannot be safely reused");
     expect(result.content).not.toContain("Only failed or cancelled runs can be resumed");
   });
