@@ -10,7 +10,7 @@ import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MessageChunk, ToolContext, ToolDefinition } from "@keelson/shared";
@@ -383,6 +383,42 @@ nodes:
     );
   });
 
+  test("workflow_run reports failed setup as unavailable isolation", async () => {
+    writeWorkflow(
+      "required-isolation.yaml",
+      `name: required-isolation
+description: requires a managed worktree
+worktree:
+  enabled: true
+nodes:
+  - id: work
+    bash: touch sentinel.txt
+`,
+    );
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const run = toolByName(tools, "workflow_run");
+
+    const { ctx, chunks } = makeCtx(cwd);
+    await run.execute({ name: "required-isolation" }, ctx);
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("Run error: worktree setup failed:");
+    expect(result.content).toContain(
+      "Isolation: required; worktree unavailable (not established).",
+    );
+    expect(result.content).toContain(`Requested source: "${canonicalPath(cwd)}".`);
+    expect(result.content).not.toContain("execution directory");
+    expect(existsSync(join(cwd, "sentinel.txt"))).toBe(false);
+    expect(
+      chunks.some(
+        (chunk) =>
+          chunk.type === "text" &&
+          chunk.content.includes(`with requested source "${canonicalPath(cwd)}"`),
+      ),
+    ).toBe(true);
+  });
+
   test("controller tracks the current node until it completes", async () => {
     writeWorkflow(
       "slow.yaml",
@@ -465,7 +501,11 @@ nodes:
     const started = makeCtx(cwd);
     await run.execute({ name: "boom", arguments: "" }, started.ctx);
     const runId = extractRunId(started.chunks);
-    expect(lastToolResult(started.chunks).isError).toBe(true);
+    const failed = lastToolResult(started.chunks);
+    expect(failed.isError).toBe(true);
+    expect(failed.content.indexOf("Run error:")).toBeLessThan(
+      failed.content.indexOf("Run output:"),
+    );
 
     const { ctx, chunks } = makeCtx(cwd);
     await resume.execute({ runId }, ctx);
@@ -726,6 +766,46 @@ nodes:
     expect(lastToolResult(okCtx.chunks).isError).toBe(false);
   });
 
+  test("workflow_status exposes durable setup failure and pending isolation", async () => {
+    const { tools, cwd, store, conversationStore, dispose } = makeRig();
+    activeDispose = dispose;
+    const runId = "required-setup-status";
+    store.createRun({
+      runId,
+      workflowName: "required",
+      inputs: {},
+      startedAt: "2026-09-21T10:00:00.000Z",
+      conversationId: conversationStore.create({ providerId: "workflow" }).id,
+      workingDir: cwd,
+      isolationEnabled: true,
+    });
+    const status = toolByName(tools, "workflow_status");
+
+    const activeCtx = makeCtx(cwd);
+    await status.execute({}, activeCtx.ctx);
+    const active = lastToolResult(activeCtx.chunks).content;
+    expect(active).toContain("Isolation: required; worktree not yet established.");
+    expect(active).toContain(`Requested source: "${cwd}".`);
+    expect(active).not.toContain("execution directory");
+
+    store.updateRunStatus({
+      runId,
+      status: "failed",
+      completedAt: "2026-09-21T10:00:01.000Z",
+      error: "worktree setup failed: injected failure",
+    });
+
+    for (const brief of [false, true]) {
+      const statusCtx = makeCtx(cwd);
+      await status.execute({ runId, brief }, statusCtx.ctx);
+      const content = lastToolResult(statusCtx.chunks).content;
+      expect(content).toContain("Run error: worktree setup failed: injected failure");
+      expect(content).toContain("Isolation: required; worktree unavailable (not established).");
+      expect(content).toContain(`Requested source: "${cwd}".`);
+      expect(content).not.toContain("execution directory");
+    }
+  });
+
   test("workflow_status lists active runs and returns per-run detail", async () => {
     writeWorkflow("pa.yaml", APPROVAL_WF);
     const { tools, cwd, dispose } = makeRig();
@@ -743,11 +823,13 @@ nodes:
     const listed = lastToolResult(listCtx.chunks);
     expect(listed.content).toContain(refs.runId);
     expect(listed.content).toContain("paused");
+    expect(listed.content).toContain("Isolation: disabled");
 
     const detailCtx = makeCtx(cwd);
     await status.execute({ runId: refs.runId }, detailCtx.ctx);
     const detail = lastToolResult(detailCtx.chunks);
     expect(detail.content).toContain("pa");
+    expect(detail.content).toContain(`in-place execution directory: "${canonicalPath(cwd)}"`);
     expect(detail.content).toContain('Awaiting approval at node "review"');
     // Status surfaces the live pauseId so a status-polled approval can resume
     // with the same protocol as workflow_run (regression for the in-memory token).

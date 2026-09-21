@@ -65,6 +65,11 @@ export async function runWorkflowStatus(
               workflowName: detail.workflowName,
               status: detail.status,
               startedAt: detail.startedAt,
+              error: detail.error,
+              workingDir: detail.workingDir,
+              worktreePath: detail.worktreePath,
+              isolationEnabled: detail.isolationEnabled,
+              worktreeEstablished: detail.worktreeEstablished,
               nodes: detail.nodes.map((node) => ({ id: node.nodeId, status: node.status })),
               current: awaitingNode?.nodeId ?? null,
               awaiting:
