@@ -44,6 +44,7 @@ export {
 } from "./executor.ts";
 export {
   buildTopologicalLayers,
+  collectTransitiveDependents,
   type DagShapeError,
   validateDagShape,
 } from "./graph.ts";
@@ -102,7 +103,6 @@ export {
 } from "./handlers/script.ts";
 export { type ResolvedBash, resolveBash } from "./handlers/shell.ts";
 export {
-  collectUnguardedCollectorWarnings,
   type DiscoveryResult,
   type DiscoveryRoot,
   discoverWorkflows,

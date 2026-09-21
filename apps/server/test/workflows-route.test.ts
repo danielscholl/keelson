@@ -2490,14 +2490,90 @@ nodes:
     expect(readFileSync(attemptPath, "utf8").trim()).toBe("2");
   });
 
-  test("POST /resume-run re-runs an always_run node even though it succeeded", async () => {
+  test("POST /resume-run refreshes descendants of an all_done collector", async () => {
+    const flakyCountPath = join(tmpDir, "all-done-flaky-count.txt");
+    const collectorCountPath = join(tmpDir, "all-done-collector-count.txt");
+    const deriveCountPath = join(tmpDir, "all-done-derive-count.txt");
+    const terminalCountPath = join(tmpDir, "all-done-terminal-count.txt");
+    writeWorkflow(
+      "resume-all-done.yaml",
+      `name: resume-all-done
+description: all_done output and its derived output refresh together
+nodes:
+  - id: flaky
+    bash: |
+      n=0
+      if [ -f "${flakyCountPath}" ]; then n=$(cat "${flakyCountPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${flakyCountPath}"
+      if [ "$n" -lt 2 ]; then exit 7; fi
+      echo "fresh-$n"
+  - id: collector
+    depends_on: [flaky]
+    trigger_rule: all_done
+    bash: |
+      n=0
+      if [ -f "${collectorCountPath}" ]; then n=$(cat "${collectorCountPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${collectorCountPath}"
+      echo "collector:$KEELSON_NODE_flaky_OUTPUT"
+  - id: derive
+    depends_on: [collector]
+    bash: |
+      n=0
+      if [ -f "${deriveCountPath}" ]; then n=$(cat "${deriveCountPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${deriveCountPath}"
+      echo "derive:$KEELSON_NODE_collector_OUTPUT"
+  - id: terminal
+    depends_on: [derive]
+    bash: |
+      n=0
+      if [ -f "${terminalCountPath}" ]; then n=$(cat "${terminalCountPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${terminalCountPath}"
+      if [ "$n" -lt 2 ]; then exit 7; fi
+`,
+    );
+    const { app } = makeRig();
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-all-done/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    const first = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; status: string }>;
+    };
+    expect(first.status).toBe("failed");
+    expect(first.nodes.find((node) => node.nodeId === "collector")?.status).toBe("succeeded");
+    expect(first.nodes.find((node) => node.nodeId === "derive")?.status).toBe("succeeded");
+
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+
+    const second = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; outputText: string | null }>;
+    };
+    expect(second.status).toBe("succeeded");
+    expect(second.nodes.find((node) => node.nodeId === "derive")?.outputText).toContain("fresh-2");
+    expect(readFileSync(flakyCountPath, "utf8").trim()).toBe("2");
+    expect(readFileSync(collectorCountPath, "utf8").trim()).toBe("2");
+    expect(readFileSync(deriveCountPath, "utf8").trim()).toBe("2");
+    expect(readFileSync(terminalCountPath, "utf8").trim()).toBe("2");
+  });
+
+  test("POST /resume-run re-runs an always_run node and its prompt descendant", async () => {
     const prepCountPath = join(tmpDir, "ar-prep-count.txt");
     const gateCountPath = join(tmpDir, "ar-gate-count.txt");
     const failCountPath = join(tmpDir, "ar-fail-count.txt");
+    let promptCalls = 0;
     writeWorkflow(
       "resume-always.yaml",
       `name: resume-always
-description: an always_run gate re-executes on resume; a normal node stays skipped
+description: an always_run gate and its prompt descendant re-execute on resume
 nodes:
   - id: prepare
     bash: |
@@ -2515,8 +2591,11 @@ nodes:
       n=$((n+1))
       echo "$n" > "${gateCountPath}"
       echo "gate:$n"
-  - id: fail
+  - id: ask
     depends_on: [gate]
+    prompt: derive the current gate output
+  - id: fail
+    depends_on: [ask]
     bash: |
       n=0
       if [ -f "${failCountPath}" ]; then n=$(cat "${failCountPath}"); fi
@@ -2526,7 +2605,17 @@ nodes:
       exit 7
 `,
     );
-    const { app } = makeRig();
+    const promptHandler = makePromptHandler({
+      getProvider: () => ({
+        async *sendQuery() {
+          promptCalls++;
+          yield { type: "text", content: `reply-${promptCalls}` };
+          yield { type: "done" };
+        },
+      }),
+      getRegisteredTools: () => [],
+    });
+    const { app } = makeRig(promptHandler);
     const start = await app.fetch(
       postRun("http://test/api/workflows/resume-always/runs", { inputs: {} }),
     );
@@ -2552,8 +2641,214 @@ nodes:
     expect(readFileSync(prepCountPath, "utf8").trim()).toBe("1");
     // gate (always_run, succeeded) re-executes on resume despite its prior pass → twice.
     expect(readFileSync(gateCountPath, "utf8").trim()).toBe("2");
+    expect(promptCalls).toBe(2);
     // fail (failed) re-executes on resume → twice.
     expect(readFileSync(failCountPath, "utf8").trim()).toBe("2");
+  });
+
+  test("POST /resume-run invalidates incomplete and absent nodes after interruption", async () => {
+    const incompleteRootPath = join(tmpDir, "incomplete-root.txt");
+    const incompleteChildPath = join(tmpDir, "incomplete-child.txt");
+    const absentRootPath = join(tmpDir, "absent-root.txt");
+    const absentChildPath = join(tmpDir, "absent-child.txt");
+    writeWorkflow(
+      "resume-incomplete.yaml",
+      `name: resume-incomplete
+description: incomplete and absent persisted nodes both re-execute
+nodes:
+  - id: incomplete-root
+    bash: echo run >> "${incompleteRootPath}"
+  - id: incomplete-child
+    depends_on: [incomplete-root]
+    bash: echo run >> "${incompleteChildPath}"
+  - id: absent-root
+    bash: echo run >> "${absentRootPath}"
+  - id: absent-child
+    depends_on: [absent-root]
+    bash: echo run >> "${absentChildPath}"
+  - id: fail
+    depends_on: [incomplete-child, absent-child]
+    bash: exit 7
+`,
+    );
+    const { app, store } = makeRig();
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-incomplete/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
+
+    store.upsertNodeOutput({
+      runId,
+      nodeId: "incomplete-root",
+      status: "awaiting",
+      outputText: null,
+      contentParts: null,
+      startedAt: null,
+      completedAt: null,
+      error: null,
+      usage: null,
+      provider: null,
+      model: null,
+      effort: null,
+    });
+    expect(store.deleteNodeOutput(runId, "absent-root")).toBe(true);
+    store.updateRunStatus({
+      runId,
+      status: "cancelled",
+      completedAt: new Date().toISOString(),
+      error: "interrupted",
+    });
+
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+    expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
+
+    for (const path of [incompleteRootPath, incompleteChildPath, absentRootPath, absentChildPath]) {
+      expect(readFileSync(path, "utf8").trim().split("\n")).toHaveLength(2);
+    }
+  });
+
+  test("POST /resume-run invalidates a diamond but keeps an independent branch", async () => {
+    const rootPath = join(tmpDir, "diamond-root.txt");
+    const leftPath = join(tmpDir, "diamond-left.txt");
+    const rightPath = join(tmpDir, "diamond-right.txt");
+    const joinPath = join(tmpDir, "diamond-join.txt");
+    const independentPath = join(tmpDir, "diamond-independent.txt");
+    writeWorkflow(
+      "resume-diamond.yaml",
+      `name: resume-diamond
+description: transitive invalidation follows fan-out and fan-in only
+nodes:
+  - id: root
+    always_run: true
+    bash: echo run >> "${rootPath}"
+  - id: left
+    depends_on: [root]
+    bash: echo run >> "${leftPath}"
+  - id: right
+    depends_on: [root]
+    bash: echo run >> "${rightPath}"
+  - id: join
+    depends_on: [left, right]
+    bash: echo run >> "${joinPath}"
+  - id: independent
+    bash: echo run >> "${independentPath}"
+  - id: fail
+    depends_on: [join]
+    bash: exit 7
+`,
+    );
+    const { app } = makeRig();
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-diamond/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
+
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+    expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
+
+    for (const path of [rootPath, leftPath, rightPath, joinPath]) {
+      expect(readFileSync(path, "utf8").trim().split("\n")).toHaveLength(2);
+    }
+    expect(readFileSync(independentPath, "utf8").trim().split("\n")).toHaveLength(1);
+  });
+
+  test("POST /resume-run keeps a fully seeded converge subgraph", async () => {
+    const preparePath = join(tmpDir, "seeded-converge-prepare.txt");
+    const gatePath = join(tmpDir, "seeded-converge-gate.txt");
+    const afterPath = join(tmpDir, "seeded-converge-after.txt");
+    writeWorkflow(
+      "resume-seeded-converge.yaml",
+      `name: resume-seeded-converge
+description: a completed converge gate keeps its subgraph seeded
+converge:
+  gate: gate
+  max_rounds: 1
+nodes:
+  - id: prepare
+    bash: echo run >> "${preparePath}"
+  - id: gate
+    depends_on: [prepare]
+    bash: echo run >> "${gatePath}"
+  - id: after
+    depends_on: [gate]
+    bash: echo run >> "${afterPath}"
+  - id: fail
+    depends_on: [after]
+    bash: exit 7
+`,
+    );
+    const { app } = makeRig();
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-seeded-converge/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
+
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+    expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
+
+    for (const path of [preparePath, gatePath, afterPath]) {
+      expect(readFileSync(path, "utf8").trim().split("\n")).toHaveLength(1);
+    }
+  });
+
+  test("POST /resume-run expands an unseeded converge gate to its ancestor closure", async () => {
+    const preparePath = join(tmpDir, "unseeded-converge-prepare.txt");
+    const gatePath = join(tmpDir, "unseeded-converge-gate.txt");
+    const sidePath = join(tmpDir, "unseeded-converge-side.txt");
+    const afterPath = join(tmpDir, "unseeded-converge-after.txt");
+    writeWorkflow(
+      "resume-unseeded-converge.yaml",
+      `name: resume-unseeded-converge
+description: an always_run gate refreshes the full converge dependency graph
+converge:
+  gate: gate
+  max_rounds: 1
+nodes:
+  - id: prepare
+    bash: echo run >> "${preparePath}"
+  - id: gate
+    depends_on: [prepare]
+    always_run: true
+    bash: echo run >> "${gatePath}"
+  - id: side
+    depends_on: [prepare]
+    bash: echo run >> "${sidePath}"
+  - id: after
+    depends_on: [gate]
+    bash: echo run >> "${afterPath}"
+  - id: fail
+    depends_on: [side, after]
+    bash: exit 7
+`,
+    );
+    const { app } = makeRig();
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-unseeded-converge/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
+
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+    expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
+
+    for (const path of [preparePath, gatePath, sidePath, afterPath]) {
+      expect(readFileSync(path, "utf8").trim().split("\n")).toHaveLength(2);
+    }
   });
 
   test("POST /resume-run re-runs the failure-cascaded tail once the failed node succeeds", async () => {
@@ -2617,6 +2912,47 @@ nodes:
     expect(readFileSync(flakyCountPath, "utf8").trim()).toBe("2");
     expect(readFileSync(tailMarkPath, "utf8").trim()).toBe("ran");
     expect(existsSync(neverMarkPath)).toBe(false);
+  });
+
+  test("POST /resume-run keeps successful descendants of a condition-skipped node", async () => {
+    const collectorCountPath = join(tmpDir, "condition-skipped-collector-count.txt");
+    writeWorkflow(
+      "resume-condition-skipped.yaml",
+      `name: resume-condition-skipped
+description: successful descendants of condition-skipped nodes stay seeded
+nodes:
+  - id: prepare
+    bash: echo ready
+  - id: skipped
+    depends_on: [prepare]
+    when: "$prepare.output == 'nope'"
+    bash: echo should-not-run
+  - id: collector
+    depends_on: [skipped]
+    trigger_rule: all_done
+    bash: |
+      n=0
+      if [ -f "${collectorCountPath}" ]; then n=$(cat "${collectorCountPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${collectorCountPath}"
+  - id: fail
+    depends_on: [collector]
+    bash: exit 7
+`,
+    );
+    const { app } = makeRig();
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-condition-skipped/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
+
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+    expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
+    expect(readFileSync(collectorCountPath, "utf8").trim()).toBe("1");
   });
 
   test("POST /resume-run reuses the artifacts dir so seeded nodes' files survive", async () => {
