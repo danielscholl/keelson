@@ -257,10 +257,11 @@ function truncateEnvValue(value: string, note: string): string {
 
 /**
  * Build the env block for a workflow subprocess. Layers `KEELSON_INPUTS_*`,
- * `KEELSON_NODE_*_OUTPUT`, node provenance, `KEELSON_ARGUMENTS`, and (when
- * provided) the per-run `KEELSON_ARTIFACTS_DIR` onto a snapshot of the parent
- * env. Non-alphanumeric chars in keys/node ids are normalized to `_` so the
- * resulting names are valid POSIX env-var identifiers.
+ * `KEELSON_NODE_*_OUTPUT`, node provenance, `KEELSON_ARGUMENTS`,
+ * `KEELSON_RUN_ID`, and (when provided) the per-run
+ * `KEELSON_ARTIFACTS_DIR` onto a snapshot of the parent env. Non-alphanumeric
+ * chars in keys/node ids are normalized to `_` so the resulting names are valid
+ * POSIX env-var identifiers.
  *
  * Every node output is written in full to `<artifactsDir>/node-outputs/<id>.txt`
  * and the path published as `KEELSON_NODE_<id>_OUTPUT_FILE`, so a consumer can
@@ -273,7 +274,11 @@ function truncateEnvValue(value: string, note: string): string {
 export function buildSubprocessEnv(
   inputs: Readonly<Record<string, string>>,
   upstream: ReadonlyMap<string, NodeOutput>,
-  options?: { artifactsDir?: string; parentEnv?: Readonly<Record<string, string>> },
+  options?: {
+    artifactsDir?: string;
+    runId?: string;
+    parentEnv?: Readonly<Record<string, string>>;
+  },
 ): Record<string, string> {
   const env: Record<string, string> = { ...(options?.parentEnv ?? PARENT_ENV) };
   // PARENT_ENV is captured at module load — if the operator's shell had
@@ -283,6 +288,7 @@ export function buildSubprocessEnv(
   // per-run value.
   delete env.KEELSON_ARTIFACTS_DIR;
   delete env.ARTIFACTS_DIR;
+  delete env.KEELSON_RUN_ID;
   const capInput = (v: string): string =>
     v.length <= ENV_VALUE_MAX_CHARS
       ? v
@@ -343,6 +349,9 @@ export function buildSubprocessEnv(
   if (options?.artifactsDir !== undefined) {
     env.KEELSON_ARTIFACTS_DIR = options.artifactsDir;
     env.ARTIFACTS_DIR = options.artifactsDir;
+  }
+  if (options?.runId !== undefined) {
+    env.KEELSON_RUN_ID = options.runId;
   }
   return env;
 }

@@ -70,6 +70,8 @@ export interface RunUntilBashProbeOptions {
   inputs: Readonly<Record<string, string>>;
   /** Upstream node outputs — projected as `KEELSON_NODE_<id>_OUTPUT`. */
   upstreamOutputs: ReadonlyMap<string, NodeOutput>;
+  /** Current workflow run id — projected as `KEELSON_RUN_ID`. */
+  runId?: string;
   /** Per-run scratch dir — projected as `KEELSON_ARTIFACTS_DIR` + `ARTIFACTS_DIR`. */
   artifactsDir?: string;
 }
@@ -93,6 +95,7 @@ export type RunUntilBashProbe = (
  */
 export const defaultRunUntilBashProbe: RunUntilBashProbe = async (script, opts) => {
   const env = buildSubprocessEnv(opts.inputs, opts.upstreamOutputs, {
+    ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
     ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
   });
   if (opts.env) {
@@ -293,6 +296,7 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
               },
               inputs: ctx.inputs,
               upstreamOutputs: ctx.upstreamOutputs,
+              runId: ctx.runId,
               ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
             });
             // Order matters: abort > timeout > exit 0. A probe that traps

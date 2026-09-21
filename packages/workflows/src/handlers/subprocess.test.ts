@@ -134,6 +134,19 @@ describe("buildSubprocessEnv", () => {
     expect(env.ARTIFACTS_DIR).toBe("/tmp/keelson-run-abc");
   });
 
+  test("sets the workflow run id without inheriting a stale value", () => {
+    const env = buildSubprocessEnv({}, new Map<string, NodeOutput>(), {
+      runId: "abcdef12-rest",
+      parentEnv: { KEELSON_RUN_ID: "stale" },
+    });
+    expect(env.KEELSON_RUN_ID).toBe("abcdef12-rest");
+
+    const withoutRun = buildSubprocessEnv({}, new Map<string, NodeOutput>(), {
+      parentEnv: { KEELSON_RUN_ID: "stale" },
+    });
+    expect(Object.hasOwn(withoutRun, "KEELSON_RUN_ID")).toBe(false);
+  });
+
   test("omits both ARTIFACTS_DIR vars when options.artifactsDir is undefined (no PARENT_ENV leak)", () => {
     // The implementation unconditionally deletes env.KEELSON_ARTIFACTS_DIR
     // and env.ARTIFACTS_DIR after spreading PARENT_ENV — so even if the

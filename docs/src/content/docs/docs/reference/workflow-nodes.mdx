@@ -471,6 +471,7 @@ environment variables, never spliced into the source:
 | `KEELSON_NODE_<id>_OUTPUT_TRUNCATED` | `1` when the `_OUTPUT` value above was capped; unset otherwise. |
 | `KEELSON_NODE_<id>_PROVIDER` | Effective provider recorded for an upstream agent node, including provider fallback. Unset for deterministic nodes. |
 | `KEELSON_NODE_<id>_MODEL` | Effective model recorded for an upstream agent node, including a provider-reported model change. Unset for deterministic nodes. |
+| `KEELSON_RUN_ID` | The current workflow run id. |
 | `KEELSON_ARTIFACTS_DIR` | The per-run scratch directory. |
 | `KEELSON_INPUTS_<key>` | One variable per workflow input; non-alphanumeric characters in the key are normalized to `_`. |
 | `KEELSON_ARGUMENTS` | The full free-form text the run was started with (equivalent to `$ARGUMENTS` in prompt substitution). |

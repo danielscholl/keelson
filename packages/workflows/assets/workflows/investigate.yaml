@@ -60,11 +60,11 @@ nodes:
             ;;
         esac
       else
-        if [ -z "${KEELSON_ARTIFACTS_DIR:-}" ]; then
-          echo "artifacts directory is required for deterministic verifier rotation" >&2
+        RUN_ID="${KEELSON_RUN_ID:-}"
+        if [ -z "$RUN_ID" ]; then
+          echo "run id is required for deterministic verifier rotation" >&2
           exit 1
         fi
-        RUN_ID=$(basename "$KEELSON_ARTIFACTS_DIR")
         VERIFIER=$(RUN_ID="$RUN_ID" bun --no-env-file -e '
           import { createHash } from "node:crypto";
           const digest = createHash("sha256").update(process.env.RUN_ID ?? "").digest();
@@ -410,8 +410,7 @@ nodes:
       else:
           text = text.rstrip()
 
-      artifacts = Path(required_env("KEELSON_ARTIFACTS_DIR"))
-      run_id = artifacts.name[:8]
+      run_id = required_env("KEELSON_RUN_ID")[:8]
       date = datetime.now(timezone.utc).date().isoformat()
       investigator_provider = required_env("KEELSON_NODE_investigate_PROVIDER")
       investigator_model = required_env("KEELSON_NODE_investigate_MODEL")

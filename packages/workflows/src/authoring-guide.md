@@ -279,6 +279,7 @@ warning.
   parsing (empty string when the output isn't JSON).
 - `$ARTIFACTS_DIR` — per-run scratch directory in prompt text; bash nodes see
   it as the `$KEELSON_ARTIFACTS_DIR` environment variable.
+- `KEELSON_RUN_ID` — the current workflow run id in bash and script nodes.
 - `KEELSON_NODE_<id>_OUTPUT` — how a bash or script node reads an upstream
   output (`$<id>.output` does not expand in a shell body). Capped at 16 KiB and
   head+tail truncated past it, with a marker in the middle.

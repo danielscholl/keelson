@@ -74,11 +74,13 @@ function runIntake(
     runId?: string;
   } = {},
 ) {
-  const artifacts = artifactsDir(inputs.runId ?? "run-default");
+  const runId = inputs.runId ?? "run-default";
+  const artifacts = artifactsDir("keelson-cli-run-random");
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     KEELSON_ARGUMENTS: question,
     KEELSON_ARTIFACTS_DIR: artifacts,
+    KEELSON_RUN_ID: runId,
   };
   for (const [key, value] of Object.entries({
     out: inputs.out,
@@ -116,13 +118,15 @@ function runFinalizer(
     runId?: string;
   } = {},
 ) {
-  const artifacts = artifactsDir(provenance.runId ?? "12345678-pilot");
+  const runId = provenance.runId ?? "12345678-pilot";
+  const artifacts = artifactsDir("keelson-cli-run-random");
   const out = join(artifacts, "evidence.md");
   writeFileSync(out, evidence);
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     KEELSON_INPUTS_out: out,
     KEELSON_ARTIFACTS_DIR: artifacts,
+    KEELSON_RUN_ID: runId,
   };
   const values = {
     KEELSON_NODE_investigate_PROVIDER: provenance.investigatorProvider ?? "copilot",
@@ -366,6 +370,7 @@ describe("investigate finalizer", () => {
         ...(process.env as Record<string, string>),
         KEELSON_INPUTS_out: out,
         KEELSON_ARTIFACTS_DIR: artifacts,
+        KEELSON_RUN_ID: "missing-provenance",
       },
       stdout: "pipe",
       stderr: "pipe",
