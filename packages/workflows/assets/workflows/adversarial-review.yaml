@@ -617,9 +617,31 @@ nodes:
         *) printf 'author %s holds no default seat; seating unchanged\n' "$AUTHOR" ;;
       esac
 
+      FAILED_LANES=""
+      record_failure() {
+        local lane="$1"
+        local state="$2"
+        if [ "$state" = "failed" ]; then
+          FAILED_LANES="${FAILED_LANES}${FAILED_LANES:+, }${lane}"
+        fi
+      }
+      record_failure reviewer-logic "${KEELSON_NODE_reviewer_logic_STATE:-}"
+      record_failure reviewer-evidence "${KEELSON_NODE_reviewer_evidence_STATE:-}"
+      record_failure reviewer-risk "${KEELSON_NODE_reviewer_risk_STATE:-}"
+      record_failure verify "${KEELSON_NODE_verify_STATE:-}"
+      record_failure synthesize "${KEELSON_NODE_synthesize_STATE:-}"
+
+      finish() {
+        if [ -n "$FAILED_LANES" ]; then
+          printf 'upstream lane failure(s): %s\n' "$FAILED_LANES" >&2
+          exit 1
+        fi
+      }
+
       OUT="${KEELSON_INPUTS_out:-}"
       if [ -z "$OUT" ]; then
         echo "no out directory set; nothing written"
+        finish
         exit 0
       fi
       mkdir -p -- "$OUT"
@@ -629,19 +651,40 @@ nodes:
         local spill="$2"
         local value="$3"
         local truncated="$4"
+        local state="$5"
+        local filter="${6:-}"
         local target="$OUT/$filename"
         rm -f -- "$target"
-        if [ -n "$spill" ]; then
+        if [ "$state" != "completed" ]; then
+          printf 'left %s absent: current lane state is %s\n' "$filename" "${state:-unknown}"
+          return
+        elif [ -n "$spill" ]; then
           if [ ! -s "$spill" ]; then
             printf 'left %s absent: current output spill is unavailable\n' "$filename"
             return
           fi
-          cat -- "$spill" > "$target"
+          if [ -n "$filter" ]; then
+            if ! jq -er "$filter" "$spill" > "$target"; then
+              rm -f -- "$target"
+              printf 'failed to extract %s from current output\n' "$filename" >&2
+              return 1
+            fi
+          else
+            cat -- "$spill" > "$target"
+          fi
         elif [ "$truncated" = "1" ]; then
           printf 'left %s absent: full current output is unavailable\n' "$filename"
           return
         elif [ -n "$value" ]; then
-          printf '%s\n' "$value" > "$target"
+          if [ -n "$filter" ]; then
+            if ! printf '%s' "$value" | jq -er "$filter" > "$target"; then
+              rm -f -- "$target"
+              printf 'failed to extract %s from current output\n' "$filename" >&2
+              return 1
+            fi
+          else
+            printf '%s\n' "$value" > "$target"
+          fi
         else
           printf 'left %s absent: current lane produced no output\n' "$filename"
           return
@@ -652,20 +695,27 @@ nodes:
       save review-logic.md \
         "${KEELSON_NODE_reviewer_logic_OUTPUT_FILE:-}" \
         "${KEELSON_NODE_reviewer_logic_OUTPUT:-}" \
-        "${KEELSON_NODE_reviewer_logic_OUTPUT_TRUNCATED:-}"
+        "${KEELSON_NODE_reviewer_logic_OUTPUT_TRUNCATED:-}" \
+        "${KEELSON_NODE_reviewer_logic_STATE:-}"
       save review-evidence.md \
         "${KEELSON_NODE_reviewer_evidence_OUTPUT_FILE:-}" \
         "${KEELSON_NODE_reviewer_evidence_OUTPUT:-}" \
-        "${KEELSON_NODE_reviewer_evidence_OUTPUT_TRUNCATED:-}"
+        "${KEELSON_NODE_reviewer_evidence_OUTPUT_TRUNCATED:-}" \
+        "${KEELSON_NODE_reviewer_evidence_STATE:-}"
       save review-risk.md \
         "${KEELSON_NODE_reviewer_risk_OUTPUT_FILE:-}" \
         "${KEELSON_NODE_reviewer_risk_OUTPUT:-}" \
-        "${KEELSON_NODE_reviewer_risk_OUTPUT_TRUNCATED:-}"
+        "${KEELSON_NODE_reviewer_risk_OUTPUT_TRUNCATED:-}" \
+        "${KEELSON_NODE_reviewer_risk_STATE:-}"
       save verification.md \
         "${KEELSON_NODE_verify_OUTPUT_FILE:-}" \
         "${KEELSON_NODE_verify_OUTPUT:-}" \
-        "${KEELSON_NODE_verify_OUTPUT_TRUNCATED:-}"
+        "${KEELSON_NODE_verify_OUTPUT_TRUNCATED:-}" \
+        "${KEELSON_NODE_verify_STATE:-}"
       save verdict.md \
         "${KEELSON_NODE_synthesize_OUTPUT_FILE:-}" \
         "${KEELSON_NODE_synthesize_OUTPUT:-}" \
-        "${KEELSON_NODE_synthesize_OUTPUT_TRUNCATED:-}"
+        "${KEELSON_NODE_synthesize_OUTPUT_TRUNCATED:-}" \
+        "${KEELSON_NODE_synthesize_STATE:-}" \
+        '.report | select(type == "string")'
+      finish

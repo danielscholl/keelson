@@ -110,6 +110,13 @@ function runSave(definition: WorkflowDefinition, overrides: Readonly<Record<stri
   for (const key of Object.keys(env)) {
     if (key.startsWith("KEELSON_NODE_")) delete env[key];
   }
+  Object.assign(env, {
+    KEELSON_NODE_reviewer_logic_STATE: "completed",
+    KEELSON_NODE_reviewer_evidence_STATE: "completed",
+    KEELSON_NODE_reviewer_risk_STATE: "completed",
+    KEELSON_NODE_verify_STATE: "completed",
+    KEELSON_NODE_synthesize_STATE: "completed",
+  });
   Object.assign(env, overrides);
   const proc = Bun.spawnSync({
     cmd: ["bash", "-c", bashNode(definition, "save")],
@@ -180,8 +187,20 @@ shimDescribe("adversarial-review output persistence", () => {
     const root = tempDir();
     const out = join(root, "review output");
     const spill = join(root, "verification.txt");
+    const verdictSpill = join(root, "verdict.json");
     const verification = `start\n${"v".repeat(ENV_VALUE_MAX_CHARS + 500)}\nend`;
+    const report = "# Verdict\n\nShip it.";
     writeFileSync(spill, verification);
+    writeFileSync(
+      verdictSpill,
+      JSON.stringify({
+        verdict: "CONFIRMED",
+        headline: "Ship it",
+        must_fix: [],
+        open_questions: [],
+        report,
+      }),
+    );
 
     const result = runSave(definition, {
       KEELSON_INPUTS_out: out,
@@ -192,7 +211,9 @@ shimDescribe("adversarial-review output persistence", () => {
       KEELSON_NODE_verify_OUTPUT: "[keelson: output truncated]",
       KEELSON_NODE_verify_OUTPUT_FILE: spill,
       KEELSON_NODE_verify_OUTPUT_TRUNCATED: "1",
-      KEELSON_NODE_synthesize_OUTPUT: "verdict",
+      KEELSON_NODE_synthesize_OUTPUT: "[keelson: output truncated]",
+      KEELSON_NODE_synthesize_OUTPUT_FILE: verdictSpill,
+      KEELSON_NODE_synthesize_OUTPUT_TRUNCATED: "1",
     });
 
     expect(result.exitCode).toBe(0);
@@ -205,6 +226,7 @@ shimDescribe("adversarial-review output persistence", () => {
       "verification.md",
     ]);
     expect(readFileSync(join(out, "verification.md"), "utf8")).toBe(verification);
+    expect(readFileSync(join(out, "verdict.md"), "utf8")).toBe(`${report}\n`);
     expect(result.stdout).toContain("reseated reviewer-logic: claude-opus-5 -> claude-opus-4.7");
   });
 
@@ -227,13 +249,44 @@ shimDescribe("adversarial-review output persistence", () => {
       KEELSON_NODE_reviewer_logic_OUTPUT: "current logic",
       KEELSON_NODE_reviewer_evidence_OUTPUT: "current evidence",
       KEELSON_NODE_verify_OUTPUT: "current verification",
-      KEELSON_NODE_synthesize_OUTPUT: "current verdict",
+      KEELSON_NODE_synthesize_OUTPUT: JSON.stringify({
+        verdict: "CONFIRMED",
+        headline: "Current verdict",
+        must_fix: [],
+        open_questions: [],
+        report: "current verdict",
+      }),
     });
 
     expect(result.exitCode).toBe(0);
     expect(existsSync(join(out, "review-risk.md"))).toBe(false);
     expect(readFileSync(join(out, "review-logic.md"), "utf8")).toBe("current logic\n");
     expect(result.stdout).toContain("left review-risk.md absent: current lane produced no output");
+  });
+
+  test("leaves a failed lane absent and propagates its failure after saving successful lanes", () => {
+    const definition = workflow();
+    const root = tempDir();
+    const out = join(root, "review output");
+    const spill = join(root, "partial-risk.txt");
+    writeFileSync(spill, "partial failed response");
+
+    const result = runSave(definition, {
+      KEELSON_INPUTS_out: out,
+      KEELSON_NODE_reviewer_logic_OUTPUT: "logic",
+      KEELSON_NODE_reviewer_evidence_OUTPUT: "evidence",
+      KEELSON_NODE_reviewer_risk_OUTPUT: "partial failed response",
+      KEELSON_NODE_reviewer_risk_OUTPUT_FILE: spill,
+      KEELSON_NODE_reviewer_risk_STATE: "failed",
+      KEELSON_NODE_verify_OUTPUT: "verification",
+      KEELSON_NODE_synthesize_STATE: "skipped",
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(existsSync(join(out, "review-risk.md"))).toBe(false);
+    expect(readFileSync(join(out, "review-logic.md"), "utf8")).toBe("logic\n");
+    expect(result.stdout).toContain("left review-risk.md absent: current lane state is failed");
+    expect(result.stderr).toContain("upstream lane failure(s): reviewer-risk");
   });
 
   test.each([...SEATS])("truthfully reports the $id reseat", (seat) => {
@@ -246,6 +299,17 @@ shimDescribe("adversarial-review output persistence", () => {
       `reseated ${seat.id}: ${seat.defaultModel} -> ${seat.alternateModel}`,
     );
     expect(result.stdout).toContain("no out directory set; nothing written");
+  });
+
+  test("propagates an upstream failure when no out directory is configured", () => {
+    const result = runSave(workflow(), {
+      KEELSON_NODE_verify_STATE: "failed",
+      KEELSON_NODE_verify_OUTPUT: "partial verification",
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toContain("no out directory set; nothing written");
+    expect(result.stderr).toContain("upstream lane failure(s): verify");
   });
 
   test("writes nothing when out and author are omitted", () => {

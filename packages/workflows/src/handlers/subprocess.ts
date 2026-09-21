@@ -257,10 +257,10 @@ function truncateEnvValue(value: string, note: string): string {
 
 /**
  * Build the env block for a workflow subprocess. Layers `KEELSON_INPUTS_*`,
- * `KEELSON_NODE_*_OUTPUT`, `KEELSON_ARGUMENTS`, and (when provided) the per-run
- * `KEELSON_ARTIFACTS_DIR` onto a snapshot of the parent env. Non-alphanumeric
- * chars in keys/node ids are normalized to `_` so the resulting names are
- * valid POSIX env-var identifiers.
+ * `KEELSON_NODE_*_{STATE,OUTPUT}`, `KEELSON_ARGUMENTS`, and (when provided) the
+ * per-run `KEELSON_ARTIFACTS_DIR` onto a snapshot of the parent env.
+ * Non-alphanumeric chars in keys/node ids are normalized to `_` so the
+ * resulting names are valid POSIX env-var identifiers.
  *
  * Every node output is written in full to `<artifactsDir>/node-outputs/<id>.txt`
  * and the path published as `KEELSON_NODE_<id>_OUTPUT_FILE`, so a consumer can
@@ -294,6 +294,7 @@ export function buildSubprocessEnv(
   for (const [id, out] of upstream.entries()) {
     const full = out.output ?? "";
     const name = `KEELSON_NODE_${envSafe(id)}_OUTPUT`;
+    env[`KEELSON_NODE_${envSafe(id)}_STATE`] = out.state;
     // An inherited path or truncation flag must not outlive the output that
     // produced it: a node reached without an artifacts dir would otherwise read
     // a prior run's file.

@@ -235,6 +235,7 @@ describe("buildSubprocessEnv — env value cap (issue #442)", () => {
       expect(spillPath).toBe(join(dir, "node-outputs", "run_tests.txt"));
       expect(readFileSync(spillPath, "utf8")).toBe(small);
       expect(env.KEELSON_NODE_run_tests_OUTPUT).toBe(small);
+      expect(env.KEELSON_NODE_run_tests_STATE).toBe("completed");
       expect(Object.hasOwn(env, "KEELSON_NODE_run_tests_OUTPUT_TRUNCATED")).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
