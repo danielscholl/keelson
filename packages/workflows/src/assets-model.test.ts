@@ -176,6 +176,16 @@ describe("resolve-pr workflow contract", () => {
   });
 });
 
+describe("smoke-test workflow contract", () => {
+  test("does not lock the checkout", () => {
+    const workflow = loadBundledWorkflows().find(
+      ({ workflow }) => workflow.name === "smoke-test",
+    )?.workflow;
+
+    expect(workflow?.mutates_checkout).toBe(false);
+  });
+});
+
 describe("bundled workflow model policy", () => {
   test("uses portable tiers and only soft provider pins", () => {
     const violations: string[] = [];
