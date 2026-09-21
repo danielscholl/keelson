@@ -31,6 +31,7 @@ const RESULT_CAP = 8_000;
 // `kind` is caller-supplied at registration with no length limit; cap it while
 // rendering so a long kind can't blow up a 100-row run_list or a run_status line.
 const KIND_CAP = 200;
+const TITLE_CAP = 600;
 
 const listInputSchema = z.object({});
 const statusInputSchema = z.object({ id: z.string().min(1) });
@@ -44,10 +45,18 @@ const steerInputSchema = z.object({
   note: z.string().min(1).max(8_192),
 });
 
+function oneLine(title: string): string {
+  const flattened = title.replace(/\s+/g, " ").trim();
+  return flattened.length <= TITLE_CAP
+    ? flattened
+    : `${flattened.slice(0, TITLE_CAP - 1)}…`;
+}
+
 function renderSummaryLine(op: OpSummaryView): string {
   const steer = op.steerable ? " (steerable)" : "";
   const done = op.completedAt ? ` completed ${op.completedAt}` : "";
-  return `• ${op.id} — ${truncate(op.kind, KIND_CAP)} [${op.status}]${steer} started ${op.createdAt}${done}`;
+  const title = op.title ? `\n    ${oneLine(op.title)}` : "";
+  return `• ${op.id} — ${truncate(op.kind, KIND_CAP)} [${op.status}]${steer} started ${op.createdAt}${done}${title}`;
 }
 
 function renderStatus(op: OpStatusView): string {
@@ -56,6 +65,7 @@ function renderStatus(op: OpStatusView): string {
     `owner: ${op.owner} · steerable: ${op.steerable} · started: ${op.createdAt}` +
       (op.completedAt ? ` · completed: ${op.completedAt}` : ""),
   ];
+  if (op.title) lines.push(oneLine(op.title));
   if (op.error) lines.push(`error: ${truncate(op.error, RESULT_CAP)}`);
   if (op.result !== undefined && op.result !== null) {
     lines.push(`result: ${truncate(JSON.stringify(op.result), RESULT_CAP)}`);
