@@ -2103,6 +2103,7 @@ nodes:
     const { handler: echoBash, calls } = echoHandler("bash");
     let gateCalls = 0;
     let downstreamFixOutput: NodeOutput | undefined;
+    const { events, onEvent } = recordEvents();
     const summary = await runWorkflow({
       ...baseOpts(workflow),
       handlers: new Map<string, NodeHandler>([
@@ -2132,6 +2133,7 @@ nodes:
         ],
         ["approval", approval],
       ]),
+      onEvent,
     });
 
     expect(summary.status).toBe("succeeded");
@@ -2144,6 +2146,15 @@ nodes:
     });
     expect(downstreamFixOutput).toMatchObject({
       state: "completed",
+      provider: "copilot",
+      model: "gpt-5.6-terra",
+    });
+    const absorbedDone = events.find(
+      (event) =>
+        event.type === "node_done" && event.nodeId === "fix" && event.result.status === "succeeded",
+    );
+    expect(absorbedDone?.type === "node_done" ? absorbedDone.result : undefined).toMatchObject({
+      status: "succeeded",
       provider: "copilot",
       model: "gpt-5.6-terra",
     });
