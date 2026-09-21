@@ -120,9 +120,21 @@ describe("fetchLiveModelCatalog", () => {
       builtIn: false,
     });
 
-    expect(await fetchLiveModelCatalog(["hanging"], { timeoutMs: 1 })).toEqual(
-      new Map([["hanging", null]]),
+    const watchdog = Promise.withResolvers<never>();
+    const watchdogTimer = setTimeout(
+      () => watchdog.reject(new Error("live catalog did not settle")),
+      1_000,
     );
+    try {
+      expect(
+        await Promise.race([
+          fetchLiveModelCatalog(["hanging"], { timeoutMs: 1 }),
+          watchdog.promise,
+        ]),
+      ).toEqual(new Map([["hanging", null]]));
+    } finally {
+      clearTimeout(watchdogTimer);
+    }
   });
 
   test("maps an unregistered provider to null", async () => {
