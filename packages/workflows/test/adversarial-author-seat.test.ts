@@ -9,21 +9,14 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ENV_VALUE_MAX_CHARS } from "../src/handlers/subprocess.ts";
-import { applyModelCase, selectModelCase } from "../src/model-by.ts";
-import { bundledWorkflowsDir } from "../src/seed.ts";
 import { parseWorkflow } from "../src/loader.ts";
+import { applyModelCase, selectModelCase } from "../src/model-by.ts";
 import type { DagNode, NodeOutput, WorkflowDefinition } from "../src/schema/index.ts";
+import { bundledWorkflowsDir } from "../src/seed.ts";
 
 const shimDescribe = process.platform === "win32" ? describe.skip : describe;
 const tmps: string[] = [];
@@ -111,10 +104,7 @@ function tempDir(): string {
   return dir;
 }
 
-function runSave(
-  definition: WorkflowDefinition,
-  overrides: Readonly<Record<string, string>> = {},
-) {
+function runSave(definition: WorkflowDefinition, overrides: Readonly<Record<string, string>> = {}) {
   const env = { ...(process.env as Record<string, string>) };
   delete env.KEELSON_INPUTS_out;
   for (const key of Object.keys(env)) {
@@ -136,17 +126,20 @@ function runSave(
 }
 
 shimDescribe("adversarial-review author seating", () => {
-  test.each([undefined, "   "])("normalizes omitted author %p and preserves every seat", (author) => {
-    const definition = workflow();
-    const selector = normalizedAuthor(definition, author);
+  test.each([undefined, "   "])(
+    "normalizes omitted author %p and preserves every seat",
+    (author) => {
+      const definition = workflow();
+      const selector = normalizedAuthor(definition, author);
 
-    expect(selector).toBe("seated");
-    for (const expected of SEATS) {
-      const seat = promptSeat(definition, expected.id);
-      expect(seat.model_by_provider?.copilot).toBe(expected.defaultModel);
-      expect(effectiveModel(seat, selector)).toBe(expected.defaultModel);
-    }
-  });
+      expect(selector).toBe("seated");
+      for (const expected of SEATS) {
+        const seat = promptSeat(definition, expected.id);
+        expect(seat.model_by_provider?.copilot).toBe(expected.defaultModel);
+        expect(effectiveModel(seat, selector)).toBe(expected.defaultModel);
+      }
+    },
+  );
 
   test("a non-matching author preserves every seat", () => {
     const definition = workflow();
@@ -174,8 +167,7 @@ shimDescribe("adversarial-review author seating", () => {
       expect(effective.every(({ model }) => model !== authoredSeat.defaultModel)).toBe(true);
       expect(
         effective.filter(
-          ({ id, model }) =>
-            model !== SEATS.find((expected) => expected.id === id)?.defaultModel,
+          ({ id, model }) => model !== SEATS.find((expected) => expected.id === id)?.defaultModel,
         ),
       ).toEqual([{ id: authoredSeat.id, model: authoredSeat.alternateModel }]);
     },
@@ -213,9 +205,7 @@ shimDescribe("adversarial-review output persistence", () => {
       "verification.md",
     ]);
     expect(readFileSync(join(out, "verification.md"), "utf8")).toBe(verification);
-    expect(result.stdout).toContain(
-      "reseated reviewer-logic: claude-opus-5 -> claude-opus-4.7",
-    );
+    expect(result.stdout).toContain("reseated reviewer-logic: claude-opus-5 -> claude-opus-4.7");
   });
 
   test("removes a prior artifact when its current lane produced no output", () => {
@@ -243,9 +233,7 @@ shimDescribe("adversarial-review output persistence", () => {
     expect(result.exitCode).toBe(0);
     expect(existsSync(join(out, "review-risk.md"))).toBe(false);
     expect(readFileSync(join(out, "review-logic.md"), "utf8")).toBe("current logic\n");
-    expect(result.stdout).toContain(
-      "left review-risk.md absent: current lane produced no output",
-    );
+    expect(result.stdout).toContain("left review-risk.md absent: current lane produced no output");
   });
 
   test.each([...SEATS])("truthfully reports the $id reseat", (seat) => {
