@@ -6,6 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+import { gatewayCredentialTransportSafe } from "@keelson/shared/config";
 import type {
   IAgentProvider,
   MessageChunk,
@@ -56,6 +57,10 @@ function errMessage(err: unknown): string {
 
 function joinUrl(base: string, path: string): string {
   return `${base.replace(/\/+$/, "")}/${path}`;
+}
+
+function credentialTransportRefusal(id: string): string {
+  return `gateway '${id}' has a stored key but its baseUrl uses plain HTTP on a non-loopback host; refusing to send it in cleartext; use https:// or a loopback host`;
 }
 
 function nonNegInt(v: unknown): number | undefined {
@@ -148,6 +153,7 @@ export class GatewayProvider implements IAgentProvider {
   private readonly model: string | undefined;
   private readonly fetchImpl: typeof fetch;
   private readonly capabilities: ProviderCapabilities;
+  private readonly credentialSafe: boolean;
 
   constructor(opts: GatewayProviderOptions) {
     this.id = opts.id;
@@ -155,6 +161,7 @@ export class GatewayProvider implements IAgentProvider {
     this.getApiKey = opts.getApiKey;
     this.model = opts.model;
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+    this.credentialSafe = gatewayCredentialTransportSafe(opts.baseUrl);
     this.capabilities = {
       sessionResume: false,
       streaming: true,
@@ -190,6 +197,10 @@ export class GatewayProvider implements IAgentProvider {
   async listModelsLive(signal?: AbortSignal): Promise<ModelInfo[] | null> {
     try {
       const key = await this.getApiKey();
+      if (key && !this.credentialSafe) {
+        console.warn(`[keelson] ${credentialTransportRefusal(this.id)}`);
+        return null;
+      }
       const res = await this.fetchImpl(joinUrl(this.baseUrl, "models"), {
         ...(signal !== undefined ? { signal } : {}),
         headers: {
@@ -232,6 +243,11 @@ export class GatewayProvider implements IAgentProvider {
     let res: Response;
     try {
       const key = await this.getApiKey();
+      if (key && !this.credentialSafe) {
+        yield { type: "error", message: credentialTransportRefusal(this.id) };
+        yield { type: "done" };
+        return;
+      }
       res = await this.fetchImpl(joinUrl(this.baseUrl, "chat/completions"), {
         method: "POST",
         headers: {
