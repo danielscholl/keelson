@@ -44,11 +44,13 @@ nodes:
       }
       const targets = new Set();
       if (/^[1-9]\d*$/.test(request)) targets.add(request);
-      for (const pattern of [
+      const urlPattern = /https?:\/\/[^\s]+\/(?:pull|merge_requests)\/([1-9]\d*)(?![\w]|\.\d)/gi;
+      for (const match of request.matchAll(urlPattern)) targets.add(match[1]);
+      const referenceText = request.replace(urlPattern, "");
+      for (const match of referenceText.matchAll(
         /(?:\b(?:pr|mr|pull\s+request|merge\s+request)\s*[#!]?\s*|[#!])([1-9]\d*)(?![\w]|\.\d)/gi,
-        /https?:\/\/[^\s]+\/(?:pull|merge_requests)\/([1-9]\d*)(?![\w]|\.\d)/gi,
-      ]) {
-        for (const match of request.matchAll(pattern)) targets.add(match[1]);
+      )) {
+        targets.add(match[1]);
       }
       if (targets.size !== 1) {
         console.error(
