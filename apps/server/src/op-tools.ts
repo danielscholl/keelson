@@ -46,7 +46,10 @@ const steerInputSchema = z.object({
 });
 
 function oneLine(title: string): string {
-  return truncate(title.replace(/\s+/g, " ").trim(), TITLE_CAP);
+  const flattened = title.replace(/\s+/g, " ").trim();
+  return flattened.length <= TITLE_CAP
+    ? flattened
+    : `${flattened.slice(0, TITLE_CAP - 1)}…`;
 }
 
 function renderSummaryLine(op: OpSummaryView): string {
