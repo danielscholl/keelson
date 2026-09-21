@@ -466,6 +466,11 @@ describe("fix-issue criteria coverage placement", () => {
 
   test("makes the repository template authoritative", () => {
     const prompt = workflowNode("create-pr").prompt;
+    expect(prompt).toContain("named `pull_request_template.md`");
+    expect(prompt).toContain("(case-insensitive) in `.github/`, the repository root, or `docs/`");
+    expect(prompt?.replace(/\s+/g, " ")).toContain(
+      "Do not select from a `PULL_REQUEST_TEMPLATE/` directory",
+    );
     expect(prompt).toContain("follow its sections exactly and add");
     expect(prompt).toContain("no section it does not ask for");
     expect(prompt).toContain("Do not use em dashes in the body");

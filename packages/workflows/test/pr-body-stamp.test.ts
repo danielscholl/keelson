@@ -93,6 +93,7 @@ const PENDING_BODY = "## Test plan\n- local gates: PASS\n- CI: pending CI\n";
 describe("create-pr test plan contract", () => {
   test("records actual results and preserves the CI placeholder", () => {
     const prompt = createPrPrompt();
+    expect(prompt).toContain("- Revalidation: $revalidate.output");
     expect(prompt).toContain("Record actual results, not intent");
     expect(prompt).toContain("only commands actually executed");
     expect(prompt).toMatch(/literal text\s+"pending CI"/);
