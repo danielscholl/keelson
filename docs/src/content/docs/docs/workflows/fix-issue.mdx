@@ -90,7 +90,7 @@ only when the pushed PR's checks pass.
 | Validate | `validate` | bash | Runs `verify.sh` fail-fast. **Exits 0** and reports `VALIDATION_STATUS` so the fixer can read it. |
 | | `fix-validation` | prompt | **`model: gpt-5.6-sol`**, **`effort: high`**: if it failed, fixes only what broke and commits; if it passed, stops. |
 | | `revalidate` | bash | **Hard gate**: re-runs the checks and **exits non-zero** on failure, skipping the PR. |
-| Draft PR | `create-pr` | prompt | Pushes the branch, opens a draft PR with `Fixes #N`, captures the PR number and URL, and records either the criteria-coverage status or an explicit not-run line. |
+| Draft PR | `create-pr` | prompt | Pushes the branch, opens a draft PR with `Fixes #N`, and captures the PR number and URL. It follows the repository's PR template exactly when one exists. Its test plan records commands actually executed and their results, with `pending CI` reserved for checks that only CI can confirm. |
 | | `enforce-draft` | bash | Verifies the new PR is a draft; if it came up ready, runs `forge pr ready --undo` to force it back to draft, and fails the run if it cannot confirm the draft state. |
 | Review loop | `capture-diff` | bash | Freezes the branch diff to `$ARTIFACTS_DIR/diff.patch` / `diff-stat.txt` so the lenses can run without shell access. |
 | | `review-correctness` | prompt | **`model: gpt-5.6-terra`**, **`effort: xhigh`**, `allowed_tools: [Read, Glob, Grep]`: one of three **independent, parallel** reviewers over `diff.patch`. Hunts by cost of failure (trust boundaries, irreversible state, idempotency gaps), labels unverified external-API claims INFERRED, and emits a confidence per finding. |
@@ -111,6 +111,8 @@ only when the pushed PR's checks pass.
 **The human gate is the spine's hinge.** Everything before `approve-plan` is
 read-and-think (fetch, classify, investigate or plan); everything after is
 write (implement, commit, push, PR). The gate sits exactly on that seam.
+When the issue has acceptance criteria, the gate shows how each criterion maps
+to the plan before the reviewer decides whether implementation should begin.
 `capture_response: true` means the reviewer's reply is not just yes or no: if
 you send changes, `implement` is instructed to fold them into the plan before
 writing any code.
