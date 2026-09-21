@@ -313,6 +313,14 @@ describe("investigate finalizer", () => {
 - External deployment state.
 `;
 
+  function fencedClaimTable(opening: string, closing: string): string {
+    return `${opening}
+| Citation | Verified | Claim # | Claim | Verification note | Level |
+| --- | --- | --- | --- | --- | --- |
+| example | CONFIRMED | 1 | Example | sample only | documented |
+${closing}`;
+  }
+
   test("counts every verdict and attributes the effective fallback models", () => {
     const { out, run } = runFinalizer(evidence, {
       investigatorProvider: "claude",
@@ -331,6 +339,25 @@ describe("investigate finalizer", () => {
       /Run abcdef12, \d{4}-\d{2}-\d{2}: investigated by `claude-opus-4-8` via `claude`; rows added or changed in this run were verified by `claude-sonnet-5` via `claude`\./,
     );
     expect(finalized).not.toContain("gpt-6-astra");
+  });
+
+  test.each([
+    ["backtick", "```markdown", "```"],
+    ["tilde", "~~~~markdown", "~~~~"],
+  ])("ignores claim tables inside %s fences", (_name, opening, closing) => {
+    const { out, run } = runFinalizer(`${fencedClaimTable(opening, closing)}\n\n${evidence}`);
+    const result = run();
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(out, "utf8")).toContain(
+      "Tally: confirmed=1; confirmed in part=1; refuted=1; unverifiable=1; not checked=1.",
+    );
+  });
+
+  test("rejects evidence containing only a fenced claim table", () => {
+    const { run } = runFinalizer(fencedClaimTable("```markdown", "```"));
+    const result = run();
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain("no claim table");
   });
 
   test("rewrites its generated section idempotently", () => {

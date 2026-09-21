@@ -397,7 +397,29 @@ nodes:
       const claimNumbers = new Set();
       let claims = 0;
       let index = 0;
+      let fenceMarker = null;
+      let fenceLength = 0;
       while (index < lines.length) {
+        const fence = lines[index].match(/^\s*(`{3,}|~{3,})(.*)$/);
+        if (fenceMarker !== null) {
+          if (
+            fence !== null &&
+            fence[1][0] === fenceMarker &&
+            fence[1].length >= fenceLength &&
+            fence[2].trim() === ""
+          ) {
+            fenceMarker = null;
+            fenceLength = 0;
+          }
+          index += 1;
+          continue;
+        }
+        if (fence !== null && (fence[1][0] === "~" || !fence[2].includes("`"))) {
+          fenceMarker = fence[1][0];
+          fenceLength = fence[1].length;
+          index += 1;
+          continue;
+        }
         const header = cells(lines[index]);
         const normalized = header?.map((cell) => cell.toLowerCase()) ?? [];
         const required = ["claim #", "claim", "level", "citation", "verified"];
