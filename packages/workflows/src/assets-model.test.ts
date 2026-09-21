@@ -21,6 +21,7 @@ import { type DagNode, type WorkflowDefinition, workflowDefinitionSchema } from 
 const MODEL_TIERS = new Set(["fast", "balanced", "deep"]);
 const MIGRATED_WORKFLOWS = new Set([
   "adversarial-review",
+  "design-converge",
   "fix-issue",
   "interactive-prd",
   "plan-act-evaluate",
@@ -28,7 +29,10 @@ const MIGRATED_WORKFLOWS = new Set([
   "resolve-pr",
   "workflow-builder",
 ]);
-const EXPECTED_PROVIDER_PINS = new Map([["adversarial-review", "copilot"]]);
+const EXPECTED_PROVIDER_PINS = new Map([
+  ["adversarial-review", "copilot"],
+  ["design-converge", "copilot"],
+]);
 const COPILOT_CAPABILITIES = {
   defaultModel: "auto",
   reasoningEffort: true,

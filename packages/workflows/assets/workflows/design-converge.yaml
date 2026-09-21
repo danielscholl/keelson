@@ -182,6 +182,7 @@ nodes:
   - id: critic-a
     depends_on: [propose-b, propose-c]
     trigger_rule: one_success
+    always_run: true
     context: fresh
     model: deep
     model_by_provider:
@@ -216,6 +217,7 @@ nodes:
   - id: critic-b
     depends_on: [propose-a, propose-c]
     trigger_rule: one_success
+    always_run: true
     context: fresh
     model: deep
     model_by_provider:
@@ -250,6 +252,7 @@ nodes:
   - id: critic-c
     depends_on: [propose-a, propose-b]
     trigger_rule: one_success
+    always_run: true
     context: fresh
     model: deep
     model_by_provider:
@@ -341,6 +344,7 @@ nodes:
 
   - id: synthesize
     depends_on: [verify]
+    always_run: true
     context: fresh
     model: deep
     model_by_provider:
@@ -408,6 +412,10 @@ nodes:
       RUN_ID="${KEELSON_RUN_ID:-}"
       if [ -z "$OUT" ] || [ -z "$RUN_ID" ]; then
         echo "persist requires out and current run metadata" >&2
+        exit 1
+      fi
+      if [ "${KEELSON_NODE_intake_STATE:-unknown}" != "completed" ]; then
+        echo "persist requires a successful intake" >&2
         exit 1
       fi
       case "$ROUND" in
@@ -506,6 +514,7 @@ nodes:
 
   - id: complete
     depends_on: [persist]
+    always_run: true
     timeout: 30000
     bash: |
       set -euo pipefail
