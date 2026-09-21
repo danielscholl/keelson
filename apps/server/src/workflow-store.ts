@@ -92,6 +92,7 @@ export interface UpdateRunStatusInput {
 export interface WorkflowStore {
   createRun(input: CreateRunInput): void;
   updateRunStatus(input: UpdateRunStatusInput): void;
+  setRunPreflightNotice(runId: string, notice: string | null): void;
   // Atomic compare-and-set for resume: flips a failed/cancelled run to running
   // in one UPDATE and returns whether THIS caller won the claim. Guards the
   // resume route against two concurrent starts and against resuming a
@@ -176,6 +177,7 @@ interface RunRow {
   origin: string;
   rib_id: string | null;
   brief_json: string | null;
+  preflight_notice: string | null;
 }
 
 interface NodeRow {
@@ -207,6 +209,7 @@ function rowToRunSummary(row: RunRow): WorkflowRunSummary {
     worktreeBase: row.worktree_base,
     origin: row.origin === "scheduled" ? "scheduled" : "manual",
     ribId: row.rib_id,
+    preflightNotice: row.preflight_notice,
   };
 }
 
@@ -292,6 +295,9 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   );
   const updateRun = db.prepare(
     "UPDATE workflow_runs SET status = ?, completed_at = ?, error = ? WHERE id = ?",
+  );
+  const updatePreflightNotice = db.prepare(
+    "UPDATE workflow_runs SET preflight_notice = ? WHERE id = ?",
   );
   const claimResume = db.prepare(
     "UPDATE workflow_runs SET status = 'running', completed_at = NULL, error = NULL WHERE id = ? AND status IN ('failed', 'cancelled') AND worktree_pruned = 0",
@@ -396,6 +402,9 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     },
     updateRunStatus(input) {
       updateRun.run(input.status, input.completedAt, input.error, input.runId);
+    },
+    setRunPreflightNotice(runId, notice) {
+      updatePreflightNotice.run(notice, runId);
     },
     claimRunForResume(runId) {
       return claimResume.run(runId).changes > 0;

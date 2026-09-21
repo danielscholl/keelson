@@ -192,6 +192,35 @@ describe("SQLite WorkflowStore", () => {
     expect(store.getRun("r1")!.worktreeBase).toBe("origin/main");
   });
 
+  test("persists a completed run's preflight notice across database reopen", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    store.createRun({
+      runId: "r1",
+      workflowName: "catalog-unavailable",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:00.000Z",
+      conversationId: mintConv(db, "catalog-unavailable-conv"),
+    });
+    store.setRunPreflightNotice("r1", "preflight not checked: offline-catalog");
+    store.updateRunStatus({
+      runId: "r1",
+      status: "succeeded",
+      completedAt: "2025-01-01T00:01:00.000Z",
+      error: null,
+    });
+    db.close();
+
+    const reopened = openDatabase({ path: dbPath });
+    try {
+      expect(createWorkflowStore(reopened).getRun("r1")?.preflightNotice).toBe(
+        "preflight not checked: offline-catalog",
+      );
+    } finally {
+      reopened.close();
+    }
+  });
+
   test("persists and clears the run brief", () => {
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);

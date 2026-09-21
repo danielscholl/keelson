@@ -339,6 +339,13 @@ const migrations: Migration[] = [
       db.exec("ALTER TABLE workflow_runs ADD COLUMN worktree_cleanup_branch TEXT;");
     },
   },
+  {
+    version: 15,
+    description: "persist workflow run preflight notices",
+    up: (db) => {
+      db.exec("ALTER TABLE workflow_runs ADD COLUMN preflight_notice TEXT;");
+    },
+  },
 ];
 
 // The lowest version this build can apply. A database stamped below it was

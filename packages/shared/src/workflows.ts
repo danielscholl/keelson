@@ -186,6 +186,7 @@ export const workflowRunSummarySchema = z
     // catalog so historical runs stay badgeable even after the rib is removed.
     // Null for local workflows.
     ribId: z.string().nullable().default(null),
+    preflightNotice: z.string().nullable().default(null),
   })
   .strict();
 export type WorkflowRunSummary = z.infer<typeof workflowRunSummarySchema>;
