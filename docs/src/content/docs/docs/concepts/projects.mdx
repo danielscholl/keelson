@@ -125,9 +125,8 @@ execution:
 
 Before the first node starts, keelson confirms the source is a Git repository,
 prepares the worktree, and persists its identity. A failed repository probe,
-worktree creation, dependency preparation, or identity write fails the run with
-a setup error. No node executes in the source checkout. The server-down CLI path
-uses the same rule.
+worktree creation, or identity write fails the run with a setup error. No node
+executes in the source checkout. The server-down CLI path uses the same rule.
 
 Run status preserves the distinction after the live warning stream is gone.
 `isolationEnabled` records required, disabled, or unknown legacy intent;
