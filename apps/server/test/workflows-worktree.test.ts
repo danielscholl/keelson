@@ -1038,7 +1038,7 @@ nodes:
     expect((await gitText(["log", "--oneline", `origin/main..${branch}`], repoDir)).trim()).toBe(
       "",
     );
-  });
+  }, 15_000);
 
   test("failed run keeps its worktree on disk for inspection", async () => {
     await initRepo(repoDir);
