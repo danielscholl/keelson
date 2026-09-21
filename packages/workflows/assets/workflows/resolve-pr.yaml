@@ -11,7 +11,8 @@ description: |
         (fix / reply with evidence, flagging rebuttals whose cited evidence
         this PR itself changes) -> pauses for approval ONLY when a round would
         publicly push back on a reviewer (wontfix / invalid / question) ->
-        fixes actionable threads -> validates and pushes -> replies on every
+        fixes actionable threads -> reviews its own fixes before anyone else
+        does -> validates and pushes -> replies on every
         handled thread -> resolves fixed threads plus approved invalid /
         already-addressed rebuttals (question stays open; wontfix stays open
         unless explicitly enabled with `resolve_wontfix=true` and approved) ->
@@ -148,6 +149,7 @@ nodes:
         forge pr checkout "$PR_NUM" --detach >&2
         printf '%s\n' "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.checked-out-pr"
       fi
+      git rev-parse HEAD > "$KEELSON_ARTIFACTS_DIR/.round-base-sha"
 
       HANDLED="$KEELSON_ARTIFACTS_DIR/handled.json"
       if [ ! -f "$HANDLED" ]; then
@@ -442,6 +444,12 @@ nodes:
         metadata-only fix.
       - For each actionable thread, read the target file before editing and run
         the narrowest check covering the change after editing.
+      - Before committing a fix, name what else it touches: the other callers
+        and entry paths of the changed code (resume or retry, cancel and
+        shutdown, the disabled or opt-out configuration, data written before
+        this change) and whatever must move with it (docs, schema or version
+        constants, exported types). Check each. A fix that holds only on the
+        path the reviewer cited earns the next review comment.
       - Stage edited files by name. Never `git add -A`, `git add .`, or
         `git add -u`. Never commit anything under `$ARTIFACTS_DIR`.
       - Commit per thread or per logical group with a conventional message.
@@ -559,8 +567,147 @@ nodes:
       - Commit the fixes before handing off:
         `git add <files>; git commit -m "fix: address validation failures"`.
 
-  - id: revalidate
+  - id: capture-fix-diff
     depends_on: [fix-validation]
+    bash: |
+      set -euo pipefail
+      BASE=$(cat "$KEELSON_ARTIFACTS_DIR/.round-base-sha" 2>/dev/null || true)
+      if [ -z "$BASE" ]; then
+        echo "No round base SHA recorded by fetch-state; cannot scope the fix review." >&2
+        exit 1
+      fi
+      git diff "$BASE..HEAD" > "$KEELSON_ARTIFACTS_DIR/fix-diff.patch"
+      git diff "$BASE..HEAD" --stat > "$KEELSON_ARTIFACTS_DIR/fix-diff-stat.txt"
+      LINES=$(wc -l < "$KEELSON_ARTIFACTS_DIR/fix-diff.patch" | tr -d ' ')
+      if [ "$LINES" -gt 0 ]; then HAS_FIX=true; else HAS_FIX=false; fi
+      jq -cn --arg has_fix "$HAS_FIX" --argjson lines "$LINES" \
+        '{has_fix: $has_fix, lines: $lines}'
+
+  # The reviewer's next round only ever sees what this round pushes, so a fix
+  # nobody reads before the push is a fix the reviewer reads after it.
+  - id: review-fix
+    depends_on: [capture-fix-diff]
+    when: "$capture-fix-diff.output.has_fix == 'true'"
+    context: fresh
+    model: deep
+    model_by_provider:
+      copilot: gpt-6-astra
+    effort: xhigh
+    idle_timeout: 1800000
+    allowed_tools: [Read, Glob, Grep]
+    output_format:
+      type: object
+      required: [findings]
+      properties:
+        findings:
+          type: array
+          items:
+            type: object
+            required: [location, severity, confidence, what, why, fix]
+            properties:
+              location: { type: string }
+              severity:
+                type: string
+                enum: [CRITICAL, HIGH, MEDIUM, LOW]
+              confidence: { type: integer }
+              what: { type: string }
+              why: { type: string }
+              fix: { type: string }
+    output_schema:
+      type: object
+      required: [findings]
+      properties:
+        findings:
+          type: array
+          items:
+            type: object
+            required: [location, severity, confidence, what, why, fix]
+            properties:
+              location: { type: string }
+              severity: { type: string }
+              confidence: { type: integer }
+              what: { type: string }
+              why: { type: string }
+              fix: { type: string }
+    prompt: |
+      You are the last reader before this round's fixes are pushed to a pull
+      request. Another agent wrote them to answer review threads. The working
+      tree is the fixed PR head; this round's delta is at
+      `$ARTIFACTS_DIR/fix-diff.patch` (`$ARTIFACTS_DIR/fix-diff-stat.txt` for
+      the shape) and the threads it answers are in `$ARTIFACTS_DIR/triage.json`.
+      Whatever you miss, the PR's reviewer raises on the next round, so find it
+      now. Review as a skeptical outsider.
+
+      1. Read the delta. Review ONLY what this round changed; ignore
+         pre-existing issues unless the fix makes them newly reachable.
+      2. A review fix is narrow by construction: it repairs the path the
+         reviewer cited. For each changed function, Grep its callers and list
+         every entry path that reaches it: first start, resume or retry, cancel
+         and shutdown, scheduled or background invocation, the disabled or
+         opt-out configuration, and data written before this change. Confirm
+         the fix holds on each one.
+      3. Ask what the fix newly assumes. New state written: who reads it, who
+         clears it, what happens when two runs write it. A new await: what can
+         happen while it is pending. A new error path: does a throw strand
+         state a caller expected to be settled. A new guard: Grep the call
+         sites and confirm every input the codebase passes today still passes.
+      4. Check what must move with the fix: docs, READMEs, and reference tables
+         that describe the changed behavior; schema or version constants;
+         exported types and their callers; sibling implementations of the same
+         pattern that the fix left behind.
+      5. When the fix adds a test, check that it exercises the production path
+         rather than a constructed shortcut that would pass with the bug
+         present.
+      6. Do NOT review style, naming, or comments, or anything a type-checker,
+         linter, or the project's checks already catch.
+      7. When a claim rests on inferred behavior of an external API, library,
+         or runtime you did not verify in this repo, label it INFERRED and cap
+         its confidence at 60.
+
+      Return a single-line JSON object matching the declared contract. Each
+      finding must include `location` (`path:line`), `severity`, `confidence`
+      (0-100), `what`, `why` (the concrete failure scenario), and `fix`. Return
+      `{"findings":[]}` when you find nothing real.
+
+  - id: apply-review-fix
+    depends_on: [review-fix]
+    context: fresh
+    model: deep
+    model_by_provider:
+      copilot: gpt-5.6-sol
+    effort: high
+    idle_timeout: 1800000
+    prompt: |
+      An independent reviewer read this round's fixes before they are pushed.
+      Act on its findings below.
+
+      ## Findings
+
+      $review-fix.output
+
+      ## Rules
+
+      - Consider only findings with severity CRITICAL or HIGH and confidence
+        >= 80. Drop the rest.
+      - Try to refute each remaining finding first: read the cited code and the
+        paths it names. Fix it only if it holds.
+      - For each fix: read the file, make the change, and run the narrowest
+        check covering it. Keep the fix inside this round's scope; do not
+        refactor or add features.
+      - Stage edited files by name. Never `git add -A`, `git add .`, or
+        `git add -u`. Never edit or commit anything under `$ARTIFACTS_DIR`.
+      - Commit what you fixed:
+        `git commit -m "fix: address pre-push review findings"`. Do NOT push;
+        a later step validates and pushes.
+      - If nothing survives, make no changes.
+
+      Append a `## Round $converge.round` section to
+      `$ARTIFACTS_DIR/pre-push-review.md` with one line per finding:
+      fixed / refuted(reason) / below-bar. Print the same lines.
+
+  - id: revalidate
+    depends_on: [fix-validation, apply-review-fix]
+    trigger_rule: none_failed_min_one_success
     timeout: 1200000
     bash: |
       set -euo pipefail
@@ -1206,6 +1353,8 @@ nodes:
         not whether the forge will permit a merge.
       - Reply/reconciliation failures: `$ARTIFACTS_DIR/reply-failures.json`
         (treat a missing file as an empty array)
+      - Pre-push review log: `$ARTIFACTS_DIR/pre-push-review.md` (absent when
+        no round pushed a code change)
       - Latest CI result:
 
         $await-ci.output
@@ -1241,7 +1390,9 @@ nodes:
       remaining merge blockers when the repo requires all threads resolved, and
       that closing them is the reviewer's or operator's call. If
       reply-failures.json is non-empty, label the report "attention needed" and
-      list the affected round, stage, thread ids, and reason. Note any exhaust
+      list the affected round, stage, thread ids, and reason. If the pre-push
+      review log exists, say how many findings it fixed before the push. Note
+      any exhaust
       approval if this report ran after a human override.>
       ```
 
