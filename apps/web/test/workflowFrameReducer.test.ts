@@ -12,6 +12,7 @@ import {
   applyFrame,
   hydrateFromSnapshot,
   mergeNode,
+  mergeWarnings,
   type NodeView,
   type RunView,
 } from "../src/hooks/useWorkflowRun.ts";
@@ -185,6 +186,15 @@ describe("hydrateFromSnapshot running overlay", () => {
     expect(Object.keys(nodes)).toEqual([]);
   });
 
+  test("a persisted preflight notice hydrates as a run warning", () => {
+    const { run } = hydrateFromSnapshot(
+      detail({ preflightNotice: "preflight not checked: offline-catalog" }),
+    );
+    expect(run.warnings).toEqual([
+      { nodeId: null, message: "preflight not checked: offline-catalog" },
+    ]);
+  });
+
   test("an awaiting row keeps its approval state over the overlay", () => {
     const { nodes } = hydrateFromSnapshot(
       detail({
@@ -226,5 +236,14 @@ describe("hydrateFromSnapshot running overlay", () => {
     expect(nodes.author?.status).toBe("running");
     expect(nodes.author?.logLines).toEqual([]);
     expect(nodes.author?.completedAt).toBeUndefined();
+  });
+});
+
+describe("mergeWarnings", () => {
+  test("keeps a durable preflight notice once when its live frame was received", () => {
+    const notice = { nodeId: null, message: "preflight not checked: offline-catalog" };
+    expect(
+      mergeWarnings([notice], [notice, { nodeId: "author", message: "provider fallback" }]),
+    ).toEqual([notice, { nodeId: "author", message: "provider fallback" }]);
   });
 });
