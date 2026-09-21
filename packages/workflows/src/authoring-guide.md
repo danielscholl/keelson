@@ -113,6 +113,12 @@ A case replaces only the fields it sets. The set of cases is closed, so
 validation checks every branch and `--live` checks every branch's model against
 the provider catalog.
 
+Set `different_vendor_from: <ancestor-prompt-id>` when a prompt must provide an
+independent model-vendor check of an earlier prompt. The executor compares the
+effective provider/model recorded after fallback and emits a run warning when
+both models belong to the same known vendor. Unknown model vendors are not
+treated as proof of diversity.
+
 ## Description format
 
 Use the structured block-scalar convention — the Workflows UI cards and the
@@ -266,6 +272,7 @@ warning.
   parsing (empty string when the output isn't JSON).
 - `$ARTIFACTS_DIR` — per-run scratch directory in prompt text; bash nodes see
   it as the `$KEELSON_ARTIFACTS_DIR` environment variable.
+- `KEELSON_RUN_ID` — the current workflow run id in bash and script nodes.
 - `KEELSON_NODE_<id>_OUTPUT` — how a bash or script node reads an upstream
   output (`$<id>.output` does not expand in a shell body). Capped at 16 KiB and
   head+tail truncated past it, with a marker in the middle.
@@ -273,6 +280,9 @@ warning.
   structured output from this file; the marker above corrupts JSON. Validation
   warns when a body parses the capped variable instead.
 - `KEELSON_NODE_<id>_OUTPUT_TRUNCATED` — `1` when the variable was capped.
+- `KEELSON_NODE_<id>_PROVIDER` / `KEELSON_NODE_<id>_MODEL` — the effective
+  provider and model recorded for an upstream agent node, including fallback
+  and provider-reported model changes. Unset for deterministic nodes.
 - `$converge.round` — current converge round while a node runs inside a
   `converge` subgraph; empty outside converge rounds.
 
