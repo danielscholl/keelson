@@ -299,7 +299,6 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
               },
               inputs: ctx.inputs,
               upstreamOutputs: ctx.upstreamOutputs,
-              runId: ctx.runId,
               ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
             });
             // Order matters: abort > timeout > exit 0. A probe that traps
