@@ -13,7 +13,8 @@ description: |
         the tally and effective model attribution to the requested output file.
   Inputs: `ARGUMENTS` is the required question; `out` is the required evidence
           file; optional `context` is a file or one-level directory; optional
-          `access` is guidance text or a readable file; `tier` is deep|std;
+          `access` is guidance text or a readable file; optional `fixtures`
+          is a directory for saved raw probe responses; `tier` is deep|std;
           `verifier` is claude|grok.
   NOT for: Changing source, enforcing a read-only sandbox, or publishing results
            to an external system.
@@ -30,6 +31,7 @@ nodes:
       VERIFIER=$(printf '%s' "${KEELSON_INPUTS_verifier:-}" | tr '[:upper:]' '[:lower:]')
       CONTEXT="${KEELSON_INPUTS_context:-}"
       ACCESS_INPUT="${KEELSON_INPUTS_access:-}"
+      FIXTURES=$(printf '%s' "${KEELSON_INPUTS_fixtures:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 
       if [ -z "$QUESTION" ]; then
         echo "no question provided; pass the investigation question with --arguments" >&2
@@ -70,6 +72,45 @@ nodes:
           const digest = createHash("sha256").update(process.env.RUN_ID ?? "").digest();
           console.log(digest[0] % 2 === 0 ? "claude" : "grok");
         ')
+      fi
+
+      WRITE_POLICY="That requested file is the only intentional write."
+      FIXTURES_NOTE=""
+      if [ -n "$FIXTURES" ]; then
+        OVERLAP=$(A="$OUT" B="$FIXTURES" bun --no-env-file -e '
+          import { existsSync, realpathSync } from "node:fs";
+          import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+          // Neither path need exist yet, so canonicalize the nearest existing
+          // ancestor: a symlinked parent must not hide that the two paths overlap.
+          const canonical = (p) => {
+            const abs = resolve(p);
+            let base = abs;
+            while (!existsSync(base) && dirname(base) !== base) base = dirname(base);
+            return join(realpathSync(base), relative(base, abs));
+          };
+          const rel = relative(canonical(process.env.A ?? ""), canonical(process.env.B ?? ""));
+          const inside = rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel);
+          console.log(rel === "" ? "same" : inside ? "nested" : "no");
+        ')
+        if [ "$OVERLAP" = "same" ]; then
+          echo "fixtures and out name the same path: $FIXTURES" >&2
+          exit 1
+        fi
+        if [ "$OVERLAP" = "nested" ]; then
+          echo "fixtures is inside the evidence file path: $FIXTURES" >&2
+          exit 1
+        fi
+        if [ -e "$FIXTURES" ] && [ ! -d "$FIXTURES" ]; then
+          echo "fixtures is not a directory: $FIXTURES" >&2
+          exit 1
+        fi
+        mkdir -p -- "$FIXTURES"
+        if [ ! -w "$FIXTURES" ]; then
+          echo "fixtures directory is not writable: $FIXTURES" >&2
+          exit 1
+        fi
+        WRITE_POLICY="Save the raw output of each runtime probe as its own file under \`$FIXTURES\` (a shell redirect or the Write tool; this is the one exception to the read-only rule), and cite that file next to the command in the Citation cell. Keep raw responses out of the evidence file. The evidence file and the files under that directory are the only intentional writes; tooling you run may still write its own logs."
+        FIXTURES_NOTE="Files cited under \`$FIXTURES\` are raw probe responses the investigator saved. Read them to see what it observed, and still re-run the probe yourself."
       fi
 
       ACCESS="(none)"
@@ -124,7 +165,7 @@ nodes:
       } > "$BUNDLE"
 
       JSON_OUT="$KEELSON_ARTIFACTS_DIR/intake.json"
-      export QUESTION OUT TIER VERIFIER ACCESS_FILE BUNDLE JSON_OUT
+      export QUESTION OUT TIER VERIFIER ACCESS_FILE BUNDLE JSON_OUT FIXTURES WRITE_POLICY FIXTURES_NOTE
       bun --no-env-file -e '
         import { readFileSync, writeFileSync } from "node:fs";
         const value = {
@@ -132,6 +173,9 @@ nodes:
           out: process.env.OUT,
           tier: process.env.TIER,
           verifier: process.env.VERIFIER,
+          fixtures: process.env.FIXTURES ?? "",
+          write_policy: process.env.WRITE_POLICY,
+          fixtures_note: process.env.FIXTURES_NOTE ?? "",
           access: readFileSync(process.env.ACCESS_FILE, "utf8"),
           bundle: readFileSync(process.env.BUNDLE, "utf8"),
         };
@@ -219,8 +263,8 @@ nodes:
       exact read-only command and relevant output. A negative probe establishes
       only what was absent in that probe.
 
-      Write the evidence file at `$intake.output.out`. That requested file is the
-      only intentional write. Use this table:
+      Write the evidence file at `$intake.output.out`. $intake.output.write_policy
+      Use this table:
 
       | Claim # | Claim | Level | Citation | Verified | Verification note |
       | --- | --- | --- | --- | --- | --- |
@@ -304,7 +348,7 @@ nodes:
       investigator nor its citations. Re-read cited source for documented and
       source-verified claims. Re-run the exact read-only probe for runtime-tested
       claims. Treat Bash as read-only guidance: do not create, modify, or delete
-      files.
+      files. $intake.output.fixtures_note
 
       A reproduced negative is not confirmation of a broader negative. Partial
       support never rounds up. Return one exact verdict per checked claim:

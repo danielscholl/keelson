@@ -5,7 +5,16 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
@@ -15,6 +24,7 @@ interface WorkflowNode {
   id: string;
   bash?: string;
   script?: string;
+  prompt?: string;
   runtime?: string;
   depends_on?: string[];
   different_vendor_from?: string;
@@ -87,6 +97,7 @@ function runIntake(
     out?: string;
     context?: string;
     access?: string;
+    fixtures?: string;
     tier?: string;
     verifier?: string;
     runId?: string;
@@ -104,6 +115,7 @@ function runIntake(
     out: inputs.out,
     context: inputs.context,
     access: inputs.access,
+    fixtures: inputs.fixtures,
     tier: inputs.tier,
     verifier: inputs.verifier,
   })) {
@@ -242,6 +254,111 @@ describe("investigate intake", () => {
     expect(parsed.tier).toBe("deep");
     expect(["claude", "grok"]).toContain(parsed.verifier);
     expect(parsed.bundle).toContain("QUESTION\nWhat does this function return?");
+  });
+
+  test("keeps the evidence file as the only write when no fixtures directory is given", () => {
+    const result = runIntake("What does this function return?", {
+      out: join(tmpdir(), "evidence.md"),
+    });
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.fixtures).toBe("");
+    expect(parsed.fixtures_note).toBe("");
+    expect(parsed.write_policy).toBe("That requested file is the only intentional write.");
+  });
+
+  test("creates the fixtures directory and names it as an intended write", () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-investigate-fixtures-"));
+    tmps.push(root);
+    const fixtures = join(root, "nested", "fixtures");
+    const result = runIntake("What does the search API return?", {
+      out: join(root, "evidence.md"),
+      fixtures: `  ${fixtures}  `,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(statSync(fixtures).isDirectory()).toBe(true);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.fixtures).toBe(fixtures);
+    expect(parsed.write_policy).toContain(`under \`${fixtures}\``);
+    expect(parsed.write_policy).toContain("Keep raw responses out of the evidence file");
+    expect(parsed.write_policy).not.toContain("That requested file is the only intentional write");
+    expect(parsed.fixtures_note).toContain(fixtures);
+  });
+
+  test("rejects a fixtures path that is a file", () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-investigate-fixtures-"));
+    tmps.push(root);
+    const file = join(root, "not-a-dir");
+    writeFileSync(file, "x");
+    const result = runIntake("What does the search API return?", {
+      out: join(root, "evidence.md"),
+      fixtures: file,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("fixtures is not a directory");
+  });
+
+  test("rejects a fixtures path that names the evidence file, before creating it", () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-investigate-fixtures-"));
+    tmps.push(root);
+    const out = join(root, "evidence");
+    const result = runIntake("What does the search API return?", {
+      out,
+      fixtures: `${root}/./evidence/`,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("fixtures and out name the same path");
+    expect(existsSync(out)).toBe(false);
+  });
+
+  test("rejects a fixtures path that reaches the evidence file through a symlink", () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-investigate-fixtures-"));
+    tmps.push(root);
+    mkdirSync(join(root, "real"));
+    symlinkSync(join(root, "real"), join(root, "link"), "junction");
+    const out = join(root, "real", "evidence");
+    const result = runIntake("What does the search API return?", {
+      out,
+      fixtures: join(root, "link", "evidence"),
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("fixtures and out name the same path");
+    expect(existsSync(out)).toBe(false);
+  });
+
+  test("rejects a fixtures path nested under the evidence file, before creating it", () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-investigate-fixtures-"));
+    tmps.push(root);
+    mkdirSync(join(root, "real"));
+    symlinkSync(join(root, "real"), join(root, "link"), "junction");
+    const out = join(root, "real", "evidence");
+    for (const fixtures of [join(out, "raw"), join(root, "link", "evidence", "raw")]) {
+      const result = runIntake("What does the search API return?", { out, fixtures });
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("fixtures is inside the evidence file path");
+      expect(existsSync(out)).toBe(false);
+    }
+  });
+
+  test("accepts an evidence file inside the fixtures directory", () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-investigate-fixtures-"));
+    tmps.push(root);
+    const fixtures = join(root, "fixtures");
+    const result = runIntake("What does the search API return?", {
+      out: join(fixtures, "evidence.md"),
+      fixtures,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(statSync(fixtures).isDirectory()).toBe(true);
+  });
+
+  test("the prompts read the write policy and fixtures note from intake", () => {
+    const nodes = workflowDocument().nodes;
+    const investigate = nodes.find((node) => node.id === "investigate")?.prompt ?? "";
+    const verify = nodes.find((node) => node.id === "verify")?.prompt ?? "";
+    expect(investigate).toContain("$intake.output.write_policy");
+    expect(investigate).not.toContain("only intentional write");
+    expect(verify).toContain("$intake.output.fixtures_note");
   });
 
   test("rotates the default verifier deterministically from fixed run ids", () => {
