@@ -95,7 +95,7 @@ describe("rib run events", () => {
       activeRuns,
       subscribers,
     );
-    return { db, store, activeRuns, subscribers, controller };
+    return { db, store, activeRuns, subscribers, controller, definition };
   }
 
   const successfulPromptHandler: NodeHandler = {
@@ -167,9 +167,10 @@ describe("rib run events", () => {
 
   test("a scheduled preflight violation fails durably and reaches the owning rib", async () => {
     const events: RibRunEvent[] = [];
-    const { db, store, controller } = makeRig({
+    const { db, store, activeRuns, controller, definition } = makeRig({
       bash: "echo unused",
       nodes: [{ id: "work", provider: "stub", model: "retired-model", prompt: "run" }],
+      promptHandler: successfulPromptHandler,
       onRibRunEvent: (_ribId, event) => events.push(event),
     });
     try {
@@ -181,7 +182,7 @@ describe("rib run events", () => {
       });
       if (!result.ok) throw new Error(result.message);
 
-      await until(() => events.length === 2);
+      await until(() => events.length === 2 && activeRuns.get(result.runId) === undefined);
       expect(store.getRun(result.runId)).toMatchObject({
         status: "failed",
         error: "preflight failed:\n- work: model 'retired-model' is not in stub's live catalog",
@@ -191,6 +192,18 @@ describe("rib run events", () => {
         status: "failed",
         error: "preflight failed:\n- work: model 'retired-model' is not in stub's live catalog",
       });
+
+      expect(controller.resumeRun(result.runId)).toEqual({ ok: true });
+      await until(() => events.length === 4 && activeRuns.get(result.runId) === undefined);
+      expect(store.getRun(result.runId)).toMatchObject({
+        status: "failed",
+        error: "preflight failed:\n- work: model 'retired-model' is not in stub's live catalog",
+      });
+
+      definition.nodes = [{ id: "work", provider: "stub", model: "stub-echo", prompt: "run" }];
+      expect(controller.resumeRun(result.runId)).toEqual({ ok: true });
+      await until(() => events.length === 6 && activeRuns.get(result.runId) === undefined);
+      expect(store.getRun(result.runId)).toMatchObject({ status: "succeeded", error: null });
     } finally {
       db.close();
     }

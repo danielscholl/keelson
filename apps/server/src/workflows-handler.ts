@@ -238,6 +238,7 @@ function nodeTypeOf(node: DagNode): string {
 // (dag-node.ts builds loop nodes without the AI fields), so its effective model
 // isn't derivable here. bash / script / approval / cancel never call a model.
 const MODEL_NODE_TYPES: ReadonlySet<string> = new Set(["prompt", "command"]);
+const PREFLIGHT_FAILURE_PREFIX = "preflight failed:\n";
 
 function workflowToSummary(
   workflow: WorkflowDefinition,
@@ -1370,6 +1371,7 @@ function resumeRunCore(
     };
   }
   const providerOverride = store.getRunProviderOverride(runId);
+  const rerunPreflight = run.error?.startsWith(PREFLIGHT_FAILURE_PREFIX) === true;
   if (
     providerOverride !== null &&
     (providerOverride === "workflow" || !isRegisteredProvider(providerOverride))
@@ -1445,7 +1447,7 @@ function resumeRunCore(
       subscribers,
       promptHandler,
       defaultProvider,
-      preflight: false,
+      preflight: rerunPreflight,
       pendingApprovals,
       ...(providerOverride !== null ? { providerOverride } : {}),
       isolation: null,
@@ -3123,7 +3125,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       }
     }
     if (result.violations.length > 0) {
-      const error = `preflight failed:\n${formatPreflightViolations(result)}`;
+      const error = `${PREFLIGHT_FAILURE_PREFIX}${formatPreflightViolations(result)}`;
       store.updateRunStatus({
         runId,
         status: "failed",
