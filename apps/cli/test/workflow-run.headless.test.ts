@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -32,6 +32,35 @@ const ENV_KEYS = [
   "KEELSON_HOME",
 ] as const;
 const savedEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
+
+function initRepo(path: string): void {
+  const git = (...args: string[]) => {
+    const result = Bun.spawnSync(["git", ...args], { cwd: path });
+    if (result.exitCode !== 0) {
+      throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
+    }
+  };
+  git("init", "-q", "-b", "main");
+  writeFileSync(join(path, "README.md"), "test\n");
+  git("add", "README.md");
+  git("-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-q", "-m", "init");
+}
+
+function writeWorkflow(root: string, name: string, body: string): string {
+  const dir = join(root, "workflows");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${name}.yaml`), body);
+  return dir;
+}
+
+function artifactsDirs(): Set<string> {
+  return new Set(
+    readdirSync(tmpdir())
+      .filter((entry) => entry.startsWith("keelson-cli-run-"))
+      .map((entry) => join(tmpdir(), entry)),
+  );
+}
+
 beforeAll(() => {
   for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
 });
@@ -161,6 +190,201 @@ describe("runHeadless (in-process executor)", () => {
       type: "run_warning",
       message: "preflight not checked: offline",
     });
+  });
+
+  test("YAML-required isolation rejects a non-repository before nodes run", async () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-headless-isolation-"));
+    try {
+      const workflowsDir = writeWorkflow(
+        root,
+        "required",
+        `name: required
+description: required isolated run
+worktree:
+  enabled: true
+nodes:
+  - id: work
+    bash: touch sentinel.txt
+`,
+      );
+      const events: RunStreamEvent[] = [];
+      const promise = runHeadless({
+        name: "required",
+        inputs: {},
+        cwd: root,
+        workflowsDir,
+        onEvent: (event) => events.push(event),
+      });
+
+      await expect(promise).rejects.toThrow("worktree setup failed:");
+      expect(events).toEqual([]);
+      expect(existsSync(join(root, "sentinel.txt"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("explicit worktree isolation rejects a non-repository before nodes run", async () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-headless-isolation-"));
+    try {
+      const workflowsDir = writeWorkflow(
+        root,
+        "forced",
+        `name: forced
+description: explicitly isolated run
+nodes:
+  - id: work
+    bash: touch sentinel.txt
+`,
+      );
+      await expect(
+        runHeadless({
+          name: "forced",
+          inputs: {},
+          cwd: root,
+          workflowsDir,
+          isolation: "worktree",
+        }),
+      ).rejects.toThrow("worktree setup failed:");
+      expect(existsSync(join(root, "sentinel.txt"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("explicit none overrides required YAML isolation", async () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-headless-isolation-"));
+    try {
+      const workflowsDir = writeWorkflow(
+        root,
+        "in-place",
+        `name: in-place
+description: caller-authorized in-place run
+worktree:
+  enabled: true
+nodes:
+  - id: work
+    bash: touch sentinel.txt
+`,
+      );
+      const result = await runHeadless({
+        name: "in-place",
+        inputs: {},
+        cwd: root,
+        workflowsDir,
+        isolation: "none",
+      });
+
+      expect(result.summary.status).toBe("succeeded");
+      expect(existsSync(join(root, "sentinel.txt"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("setup failure rejects before execution and cleans headless artifacts", async () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-headless-isolation-"));
+    initRepo(root);
+    const before = artifactsDirs();
+    try {
+      const workflowsDir = writeWorkflow(
+        root,
+        "invalid-branch",
+        `name: invalid-branch
+description: deterministic worktree setup failure
+worktree:
+  enabled: true
+  branch: invalid..branch
+nodes:
+  - id: work
+    bash: touch sentinel.txt
+`,
+      );
+      await expect(
+        runHeadless({
+          name: "invalid-branch",
+          inputs: {},
+          cwd: root,
+          workflowsDir,
+        }),
+      ).rejects.toThrow("worktree setup failed:");
+      expect(existsSync(join(root, "sentinel.txt"))).toBe(false);
+      expect([...artifactsDirs()].filter((path) => !before.has(path))).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("successful required isolation executes outside the source checkout", async () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-headless-isolation-"));
+    initRepo(root);
+    try {
+      const workflowsDir = writeWorkflow(
+        root,
+        "isolated",
+        `name: isolated
+description: successful isolated run
+worktree:
+  enabled: true
+nodes:
+  - id: work
+    bash: pwd; touch sentinel.txt
+`,
+      );
+      const result = await runHeadless({
+        name: "isolated",
+        inputs: {},
+        cwd: root,
+        workflowsDir,
+      });
+
+      expect(result.summary.status).toBe("succeeded");
+      expect(result.summary.nodes.work?.output.replaceAll("\\", "/")).toContain("/.worktrees/");
+      expect(existsSync(join(root, "sentinel.txt"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("server-down CLI reports required setup failure with exit 1", async () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-headless-cli-isolation-"));
+    const home = mkdtempSync(join(tmpdir(), "keelson-headless-cli-home-"));
+    try {
+      const workflowsDir = writeWorkflow(
+        root,
+        "required-cli",
+        `name: required-cli
+description: required isolated CLI run
+worktree:
+  enabled: true
+nodes:
+  - id: work
+    bash: touch sentinel.txt
+`,
+      );
+      const proc = Bun.spawn(
+        ["bun", BIN, "--json", "workflow", "run", "required-cli", "--working-dir", root],
+        {
+          env: {
+            ...process.env,
+            KEELSON_HOME: home,
+            KEELSON_PROVIDERS: "stub",
+            KEELSON_SERVER_URL: "http://127.0.0.1:1",
+            KEELSON_WORKFLOWS_DIR: workflowsDir,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+
+      expect(exitCode).toBe(1);
+      expect(JSON.parse(stdout.trim()).error).toContain("worktree setup failed:");
+      expect(existsSync(join(root, "sentinel.txt"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   test("--no-preflight reaches the in-process runner", async () => {
