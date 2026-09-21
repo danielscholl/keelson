@@ -401,9 +401,7 @@ ${closing}`;
 
   test("accepts and unescapes an escaped pipe inside a code span", () => {
     const claim = "`A\\|B`";
-    const probe = runCellsProbe(
-      `| 1 | ${claim} | source-verified | src/a.ts:1 | CONFIRMED |`,
-    );
+    const probe = runCellsProbe(`| 1 | ${claim} | source-verified | src/a.ts:1 | CONFIRMED |`);
     expect(probe.exitCode).toBe(0);
     expect(probe.stdout.toString().trim()).toBe(
       '["1","`A|B`","source-verified","src/a.ts:1","CONFIRMED"]',
