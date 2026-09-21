@@ -27,6 +27,9 @@ keelson workflow run design-converge --inputs \
   round=1
 ```
 
+It needs a Copilot subscription. The workflow rejects a non-Copilot provider
+override rather than falling back across providers.
+
 `brief` must name a non-empty file. `out` is the directory that receives a
 `round-N/` directory. The remaining inputs are optional:
 
@@ -83,10 +86,11 @@ text, that text is preserved and its failed state is recorded in the
 `MANIFEST`. A resumed persist step rebuilds the directory from current run
 state, so files from a previous attempt cannot remain silently.
 
-**Effective diversity.** Model mappings request three vendor families for each
-panel, but provider fallback can change what actually runs. `complete` derives
-its warning from recorded effective provider and model values. A preflight
-configuration warning is not treated as proof of runtime diversity.
+**Effective diversity.** Model mappings request three vendor families through
+Copilot for each panel, but model availability and fallback within Copilot can
+change what actually runs. `complete` derives its warning from recorded
+effective provider and model values. A preflight configuration warning is not
+treated as proof of runtime diversity.
 
 ## Related
 
