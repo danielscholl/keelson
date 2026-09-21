@@ -57,7 +57,6 @@ export interface UntilBashResult {
 }
 
 export interface RunUntilBashProbeOptions {
-  runId?: string;
   cwd: string;
   signal: AbortSignal;
   /**
@@ -98,7 +97,6 @@ export const defaultRunUntilBashProbe: RunUntilBashProbe = async (script, opts) 
   const env = buildSubprocessEnv(opts.inputs, opts.upstreamOutputs, {
     ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
     ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
-    runId: opts.runId,
   });
   if (opts.env) {
     for (const [k, v] of Object.entries(opts.env)) env[k] = v;
