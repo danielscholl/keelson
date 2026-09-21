@@ -89,7 +89,7 @@ the tier to a concrete model, so tier-based workflows remain portable.
 Use `model_by_provider: { <provider>: <id> }` only for a deliberate
 cross-provider spread, such as a diverse review panel. The effective provider's
 entry wins; providers without an entry fall through to the node or workflow
-tier.
+tier. This field applies to `prompt` and `command` nodes, not `loop`.
 
 Use a literal model id only for an install-specific workflow pinned to one
 account's catalog.
@@ -195,6 +195,9 @@ workflow-level `interactive: true` and a `gate_message`:
     max_iterations: 5
 ```
 
+Node-level `model` and `provider` are forwarded to every iteration and validated
+by the run-start model-catalog preflight.
+
 `cancel` — terminates the run with a reason; pair with `when` for guard
 branches:
 
@@ -217,16 +220,20 @@ must already exist on disk; from chat, use an inline `prompt` node instead.
 - `trigger_rule` — join semantics when multiple dependencies finish:
   `all_success` (default) | `one_success` | `none_failed_min_one_success` |
   `all_done`.
-- `model` — per-node model override. The reserved `fast`, `balanced`, and `deep`
-  values resolve for the effective provider; literal model ids pass through.
-- `model_by_provider` — map of provider id to concrete model id. The effective
-  provider's entry wins; when absent, resolution falls through to `model`.
-- `provider` — per-node provider override (AI nodes).
-- `context: fresh | shared` — `fresh` forces a new AI session for the node.
-- `allowed_tools` / `denied_tools` — tool-name filters for AI nodes.
+- `model` — per-node model override on prompt, command, and loop nodes. The
+  reserved `fast`, `balanced`, and `deep` values resolve for the effective
+  provider; literal model ids pass through.
+- `model_by_provider` — prompt/command map of provider id to concrete model id.
+  The effective provider's entry wins; when absent, resolution falls through to
+  `model`.
+- `provider` — per-node provider override on prompt, command, and loop nodes.
+- `context: fresh | shared` — `fresh` forces a new AI session for a prompt or
+  command node.
+- `allowed_tools` / `denied_tools` — tool-name filters for prompt and command
+  nodes.
   Rib-registered tools are default-off; opt in with `allowed_tools`.
-- `output_schema` — JSON-Schema subset the node output must satisfy.
-- `output_format` — provider structured-output request (claude).
+- `output_schema` — JSON-Schema subset any node output must satisfy.
+- `output_format` — prompt/command provider structured-output request (claude).
 - `retry: { max_attempts, delay_ms, on_error }` — `max_attempts` 1–5
   (required), `delay_ms` 1000–60000 (doubled each attempt), `on_error`
   `transient` (default) | `all`. Not allowed on loop nodes.
@@ -235,25 +242,29 @@ must already exist on disk; from chat, use an inline `prompt` node instead.
   pass). Its transitive descendants re-run too, including prompt nodes that
   incur their normal provider cost. Off by default: a succeeded node is reused
   unless an ancestor re-executes.
-- `require_tool_call: [tool-name, ...]` — fail if a listed tool is available to
-  the node but the turn ends without a successful tool result. An error followed
-  by a successful retry satisfies it. Only registry/MCP tools are checked: a
-  provider SDK's own built-ins (`Read`, `Bash`, …) are never in the catalog, so
-  naming one here does nothing, and providers that take no keelson tools at all
-  (codex, gateways, stub) skip the check rather than fail it.
-- `fail_on_tool_error: true` — fail the node if any invoked tool errored.
-- `idle_timeout` — ms of AI-stream silence before the node fails.
+- `require_tool_call: [tool-name, ...]` — fail a prompt or command node if a
+  listed tool is available but the turn ends without a successful tool result.
+  An error followed by a successful retry satisfies it. Only registry/MCP tools
+  are checked: a provider SDK's own built-ins (`Read`, `Bash`, …) are never in
+  the catalog, so naming one here does nothing, and providers that take no
+  keelson tools at all (codex, gateways, stub) skip the check rather than fail
+  it.
+- `fail_on_tool_error: true` — fail a prompt or command node if any invoked tool
+  errored.
+- `idle_timeout` — ms of AI-stream silence before a prompt, command, or loop
+  node fails.
 - `effort` — reasoning tier for this node; overrides the workflow-level value.
   Ignored on `loop` nodes, which take the workflow value instead.
-- `systemPrompt`, `thinking` — claude-only per-node controls.
+- `systemPrompt`, `thinking` — claude-only prompt/command controls.
 - `memory` / `notebook` — recall/writeback blocks wired to the memory store
   and project notebook.
-- `hooks` — fully honored only by the claude provider.
+- `hooks` — prompt/command hooks, fully honored only by the claude provider.
 
 Ignored with a warning on any node: `agents`, `sandbox`, `betas`,
 `fallbackModel`, `maxBudgetUsd`, `mcp`, `skills`. AI-only fields on
-non-AI nodes (bash/script/loop/approval/cancel) are also ignored with a
-warning.
+bash/script/approval/cancel nodes are also ignored with a warning. On loop
+nodes, `model` and `provider` are the supported exceptions; other AI-only fields
+are ignored with a warning.
 
 ## Variables and data flow
 
