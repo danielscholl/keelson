@@ -36,6 +36,12 @@ nodes:
     runtime: bun
     script: |
       const request = (process.env.KEELSON_ARGUMENTS ?? "").trim();
+      if (request.includes("[keelson: input truncated")) {
+        console.error(
+          "resolve-pr arguments exceeded the 16 KiB input limit; pass a shorter request."
+        );
+        process.exit(1);
+      }
       const targets = new Set();
       if (/^[1-9]\d*$/.test(request)) targets.add(request);
       for (const pattern of [
