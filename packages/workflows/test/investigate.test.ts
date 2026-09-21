@@ -5,7 +5,15 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
@@ -287,6 +295,19 @@ describe("investigate intake", () => {
     });
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("fixtures is not a directory");
+  });
+
+  test("rejects a fixtures path that names the evidence file, before creating it", () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-investigate-fixtures-"));
+    tmps.push(root);
+    const out = join(root, "evidence");
+    const result = runIntake("What does the search API return?", {
+      out,
+      fixtures: `${root}/./evidence/`,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("fixtures and out name the same path");
+    expect(existsSync(out)).toBe(false);
   });
 
   test("the prompts read the write policy and fixtures note from intake", () => {

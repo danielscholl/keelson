@@ -77,6 +77,14 @@ nodes:
       WRITE_POLICY="That requested file is the only intentional write."
       FIXTURES_NOTE=""
       if [ -n "$FIXTURES" ]; then
+        SAME_PATH=$(A="$OUT" B="$FIXTURES" bun --no-env-file -e '
+          import { resolve } from "node:path";
+          console.log(resolve(process.env.A ?? "") === resolve(process.env.B ?? "") ? "yes" : "no");
+        ')
+        if [ "$SAME_PATH" = "yes" ]; then
+          echo "fixtures and out name the same path: $FIXTURES" >&2
+          exit 1
+        fi
         if [ -e "$FIXTURES" ] && [ ! -d "$FIXTURES" ]; then
           echo "fixtures is not a directory: $FIXTURES" >&2
           exit 1
