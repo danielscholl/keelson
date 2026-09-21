@@ -337,55 +337,53 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   const isolationOn =
     isolationMode === "worktree" ||
     (isolationMode === "auto" && workflow.worktree?.enabled === true);
-  // `worktree` is the operator's explicit flag — fail closed so a typo / non-git
-  // dir doesn't silently mutate the live checkout. `auto` means "honor the YAML
-  // default" — best-effort, fall back to in-place with a warning if the target
-  // isn't a git repo.
-  const isolationRequired = isolationMode === "worktree";
   let effectiveCwd = opts.cwd;
   let cleanupWorktree: { repoPath: string; dest: string } | null = null;
-  if (isolationOn) {
-    if (!(await isGitRepo(opts.cwd))) {
-      const msg = `worktree isolation requested but ${opts.cwd} is not a git repo`;
-      if (isolationRequired) {
-        throw new Error(`${msg}. Initialize the directory with \`git init\` or drop --worktree.`);
-      }
-      console.warn(`[keelson] ${msg}; running in place`);
-    } else {
-      const branch = resolveBranchTemplate(workflow.worktree?.branch, {
-        workflow: workflow.name,
-        runId,
-      });
-      // Anchor at the repo top-level, not opts.cwd: a run started from a
-      // subdirectory must still place its worktree at `<repo>/.worktrees/` so a
-      // kept-on-failure worktree lands where it's discoverable, not orphaned
-      // under the subdir.
-      const repoRoot = (await gitToplevel(opts.cwd)) ?? opts.cwd;
-      const dest = worktreePathForRepoLocal({
-        projectRootPath: repoRoot,
-        branch,
-      });
-      if (workflow.worktree?.base === undefined) {
-        const fetched = await fetchOrigin(repoRoot);
-        if (fetched.attempted && !fetched.ok) {
+
+  try {
+    if (isolationOn) {
+      try {
+        if (!(await isGitRepo(opts.cwd))) {
+          throw new Error(`could not confirm '${opts.cwd}' is a git repository`);
+        }
+        const branch = resolveBranchTemplate(workflow.worktree?.branch, {
+          workflow: workflow.name,
+          runId,
+        });
+        // Anchor at the repo top-level, not opts.cwd: a run started from a
+        // subdirectory must still place its worktree at `<repo>/.worktrees/` so a
+        // kept-on-failure worktree lands where it's discoverable, not orphaned
+        // under the subdir.
+        const repoRoot = (await gitToplevel(opts.cwd)) ?? opts.cwd;
+        const dest = worktreePathForRepoLocal({
+          projectRootPath: repoRoot,
+          branch,
+        });
+        if (workflow.worktree?.base === undefined) {
+          const fetched = await fetchOrigin(repoRoot);
+          if (fetched.attempted && !fetched.ok) {
+            console.warn(
+              `[keelson] git fetch origin failed; branching from possibly-stale local refs: ${fetched.error}`,
+            );
+          }
+        }
+        const base = workflow.worktree?.base ?? (await resolveDefaultBranch(repoRoot));
+        if (base !== null && (await headDivergesFrom(repoRoot, base))) {
           console.warn(
-            `[keelson] git fetch origin failed; branching from possibly-stale local refs: ${fetched.error}`,
+            `[keelson] current HEAD is not contained in ${base}; creating isolated worktree branch from ${base}`,
           );
         }
-      }
-      const base = workflow.worktree?.base ?? (await resolveDefaultBranch(repoRoot));
-      if (base !== null && (await headDivergesFrom(repoRoot, base))) {
-        console.warn(
-          `[keelson] current HEAD is not contained in ${base}; creating isolated worktree branch from ${base}`,
-        );
-      }
-      try {
         const created = await createWorktree({
           repoPath: repoRoot,
           branch,
           dest,
           base: base ?? undefined,
         });
+        if (created.adopted) {
+          throw new Error(
+            `workspace destination already exists at ${dest} — refusing to adopt another owner's checkout`,
+          );
+        }
         effectiveCwd = created.worktreePath;
         cleanupWorktree = { repoPath: repoRoot, dest: created.worktreePath };
         const deps = await ensureWorktreeDeps({
@@ -408,15 +406,10 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        if (isolationRequired) {
-          throw new Error(`worktree creation failed: ${message}`);
-        }
-        console.warn(`[keelson] worktree creation failed; running in place: ${message}`);
+        throw new Error(`worktree setup failed: ${message}`);
       }
     }
-  }
 
-  try {
     await runWorkflow({
       workflow,
       runId,

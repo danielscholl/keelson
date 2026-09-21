@@ -44,6 +44,25 @@ describe("workflowRunDetailSchema", () => {
     ).toBe("preflight not checked: offline-catalog");
   });
 
+  it("defaults old isolation payloads and validates durable isolation state", () => {
+    const legacy = workflowRunDetailSchema.parse(makeRunDetail());
+    expect(legacy.isolationEnabled).toBeNull();
+    expect(legacy.worktreeEstablished).toBe(false);
+
+    const isolated = workflowRunDetailSchema.parse(
+      makeRunDetail({ isolationEnabled: true, worktreeEstablished: true }),
+    );
+    expect(isolated.isolationEnabled).toBe(true);
+    expect(isolated.worktreeEstablished).toBe(true);
+
+    expect(() =>
+      workflowRunDetailSchema.parse(makeRunDetail({ isolationEnabled: "true" })),
+    ).toThrow();
+    expect(() =>
+      workflowRunDetailSchema.parse(makeRunDetail({ worktreeEstablished: 1 })),
+    ).toThrow();
+  });
+
   describe("startWorkflowRunBodySchema", () => {
     it("accepts an explicit preflight override", () => {
       expect(

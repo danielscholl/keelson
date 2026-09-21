@@ -184,6 +184,8 @@ interface RunRow {
   working_dir: string | null;
   worktree_path: string | null;
   worktree_base: string | null;
+  isolation_enabled: number | null;
+  worktree_established: number;
   origin: string;
   rib_id: string | null;
   brief_json: string | null;
@@ -217,6 +219,8 @@ function rowToRunSummary(row: RunRow): WorkflowRunSummary {
     workingDir: row.working_dir,
     worktreePath: row.worktree_path,
     worktreeBase: row.worktree_base,
+    isolationEnabled: row.isolation_enabled === null ? null : row.isolation_enabled === 1,
+    worktreeEstablished: row.worktree_established === 1,
     origin: row.origin === "scheduled" ? "scheduled" : "manual",
     ribId: row.rib_id,
     preflightNotice: row.preflight_notice,
@@ -301,7 +305,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   );
 
   const insertRun = db.prepare(
-    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, worktree_base, origin, rib_id, provider_override, isolation_enabled, started_by_rib_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, worktree_base, origin, rib_id, provider_override, isolation_enabled, worktree_established, started_by_rib_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const updateRun = db.prepare(
     "UPDATE workflow_runs SET status = ?, completed_at = ?, error = ? WHERE id = ?",
@@ -426,6 +430,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
           : input.isolationEnabled
             ? 1
             : 0,
+        input.worktreePath === undefined || input.worktreePath === null ? 0 : 1,
         input.startedByRibId ?? null,
       );
     },

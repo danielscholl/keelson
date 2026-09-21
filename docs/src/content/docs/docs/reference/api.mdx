@@ -124,18 +124,32 @@ See [Snapshots and the canvas](../snapshots/) for the frame and payload shapes.
 | --- | --- | --- |
 | `GET` | `/api/workflows` | The merged catalog. |
 | `GET` | `/api/workflows/:name` | One workflow definition. |
-| `POST` | `/api/workflows/:name/runs` | Start a run. |
+| `POST` | `/api/workflows/:name/runs` | Start a run. `isolation: "worktree"` forces a managed checkout; `"none"` explicitly runs in the supplied directory. Omitted follows the workflow's `worktree.enabled` policy. |
 | `POST` | `/api/workflows/:name/refresh` | Re-run a workflow bound to a snapshot key (the board-refresh path). |
 | `GET` | `/api/workflows/:name/runs` | Runs for one workflow. |
 | `GET` | `/api/workflows/runs` | Recent runs across the catalog. |
 | `GET` | `/api/workflows/runs/:runId` | One run with its per-node outputs. |
 | `POST` | `/api/workflows/runs/:runId/resume` | Resume a paused run by replying to its approval node. |
-| `POST` | `/api/workflows/runs/:runId/resume-run` | Re-start an interrupted (failed or cancelled) run from the last successfully completed node. Distinct from the approval-pause resume above. |
+| `POST` | `/api/workflows/runs/:runId/resume-run` | Re-start an interrupted (failed or cancelled) run from the last successfully completed node. Distinct from the approval-pause resume above. Required isolation must still be available or safely retryable. |
 | `GET` | `/api/workflows/runs/:runId/artifact` | Read a file from a run's sandboxed artifact directory. |
 | `DELETE` | `/api/workflows/runs/:runId` | Cancel an in-flight run (`{ cancelled: true }`). With `?purge=1`, purge the run and cascade its node outputs and conversation (`{ deleted: true }`). 404 for an unknown or already-completed run. Origin-gated. |
 | `POST` | `/api/workflows/runs/bulk-delete` | Delete several runs at once. |
 | `GET` | `/api/workflows/worktree-paths` | The worktree directories isolated runs created. |
 | `WS` | `/api/workflows/runs/:runId/ws` | The run event stream: node start, stream, and settle, plus the approval-pause frame. |
+
+Run summaries and details carry `error`, `workingDir`, `worktreePath`,
+`isolationEnabled`, and `worktreeEstablished`. `workingDir` is the requested
+source. `worktreePath` is the managed execution checkout when one is retained.
+`isolationEnabled` is `true`, `false`, or `null` for unknown legacy intent.
+`worktreeEstablished` remains true after a successful checkout is cleaned up, so
+a null path does not imply that the run executed in place.
+
+Required worktree setup is fail-closed. If the server cannot prove the source is
+a repository, prepare the checkout, or persist its identity, the run becomes
+`failed` with a run-level error before any node rows are written. Resume retries
+only a known-required setup failure with no node history. It rejects required
+runs that have node history but no retained checkout, as well as legacy runs
+whose isolation intent is unknown and whose checkout is unavailable.
 
 ## Workspaces
 

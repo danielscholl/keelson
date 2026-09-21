@@ -40,11 +40,18 @@ immediately, with no server restart.
 | `webSearchMode` | no | `disabled` \| `cached` \| `live`. |
 | `interactive` | no | `true` is required when any loop node sets `loop.interactive: true`. |
 | `tags` | no | A list of strings for filtering. |
-| `worktree` | no | `{ enabled, branch }` pins git-worktree isolation per run; `branch` accepts `{workflow}` and `{run_id_short}`. |
+| `worktree` | no | `{ enabled, branch }` pins git-worktree isolation per run; `branch` accepts `{workflow}` and `{run_id_short}`. When enabled, setup is required and failure stops the run before its first node. |
 | `requiresProject` | no | `true` marks a repo-scoped workflow; `workflow_run` refuses to start it unless the resolved working directory is a git repo. |
 | `mutates_checkout` | no | `false` marks a read-only workflow; a non-isolated run against a project's live checkout then skips the per-project mutation lock (it can't clash with a mutating run). Defaults to mutating. |
 | `locking` | no | `exclusive` (default) or `shared`. Shared runs can coexist on one project but remain mutually exclusive with a mutating run. This field takes precedence over `mutates_checkout`; use `mutates_checkout: false` to take no lock. |
 | `converge` | no | `{ gate, max_rounds, on_exhaust }` re-runs a subgraph until a gate node passes. See [converge](#converge). |
+
+The run-start API's `isolation: "worktree"` and the CLI's `--worktree` force
+isolation on. `isolation: "none"` and `--no-worktree` explicitly override even a
+YAML declaration and run in the supplied directory. Keelson does not otherwise
+fall back to that directory when required setup fails. See
+[Projects and worktrees](../../concepts/projects/#worktree-isolation-for-runs)
+for status, resume, and caller-owned lease behavior.
 
 The loader **accepts but ignores** these workflow-level fields, dropping them
 with a warning so a cross-runtime file still loads: `sandbox`, `betas`,

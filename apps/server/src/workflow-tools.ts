@@ -113,12 +113,64 @@ function renderNodes(detail: WorkflowRunDetail): string {
   return blocks.join("\n\n");
 }
 
+type RunFacts = Pick<
+  WorkflowRunDetail,
+  "status" | "error" | "workingDir" | "worktreePath" | "isolationEnabled" | "worktreeEstablished"
+>;
+
+function renderRunFacts(detail: RunFacts): string[] {
+  const lines = detail.error !== null ? [`Run error: ${detail.error}`] : [];
+  const source =
+    detail.workingDir !== null
+      ? `Requested source: "${detail.workingDir}".`
+      : "Requested source unavailable.";
+
+  if (detail.worktreePath !== null) {
+    const intent =
+      detail.isolationEnabled === true
+        ? "required"
+        : detail.isolationEnabled === false
+          ? "disabled"
+          : "intent unavailable";
+    lines.push(`Isolation: ${intent}; worktree established at "${detail.worktreePath}".`, source);
+    return lines;
+  }
+  if (detail.isolationEnabled === false) {
+    lines.push(
+      detail.workingDir !== null
+        ? `Isolation: disabled; in-place execution directory: "${detail.workingDir}".`
+        : "Isolation: disabled; in-place execution directory unavailable.",
+    );
+    return lines;
+  }
+  if (detail.worktreeEstablished) {
+    const intent = detail.isolationEnabled === true ? "required" : "intent unavailable";
+    lines.push(
+      `Isolation: ${intent}; worktree established previously, but no retained path is available.`,
+      source,
+    );
+    return lines;
+  }
+  if (detail.isolationEnabled === true) {
+    lines.push(
+      detail.status === "running"
+        ? "Isolation: required; worktree not yet established."
+        : "Isolation: required; worktree unavailable (not established).",
+      source,
+    );
+    return lines;
+  }
+  lines.push("Isolation: intent unavailable; no established worktree is recorded.", source);
+  return lines;
+}
+
 function renderBriefStatus(
   detail: WorkflowRunDetail,
   opts: { current: string[]; pauseId?: string; awaitingNodeId?: string },
 ): string {
   const lines = [
     `Run ${detail.runId} — workflow "${detail.workflowName}" — status ${detail.status} — started ${detail.startedAt}.`,
+    ...renderRunFacts(detail),
   ];
   const inputs = summarizeInputs(detail.inputs);
   if (inputs !== "") lines.push(inputs);
@@ -150,11 +202,6 @@ function resumeInstructions(runId: string, nodeId: string, pauseId: string | und
   ].join("\n");
 }
 
-function inputsSuffix(inputs: Record<string, string> | undefined): string {
-  const summary = summarizeInputs(inputs);
-  return summary === "" ? "" : `\n    ${summary}`;
-}
-
 // Turns a watch result into the tool_result the model reads. Carries the
 // runId/nodeId/pauseId on a pause so the model can resume in a later turn.
 function describeState(
@@ -169,6 +216,7 @@ function describeState(
       const nodeView = detail ? truncate(renderNodes(detail), PAUSED_OUTPUT_CAP) : "";
       const content = [
         `Workflow run ${runId} is PAUSED awaiting approval at node "${state.nodeId}".`,
+        ...(detail ? renderRunFacts(detail) : []),
         summarizeInputs(detail?.inputs),
         "",
         "Approval prompt:",
@@ -191,6 +239,7 @@ function describeState(
           : "";
       const content = [
         `Workflow run ${runId} ${verb}.`,
+        ...(detail ? renderRunFacts(detail) : []),
         summarizeInputs(detail?.inputs),
         nodeView ? `\nRun output:\n${nodeView}` : "",
         hint,
@@ -199,11 +248,19 @@ function describeState(
         .join("\n");
       return { content, isError: state.status === "failed" };
     }
-    case "running":
+    case "running": {
+      const detail = controller.getRun(runId);
+      const inputs = summarizeInputs(detail?.inputs);
       return {
-        content: `Workflow run ${runId} is still in progress and continues in the background. Call workflow_status with runId="${runId}" to check on it.${inputsSuffix(controller.getRun(runId)?.inputs)}`,
+        content: [
+          `Workflow run ${runId} is still in progress and continues in the background.`,
+          ...(detail ? renderRunFacts(detail) : []),
+          `Call workflow_status with runId="${runId}" to check on it.`,
+          ...(inputs === "" ? [] : [inputs]),
+        ].join("\n"),
         isError: false,
       };
+    }
     case "unknown":
       return {
         content: `Workflow run ${runId} was not found (it may have been purged, or the server restarted while it was paused).`,
@@ -515,7 +572,11 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
       // a relative or symlinked dir would otherwise print one path while the
       // run record holds another, which is the mismatch this banner exists to
       // expose.
-      const scopeNote = ` in "${canonicalPath(workingDir)}"`;
+      const startedDetail = controller.getRun(started.runId);
+      const scopeNote =
+        startedDetail?.isolationEnabled === true
+          ? ` with requested source "${canonicalPath(workingDir)}"`
+          : ` in "${canonicalPath(workingDir)}"`;
       ctx.emit({
         type: "text",
         content: `Started workflow "${name}"${scopeNote} (run ${started.runId}).\n`,
@@ -588,7 +649,9 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
             ? " Only failed or cancelled runs can be resumed; call workflow_status to check its state."
             : result.reason === "locked"
               ? " Another run holds the project's mutation lock; retry once it releases."
-              : " The run or its workflow is no longer available — it may have been purged, or its workflow definition removed or renamed.";
+              : result.reason === "isolation_unavailable"
+                ? " Start a fresh run with worktree isolation; prior outputs cannot be safely reused."
+                : " The run or its workflow is no longer available — it may have been purged, or its workflow definition removed or renamed.";
         emitResult(ctx, `Could not resume run ${runId}: ${result.message}.${hint}`, true);
         return;
       }
@@ -641,6 +704,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         }
         const lines = [
           `Run ${runId} — workflow "${detail.workflowName}" — status ${detail.status}.`,
+          ...renderRunFacts(detail),
           summarizeInputs(detail.inputs),
         ];
         if (detail.status === "failed" || detail.status === "cancelled") {
@@ -670,12 +734,15 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         return;
       }
       const rendered = active
-        .map(
-          (r) =>
+        .map((r) => {
+          const inputs = summarizeInputs(controller.getRun(r.runId)?.inputs);
+          return [
             `• ${r.runId} — ${r.workflowName} [${r.status}] started ${r.startedAt}` +
-            (r.status === "paused" ? " (awaiting approval — use workflow_respond)" : "") +
-            inputsSuffix(controller.getRun(r.runId)?.inputs),
-        )
+              (r.status === "paused" ? " (awaiting approval — use workflow_respond)" : ""),
+            ...renderRunFacts(r).map((line) => `  ${line}`),
+            ...(inputs === "" ? [] : [`  ${inputs}`]),
+          ].join("\n");
+        })
         .join("\n");
       emitResult(
         ctx,

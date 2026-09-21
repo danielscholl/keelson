@@ -36,7 +36,10 @@ whichever is present), a Copilot subscription, and a **running
 server** (`keelson start`) because the approval gate pauses the run. It mutates
 the working tree (branch, commits, push, PR), so it sets `worktree.enabled`:
 every run executes in an isolated git worktree and cannot trample your editor
-state.
+state. Worktree setup is a launch gate. If keelson cannot establish and record
+the checkout, the run fails before `extract-issue` instead of continuing in the
+source directory. `--no-worktree` is a deliberate override that makes the
+workflow mutate the supplied directory in place.
 
 <Aside type="caution" title="It writes to your repo and GitHub">
 `fix-issue` commits, pushes a branch, and opens a draft PR. The approval gate is

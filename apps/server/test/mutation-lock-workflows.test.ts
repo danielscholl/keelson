@@ -272,7 +272,7 @@ nodes:
     }
   });
 
-  test("isolation fallback acquires mutation lock before running in place", async () => {
+  test("required isolation fails for setup even while the mutation lock is held", async () => {
     writeWorkflow(
       "guarded-fallback.yaml",
       `name: guarded-fallback
@@ -331,7 +331,9 @@ nodes:
       await pollUntilTerminal(store, fallback.runId);
       const fallbackRun = store.getRun(fallback.runId);
       expect(fallbackRun?.status).toBe("failed");
-      expect(fallbackRun?.error).toContain(`project ${project.id} is locked by workflow:`);
+      expect(fallbackRun?.error).toContain("worktree setup failed:");
+      expect(fallbackRun?.error).not.toContain(`project ${project.id} is locked by workflow:`);
+      expect(fallbackRun?.nodes).toEqual([]);
     } finally {
       await activeRuns.abortAll();
       db.close();

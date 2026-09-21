@@ -165,7 +165,8 @@ export type NodeOutputRow = z.infer<typeof nodeOutputRowSchema>;
 // the wire for back-compat with rows created before the projects feature landed.
 // New runs always have `workingDir`; `projectId` is set when the caller targeted
 // a named project; `worktreePath` and `worktreeBase` are populated only when
-// isolation is on and the value is known.
+// isolation is on and the value is known. Isolation fields default for payloads
+// produced before their durable state was exposed.
 export const workflowRunSummarySchema = z
   .object({
     runId: z.string(),
@@ -179,6 +180,8 @@ export const workflowRunSummarySchema = z
     workingDir: z.string().nullable(),
     worktreePath: z.string().nullable(),
     worktreeBase: z.string().nullable().default(null),
+    isolationEnabled: z.boolean().nullable().default(null),
+    worktreeEstablished: z.boolean().default(false),
     // Trigger provenance (migration 3). Defaulted so pre-migration rows and the
     // fixtures that predate the column keep parsing.
     origin: workflowRunOriginSchema.default("manual"),
