@@ -491,7 +491,13 @@ nodes:
           const row = cells(lines[index]);
           if (row === null) break;
           if (row.length !== header.length) {
-            fail(`claim table row has ${row.length} cells; expected ${header.length}`);
+            const claimId = row[positions["claim #"]]?.trim();
+            const label = /^[1-9]\d*$/.test(claimId ?? "")
+              ? `Claim ${claimId}`
+              : "a claim table row";
+            fail(
+              `${label} has ${row.length} cells; expected ${header.length}: ${lines[index].trim()}`,
+            );
           }
           const claimNumber = row[positions["claim #"]].trim();
           if (!/^[1-9]\d*$/.test(claimNumber)) {
