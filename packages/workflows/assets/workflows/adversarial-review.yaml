@@ -43,7 +43,8 @@ description: |
           Set `subject_required=1` to fail instead of falling back when a
           provided subject cannot be snapshotted. Optional `author` names the
           model that wrote the artifact so it is excluded from every review,
-          verification, and synthesis seat.
+          verification, and synthesis seat. Optional `out` names a directory
+          where the five review artifacts are written.
   NOT for: Building or fixing code (use fix-issue), posting
            a GitHub PR review (use pr-review), or generating something new.
 
@@ -591,3 +592,75 @@ nodes:
       untruncated. The `report` field is this workflow's human-readable
       output; the sibling fields exist so callers can consume the verdict
       without parsing prose.
+
+  - id: save
+    depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk, verify, synthesize]
+    trigger_rule: all_done
+    always_run: true
+    timeout: 30000
+    bash: |
+      set -euo pipefail
+
+      AUTHOR="${KEELSON_NODE_author_seat_OUTPUT:-seated}"
+      case "$AUTHOR" in
+        seated) echo "no author model set; seating unchanged" ;;
+        claude-opus-5) echo "reseated reviewer-logic: claude-opus-5 -> claude-opus-4.7" ;;
+        gpt-5.6-sol) echo "reseated reviewer-evidence: gpt-5.6-sol -> gpt-6-astra" ;;
+        grok-4.6) echo "reseated reviewer-risk: grok-4.6 -> grok-4.5" ;;
+        gpt-5.6-terra) echo "reseated verify: gpt-5.6-terra -> gpt-5.5" ;;
+        claude-opus-4.8) echo "reseated synthesize: claude-opus-4.8 -> claude-opus-4.7" ;;
+        *) printf 'author %s holds no default seat; seating unchanged\n' "$AUTHOR" ;;
+      esac
+
+      OUT="${KEELSON_INPUTS_out:-}"
+      if [ -z "$OUT" ]; then
+        echo "no out directory set; nothing written"
+        exit 0
+      fi
+      mkdir -p -- "$OUT"
+
+      save() {
+        local filename="$1"
+        local spill="$2"
+        local value="$3"
+        local truncated="$4"
+        local target="$OUT/$filename"
+        rm -f -- "$target"
+        if [ -n "$spill" ]; then
+          if [ ! -s "$spill" ]; then
+            printf 'left %s absent: current output spill is unavailable\n' "$filename"
+            return
+          fi
+          cat -- "$spill" > "$target"
+        elif [ "$truncated" = "1" ]; then
+          printf 'left %s absent: full current output is unavailable\n' "$filename"
+          return
+        elif [ -n "$value" ]; then
+          printf '%s\n' "$value" > "$target"
+        else
+          printf 'left %s absent: current lane produced no output\n' "$filename"
+          return
+        fi
+        printf 'wrote %s\n' "$filename"
+      }
+
+      save review-logic.md \
+        "${KEELSON_NODE_reviewer_logic_OUTPUT_FILE:-}" \
+        "${KEELSON_NODE_reviewer_logic_OUTPUT:-}" \
+        "${KEELSON_NODE_reviewer_logic_OUTPUT_TRUNCATED:-}"
+      save review-evidence.md \
+        "${KEELSON_NODE_reviewer_evidence_OUTPUT_FILE:-}" \
+        "${KEELSON_NODE_reviewer_evidence_OUTPUT:-}" \
+        "${KEELSON_NODE_reviewer_evidence_OUTPUT_TRUNCATED:-}"
+      save review-risk.md \
+        "${KEELSON_NODE_reviewer_risk_OUTPUT_FILE:-}" \
+        "${KEELSON_NODE_reviewer_risk_OUTPUT:-}" \
+        "${KEELSON_NODE_reviewer_risk_OUTPUT_TRUNCATED:-}"
+      save verification.md \
+        "${KEELSON_NODE_verify_OUTPUT_FILE:-}" \
+        "${KEELSON_NODE_verify_OUTPUT:-}" \
+        "${KEELSON_NODE_verify_OUTPUT_TRUNCATED:-}"
+      save verdict.md \
+        "${KEELSON_NODE_synthesize_OUTPUT_FILE:-}" \
+        "${KEELSON_NODE_synthesize_OUTPUT:-}" \
+        "${KEELSON_NODE_synthesize_OUTPUT_TRUNCATED:-}"
