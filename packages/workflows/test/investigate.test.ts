@@ -353,6 +353,10 @@ describe("investigate finalizer", () => {
       "| Claim | Level | Citation | Verified |\n| --- | --- | --- | --- |\n| A | documented | x | MAYBE |\n",
       "unsupported verification verdict",
     ],
+    [
+      "| Claim | Level | Citation | Verified |\n| --- | --- |\n| A | documented | x | CONFIRMED |\n",
+      "claim table is missing its Markdown separator row",
+    ],
   ])("fails closed for malformed evidence", (contents, message) => {
     const { run } = runFinalizer(contents);
     const result = run();

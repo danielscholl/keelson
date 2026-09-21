@@ -359,8 +359,12 @@ nodes:
               return None
           return [cell.strip().replace("\\|", "|") for cell in re.split(r"(?<!\\)\|", value[1:-1])]
 
-      def separator(row):
-          return row is not None and all(re.fullmatch(r":?-{3,}:?", cell) for cell in row)
+      def separator(row, width):
+          return (
+              row is not None
+              and len(row) == width
+              and all(re.fullmatch(r":?-{3,}:?", cell) for cell in row)
+          )
 
       out = Path(required_env("KEELSON_INPUTS_out"))
       if not out.is_file() or out.stat().st_size == 0:
@@ -379,7 +383,7 @@ nodes:
               index += 1
               continue
           positions = {name: normalized.index(name) for name in required}
-          if index + 1 >= len(lines) or not separator(cells(lines[index + 1])):
+          if index + 1 >= len(lines) or not separator(cells(lines[index + 1]), len(header)):
               raise SystemExit("claim table is missing its Markdown separator row")
           index += 2
           while index < len(lines):
