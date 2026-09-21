@@ -56,6 +56,23 @@ function nodeBody(id: string, field: "bash" | "script"): string {
   return body;
 }
 
+function runCellsProbe(line: string) {
+  const script = nodeBody("finalize", "script");
+  const end = script.indexOf("\nfunction separator");
+  if (end < 0) throw new Error("Missing cells function boundary");
+  return Bun.spawnSync({
+    cmd: [
+      "bun",
+      "--no-env-file",
+      "-e",
+      `${script.slice(0, end)}\nconsole.log(JSON.stringify(cells(${JSON.stringify(line)})));`,
+    ],
+    cwd: tmpdir(),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+}
+
 function artifactsDir(runId: string): string {
   const root = mkdtempSync(join(tmpdir(), "keelson-investigate-"));
   tmps.push(root);
@@ -334,6 +351,15 @@ describe("investigate finalizer", () => {
 - External deployment state.
 `;
 
+  function singleClaimEvidence(claim: string): string {
+    return `# Evidence
+
+| Claim # | Claim | Level | Citation | Verified |
+| --- | --- | --- | --- | --- |
+| 1 | ${claim} | source-verified | src/a.ts:1 | CONFIRMED |
+`;
+  }
+
   function fencedClaimTable(opening: string, closing: string): string {
     return `${opening}
 | Citation | Verified | Claim # | Claim | Verification note | Level |
@@ -360,6 +386,49 @@ ${closing}`;
       /Run abcdef12, \d{4}-\d{2}-\d{2}: investigated by `claude-opus-4-8` via `claude`; rows added or changed in this run were verified by `claude-sonnet-5` via `claude`\./,
     );
     expect(finalized).not.toContain("gpt-6-astra");
+  });
+
+  test.each([
+    ["an unescaped pipe inside a code span", "`A|B|C`"],
+    ["an escaped literal pipe", "A\\|B"],
+  ])("accepts %s", (_name, claim) => {
+    const { out, run } = runFinalizer(singleClaimEvidence(claim));
+    expect(run().exitCode).toBe(0);
+    expect(readFileSync(out, "utf8")).toContain(
+      "Tally: confirmed=1; confirmed in part=0; refuted=0; unverifiable=0; not checked=0.",
+    );
+  });
+
+  test("accepts and unescapes an escaped pipe inside a code span", () => {
+    const claim = "`A\\|B`";
+    const probe = runCellsProbe(
+      `| 1 | ${claim} | source-verified | src/a.ts:1 | CONFIRMED |`,
+    );
+    expect(probe.exitCode).toBe(0);
+    expect(probe.stdout.toString().trim()).toBe(
+      '["1","`A|B`","source-verified","src/a.ts:1","CONFIRMED"]',
+    );
+
+    const { out, run } = runFinalizer(singleClaimEvidence(claim));
+    expect(run().exitCode).toBe(0);
+    expect(readFileSync(out, "utf8")).toContain(
+      "Tally: confirmed=1; confirmed in part=0; refuted=0; unverifiable=0; not checked=0.",
+    );
+  });
+
+  test("identifies a claim whose row has too many cells", () => {
+    const malformed = `| Claim # | Claim | Level | Citation | Verified |
+| --- | --- | --- | --- | --- |
+| 7 | Alpha | documented | src/a.ts:1 | CONFIRMED | extra |
+`;
+    const { run } = runFinalizer(malformed);
+    const result = run();
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain("Claim 7");
+    expect(result.stderr.toString()).toContain("cells; expected");
+    expect(result.stderr.toString()).toContain(
+      "| 7 | Alpha | documented | src/a.ts:1 | CONFIRMED | extra |",
+    );
   });
 
   test.each([
