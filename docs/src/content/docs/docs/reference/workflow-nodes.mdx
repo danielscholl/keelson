@@ -451,6 +451,7 @@ environment variables, never spliced into the source:
 | Variable | Carries |
 | --- | --- |
 | `KEELSON_NODE_<id>_OUTPUT` | The upstream node's output (non-alphanumeric characters in the id are normalized to `_`). Capped, see below. |
+| `KEELSON_NODE_<id>_STATE` | The upstream node's `NodeOutput` state: `pending`, `running`, `completed`, `failed`, or `skipped`. |
 | `KEELSON_NODE_<id>_OUTPUT_FILE` | Path to a file holding that output in full, set for every upstream node whatever its size. Absent only when the run has no artifacts directory, which every server and CLI run creates. |
 | `KEELSON_NODE_<id>_OUTPUT_TRUNCATED` | `1` when the `_OUTPUT` value above was capped; unset otherwise. |
 | `KEELSON_ARTIFACTS_DIR` | The per-run scratch directory. |

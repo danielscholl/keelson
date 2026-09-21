@@ -276,6 +276,8 @@ warning.
 - `KEELSON_NODE_<id>_OUTPUT` — how a bash or script node reads an upstream
   output (`$<id>.output` does not expand in a shell body). Capped at 16 KiB and
   head+tail truncated past it, with a marker in the middle.
+- `KEELSON_NODE_<id>_STATE` — the upstream node's `NodeOutput` state:
+  `pending`, `running`, `completed`, `failed`, or `skipped`.
 - `KEELSON_NODE_<id>_OUTPUT_FILE` — the same output in full, always set. Read
   structured output from this file; the marker above corrupts JSON. Validation
   warns when a body parses the capped variable instead.
