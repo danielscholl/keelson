@@ -54,6 +54,26 @@ const PER_NODE_OUTPUT_CAP = 2_000;
 const PAUSED_OUTPUT_CAP = 8_000;
 const TERMINAL_OUTPUT_CAP = 12_000;
 
+const INPUT_VALUE_CAP = 80;
+const INPUT_SUMMARY_MAX_KEYS = 6;
+
+// Parallel runs of one workflow differ only by their inputs, so every reply
+// that names a run carries them; without it a client pairs ids by arrival order.
+export function summarizeInputs(inputs: Record<string, string> | undefined): string {
+  if (inputs === undefined) return "";
+  const entries = Object.entries(inputs)
+    .filter(([, value]) => value.trim() !== "")
+    .sort(([a], [b]) => (a === "ARGUMENTS" ? -1 : b === "ARGUMENTS" ? 1 : 0));
+  if (entries.length === 0) return "";
+  const shown = entries.slice(0, INPUT_SUMMARY_MAX_KEYS).map(([key, value]) => {
+    const line = value.trim().split(/\r\n|\n|\r/, 1)[0] ?? "";
+    const clipped = line.length > INPUT_VALUE_CAP ? `${line.slice(0, INPUT_VALUE_CAP)}…` : line;
+    return `${key}=${JSON.stringify(clipped)}`;
+  });
+  const more = entries.length - shown.length;
+  return `inputs: ${shown.join(", ")}${more > 0 ? `, +${more} more` : ""}`;
+}
+
 export function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}\n…[truncated ${text.length - max} chars]`;
@@ -99,6 +119,8 @@ function renderBriefStatus(
   const lines = [
     `Run ${detail.runId} — workflow "${detail.workflowName}" — status ${detail.status} — started ${detail.startedAt}.`,
   ];
+  const inputs = summarizeInputs(detail.inputs);
+  if (inputs !== "") lines.push(inputs);
   if (opts.current.length > 0) {
     lines.push(`current: ${opts.current.join(", ")}`);
   }
@@ -127,6 +149,11 @@ function resumeInstructions(runId: string, nodeId: string, pauseId: string | und
   ].join("\n");
 }
 
+function inputsSuffix(inputs: Record<string, string> | undefined): string {
+  const summary = summarizeInputs(inputs);
+  return summary === "" ? "" : `\n    ${summary}`;
+}
+
 // Turns a watch result into the tool_result the model reads. Carries the
 // runId/nodeId/pauseId on a pause so the model can resume in a later turn.
 function describeState(
@@ -141,6 +168,7 @@ function describeState(
       const nodeView = detail ? truncate(renderNodes(detail), PAUSED_OUTPUT_CAP) : "";
       const content = [
         `Workflow run ${runId} is PAUSED awaiting approval at node "${state.nodeId}".`,
+        summarizeInputs(detail?.inputs),
         "",
         "Approval prompt:",
         state.message,
@@ -162,6 +190,7 @@ function describeState(
           : "";
       const content = [
         `Workflow run ${runId} ${verb}.`,
+        summarizeInputs(detail?.inputs),
         nodeView ? `\nRun output:\n${nodeView}` : "",
         hint,
       ]
@@ -171,7 +200,7 @@ function describeState(
     }
     case "running":
       return {
-        content: `Workflow run ${runId} is still in progress and continues in the background. Call workflow_status with runId="${runId}" to check on it.`,
+        content: `Workflow run ${runId} is still in progress and continues in the background. Call workflow_status with runId="${runId}" to check on it.${inputsSuffix(controller.getRun(runId)?.inputs)}`,
         isError: false,
       };
     case "unknown":
@@ -486,9 +515,11 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
       // run record holds another, which is the mismatch this banner exists to
       // expose.
       const scopeNote = ` in "${canonicalPath(workingDir)}"`;
+      const startedInputs = summarizeInputs(runInputs);
+      const inputsLine = startedInputs === "" ? "" : `${startedInputs}\n`;
       ctx.emit({
         type: "text",
-        content: `Started workflow "${name}"${scopeNote} (run ${started.runId}).\n`,
+        content: `Started workflow "${name}"${scopeNote} (run ${started.runId}).\n${inputsLine}`,
       });
       const state = await controller.awaitPauseOrTerminal(started.runId, {
         onFrame: streamProgress(ctx),
@@ -611,6 +642,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         }
         const lines = [
           `Run ${runId} — workflow "${detail.workflowName}" — status ${detail.status}.`,
+          summarizeInputs(detail.inputs),
         ];
         if (detail.status === "failed" || detail.status === "cancelled") {
           lines.push(
@@ -642,7 +674,8 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         .map(
           (r) =>
             `• ${r.runId} — ${r.workflowName} [${r.status}] started ${r.startedAt}` +
-            (r.status === "paused" ? " (awaiting approval — use workflow_respond)" : ""),
+            (r.status === "paused" ? " (awaiting approval — use workflow_respond)" : "") +
+            inputsSuffix(controller.getRun(r.runId)?.inputs),
         )
         .join("\n");
       emitResult(
