@@ -540,15 +540,20 @@ This heading is part of a fenced example.
   test("fails closed when effective attribution is absent", () => {
     const { out } = runFinalizer(evidence);
     const artifacts = artifactsDir("missing-provenance");
+    const env: Record<string, string> = {
+      ...(process.env as Record<string, string>),
+      KEELSON_INPUTS_out: out,
+      KEELSON_ARTIFACTS_DIR: artifacts,
+      KEELSON_RUN_ID: "missing-provenance",
+    };
+    delete env.KEELSON_NODE_investigate_PROVIDER;
+    delete env.KEELSON_NODE_investigate_MODEL;
+    delete env.KEELSON_NODE_verify_PROVIDER;
+    delete env.KEELSON_NODE_verify_MODEL;
     const proc = Bun.spawnSync({
       cmd: ["bun", "--no-env-file", "-e", nodeBody("finalize", "script")],
       cwd: tmpdir(),
-      env: {
-        ...(process.env as Record<string, string>),
-        KEELSON_INPUTS_out: out,
-        KEELSON_ARTIFACTS_DIR: artifacts,
-        KEELSON_RUN_ID: "missing-provenance",
-      },
+      env,
       stdout: "pipe",
       stderr: "pipe",
     });
