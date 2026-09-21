@@ -475,6 +475,37 @@ describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
     expect(res.error).toContain("cwd");
   });
 
+  test("rejects required isolation before registering or invoking a node", async () => {
+    let promptCalls = 0;
+    const promptHandler: NodeHandler = {
+      type: "prompt",
+      async handle() {
+        promptCalls += 1;
+        return { status: "succeeded", output: { kind: "text", text: "unsafe" } };
+      },
+    };
+    const { controller, activeRuns } = makeController({ promptHandler });
+    const res = await controller.runDefinition(
+      {
+        name: "isolated-memory",
+        description: "requires a managed worktree",
+        worktree: { enabled: true },
+        nodes: [{ id: "work", prompt: "run" }],
+      },
+      {},
+      tmpDir,
+    );
+
+    expect(res).toEqual({
+      status: "failed",
+      nodes: {},
+      error:
+        "worktree isolation is not supported for in-memory workflow definitions; start the catalog workflow or use an explicitly in-place definition inside a caller-owned checkout",
+    });
+    expect(promptCalls).toBe(0);
+    expect(activeRuns.size()).toBe(0);
+  });
+
   test("surfaces a failed node as status failed with the node error", async () => {
     const { controller } = makeController();
     const res = await controller.runDefinition(

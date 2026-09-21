@@ -1844,6 +1844,14 @@ export function createWorkflowController(
       if (invariantError) {
         return { status: "failed", nodes: {}, error: `invalid workflow: ${invariantError}` };
       }
+      if (definitionObj.worktree?.enabled === true) {
+        return {
+          status: "failed",
+          nodes: {},
+          error:
+            "worktree isolation is not supported for in-memory workflow definitions; start the catalog workflow or use an explicitly in-place definition inside a caller-owned checkout",
+        };
+      }
       let workingDir: string;
       try {
         if (!statSync(cwd).isDirectory()) {
