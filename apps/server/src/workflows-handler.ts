@@ -1142,6 +1142,7 @@ function startRunCore(
       origin,
       ribId,
       providerOverride: providerOverride ?? null,
+      isolationEnabled: isolationOn,
     });
   } catch (err) {
     if (lockHandle !== undefined) {
@@ -1372,6 +1373,35 @@ function resumeRunCore(
   }
   const providerOverride = store.getRunProviderOverride(runId);
   const rerunPreflight = run.error?.startsWith(PREFLIGHT_FAILURE_PREFIX) === true;
+  const persistedIsolationEnabled = store.getRunIsolationEnabled(runId);
+  if (
+    rerunPreflight &&
+    run.worktreePath === null &&
+    persistedIsolationEnabled === null &&
+    workflow.worktree?.enabled === undefined
+  ) {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run '${runId}' isolation choice is unavailable and cannot be safely resumed`,
+    };
+  }
+  const resumeIsolationEnabled =
+    rerunPreflight &&
+    run.worktreePath === null &&
+    (persistedIsolationEnabled ?? workflow.worktree?.enabled ?? false);
+  const resumeIsolation: IsolationConfig | null = resumeIsolationEnabled
+    ? {
+        branchTemplate: workflow.worktree?.branch,
+        base: workflow.worktree?.base,
+        projectRootPath:
+          resumeProject &&
+          (run.workingDir === resumeProject.rootPath ||
+            run.workingDir.startsWith(`${resumeProject.rootPath}${sep}`))
+            ? resumeProject.rootPath
+            : run.workingDir,
+      }
+    : null;
   if (
     providerOverride !== null &&
     (providerOverride === "workflow" || !isRegisteredProvider(providerOverride))
@@ -1387,10 +1417,24 @@ function resumeRunCore(
     workingDir: run.workingDir,
     projectsStore,
   });
+  const resumeIsolationFallbackMode = resolveLockMode(workflow);
+  const resumeIsolationFallbackLock =
+    resumeIsolation !== null &&
+    mutationLockManager !== undefined &&
+    resumeIsolationFallbackMode !== "none" &&
+    resumeLockProjectId !== null
+      ? {
+          manager: mutationLockManager,
+          projectId: resumeLockProjectId,
+          mode: resumeIsolationFallbackMode,
+          purpose: workflow.name,
+          owner: mutationLockOwner(run.origin, runId),
+        }
+      : undefined;
   let lockHandle: MutationLockHandle | undefined;
   try {
     lockHandle =
-      run.worktreePath === null
+      run.worktreePath === null && resumeIsolation === null
         ? acquireRunMutationLock({
             mutationLockManager,
             workflow,
@@ -1447,10 +1491,10 @@ function resumeRunCore(
       subscribers,
       promptHandler,
       defaultProvider,
-      preflight: rerunPreflight,
+      preflight: rerunPreflight && resolveWorkflowPreflight(loadKeelsonConfig()),
       pendingApprovals,
       ...(providerOverride !== null ? { providerOverride } : {}),
-      isolation: null,
+      isolation: resumeIsolation,
       ...(run.projectId !== null ? { projectId: run.projectId } : {}),
       ...(memoryTools !== undefined ? { memoryTools } : {}),
       ...(snapshotManager !== undefined ? { snapshotManager } : {}),
@@ -1458,6 +1502,9 @@ function resumeRunCore(
       ...(usageStore !== undefined ? { usageStore } : {}),
       ...(workspaceManager !== undefined ? { workspaceManager } : {}),
       ...(notebook !== undefined ? { notebook } : {}),
+      ...(resumeIsolationFallbackLock !== undefined
+        ? { isolationFallbackLock: resumeIsolationFallbackLock }
+        : {}),
       completedNodeOutputs,
       existingWorktreePath: run.worktreePath ?? undefined,
     });

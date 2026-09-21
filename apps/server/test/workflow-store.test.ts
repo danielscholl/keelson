@@ -118,6 +118,7 @@ describe("SQLite WorkflowStore", () => {
       startedAt: "2025-01-01T00:00:00.000Z",
       conversationId: mintConv(db, "hello-world-conv"),
       providerOverride: "stub",
+      isolationEnabled: true,
     });
 
     const run = store.getRun("r1");
@@ -132,6 +133,8 @@ describe("SQLite WorkflowStore", () => {
     expect(run!.error).toBeNull();
     expect(store.getRunProviderOverride("r1")).toBe("stub");
     expect(store.getRunProviderOverride("missing")).toBeNull();
+    expect(store.getRunIsolationEnabled("r1")).toBe(true);
+    expect(store.getRunIsolationEnabled("missing")).toBeNull();
   });
 
   test("listWorktreeRuns reports every worktree-bearing run with its status", () => {

@@ -209,6 +209,37 @@ describe("rib run events", () => {
     }
   });
 
+  test("a failed preflight resume honors the current preflight setting", async () => {
+    const prior = process.env.KEELSON_WORKFLOW_PREFLIGHT;
+    const { db, store, activeRuns, controller } = makeRig({
+      bash: "echo unused",
+      nodes: [{ id: "work", provider: "stub", model: "retired-model", prompt: "run" }],
+      promptHandler: successfulPromptHandler,
+    });
+    try {
+      const result = controller.startRun({
+        name: "provision",
+        inputs: {},
+        workingDir: tmpDir,
+        origin: "scheduled",
+      });
+      if (!result.ok) throw new Error(result.message);
+      await until(
+        () => store.getRun(result.runId)?.status === "failed" && !activeRuns.get(result.runId),
+      );
+
+      process.env.KEELSON_WORKFLOW_PREFLIGHT = "0";
+      expect(controller.resumeRun(result.runId)).toEqual({ ok: true });
+      await until(
+        () => store.getRun(result.runId)?.status === "succeeded" && !activeRuns.get(result.runId),
+      );
+    } finally {
+      if (prior === undefined) delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
+      else process.env.KEELSON_WORKFLOW_PREFLIGHT = prior;
+      db.close();
+    }
+  });
+
   test("a scheduled run persists an unavailable-catalog notice", async () => {
     const capabilities = {
       sessionResume: false,

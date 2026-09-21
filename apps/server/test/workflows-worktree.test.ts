@@ -21,6 +21,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
+import { isRegisteredProvider, registerStubProvider } from "@keelson/providers";
 import { TERMINAL_RUN_STATUSES, type WorkflowRunStatus } from "@keelson/shared";
 import * as worktrees from "@keelson/workflows";
 import { Hono } from "hono";
@@ -117,6 +118,7 @@ async function addOrigin(path: string): Promise<void> {
 }
 
 beforeEach(() => {
+  if (!isRegisteredProvider("stub")) registerStubProvider();
   tmpDir = realpathSync.native(mkdtempSync(join(tmpdir(), "keelson-worktree-route-")));
   repoDir = join(tmpDir, "repo");
   mkdirSync(repoDir);
@@ -159,7 +161,15 @@ function makeRig(opts: { includeWorkspaceManager?: boolean; projectRootPath?: st
   const subscribers = createWorkflowSubscribers();
   workflowsRoutes(app, options, activeRuns, subscribers);
   const controller = createWorkflowController(options, activeRuns, subscribers);
-  return { app, store, conversationStore, controller, workspaceManager, projectId: project.id };
+  return {
+    app,
+    store,
+    conversationStore,
+    controller,
+    workspaceManager,
+    catalog,
+    projectId: project.id,
+  };
 }
 
 describe("worktree prune coordination", () => {
@@ -823,6 +833,57 @@ nodes:
       expect(completed.nodes[0]!.outputText).toContain("LINK_PRESENT");
     });
   }
+
+  test("resume recreates forced isolation after preflight fails before worktree creation", async () => {
+    await initRepo(repoDir);
+    writeWorkflow(
+      "preflight-isolated.yaml",
+      `name: preflight-isolated
+description: preserve forced isolation across a preflight retry
+provider: stub
+nodes:
+  - id: probe
+    model: retired-model
+    prompt: run
+`,
+    );
+    const { app, catalog, projectId } = makeRig();
+    const start = await app.fetch(
+      new Request("http://test/api/workflows/preflight-isolated/runs", {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({ inputs: {}, projectId, isolation: "worktree" }),
+      }),
+    );
+    expect(start.status).toBe(200);
+    const { runId } = (await start.json()) as { runId: string };
+    const failed = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      worktreePath: string | null;
+    };
+    expect(failed.status).toBe("failed");
+    expect(failed.worktreePath).toBeNull();
+
+    const workflow = catalog.get("preflight-isolated", { projectId });
+    if (!workflow) throw new Error("workflow missing from catalog");
+    workflow.nodes = [{ id: "probe", bash: "pwd; touch sentinel.txt" }];
+
+    const resume = await app.fetch(
+      new Request(`http://test/api/workflows/runs/${runId}/resume-run`, {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(resume.status).toBe(200);
+    const completed = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ outputText: string | null }>;
+    };
+    expect(completed.status).toBe("succeeded");
+    expect(completed.nodes[0]?.outputText).toContain(`${sep}.worktrees${sep}`);
+    expect(existsSync(join(repoDir, "sentinel.txt"))).toBe(false);
+  });
 
   test("worktree isolation still runs when workspaceManager is omitted", async () => {
     await initRepo(repoDir);

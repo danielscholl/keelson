@@ -346,6 +346,15 @@ const migrations: Migration[] = [
       db.exec("ALTER TABLE workflow_runs ADD COLUMN preflight_notice TEXT;");
     },
   },
+  {
+    version: 16,
+    description: "persist workflow run isolation choices",
+    up: (db) => {
+      db.exec(
+        "ALTER TABLE workflow_runs ADD COLUMN isolation_enabled INTEGER CHECK (isolation_enabled IN (0, 1));",
+      );
+    },
+  },
 ];
 
 // The lowest version this build can apply. A database stamped below it was
