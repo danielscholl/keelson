@@ -326,6 +326,32 @@ describe("investigate intake", () => {
     expect(existsSync(out)).toBe(false);
   });
 
+  test("rejects a fixtures path nested under the evidence file, before creating it", () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-investigate-fixtures-"));
+    tmps.push(root);
+    mkdirSync(join(root, "real"));
+    symlinkSync(join(root, "real"), join(root, "link"), "junction");
+    const out = join(root, "real", "evidence");
+    for (const fixtures of [join(out, "raw"), join(root, "link", "evidence", "raw")]) {
+      const result = runIntake("What does the search API return?", { out, fixtures });
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("fixtures is inside the evidence file path");
+      expect(existsSync(out)).toBe(false);
+    }
+  });
+
+  test("accepts an evidence file inside the fixtures directory", () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-investigate-fixtures-"));
+    tmps.push(root);
+    const fixtures = join(root, "fixtures");
+    const result = runIntake("What does the search API return?", {
+      out: join(fixtures, "evidence.md"),
+      fixtures,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(statSync(fixtures).isDirectory()).toBe(true);
+  });
+
   test("the prompts read the write policy and fixtures note from intake", () => {
     const nodes = workflowDocument().nodes;
     const investigate = nodes.find((node) => node.id === "investigate")?.prompt ?? "";

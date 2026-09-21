@@ -77,21 +77,27 @@ nodes:
       WRITE_POLICY="That requested file is the only intentional write."
       FIXTURES_NOTE=""
       if [ -n "$FIXTURES" ]; then
-        SAME_PATH=$(A="$OUT" B="$FIXTURES" bun --no-env-file -e '
+        OVERLAP=$(A="$OUT" B="$FIXTURES" bun --no-env-file -e '
           import { existsSync, realpathSync } from "node:fs";
-          import { dirname, join, relative, resolve } from "node:path";
+          import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
           // Neither path need exist yet, so canonicalize the nearest existing
-          // ancestor: a symlinked parent must not hide that both name one place.
+          // ancestor: a symlinked parent must not hide that the two paths overlap.
           const canonical = (p) => {
             const abs = resolve(p);
             let base = abs;
             while (!existsSync(base) && dirname(base) !== base) base = dirname(base);
             return join(realpathSync(base), relative(base, abs));
           };
-          console.log(canonical(process.env.A ?? "") === canonical(process.env.B ?? "") ? "yes" : "no");
+          const rel = relative(canonical(process.env.A ?? ""), canonical(process.env.B ?? ""));
+          const inside = rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel);
+          console.log(rel === "" ? "same" : inside ? "nested" : "no");
         ')
-        if [ "$SAME_PATH" = "yes" ]; then
+        if [ "$OVERLAP" = "same" ]; then
           echo "fixtures and out name the same path: $FIXTURES" >&2
+          exit 1
+        fi
+        if [ "$OVERLAP" = "nested" ]; then
+          echo "fixtures is inside the evidence file path: $FIXTURES" >&2
           exit 1
         fi
         if [ -e "$FIXTURES" ] && [ ! -d "$FIXTURES" ]; then
