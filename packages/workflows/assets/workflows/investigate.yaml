@@ -85,6 +85,8 @@ nodes:
         echo "artifacts directory is required to assemble investigation context" >&2
         exit 1
       fi
+      ACCESS_FILE="$KEELSON_ARTIFACTS_DIR/investigate-access.txt"
+      printf '%s' "$ACCESS" > "$ACCESS_FILE"
       CONTEXT_BUNDLE="$KEELSON_ARTIFACTS_DIR/investigate-context.txt"
       : > "$CONTEXT_BUNDLE"
       if [ -z "$CONTEXT" ]; then
@@ -114,13 +116,15 @@ nodes:
       BUNDLE="$KEELSON_ARTIFACTS_DIR/investigate-bundle.txt"
       {
         printf 'QUESTION\n%s\n\n' "$QUESTION"
-        printf 'ACCESS GUIDANCE\n%s\n\n' "$ACCESS"
+        printf 'ACCESS GUIDANCE\n'
+        cat -- "$ACCESS_FILE"
+        printf '\n\n'
         printf 'CONTEXT\n'
         cat -- "$CONTEXT_BUNDLE"
       } > "$BUNDLE"
 
       JSON_OUT="$KEELSON_ARTIFACTS_DIR/intake.json"
-      export QUESTION OUT TIER VERIFIER ACCESS BUNDLE JSON_OUT
+      export QUESTION OUT TIER VERIFIER ACCESS_FILE BUNDLE JSON_OUT
       bun --no-env-file -e '
         import { readFileSync, writeFileSync } from "node:fs";
         const value = {
@@ -128,7 +132,7 @@ nodes:
           out: process.env.OUT,
           tier: process.env.TIER,
           verifier: process.env.VERIFIER,
-          access: process.env.ACCESS,
+          access: readFileSync(process.env.ACCESS_FILE, "utf8"),
           bundle: readFileSync(process.env.BUNDLE, "utf8"),
         };
         writeFileSync(process.env.JSON_OUT, JSON.stringify(value));

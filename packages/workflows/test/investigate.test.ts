@@ -287,6 +287,27 @@ describe("investigate intake", () => {
     expect(parsed.bundle).toContain("source note");
   });
 
+  test("accepts large readable access files below the aggregate limit", () => {
+    const access = join(artifactsDir("large-access"), "access.txt");
+    const guidance = "a".repeat(200_000);
+    writeFileSync(access, guidance);
+
+    const result = runIntake("Question?", { out: "evidence.md", access });
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.access).toBe(guidance);
+    expect(parsed.bundle).toContain(guidance);
+  });
+
+  test("rejects access files that exceed the aggregate limit", () => {
+    const access = join(artifactsDir("oversized-access"), "access.txt");
+    writeFileSync(access, "x".repeat(600_000));
+    const result = runIntake("Question?", { out: "evidence.md", access });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("limit is 1000000");
+    expect(result.stdout).toBe("");
+  });
+
   test("rejects oversized context instead of truncating it", () => {
     const context = join(artifactsDir("oversized"), "large.txt");
     writeFileSync(context, "x".repeat(1_000_001));
