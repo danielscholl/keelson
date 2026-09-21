@@ -207,7 +207,7 @@ describe("design-converge", () => {
       const critic = workflow.nodes.find((node) => node.id === route.id);
       expect(critic?.model_by_provider?.copilot).toBe(route.model);
       expect(critic?.effort).toBe(route.effort);
-      expect(critic?.depends_on).toEqual(route.inputs);
+      expect(critic?.depends_on).toEqual([...route.inputs]);
       const criticVendor = modelVendor(route.model);
       expect(criticVendor).toBe(modelVendor(proposalModels.get(route.omitted)));
       for (const input of route.inputs) {
