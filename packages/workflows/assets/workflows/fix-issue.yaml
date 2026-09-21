@@ -742,12 +742,12 @@ nodes:
          - Do not use em dashes in the body; use a comma, colon, parentheses, or
            separate sentences instead.
          - Describe the change under review, not the run that produced it.
-         - Record results, not intent: the test plan lists what this run
-           actually executed with outcomes, and the body ships NO unchecked
-           checkboxes. When the template has a checklist, check the items
-           this run verified and rewrite items only CI can confirm as plain
-           result lines ending in the literal text "pending CI" (a later
-           step replaces it with the real outcome).
+         - Record actual results, not intent. Keep the test plan short and list
+           only commands actually executed, with the observed result for each.
+           The body ships NO unchecked checkboxes. When the template has a
+           checklist, check the items already verified. Rewrite checks only CI
+           can confirm as plain result lines ending in the literal text
+           "pending CI" (a later step replaces it with the real outcome).
          - If you write the body to a file, put it at `$ARTIFACTS_DIR/pr-body.md`
            — never at the repo root (the next commit would sweep it up).
       7. Capture identifiers:

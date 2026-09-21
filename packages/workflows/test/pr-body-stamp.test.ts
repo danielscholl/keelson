@@ -14,18 +14,24 @@ import { fakeBinDir, pathWith } from "./forge-support.ts";
 
 const shimDescribe = process.platform === "win32" ? describe.skip : describe;
 const tmps: string[] = [];
+const document = parse(readFileSync(join(bundledWorkflowsDir(), "fix-issue.yaml"), "utf8")) as {
+  nodes: Array<{ id: string; bash?: string; prompt?: string }>;
+};
 
 afterEach(() => {
   while (tmps.length) rmSync(tmps.pop() as string, { recursive: true, force: true });
 });
 
 function finalizeBash(): string {
-  const document = parse(readFileSync(join(bundledWorkflowsDir(), "fix-issue.yaml"), "utf8")) as {
-    nodes: Array<{ id: string; bash?: string }>;
-  };
   const script = document.nodes.find((node) => node.id === "finalize-pr")?.bash;
   if (!script) throw new Error("Missing finalize-pr bash node in fix-issue");
   return script;
+}
+
+function createPrPrompt(): string {
+  const prompt = document.nodes.find((node) => node.id === "create-pr")?.prompt;
+  if (!prompt) throw new Error("Missing create-pr prompt node in fix-issue");
+  return prompt;
 }
 
 function runFinalize(
@@ -83,6 +89,15 @@ esac
 }
 
 const PENDING_BODY = "## Test plan\n- local gates: PASS\n- CI: pending CI\n";
+
+describe("create-pr test plan contract", () => {
+  test("records actual results and preserves the CI placeholder", () => {
+    const prompt = createPrPrompt();
+    expect(prompt).toContain("Record actual results, not intent");
+    expect(prompt).toContain("only commands actually executed");
+    expect(prompt).toMatch(/literal text\s+"pending CI"/);
+  });
+});
 
 shimDescribe("finalize-pr body stamping", () => {
   test("replaces the pending CI placeholder with the real outcome on promote", () => {
