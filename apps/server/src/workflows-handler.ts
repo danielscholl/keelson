@@ -1725,6 +1725,24 @@ export function createWorkflowController(
       const projectId = projectsStore?.findByPathPrefix(workingDir)?.id;
       const runId = crypto.randomUUID();
       const abort = new AbortController();
+      if (resolveWorkflowPreflight(loadKeelsonConfig())) {
+        const preflight = await resolveCatalogPreflight(definitionObj, {
+          defaultProviderId: defaultProvider,
+          signal: abort.signal,
+        });
+        if (preflight.notChecked.length > 0 && preflight.violations.length === 0) {
+          console.warn(
+            `[workflows] rib-run ${definitionObj.name} preflight not checked: ${preflight.notChecked.join(", ")}`,
+          );
+        }
+        if (preflight.violations.length > 0) {
+          return {
+            status: "failed",
+            nodes: {},
+            error: `preflight failed:\n${formatPreflightViolations(preflight)}`,
+          };
+        }
+      }
       const handlers = new Map<string, NodeHandler>([
         ["bash", bashHandler],
         ["prompt", promptHandler],
