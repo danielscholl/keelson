@@ -35,6 +35,11 @@ jobs:
           # (1.3.13 fails the worktree frozen-lockfile install on win32).
           bun-version: 1.3.14
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: 0.12.17
+
       - name: Install dependencies
         uses: ./.github/actions/bun-install
 
