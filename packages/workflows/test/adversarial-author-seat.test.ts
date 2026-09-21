@@ -185,7 +185,7 @@ shimDescribe("adversarial-review output persistence", () => {
 
     const result = runSave(definition, {
       KEELSON_INPUTS_out: out,
-      KEELSON_NODE_author_seat_OUTPUT: "claude-opus-5",
+      KEELSON_NODE_author_seat_OUTPUT: "claude-opus-5\n",
       KEELSON_NODE_reviewer_logic_OUTPUT: "logic",
       KEELSON_NODE_reviewer_evidence_OUTPUT: "evidence",
       KEELSON_NODE_reviewer_risk_OUTPUT: "risk",
@@ -223,7 +223,7 @@ shimDescribe("adversarial-review output persistence", () => {
 
     const result = runSave(definition, {
       KEELSON_INPUTS_out: out,
-      KEELSON_NODE_author_seat_OUTPUT: "seated",
+      KEELSON_NODE_author_seat_OUTPUT: "seated\n",
       KEELSON_NODE_reviewer_logic_OUTPUT: "current logic",
       KEELSON_NODE_reviewer_evidence_OUTPUT: "current evidence",
       KEELSON_NODE_verify_OUTPUT: "current verification",
@@ -238,7 +238,7 @@ shimDescribe("adversarial-review output persistence", () => {
 
   test.each([...SEATS])("truthfully reports the $id reseat", (seat) => {
     const result = runSave(workflow(), {
-      KEELSON_NODE_author_seat_OUTPUT: seat.defaultModel,
+      KEELSON_NODE_author_seat_OUTPUT: `${seat.defaultModel}\n`,
     });
 
     expect(result.exitCode).toBe(0);

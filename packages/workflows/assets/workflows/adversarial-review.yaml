@@ -606,7 +606,7 @@ nodes:
     bash: |
       set -euo pipefail
 
-      AUTHOR="${KEELSON_NODE_author_seat_OUTPUT:-seated}"
+      AUTHOR=$(printf '%s' "${KEELSON_NODE_author_seat_OUTPUT:-seated}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
       case "$AUTHOR" in
         seated) echo "no author model set; seating unchanged" ;;
         claude-opus-5) echo "reseated reviewer-logic: claude-opus-5 -> claude-opus-4.7" ;;
