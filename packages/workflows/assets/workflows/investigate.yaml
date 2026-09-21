@@ -367,10 +367,56 @@ nodes:
       function cells(line) {
         const value = line.trim();
         if (!value.startsWith("|") || !value.endsWith("|")) return null;
-        return value
-          .slice(1, -1)
-          .split(/(?<!\\)\|/)
-          .map((cell) => cell.trim().replaceAll("\\|", "|"));
+        const inner = value.slice(1, -1);
+        const parts = [];
+        let current = "";
+        let i = 0;
+        while (i < inner.length) {
+          const ch = inner[i];
+          if (ch === "\\" && inner[i + 1] === "|") {
+            current += "|";
+            i += 2;
+            continue;
+          }
+          if (ch === "`") {
+            let run = 0;
+            while (inner[i + run] === "`") run += 1;
+            let j = i + run;
+            let close = -1;
+            while (j < inner.length) {
+              if (inner[j] === "`") {
+                let len = 0;
+                while (inner[j + len] === "`") len += 1;
+                if (len === run) {
+                  close = j;
+                  break;
+                }
+                j += len;
+              } else {
+                j += 1;
+              }
+            }
+            if (close >= 0) {
+              const end = close + run;
+              current += inner.slice(i, end).replaceAll("\\|", "|");
+              i = end;
+              continue;
+            }
+            current += inner.slice(i, i + run);
+            i += run;
+            continue;
+          }
+          if (ch === "|") {
+            parts.push(current);
+            current = "";
+            i += 1;
+            continue;
+          }
+          current += ch;
+          i += 1;
+        }
+        parts.push(current);
+        return parts.map((cell) => cell.trim());
       }
 
       function separator(row, width) {
