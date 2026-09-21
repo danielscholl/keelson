@@ -112,6 +112,15 @@ describe("bashHandler", () => {
     expect(text).toContain("round=3");
   });
 
+  test("projects the current workflow run id", async () => {
+    const result = await bashHandler.handle(
+      stubNode,
+      buildCtx({ resolvedBody: 'printf "%s" "$KEELSON_RUN_ID"' }),
+    );
+    expect(result.status).toBe("succeeded");
+    expect(result.output).toEqual({ kind: "text", text: "test-run" });
+  });
+
   test("preserves the \\$ escape so bash prints a literal $converge.round", async () => {
     const result = await bashHandler.handle(
       stubNode,

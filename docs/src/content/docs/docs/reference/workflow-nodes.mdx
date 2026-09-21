@@ -251,6 +251,7 @@ These apply across kinds (some only to agent nodes, as noted).
 | `provider` | `prompt`, `command`, `loop` | Per-node provider override. |
 | `model_by_provider` | `prompt`, `command` | Map of provider ids to concrete model ids. The effective provider's entry takes precedence over `model`. |
 | `model_by` | `prompt`, `command` | Pick the model and/or effort from run data: see [model_by](#model_by). |
+| `different_vendor_from` | `prompt` | Ancestor prompt id that should run on a different model vendor. Emits a run warning when effective provider/model attribution proves both turns used the same vendor. |
 | `context` | `prompt`, `command` | `fresh` forces a new agent session for the node; `shared` reuses one. |
 | `allowed_tools`, `denied_tools` | `prompt`, `command` | Tool-name filters. Rib tools are default-off; opt in with `allowed_tools`. |
 | `output_schema` | all | A JSON-Schema subset the output must satisfy, or the node fails. |
@@ -258,9 +259,9 @@ These apply across kinds (some only to agent nodes, as noted).
 | `retry` | all but `loop` | `{ max_attempts: 1-5, delay_ms: 1000-60000, on_error }`. `delay_ms` doubles each attempt; `on_error` is `transient` (default) or `all`. |
 | `always_run` | all | `true` re-executes the node on a resumed run even if it previously succeeded (default `false`). Its transitive descendants also re-run, including prompt nodes that make provider calls and incur their normal token cost. Use it for a gate or validation that must re-check rather than replay a prior pass: see [resume and side effects](#resume-and-side-effects). |
 | `fail_on_tool_error` | `prompt`, `command` | `true` fails the node if any invoked tool errored. |
-| `require_tool_call` | `prompt`, `command` | `[tool-name, ...]` — fails the node if a listed tool was available but the turn ended without a successful call to it, so a node whose deliverable is a tool call cannot report success having produced nothing. An error followed by a successful retry satisfies it. Only registry/MCP tools are checked: a provider SDK's own built-ins (`Read`, `Bash`, …) are never in the catalog, so naming one has no effect, and providers that take no keelson tools (`codex`, gateways, `stub`) skip the check rather than fail it. |
+| `require_tool_call` | `prompt`, `command` | `[tool-name, ...]` fails the node if a listed tool was available but the turn ended without a successful call to it, so a node whose deliverable is a tool call cannot report success having produced nothing. An error followed by a successful retry satisfies it. Only registry/MCP tools are checked: a provider SDK's own built-ins (`Read`, `Bash`, …) are never in the catalog, so naming one has no effect, and providers that take no keelson tools (`codex`, gateways, `stub`) skip the check rather than fail it. |
 | `idle_timeout` | `prompt`, `command`, `loop` | Milliseconds of stream silence before the node fails. |
-| `effort` | `prompt`, `command` | Reasoning tier, forwarded as `reasoningEffort`: `none` / `low` / `medium` / `high` / `xhigh` (`max` is a legacy alias for `xhigh`). Overrides the workflow-level `effort`; a `loop` node's own value is dropped, so loop iterations take the workflow value. Copilot and Codex consume it on reasoning models; Claude ignores it. Omit it to take the model's own default — a model with no reasoning tier, such as Copilot's `auto`, errors on any value. |
+| `effort` | `prompt`, `command` | Reasoning tier, forwarded as `reasoningEffort`: `none` / `low` / `medium` / `high` / `xhigh` (`max` is a legacy alias for `xhigh`). Overrides the workflow-level `effort`; a `loop` node's own value is dropped, so loop iterations take the workflow value. Copilot and Codex consume it on reasoning models; Claude ignores it. Omit it to take the model's own default. A model with no reasoning tier, such as Copilot's `auto`, errors on any value. |
 | `systemPrompt`, `thinking` | `prompt`, `command` | Claude-only per-node controls. `thinking` is `adaptive` / `enabled` / `disabled`. |
 | `memory`, `notebook` | all | Recall/writeback blocks wired to the memory store and the project notebook. |
 | `hooks` | `prompt`, `command` | Fully honored only by Claude; Copilot covers `PreToolUse` / `PostToolUse`. |
@@ -361,6 +362,21 @@ rather than free substitution: `keelson workflow validate` checks the shape of
 every branch, and `--live` checks **every** branch's model against the
 provider's catalog, not just the one a given run would take. A typo in a cold
 branch is caught before a run reaches it.
+
+Use `different_vendor_from` when the later prompt is an independent verification
+seat:
+
+```yaml
+- id: verify
+  depends_on: [investigate]
+  different_vendor_from: investigate
+  prompt: "Re-check the claims in $investigate.output"
+```
+
+The referenced node must be an ancestor prompt. Comparison uses the effective
+provider and model recorded after fallback and provider-reported model changes.
+When both models map to the same known vendor, the run emits a warning. An
+unknown model vendor is not treated as proof that the turns are diverse.
 
 ### trigger_rule
 
@@ -466,8 +482,12 @@ environment variables, never spliced into the source:
 | Variable | Carries |
 | --- | --- |
 | `KEELSON_NODE_<id>_OUTPUT` | The upstream node's output (non-alphanumeric characters in the id are normalized to `_`). Capped, see below. |
+| `KEELSON_NODE_<id>_STATE` | The upstream node's `NodeOutput` state: `pending`, `running`, `completed`, `failed`, or `skipped`. |
 | `KEELSON_NODE_<id>_OUTPUT_FILE` | Path to a file holding that output in full, set for every upstream node whatever its size. Absent only when the run has no artifacts directory, which every server and CLI run creates. |
 | `KEELSON_NODE_<id>_OUTPUT_TRUNCATED` | `1` when the `_OUTPUT` value above was capped; unset otherwise. |
+| `KEELSON_NODE_<id>_PROVIDER` | Effective provider recorded for an upstream agent node, including provider fallback. Unset for deterministic nodes. |
+| `KEELSON_NODE_<id>_MODEL` | Effective model recorded for an upstream agent node, including a provider-reported model change. Unset for deterministic nodes. |
+| `KEELSON_RUN_ID` | The current workflow run id. |
 | `KEELSON_ARTIFACTS_DIR` | The per-run scratch directory. |
 | `KEELSON_INPUTS_<key>` | One variable per workflow input; non-alphanumeric characters in the key are normalized to `_`. |
 | `KEELSON_ARGUMENTS` | The full free-form text the run was started with (equivalent to `$ARGUMENTS` in prompt substitution). |

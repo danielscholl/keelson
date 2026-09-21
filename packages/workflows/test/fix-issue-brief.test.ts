@@ -49,8 +49,10 @@ function runBash(nodeId: string, artifacts: string, env: Record<string, string> 
   const script = workflowNode(nodeId).bash;
   if (!script) throw new Error(`Missing bash script for ${nodeId} in fix-issue`);
   const inheritedEnv = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !key.startsWith("KEELSON_NODE_")),
-  );
+    Object.entries(process.env).filter(([key, value]) => {
+      return typeof value === "string" && !key.startsWith("KEELSON_NODE_");
+    }),
+  ) as Record<string, string>;
   const proc = Bun.spawnSync({
     cmd: ["bash", "-c", script],
     env: {
@@ -456,14 +458,30 @@ macOS with the Copilot provider.
   });
 });
 
-describe("fix-issue PR divergence status", () => {
-  test("requires coverage details or an explicit skipped line in every PR body", () => {
+describe("fix-issue criteria coverage placement", () => {
+  test("keeps coverage in the approval gate and out of the PR body", () => {
     const prompt = workflowNode("create-pr").prompt;
     expect(prompt).toContain("$ARTIFACTS_DIR/brief.json");
-    expect(prompt).toContain("$ARTIFACTS_DIR/coverage.json");
-    expect(prompt).toContain("- [COVERED] {criterion} -> {step}");
-    expect(prompt).toContain("- [MISSING] {criterion}");
-    expect(prompt).toContain("COVERAGE: SKIPPED — no acceptance criteria found in the issue body");
+    expect(prompt).not.toContain("$ARTIFACTS_DIR/coverage.json");
+    expect(prompt).not.toContain("Divergence check");
+    expect(prompt).not.toContain("Criteria coverage");
+    expect(prompt).not.toContain("COVERAGE: SKIPPED");
+    expect(workflowNode("approve-plan").depends_on).toContain("coverage-ready");
+  });
+
+  test("makes the repository template authoritative", () => {
+    const prompt = workflowNode("create-pr").prompt;
+    expect(prompt).toContain("named `pull_request_template.md`");
+    expect(prompt).toContain("(case-insensitive) in `.github/`, the repository root, or `docs/`");
+    expect(prompt?.replace(/\s+/g, " ")).toContain(
+      "Do not select from a `PULL_REQUEST_TEMPLATE/` directory",
+    );
+    expect(prompt).toContain("follow its sections exactly and add");
+    expect(prompt).toContain("no section it does not ask for");
+    expect(prompt).toContain("Do not use em dashes in the body");
+    expect(prompt).toContain("Describe the change under review, not the run that produced it");
+    expect(prompt).not.toContain("plain ASCII");
+    expect(prompt).not.toContain("en dashes");
   });
 });
 

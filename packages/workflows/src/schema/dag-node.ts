@@ -187,6 +187,7 @@ export const dagNodeBaseSchema = z.object({
   model: z.string().optional(),
   model_by_provider: z.record(z.string(), z.string().min(1)).optional(),
   model_by: modelBySchema.optional(),
+  different_vendor_from: z.string().trim().min(1).optional(),
   provider: z.string().trim().min(1).optional(),
   context: z.enum(["fresh", "shared"]).optional(),
   output_format: z.record(z.string(), z.unknown()).optional(),
@@ -392,6 +393,7 @@ export const BASH_NODE_AI_FIELDS: readonly string[] = [
   "model",
   "model_by_provider",
   "model_by",
+  "different_vendor_from",
   "context",
   "output_format",
   "allowed_tools",
@@ -512,6 +514,7 @@ export const dagNodeSchema = dagNodeBaseSchema
         });
         return z.NEVER;
       }
+
       if (typeof data.prompt === "string") {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -534,6 +537,14 @@ export const dagNodeSchema = dagNodeBaseSchema
           "must have either 'command', 'prompt', 'bash', 'loop', 'approval', 'cancel', or 'script'",
       });
       return z.NEVER;
+    }
+
+    if (data.different_vendor_from !== undefined && !hasPrompt) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "'different_vendor_from' is supported only on prompt nodes",
+        path: ["different_vendor_from"],
+      });
     }
 
     // Command name validation
@@ -630,6 +641,9 @@ export const dagNodeSchema = dagNodeBaseSchema
         ? { model_by_provider: data.model_by_provider }
         : {}),
       ...(data.model_by !== undefined ? { model_by: data.model_by } : {}),
+      ...(data.different_vendor_from !== undefined
+        ? { different_vendor_from: data.different_vendor_from }
+        : {}),
       ...(data.context !== undefined ? { context: data.context } : {}),
       ...(data.output_format !== undefined ? { output_format: data.output_format } : {}),
       ...(data.allowed_tools !== undefined ? { allowed_tools: data.allowed_tools } : {}),

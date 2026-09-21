@@ -1035,6 +1035,66 @@ ${body}`;
     expect(Object.keys(node?.model_by?.cases ?? {}).sort()).toEqual(["deep", "std"]);
   });
 
+  test("different_vendor_from accepts an ancestor prompt", () => {
+    const result = parseWorkflow(modelByYaml("    different_vendor_from: intake\n"), "tiered.yaml");
+    expect(result.error).toBeNull();
+    expect(
+      result.workflow?.nodes.find((node) => node.id === "investigate")?.different_vendor_from,
+    ).toBe("intake");
+  });
+
+  test("different_vendor_from rejects an unknown or non-ancestor node", () => {
+    const unknown = parseWorkflow(
+      modelByYaml("    different_vendor_from: missing\n"),
+      "tiered.yaml",
+    );
+    expect(unknown.error?.error).toContain("references unknown node 'missing'");
+
+    const nonAncestor = parseWorkflow(
+      `${modelByYaml("")}
+  - id: verifier
+    prompt: verify
+    different_vendor_from: intake
+`,
+      "tiered.yaml",
+    );
+    expect(nonAncestor.error?.error).toContain("not in its depends_on chain");
+  });
+
+  test("different_vendor_from requires prompt nodes on both sides", () => {
+    const target = parseWorkflow(
+      `
+name: vendor-target
+description: rejects a deterministic target
+nodes:
+  - id: intake
+    bash: echo data
+  - id: verify
+    depends_on: [intake]
+    prompt: verify
+    different_vendor_from: intake
+`,
+      "vendor-target.yaml",
+    );
+    expect(target.error?.error).toContain("target 'intake' is not a prompt node");
+
+    const source = parseWorkflow(
+      `
+name: vendor-source
+description: rejects a deterministic source
+nodes:
+  - id: intake
+    prompt: data
+  - id: verify
+    depends_on: [intake]
+    bash: echo verify
+    different_vendor_from: intake
+`,
+      "vendor-source.yaml",
+    );
+    expect(source.error?.error).toContain("supported only on prompt nodes");
+  });
+
   test("model_by.from naming a substitution namespace is rejected", () => {
     const result = parseWorkflow(
       modelByYaml(`    model_by:
