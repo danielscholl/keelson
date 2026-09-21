@@ -165,13 +165,14 @@ export interface RibWorkflowRunResult {
 // LAUNCH, not per run: resuming a failed/cancelled run emits a fresh pair
 // with the same runId. Launches of one run never interleave: a launch's
 // terminal event is delivered before any later launch's running event, so a
-// rib reducing the stream can treat the latest event as current. Within a
-// launch, `paused` fires each time the run stops on a human gate (carrying
-// `pendingApproval`) and `running` fires again when that gate is answered.
-// Delivery is launch-source-agnostic (a board effect, the Workflows surface, a
-// cadence refresh). The rib that started a run through RibContext.startWorkflow
-// receives the same events as the owner, with `startedByRibId` set, so it can
-// follow a catalog workflow it does not own. `inputs` are the run's inputs, so
+// rib reducing the stream can treat the latest event as current. Delivery is
+// launch-source-agnostic (a board effect, the Workflows surface, a cadence
+// refresh). The rib that started a run through RibContext.startWorkflow receives
+// its events too, with `startedByRibId` set, so it can follow a catalog workflow
+// it does not own. That rib alone also sees the pause transitions: `paused` each
+// time the run stops on a human gate (carrying `pendingApproval`) and `running`
+// again once the last open gate is answered. An owner that did not start the run
+// keeps the launch/terminal pair only. `inputs` are the run's inputs, so
 // a rib can reconstruct dispatch context for runs it didn't launch; `error`
 // carries the run-level failure message on a failed run. See Rib.onRunEvent.
 export interface RibRunEvent {
@@ -201,8 +202,9 @@ export interface StartWorkflowOptions {
 
 // What RibContext.getRunStatus reports. `checkout` is the isolation the run
 // actually established, not what its workflow requested: `worktreeEstablished`
-// is false while a worktree-enabled run is still in the project's live checkout.
-// `branch` is null when the path is gone or is not a git checkout.
+// is false for a worktree-enabled run that executed in the project's live
+// checkout, and stays true after a finished run's worktree is cleaned up, when
+// `path` and `branch` read null. `branch` is also null for a non-git path.
 export interface RibRunStatus {
   runId: string;
   workflowName: string;
@@ -377,8 +379,8 @@ export interface RibContext {
     inputs?: Record<string, string>,
     opts?: { cwd?: string },
   ) => Promise<RibWorkflowRunResult>;
-  // Start a CATALOG workflow by name, exactly as the workflow_run tool would, and
-  // resolve with its run id as soon as the run is registered — the rib follows it
+  // Start a CATALOG workflow by its exact name, on the same launch path the
+  // workflow_run tool uses, and resolve with its run id as soon as the run is registered — the rib follows it
   // through onRunEvent / getRunStatus rather than blocking on it. Denied by default:
   // the operator grants each rib the workflow names it may start (config.json
   // `ribWorkflowGrants`), and the grant is checked before anything else, so an

@@ -586,7 +586,10 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
         const startedByRibId = controller.getRunStartedByRibId(runId);
         if (startedByRibId !== ribId && run.ribId !== ribId) return undefined;
         const awaiting = run.nodes.find((n) => n.status === "awaiting");
-        const path = run.worktreePath ?? run.workingDir;
+        const worktreeEstablished = controller.getRunWorktreeEstablished(runId);
+        // An established worktree that cleanup has removed has no path left; the
+        // project's live checkout is not where the run executed.
+        const path = worktreeEstablished ? run.worktreePath : run.workingDir;
         return {
           runId: run.runId,
           workflowName: run.workflowName,
@@ -602,7 +605,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
           checkout: {
             path,
             branch: path !== null ? await currentBranch(path).catch(() => null) : null,
-            worktreeEstablished: run.worktreePath !== null,
+            worktreeEstablished,
           },
           nodes: run.nodes.map((n) => ({
             nodeId: n.nodeId,

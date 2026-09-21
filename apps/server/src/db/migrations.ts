@@ -357,9 +357,13 @@ const migrations: Migration[] = [
   },
   {
     version: 17,
-    description: "persist the rib that started a workflow run",
+    description:
+      "persist the rib that started a workflow run and whether its worktree was established",
     up: (db) => {
       db.exec("ALTER TABLE workflow_runs ADD COLUMN started_by_rib_id TEXT;");
+      db.exec(
+        "ALTER TABLE workflow_runs ADD COLUMN worktree_established INTEGER NOT NULL DEFAULT 0 CHECK (worktree_established IN (0, 1));",
+      );
     },
   },
 ];

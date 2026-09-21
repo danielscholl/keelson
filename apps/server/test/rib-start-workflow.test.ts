@@ -75,6 +75,12 @@ const WORKFLOWS: WorkflowDefinition[] = [
   {
     name: "owned",
     description: "Use when: exercising a workflow another rib owns",
+    nodes: [{ id: "review", approval: { message: "ok?" } }],
+  },
+  {
+    name: "isolated",
+    description: "Use when: exercising established isolation",
+    worktree: { enabled: true },
     nodes: [{ id: "work", bash: "echo done" }],
   },
   {
@@ -305,16 +311,26 @@ describe("rib startWorkflow / getRunStatus / cancelRun", () => {
     }
   });
 
-  test("the owning rib and the starting rib both follow a run", async () => {
-    const { db, ctx, eventsFor } = await makeRig({ grants: "lead:owned" });
+  test("the owning rib follows the run but only the starting rib sees the pause", async () => {
+    const { db, controller, ctx, eventsFor } = await makeRig({ grants: "lead:owned" });
     try {
       const { runId } = await ctx("lead").startWorkflow("owned");
+      await until(() => eventsFor("lead").some((e) => e.status === "paused"));
+      expect(controller.resolveApproval(runId, { nodeId: "review", text: "approve" }).ok).toBe(
+        true,
+      );
       await until(
         () =>
           eventsFor("lead").some((e) => e.status === "succeeded") &&
           eventsFor("bystander").some((e) => e.status === "succeeded"),
       );
       expect(eventsFor("bystander").map((e) => e.status)).toEqual(["running", "succeeded"]);
+      expect(eventsFor("lead").map((e) => e.status)).toEqual([
+        "running",
+        "paused",
+        "running",
+        "succeeded",
+      ]);
       expect(eventsFor("bystander").every((e) => e.startedByRibId === "lead")).toBe(true);
 
       expect((await ctx("bystander").getRunStatus(runId))?.startedByRibId).toBe("lead");
@@ -323,6 +339,42 @@ describe("rib startWorkflow / getRunStatus / cancelRun", () => {
       db.close();
     }
   });
+
+  test("established isolation is still reported after the worktree is cleaned up", async () => {
+    const { db, projectsStore, ctx, eventsFor } = await makeRig({ grants: "lead:isolated" });
+    try {
+      const repo = join(tmpDir, "repo");
+      mkdirSync(repo);
+      const git = (...args: string[]) => {
+        const out = Bun.spawnSync(["git", ...args], { cwd: repo });
+        if (out.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${out.stderr.toString()}`);
+      };
+      git("init", "-q", "-b", "main");
+      git(
+        "-c",
+        "user.email=t@example.com",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "init",
+      );
+      const project = projectsStore.create({ name: "repo", rootPath: repo });
+
+      const { runId } = await ctx("lead").startWorkflow("isolated", {}, { projectId: project.id });
+      await until(
+        () => eventsFor("lead").some((e) => e.status === "succeeded" || e.status === "failed"),
+        20_000,
+      );
+      const settled = await ctx("lead").getRunStatus(runId);
+      expect(settled?.status).toBe("succeeded");
+      expect(settled?.checkout).toEqual({ path: null, branch: null, worktreeEstablished: true });
+    } finally {
+      db.close();
+    }
+  }, 30_000);
 
   test("status and cancel are scoped to the rib that started the run", async () => {
     const { db, ctx, eventsFor } = await makeRig({ grants: "lead:gated" });

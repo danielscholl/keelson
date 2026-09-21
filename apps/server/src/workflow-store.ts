@@ -129,6 +129,9 @@ export interface WorkflowStore {
   getRunProviderOverride(runId: string): string | null;
   getRunIsolationEnabled(runId: string): boolean | null;
   getRunStartedByRibId(runId: string): string | null;
+  // True once the run has executed in its own worktree, even after cleanup
+  // cleared worktree_path.
+  getRunWorktreeEstablished(runId: string): boolean;
   getRun(runId: string): WorkflowRunDetail | undefined;
   listRuns(workflowName?: string): WorkflowRunSummary[];
   // General filtered feed backing GET /api/workflows/runs and bulk delete.
@@ -309,7 +312,14 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   const claimResume = db.prepare(
     "UPDATE workflow_runs SET status = 'running', completed_at = NULL, error = NULL WHERE id = ? AND status IN ('failed', 'cancelled') AND worktree_pruned = 0",
   );
-  const updateWorktreePath = db.prepare("UPDATE workflow_runs SET worktree_path = ? WHERE id = ?");
+  // worktree_established latches: clearing the path after cleanup must not erase
+  // the record that the run executed in its own worktree.
+  const updateWorktreePath = db.prepare(
+    "UPDATE workflow_runs SET worktree_path = ?1, worktree_established = CASE WHEN ?1 IS NOT NULL THEN 1 ELSE worktree_established END WHERE id = ?2",
+  );
+  const selectWorktreeEstablished = db.prepare(
+    "SELECT worktree_established FROM workflow_runs WHERE id = ?",
+  );
   const selectWorktreePruned = db.prepare("SELECT worktree_pruned FROM workflow_runs WHERE id = ?");
   const updateWorktreePruned = db.prepare(
     "UPDATE workflow_runs SET worktree_pruned = ? WHERE id = ? AND worktree_pruned != ?",
@@ -495,6 +505,10 @@ export function createWorkflowStore(db: Database): WorkflowStore {
       } | null;
       if (row === null || row.isolation_enabled === null) return null;
       return row.isolation_enabled === 1;
+    },
+    getRunWorktreeEstablished(runId) {
+      const row = selectWorktreeEstablished.get(runId) as { worktree_established: number } | null;
+      return row?.worktree_established === 1;
     },
     getRunStartedByRibId(runId) {
       const row = selectRunStartedByRibId.get(runId) as { started_by_rib_id: string | null } | null;

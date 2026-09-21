@@ -41,6 +41,7 @@ describe("migrations", () => {
     expect(runColumns.map((column) => column.name)).toContain("preflight_notice");
     expect(runColumns.map((column) => column.name)).toContain("isolation_enabled");
     expect(runColumns.map((column) => column.name)).toContain("started_by_rib_id");
+    expect(runColumns.map((column) => column.name)).toContain("worktree_established");
     expect(tableNames(db)).toContain("usage_events");
     expect(tableNames(db)).toContain("ops");
     db.close();

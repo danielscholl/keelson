@@ -789,8 +789,8 @@ function emitRibRunEvents(opts: {
   // An async callback is assignable to the void-returning seam, so guard the
   // rejection path as well as the synchronous throw. Each recipient gets its own
   // copy so one rib's hook can't mutate what the other observes.
-  const emit = (build: () => RibRunEvent): void => {
-    for (const ribId of recipients) {
+  const emit = (build: () => RibRunEvent, to: readonly string[] = recipients): void => {
+    for (const ribId of to) {
       try {
         void Promise.resolve(onRibRunEvent(ribId, build())).catch(() => warn(ribId));
       } catch {
@@ -807,16 +807,23 @@ function emitRibRunEvents(opts: {
     ...provenance,
   });
   emit(running);
+  // Pause transitions go only to the rib that started the run: it opted into
+  // them by calling startWorkflow, while an owner's hook may predate `paused`
+  // and read any non-running status as terminal.
+  const pauseAudience = startedByRibId !== null ? [startedByRibId] : [];
   const emitPaused = (pendingApproval: { nodeId: string; prompt: string }): void => {
-    emit(() => ({
-      workflowName,
-      runId,
-      status: "paused",
-      inputs: { ...inputsSnapshot },
-      startedAt,
-      pendingApproval: { ...pendingApproval },
-      ...provenance,
-    }));
+    emit(
+      () => ({
+        workflowName,
+        runId,
+        status: "paused",
+        inputs: { ...inputsSnapshot },
+        startedAt,
+        pendingApproval: { ...pendingApproval },
+        ...provenance,
+      }),
+      pauseAudience,
+    );
   };
   const readTerminal = (): RibRunEvent | null => {
     const run = store.getRun(runId);
@@ -855,7 +862,7 @@ function emitRibRunEvents(opts: {
       if (run?.status === "paused" && remaining) {
         emitPaused({ nodeId: remaining.nodeId, prompt: remaining.outputText ?? "" });
       } else {
-        emit(running);
+        emit(running, pauseAudience);
       }
       return;
     }
@@ -1752,6 +1759,7 @@ export interface WorkflowController {
   // Abort a live run. False when the run is unknown or already settled.
   cancelRun(runId: string): boolean;
   getRunStartedByRibId(runId: string): string | null;
+  getRunWorktreeEstablished(runId: string): boolean;
   // The live run for an identical (name, workingDir, inputs), or undefined — the
   // heartbeat scheduler's pre-check so it won't re-fire a collector still running.
   findActiveRun(
@@ -2083,6 +2091,10 @@ export function createWorkflowController(
 
     getRunStartedByRibId(runId) {
       return store.getRunStartedByRibId(runId);
+    },
+
+    getRunWorktreeEstablished(runId) {
+      return store.getRunWorktreeEstablished(runId);
     },
 
     findActiveRun(name, workingDir, inputs) {
