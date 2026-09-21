@@ -35,6 +35,15 @@ describe("workflowRunDetailSchema", () => {
     expect(workflowRunDetailSchema.parse(makeRunDetail()).brief).toBeNull();
   });
 
+  it("defaults the preflight notice to null and accepts a persisted notice", () => {
+    expect(workflowRunDetailSchema.parse(makeRunDetail()).preflightNotice).toBeNull();
+    expect(
+      workflowRunDetailSchema.parse(
+        makeRunDetail({ preflightNotice: "preflight not checked: offline-catalog" }),
+      ).preflightNotice,
+    ).toBe("preflight not checked: offline-catalog");
+  });
+
   describe("startWorkflowRunBodySchema", () => {
     it("accepts an explicit preflight override", () => {
       expect(

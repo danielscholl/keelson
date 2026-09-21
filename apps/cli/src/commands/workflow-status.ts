@@ -13,6 +13,7 @@ import {
   resolveRunRef,
 } from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
+import { gateSchemaSkew } from "../schema-gate.ts";
 import { probeServer } from "../server-probe.ts";
 
 export interface WorkflowStatusOptions {
@@ -26,7 +27,8 @@ export async function runWorkflowStatus(
   runId: string | undefined,
   opts: WorkflowStatusOptions,
 ): Promise<never> {
-  const baseUrl = opts.baseUrl ?? (await probeServer())?.baseUrl;
+  const info = opts.baseUrl ? null : await probeServer();
+  const baseUrl = opts.baseUrl ?? info?.baseUrl;
   if (!baseUrl) {
     emit(
       {
@@ -37,6 +39,7 @@ export async function runWorkflowStatus(
     );
     process.exit(EXIT_NO_SERVER);
   }
+  await gateSchemaSkew(baseUrl, info?.schemaVersion, opts.json);
 
   try {
     if (runId) {

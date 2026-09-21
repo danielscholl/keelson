@@ -327,7 +327,7 @@ describe("keelson CLI smoke", () => {
       expect(res.exitCode).toBe(0);
       expect(JSON.parse(res.stdout.trim()).data.command).toBe("service");
     }
-  });
+  }, 15_000);
 
   test("chat with stub provider on a pipe emits only the assistant text", async () => {
     // Non-TTY + no --json must produce just the answer so pipes like

@@ -43,6 +43,8 @@ export interface CreateRunInput {
   worktreePath?: string | null;
   // Resolved git start-point used for a newly-created isolated worktree branch.
   worktreeBase?: string | null;
+  // Resolved per-run choice after applying any request override to the workflow policy.
+  isolationEnabled?: boolean | null;
   // How the run was triggered. Omitted → 'manual' (the operator paths). The
   // heartbeat / panel-refresh pass 'scheduled' so producer runs stay out of the
   // default feed and get retention-pruned.
@@ -92,6 +94,7 @@ export interface UpdateRunStatusInput {
 export interface WorkflowStore {
   createRun(input: CreateRunInput): void;
   updateRunStatus(input: UpdateRunStatusInput): void;
+  setRunPreflightNotice(runId: string, notice: string | null): void;
   // Atomic compare-and-set for resume: flips a failed/cancelled run to running
   // in one UPDATE and returns whether THIS caller won the claim. Guards the
   // resume route against two concurrent starts and against resuming a
@@ -121,6 +124,7 @@ export interface WorkflowStore {
   // mixed provider input conventions.
   getRunUsageTotals(runId: string): { totalTokens: number; turns: number };
   getRunProviderOverride(runId: string): string | null;
+  getRunIsolationEnabled(runId: string): boolean | null;
   getRun(runId: string): WorkflowRunDetail | undefined;
   listRuns(workflowName?: string): WorkflowRunSummary[];
   // General filtered feed backing GET /api/workflows/runs and bulk delete.
@@ -176,6 +180,7 @@ interface RunRow {
   origin: string;
   rib_id: string | null;
   brief_json: string | null;
+  preflight_notice: string | null;
 }
 
 interface NodeRow {
@@ -207,6 +212,7 @@ function rowToRunSummary(row: RunRow): WorkflowRunSummary {
     worktreeBase: row.worktree_base,
     origin: row.origin === "scheduled" ? "scheduled" : "manual",
     ribId: row.rib_id,
+    preflightNotice: row.preflight_notice,
   };
 }
 
@@ -288,10 +294,13 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   );
 
   const insertRun = db.prepare(
-    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, worktree_base, origin, rib_id, provider_override) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, worktree_base, origin, rib_id, provider_override, isolation_enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const updateRun = db.prepare(
     "UPDATE workflow_runs SET status = ?, completed_at = ?, error = ? WHERE id = ?",
+  );
+  const updatePreflightNotice = db.prepare(
+    "UPDATE workflow_runs SET preflight_notice = ? WHERE id = ?",
   );
   const claimResume = db.prepare(
     "UPDATE workflow_runs SET status = 'running', completed_at = NULL, error = NULL WHERE id = ? AND status IN ('failed', 'cancelled') AND worktree_pruned = 0",
@@ -323,6 +332,9 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   const selectRun = db.prepare("SELECT * FROM workflow_runs WHERE id = ?");
   const selectRunProviderOverride = db.prepare(
     "SELECT provider_override FROM workflow_runs WHERE id = ?",
+  );
+  const selectRunIsolationEnabled = db.prepare(
+    "SELECT isolation_enabled FROM workflow_runs WHERE id = ?",
   );
   const listRunsAll = db.prepare(
     "SELECT * FROM workflow_runs ORDER BY started_at DESC, rowid DESC",
@@ -392,10 +404,18 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         input.origin ?? "manual",
         input.ribId ?? null,
         input.providerOverride ?? null,
+        input.isolationEnabled === undefined || input.isolationEnabled === null
+          ? null
+          : input.isolationEnabled
+            ? 1
+            : 0,
       );
     },
     updateRunStatus(input) {
       updateRun.run(input.status, input.completedAt, input.error, input.runId);
+    },
+    setRunPreflightNotice(runId, notice) {
+      updatePreflightNotice.run(notice, runId);
     },
     claimRunForResume(runId) {
       return claimResume.run(runId).changes > 0;
@@ -460,6 +480,13 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         provider_override: string | null;
       } | null;
       return row?.provider_override ?? null;
+    },
+    getRunIsolationEnabled(runId) {
+      const row = selectRunIsolationEnabled.get(runId) as {
+        isolation_enabled: number | null;
+      } | null;
+      if (row === null || row.isolation_enabled === null) return null;
+      return row.isolation_enabled === 1;
     },
     getRun(runId) {
       const row = selectRun.get(runId) as RunRow | null;
