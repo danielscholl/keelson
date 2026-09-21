@@ -391,6 +391,7 @@ ${closing}`;
   test.each([
     ["an unescaped pipe inside a code span", "`A|B|C`"],
     ["an escaped literal pipe", "A\\|B"],
+    ["a double-backtick span containing a pipe and a single backtick", "``A|B`C``"],
   ])("accepts %s", (_name, claim) => {
     const { out, run } = runFinalizer(singleClaimEvidence(claim));
     expect(run().exitCode).toBe(0);
@@ -411,6 +412,14 @@ ${closing}`;
     expect(run().exitCode).toBe(0);
     expect(readFileSync(out, "utf8")).toContain(
       "Tally: confirmed=1; confirmed in part=0; refuted=0; unverifiable=0; not checked=0.",
+    );
+  });
+
+  test("treats an escaped backtick as literal, not a code-span opener", () => {
+    const probe = runCellsProbe("| 1 | \\`foo|bar\\` | source-verified | src/a.ts:1 | CONFIRMED |");
+    expect(probe.exitCode).toBe(0);
+    expect(probe.stdout.toString().trim()).toBe(
+      '["1","\\\\`foo","bar\\\\`","source-verified","src/a.ts:1","CONFIRMED"]',
     );
   });
 

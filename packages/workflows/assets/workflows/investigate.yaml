@@ -369,6 +369,12 @@ nodes:
         return value;
       }
 
+      function precedingBackslashRun(str, pos) {
+        let count = 0;
+        while (pos - count - 1 >= 0 && str[pos - count - 1] === "\\") count += 1;
+        return count;
+      }
+
       function cells(line) {
         const value = line.trim();
         if (!value.startsWith("|") || !value.endsWith("|")) return null;
@@ -383,7 +389,7 @@ nodes:
             i += 2;
             continue;
           }
-          if (ch === "`") {
+          if (ch === "`" && precedingBackslashRun(inner, i) % 2 === 0) {
             let run = 0;
             while (inner[i + run] === "`") run += 1;
             let j = i + run;
