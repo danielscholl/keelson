@@ -57,6 +57,7 @@ export interface UntilBashResult {
 }
 
 export interface RunUntilBashProbeOptions {
+  runId: string;
   cwd: string;
   signal: AbortSignal;
   /**
@@ -94,6 +95,7 @@ export type RunUntilBashProbe = (
 export const defaultRunUntilBashProbe: RunUntilBashProbe = async (script, opts) => {
   const env = buildSubprocessEnv(opts.inputs, opts.upstreamOutputs, {
     ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
+    runId: opts.runId,
   });
   if (opts.env) {
     for (const [k, v] of Object.entries(opts.env)) env[k] = v;
@@ -285,6 +287,7 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
           // substitution on the next probe.
           try {
             const probe = await runUntilBashProbe(loop.until_bash, {
+              runId: ctx.runId,
               cwd: ctx.cwd,
               signal: ctx.abortSignal,
               env: {

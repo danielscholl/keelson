@@ -857,6 +857,8 @@ function buildResumeSeed(
       seed.set(node.nodeId, {
         state: "completed",
         output: node.outputText ?? "",
+        ...(node.provider !== null ? { provider: node.provider } : {}),
+        ...(node.model !== null ? { model: node.model } : {}),
         ...(node.startedAt !== null ? { startedAt: node.startedAt } : {}),
         ...(node.completedAt !== null ? { completedAt: node.completedAt } : {}),
       });

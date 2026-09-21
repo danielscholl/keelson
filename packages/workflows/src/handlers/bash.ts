@@ -52,6 +52,7 @@ export function makeBashHandler(opts: MakeBashHandlerOptions = {}): NodeHandler 
         });
         const nodeEnv = buildSubprocessEnv(ctx.inputs, ctx.upstreamOutputs, {
           ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+          runId: ctx.runId,
         });
         nodeEnv.KEELSON_FORGE_BIN = forgeShimPath();
         // Live-splice the operator's forge selection: buildSubprocessEnv copies a

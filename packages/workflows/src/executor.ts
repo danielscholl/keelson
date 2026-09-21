@@ -439,9 +439,20 @@ function bodyToSchemaOutput(
     result.output.kind === "text"
       ? result.output.text
       : (JSON.stringify(result.output.value) ?? "");
+  const provenance = {
+    ...(result.provider !== undefined ? { provider: result.provider } : {}),
+    ...(result.model !== undefined ? { model: result.model } : {}),
+  };
   switch (result.status) {
     case "succeeded":
-      return { state: "completed", output: text, startedAt, completedAt, durationMs };
+      return {
+        state: "completed",
+        output: text,
+        startedAt,
+        completedAt,
+        durationMs,
+        ...provenance,
+      };
     case "failed":
       return {
         state: "failed",
@@ -450,6 +461,7 @@ function bodyToSchemaOutput(
         startedAt,
         completedAt,
         durationMs,
+        ...provenance,
       };
     case "skipped":
       return { state: "skipped", output: "" };

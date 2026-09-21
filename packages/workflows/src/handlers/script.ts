@@ -110,6 +110,7 @@ export function makeScriptHandler(opts: MakeScriptHandlerOptions = {}): NodeHand
           cwd: ctx.cwd,
           env: buildSubprocessEnv(ctx.inputs, ctx.upstreamOutputs, {
             ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+            runId: ctx.runId,
           }),
           timeoutMs,
           abortSignal: ctx.abortSignal,

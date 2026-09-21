@@ -17,9 +17,8 @@
  * the documented timeout, and a script that traps SIGTERM can't deadlock
  * the run.
  *
- * The env channel (`KEELSON_INPUTS_*`, `KEELSON_NODE_*_OUTPUT`, `KEELSON_ARGUMENTS`)
- * is the contract documented in `bash.ts` — single source here so future
- * additions (e.g. `KEELSON_RUN_ID`) reach both surfaces.
+ * The env channel (`KEELSON_INPUTS_*`, `KEELSON_NODE_*`, `KEELSON_ARGUMENTS`,
+ * `KEELSON_RUN_ID`) is the contract documented in `bash.ts`.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -257,10 +256,9 @@ function truncateEnvValue(value: string, note: string): string {
 
 /**
  * Build the env block for a workflow subprocess. Layers `KEELSON_INPUTS_*`,
- * `KEELSON_NODE_*_OUTPUT`, `KEELSON_ARGUMENTS`, and (when provided) the per-run
- * `KEELSON_ARTIFACTS_DIR` onto a snapshot of the parent env. Non-alphanumeric
- * chars in keys/node ids are normalized to `_` so the resulting names are
- * valid POSIX env-var identifiers.
+ * `KEELSON_NODE_*`, `KEELSON_ARGUMENTS`, and run metadata onto a snapshot of
+ * the parent env. Non-alphanumeric chars in keys/node ids are normalized to `_`
+ * so the resulting names are valid POSIX env-var identifiers.
  *
  * Every node output is written in full to `<artifactsDir>/node-outputs/<id>.txt`
  * and the path published as `KEELSON_NODE_<id>_OUTPUT_FILE`, so a consumer can
@@ -273,7 +271,11 @@ function truncateEnvValue(value: string, note: string): string {
 export function buildSubprocessEnv(
   inputs: Readonly<Record<string, string>>,
   upstream: ReadonlyMap<string, NodeOutput>,
-  options?: { artifactsDir?: string; parentEnv?: Readonly<Record<string, string>> },
+  options?: {
+    artifactsDir?: string;
+    parentEnv?: Readonly<Record<string, string>>;
+    runId?: string;
+  },
 ): Record<string, string> {
   const env: Record<string, string> = { ...(options?.parentEnv ?? PARENT_ENV) };
   // PARENT_ENV is captured at module load — if the operator's shell had
@@ -283,6 +285,7 @@ export function buildSubprocessEnv(
   // per-run value.
   delete env.KEELSON_ARTIFACTS_DIR;
   delete env.ARTIFACTS_DIR;
+  delete env.KEELSON_RUN_ID;
   const capInput = (v: string): string =>
     v.length <= ENV_VALUE_MAX_CHARS
       ? v
@@ -291,14 +294,29 @@ export function buildSubprocessEnv(
     env[`KEELSON_INPUTS_${envSafe(k)}`] = capInput(v);
   }
   env.KEELSON_ARGUMENTS = capInput(inputs.ARGUMENTS ?? "");
+  if (options?.runId !== undefined) env.KEELSON_RUN_ID = options.runId;
   for (const [id, out] of upstream.entries()) {
     const full = out.output ?? "";
     const name = `KEELSON_NODE_${envSafe(id)}_OUTPUT`;
-    // An inherited path or truncation flag must not outlive the output that
-    // produced it: a node reached without an artifacts dir would otherwise read
-    // a prior run's file.
-    delete env[`${name}_FILE`];
-    delete env[`${name}_TRUNCATED`];
+    const base = name.slice(0, -"_OUTPUT".length);
+    for (const suffix of [
+      "OUTPUT_FILE",
+      "OUTPUT_TRUNCATED",
+      "STATE",
+      "ERROR",
+      "PROVIDER",
+      "MODEL",
+    ]) {
+      delete env[`${base}_${suffix}`];
+    }
+    env[`${base}_STATE`] = out.state;
+    if (out.state === "failed") env[`${base}_ERROR`] = capInput(out.error);
+    if ("provider" in out && out.provider !== undefined) {
+      env[`${base}_PROVIDER`] = capInput(out.provider);
+    }
+    if ("model" in out && out.model !== undefined) {
+      env[`${base}_MODEL`] = capInput(out.model);
+    }
     let fileNote = "";
     if (options?.artifactsDir !== undefined) {
       try {
