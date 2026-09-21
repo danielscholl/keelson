@@ -1,4 +1,4 @@
-import type { WorkflowDefinition } from "./schema/index.ts";
+import { nodeReachesProvider, type WorkflowDefinition } from "./schema/index.ts";
 
 interface DiversityCandidate {
   nodeId: string;
@@ -19,7 +19,7 @@ export function diagnoseModelDiversity(
   const groups = new Map<string, DiversityCandidate[]>();
 
   for (const node of workflow.nodes) {
-    if (node.prompt === undefined) continue;
+    if (!nodeReachesProvider(node)) continue;
 
     const hasResolvedNode = resolvedNodes?.has(node.id) === true;
     const resolvedNode = resolvedNodes?.get(node.id);

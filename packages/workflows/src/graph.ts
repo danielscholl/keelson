@@ -107,6 +107,30 @@ export function validateDagShape(nodes: readonly DagNode[]): DagShapeError[] {
   return errors;
 }
 
+export function collectTransitiveDependents(
+  nodes: readonly DagNode[],
+  roots: Iterable<string>,
+): Set<string> {
+  const dependents = new Map<string, string[]>();
+  for (const node of nodes) {
+    for (const dependency of node.depends_on ?? []) {
+      const existing = dependents.get(dependency) ?? [];
+      existing.push(node.id);
+      dependents.set(dependency, existing);
+    }
+  }
+
+  const collected = new Set<string>();
+  const stack = [...roots];
+  while (stack.length > 0) {
+    const id = stack.pop();
+    if (id === undefined || collected.has(id)) continue;
+    collected.add(id);
+    stack.push(...(dependents.get(id) ?? []));
+  }
+  return collected;
+}
+
 /**
  * Build topological layers from DAG nodes using Kahn's algorithm.
  *

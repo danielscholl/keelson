@@ -394,7 +394,6 @@ nodes:
   - id: brief-ready
     depends_on: [extract-brief-llm]
     trigger_rule: all_done
-    always_run: true
     bash: |
       set -euo pipefail
       BRIEF_FILE="$KEELSON_ARTIFACTS_DIR/brief.json"
@@ -485,7 +484,6 @@ nodes:
   - id: coverage-ready
     depends_on: [coverage-check]
     trigger_rule: all_done
-    always_run: true
     bash: |
       set -uo pipefail
       BRIEF_FILE="$KEELSON_ARTIFACTS_DIR/brief.json"

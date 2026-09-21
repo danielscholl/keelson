@@ -715,6 +715,10 @@ export function isScriptNode(node: DagNode): node is ScriptNode {
   return "script" in node && typeof node.script === "string";
 }
 
+export function nodeReachesProvider(node: DagNode): boolean {
+  return node.prompt !== undefined || node.command !== undefined || isLoopNode(node);
+}
+
 /** Type guard: validates a value is a known TriggerRule */
 export function isTriggerRule(value: unknown): value is TriggerRule {
   return typeof value === "string" && (TRIGGER_RULES as readonly string[]).includes(value);
