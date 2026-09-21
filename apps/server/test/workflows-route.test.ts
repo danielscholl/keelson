@@ -2408,6 +2408,63 @@ nodes:
     expect(readFileSync(failCountPath, "utf8").trim()).toBe("2");
   });
 
+  test("POST /resume-run seeds persisted prompt provider and model provenance", async () => {
+    const attemptPath = join(tmpDir, "provenance-resume-attempt.txt");
+    const provenancePath = join(tmpDir, "resumed-provenance.txt");
+    writeWorkflow(
+      "resume-provenance.yaml",
+      `name: resume-provenance
+description: completed prompt provenance survives resume
+nodes:
+  - id: ask
+    provider: stub
+    model: stub-echo
+    prompt: answer
+  - id: retry
+    depends_on: [ask]
+    bash: |
+      n=0
+      if [ -f "${attemptPath}" ]; then n=$(cat "${attemptPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${attemptPath}"
+      if [ "$n" -eq 1 ]; then exit 7; fi
+      printf '%s/%s\\n' "$KEELSON_NODE_ask_PROVIDER" "$KEELSON_NODE_ask_MODEL" > "${provenancePath}"
+`,
+    );
+    let promptCalls = 0;
+    const promptHandler = makePromptHandler({
+      getProvider: () => ({
+        getCapabilities: () => ({ defaultModel: "stub-echo", models: ["stub-echo"] }),
+        async *sendQuery() {
+          promptCalls += 1;
+          yield { type: "text" as const, content: "seed me" };
+          yield { type: "done" as const };
+        },
+      }),
+      resolveProviderId: (id) => id ?? "stub",
+      getRegisteredTools: () => [],
+    });
+    const { app, store } = makeRig(promptHandler);
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-provenance/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
+    expect(store.getRun(runId)?.nodes.find((node) => node.nodeId === "ask")).toMatchObject({
+      status: "succeeded",
+      provider: "stub",
+      model: "stub-echo",
+    });
+
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+    expect((await pollUntilTerminal(app, runId)).status).toBe("succeeded");
+    expect(promptCalls).toBe(1);
+    expect(readFileSync(provenancePath, "utf8").trim()).toBe("stub/stub-echo");
+  });
+
   test("POST /resume-run preserves the provider override and requires it to remain registered", async () => {
     const attemptPath = join(tmpDir, "provider-resume-attempt.txt");
     writeWorkflow(
