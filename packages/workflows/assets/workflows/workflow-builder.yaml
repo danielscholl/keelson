@@ -68,7 +68,11 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
   - id: extract-intent
     depends_on: [scan-codebase]
-    model: balanced
+    model: deep
+    model_by_provider:
+      copilot: gpt-6-astra
+    effort: xhigh
+    idle_timeout: 1800000
     output_format:
       type: object
       required: [workflow_name, description, trigger_phrases, proposed_nodes, execution_mode]
@@ -123,7 +127,11 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
   - id: generate-yaml
     depends_on: [extract-intent]
-    model: balanced
+    model: deep
+    model_by_provider:
+      copilot: gpt-6-astra
+    effort: xhigh
+    idle_timeout: 1800000
     allowed_tools: [Read, Write]
     prompt: |
       You are a Keelson workflow author. Write ONE complete, valid workflow YAML
@@ -269,6 +277,8 @@ nodes:
   - id: save-or-report
     depends_on: [validate-yaml]
     model: balanced
+    model_by_provider:
+      copilot: mai-code-1.1-flash
     prompt: |
       Install the generated workflow and report to the user.
 

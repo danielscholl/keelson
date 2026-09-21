@@ -22,7 +22,8 @@ you should still read before running.
 keelson workflow run workflow-builder --inputs ARGUMENTS="a workflow that runs my tests, then lints, and reports failures"
 ```
 
-It needs a Copilot subscription (`provider: copilot`, `model: auto`) and write
+It needs a provider (on Copilot, `extract-intent` and `generate-yaml` pin
+`gpt-6-astra` at `effort: xhigh`) and write
 access to `.keelson/workflows/` in the current project. No server or approval
 gate.
 

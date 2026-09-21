@@ -3,8 +3,8 @@
 # canvas_publish gate. Palette validation is fail-closed inside the tool, so a
 # bad palette surfaces as a tool error the author node must fix and retry —
 # fail_on_tool_error stays off for exactly that reason.
-# No provider pin — artifact quality tracks the strongest available model;
-# operators can pin `provider:`/`model:` here or via KEELSON_WORKFLOW_PROVIDER.
+# No provider pin — the author runs the deep tier on whichever provider is
+# active; operators can pin `provider:` here or via KEELSON_WORKFLOW_PROVIDER.
 
 name: design-artifact
 description: |
@@ -20,6 +20,10 @@ description: |
 
 nodes:
   - id: author
+    model: deep
+    model_by_provider:
+      copilot: gpt-6-astra
+    effort: xhigh
     prompt: |
       Build a designed canvas artifact for this request:
 
@@ -57,4 +61,4 @@ nodes:
        among your tools. Never use this because a call was refused or errored.
     allowed_tools: [canvas_publish, canvas_design_guide]
     require_tool_call: [canvas_publish]
-    idle_timeout: 300000
+    idle_timeout: 1800000

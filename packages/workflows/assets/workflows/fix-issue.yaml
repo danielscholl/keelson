@@ -37,6 +37,8 @@ nodes:
 
   - id: extract-issue
     model: balanced
+    model_by_provider:
+      copilot: mai-code-1.1-flash
     prompt: |
       Find the issue number for this request.
 
@@ -151,6 +153,8 @@ nodes:
   - id: classify
     depends_on: [fetch-issue]
     model: balanced
+    model_by_provider:
+      copilot: mai-code-1.1-flash
     context: fresh
     output_format:
       type: object
@@ -368,6 +372,9 @@ nodes:
     depends_on: [criteria-count-initial]
     when: "$criteria-count-initial.output == '0'"
     context: fresh
+    model: balanced
+    model_by_provider:
+      copilot: mai-code-1.1-flash
     allowed_tools: []
     output_format:
       type: object
@@ -1672,6 +1679,8 @@ nodes:
   - id: report
     depends_on: [finalize-pr]
     model: balanced
+    model_by_provider:
+      copilot: mai-code-1.1-flash
     context: fresh
     prompt: |
       Produce the final operator summary.
