@@ -16,10 +16,10 @@ import { join } from "node:path";
 import type { MessageChunk, ToolContext, ToolDefinition } from "@keelson/shared";
 
 import { bootstrapWorkflows } from "../src/bootstrap.ts";
-import { createConversationStore } from "../src/conversation-store.ts";
+import { type ConversationStore, createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { canonicalPath, createProjectsStore } from "../src/projects-store.ts";
-import { createWorkflowStore } from "../src/workflow-store.ts";
+import { createWorkflowStore, type WorkflowStore } from "../src/workflow-store.ts";
 import { createWorkflowChatTools } from "../src/workflow-tools.ts";
 import {
   createActiveRuns,
@@ -56,6 +56,8 @@ interface Rig {
 
 interface RigExtras {
   projectsStore: ReturnType<typeof createProjectsStore>;
+  store: WorkflowStore;
+  conversationStore: ConversationStore;
 }
 
 function makeRig(): Rig & RigExtras {
@@ -83,7 +85,15 @@ function makeRig(): Rig & RigExtras {
     projectsStore,
     watchDeadlineMs: 4000,
   });
-  return { controller, tools, cwd: tmpDir, projectsStore, dispose: () => db.close() };
+  return {
+    controller,
+    tools,
+    cwd: tmpDir,
+    projectsStore,
+    store,
+    conversationStore,
+    dispose: () => db.close(),
+  };
 }
 
 function writeWorkflow(filename: string, body: string): void {
@@ -465,6 +475,60 @@ nodes:
     expect(result.content).not.toContain("Could not resume");
     expect(result.content).toContain(runId);
     expect(result.content).toContain("failed");
+  });
+
+  test("workflow_resume gives isolation-specific recovery guidance", async () => {
+    writeWorkflow(
+      "unsafe-history.yaml",
+      `name: unsafe-history
+description: historical required-isolation fallback
+worktree:
+  enabled: true
+nodes:
+  - id: work
+    bash: echo unsafe
+`,
+    );
+    const { tools, cwd, store, conversationStore, dispose } = makeRig();
+    activeDispose = dispose;
+    const runId = "unsafe-history-run";
+    store.createRun({
+      runId,
+      workflowName: "unsafe-history",
+      inputs: {},
+      startedAt: new Date().toISOString(),
+      conversationId: conversationStore.create({ providerId: "workflow" }).id,
+      workingDir: cwd,
+      isolationEnabled: true,
+    });
+    store.upsertNodeOutput({
+      runId,
+      nodeId: "work",
+      status: "failed",
+      outputText: null,
+      contentParts: null,
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      error: "unsafe fallback",
+      usage: null,
+      provider: null,
+      model: null,
+      effort: null,
+    });
+    store.updateRunStatus({
+      runId,
+      status: "failed",
+      completedAt: new Date().toISOString(),
+      error: "unsafe fallback",
+    });
+
+    const { ctx, chunks } = makeCtx(cwd);
+    await toolByName(tools, "workflow_resume").execute({ runId }, ctx);
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("start a fresh isolated run instead");
+    expect(result.content).toContain("prior outputs cannot be safely reused");
+    expect(result.content).not.toContain("Only failed or cancelled runs can be resumed");
   });
 
   test("workflow_run with an unknown name returns an error result", async () => {

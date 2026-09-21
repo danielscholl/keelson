@@ -905,7 +905,7 @@ nodes:
     prompt: run
 `,
     );
-    const { app, catalog, projectId } = makeRig();
+    const { app, catalog, projectId, store } = makeRig();
     const start = await app.fetch(
       new Request("http://test/api/workflows/preflight-legacy/runs", {
         method: "POST",
@@ -934,6 +934,64 @@ nodes:
       }),
     );
     expect(resume.status).toBe(409);
+    expect(await resume.json()).toEqual({
+      error: `run '${runId}' isolation choice is unavailable and cannot be safely resumed`,
+    });
+    expect(store.getRun(runId)?.error).toContain("preflight failed:");
+    expect(existsSync(join(repoDir, "sentinel.txt"))).toBe(false);
+  });
+
+  test("resume refuses required isolation after nodes ran without a worktree", async () => {
+    writeWorkflow(
+      "historical-fallback.yaml",
+      `name: historical-fallback
+description: a historical required-isolation run that fell back in place
+worktree:
+  enabled: true
+nodes:
+  - id: work
+    bash: touch sentinel.txt
+`,
+    );
+    const rig = makeRig();
+    const runId = "historical-required-fallback";
+    rig.store.createRun({
+      runId,
+      workflowName: "historical-fallback",
+      inputs: {},
+      startedAt: new Date().toISOString(),
+      conversationId: rig.conversationStore.create({ providerId: "workflow" }).id,
+      projectId: rig.projectId,
+      workingDir: repoDir,
+      isolationEnabled: true,
+    });
+    rig.store.upsertNodeOutput({
+      runId,
+      nodeId: "work",
+      status: "failed",
+      outputText: null,
+      contentParts: null,
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      error: "historical failure",
+      usage: null,
+      provider: null,
+      model: null,
+      effort: null,
+    });
+    rig.store.updateRunStatus({
+      runId,
+      status: "failed",
+      completedAt: new Date().toISOString(),
+      error: "historical failure",
+    });
+
+    expect(rig.controller.resumeRun(runId)).toEqual({
+      ok: false,
+      reason: "isolation_unavailable",
+      message: `run '${runId}' executed nodes without its required worktree; start a fresh isolated run instead`,
+    });
+    expect(rig.store.getRun(runId)?.error).toBe("historical failure");
     expect(existsSync(join(repoDir, "sentinel.txt"))).toBe(false);
   });
 

@@ -558,7 +558,9 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
             ? " Only failed or cancelled runs can be resumed; call workflow_status to check its state."
             : result.reason === "locked"
               ? " Another run holds the project's mutation lock; retry once it releases."
-              : " The run or its workflow is no longer available — it may have been purged, or its workflow definition removed or renamed.";
+              : result.reason === "isolation_unavailable"
+                ? " Start a fresh run with worktree isolation; prior outputs cannot be safely reused."
+                : " The run or its workflow is no longer available — it may have been purged, or its workflow definition removed or renamed.";
         emitResult(ctx, `Could not resume run ${runId}: ${result.message}.${hint}`, true);
         return;
       }

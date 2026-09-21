@@ -1336,7 +1336,12 @@ export type ResumeRunResult =
   | { ok: true }
   | {
       ok: false;
-      reason: "not_found" | "not_terminal" | "locked" | "provider_unavailable";
+      reason:
+        | "not_found"
+        | "not_terminal"
+        | "locked"
+        | "provider_unavailable"
+        | "isolation_unavailable";
       message: string;
     };
 
@@ -1412,9 +1417,6 @@ function resumeRunCore(
     };
   }
 
-  const excludedNodeIds = buildResumeExclusions(workflow, run.nodes);
-  const completedNodeOutputs = buildResumeSeed(run.nodes, excludedNodeIds);
-
   if (!run.workingDir) {
     return {
       ok: false,
@@ -1457,14 +1459,23 @@ function resumeRunCore(
   const rerunPreflight =
     run.error?.startsWith(PREFLIGHT_FAILURE_PREFIX) === true || run.nodes.length === 0;
   const persistedIsolationEnabled = store.getRunIsolationEnabled(runId);
-  // The workflow's current worktree.enabled can't stand in for a missing choice:
-  // a per-run isolation override may have forced the opposite.
-  if (rerunPreflight && run.worktreePath === null && persistedIsolationEnabled === null) {
-    return {
-      ok: false,
-      reason: "not_terminal",
-      message: `run '${runId}' isolation choice is unavailable and cannot be safely resumed`,
-    };
+  if (run.worktreePath === null) {
+    if (persistedIsolationEnabled === null) {
+      return {
+        ok: false,
+        reason: "isolation_unavailable",
+        message: `run '${runId}' isolation choice is unavailable and cannot be safely resumed`,
+      };
+    }
+    if (persistedIsolationEnabled && run.nodes.length > 0) {
+      return {
+        ok: false,
+        reason: "isolation_unavailable",
+        message: run.worktreeEstablished
+          ? `run '${runId}' no longer has its required worktree; start a fresh isolated run instead`
+          : `run '${runId}' executed nodes without its required worktree; start a fresh isolated run instead`,
+      };
+    }
   }
   const resumeIsolationEnabled = run.worktreePath === null && persistedIsolationEnabled === true;
   const resumeIsolation: IsolationConfig | null = resumeIsolationEnabled
@@ -1479,6 +1490,8 @@ function resumeRunCore(
             : run.workingDir,
       }
     : null;
+  const excludedNodeIds = buildResumeExclusions(workflow, run.nodes);
+  const completedNodeOutputs = buildResumeSeed(run.nodes, excludedNodeIds);
   if (
     providerOverride !== null &&
     (providerOverride === "workflow" || !isRegisteredProvider(providerOverride))
