@@ -91,6 +91,7 @@ import {
   type NodeOutput,
   type NodeResult,
   type NotebookAdapter,
+  type PreflightResult,
   type RequestCancel,
   type RunStreamEvent,
   type RunSummary,
@@ -817,6 +818,51 @@ function emitRibRunEvents(opts: {
     if (event !== null) emit(event);
   };
   void done.then(observeSettle, observeSettle);
+}
+
+async function resolveCatalogPreflight(
+  workflow: WorkflowDefinition,
+  opts: {
+    defaultProviderId: string | undefined;
+    providerOverride?: string;
+    signal?: AbortSignal;
+  },
+): Promise<PreflightResult> {
+  const config = loadKeelsonConfig();
+  const providers = new Map(
+    getProviderInfoList().map(({ id, capabilities }) => [
+      id,
+      {
+        defaultModel: capabilities.defaultModel,
+        models: capabilities.models,
+        ...(capabilities.modelClasses !== undefined
+          ? { modelClasses: capabilities.modelClasses }
+          : {}),
+      },
+    ]),
+  );
+  const modelClassOverride = (id: string, modelClass: "fast" | "balanced" | "deep") =>
+    readModelClassOverride(config, id)?.[modelClass];
+  const resolution = resolveWorkflowResolution(workflow, {
+    providers,
+    defaultProviderId: opts.defaultProviderId,
+    runProviderId: opts.providerOverride,
+    modelClassOverride,
+  });
+  const effectiveProviders = resolution.nodes
+    .map(({ effectiveProvider }) => effectiveProvider)
+    .filter((id): id is string => id !== undefined);
+  const liveCatalog = await fetchLiveModelCatalog(
+    effectiveProviders,
+    opts.signal !== undefined ? { signal: opts.signal } : {},
+  );
+  return checkWorkflowCatalog(workflow, {
+    providers,
+    defaultProviderId: opts.defaultProviderId,
+    runProviderId: opts.providerOverride,
+    modelClassOverride,
+    liveCatalog,
+  });
 }
 
 interface StartRunCoreParams {
@@ -3026,42 +3072,12 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
   } = args;
   let pendingPreflightNotice: string | undefined;
   if (preflight) {
-    const config = loadKeelsonConfig();
-    const providers = new Map(
-      getProviderInfoList().map(({ id, capabilities }) => [
-        id,
-        {
-          defaultModel: capabilities.defaultModel,
-          models: capabilities.models,
-          ...(capabilities.modelClasses !== undefined
-            ? { modelClasses: capabilities.modelClasses }
-            : {}),
-        },
-      ]),
-    );
     // The same default the executor runs with, captured when the routes were
     // built; re-resolving here could preflight one provider and run another.
-    const defaultProviderId = defaultProvider;
-    const modelClassOverride = (id: string, modelClass: "fast" | "balanced" | "deep") =>
-      readModelClassOverride(config, id)?.[modelClass];
-    const resolution = resolveWorkflowResolution(workflow, {
-      providers,
-      defaultProviderId,
-      runProviderId: providerOverride,
-      modelClassOverride,
-    });
-    const effectiveProviders = resolution.nodes
-      .map(({ effectiveProvider }) => effectiveProvider)
-      .filter((id): id is string => id !== undefined);
-    const liveCatalog = await fetchLiveModelCatalog(effectiveProviders, {
+    const result = await resolveCatalogPreflight(workflow, {
+      defaultProviderId: defaultProvider,
+      ...(providerOverride !== undefined ? { providerOverride } : {}),
       signal: abort.signal,
-    });
-    const result = checkWorkflowCatalog(workflow, {
-      providers,
-      defaultProviderId,
-      runProviderId: providerOverride,
-      modelClassOverride,
-      liveCatalog,
     });
     if (result.notChecked.length > 0 && result.violations.length === 0) {
       console.warn(
@@ -3070,6 +3086,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       // Held until run_started rather than broadcast here: preflight runs before
       // any client has subscribed, and broadcast drops frames with no listener.
       pendingPreflightNotice = `preflight not checked: ${result.notChecked.join(", ")}`;
+      store.setRunPreflightNotice(runId, pendingPreflightNotice);
     }
     if (result.violations.length > 0) {
       const error = `preflight failed:\n${formatPreflightViolations(result)}`;
