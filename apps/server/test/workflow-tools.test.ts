@@ -318,6 +318,7 @@ nodes:
       Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`k${i}`, "v"])),
     );
     expect(many).toContain("+2 more");
+    expect(summarizeInputs({ "bad\nkey": "v" })).toBe('inputs: "bad\\nkey"="v"');
   });
 
   test("workflow_run refuses ARGUMENTS named twice rather than picking a winner", async () => {

@@ -222,10 +222,10 @@ export function createKeelsonMcpServer(opts: KeelsonMcpServerOptions): Server {
     // Post-execution result gate: run the tool's output through the result phase
     // (redaction) before it returns to the client, matching the chat/workflow
     // tool_result seam. A deny withholds the output; an allow+data substitutes
-    // the redacted text. Only a successful result is gated — an error already
-    // carries no tool output to scrub.
+    // the redacted text. Errors are gated too: a failed workflow run reports as
+    // an error and still carries node output and the run's inputs.
     let content = res.content;
-    if (opts.policyGate && !res.isError) {
+    if (opts.policyGate) {
       const decision = await opts.policyGate.evaluateToolResult({ tool: name, result: content });
       if (decision.outcome === "deny") {
         return {

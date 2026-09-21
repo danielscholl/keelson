@@ -68,7 +68,8 @@ export function summarizeInputs(inputs: Record<string, string> | undefined): str
   const shown = entries.slice(0, INPUT_SUMMARY_MAX_KEYS).map(([key, value]) => {
     const line = value.trim().split(/\r\n|\n|\r/, 1)[0] ?? "";
     const clipped = line.length > INPUT_VALUE_CAP ? `${line.slice(0, INPUT_VALUE_CAP)}…` : line;
-    return `${key}=${JSON.stringify(clipped)}`;
+    const label = /^[\w.-]+$/.test(key) ? key : JSON.stringify(key);
+    return `${label}=${JSON.stringify(clipped)}`;
   });
   const more = entries.length - shown.length;
   return `inputs: ${shown.join(", ")}${more > 0 ? `, +${more} more` : ""}`;
@@ -515,11 +516,9 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
       // run record holds another, which is the mismatch this banner exists to
       // expose.
       const scopeNote = ` in "${canonicalPath(workingDir)}"`;
-      const startedInputs = summarizeInputs(runInputs);
-      const inputsLine = startedInputs === "" ? "" : `${startedInputs}\n`;
       ctx.emit({
         type: "text",
-        content: `Started workflow "${name}"${scopeNote} (run ${started.runId}).\n${inputsLine}`,
+        content: `Started workflow "${name}"${scopeNote} (run ${started.runId}).\n`,
       });
       const state = await controller.awaitPauseOrTerminal(started.runId, {
         onFrame: streamProgress(ctx),
