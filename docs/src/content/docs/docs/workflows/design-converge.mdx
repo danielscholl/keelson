@@ -1,0 +1,98 @@
+---
+title: design-converge
+description: Produces three independent design proposals, cross-critiques them under blind seat labels, checks their load-bearing claims against source, and writes one synthesis for human approval.
+sidebar:
+  order: 5
+---
+
+`design-converge` turns a design brief into a decision-ready draft. Three
+independent seats propose approaches, each seat critiques the other two, a
+fact-checker verifies load-bearing claims, and a final judge synthesizes the
+strongest parts without hiding dissent.
+
+The result is still a **draft for a person to accept or send back**. This
+workflow helps choose and shape a design. It does not implement the design or
+prove that the finished artifact works. Run
+[adversarial-review](../adversarial-review/) after the draft is accepted.
+
+## Invoke it
+
+```sh
+keelson workflow run design-converge --inputs \
+  brief=./design-brief.md \
+  out=./design-output \
+  criteria=./acceptance-criteria.md \
+  evidence=./evidence \
+  sources=../service-a,../service-b \
+  round=1
+```
+
+`brief` must name a non-empty file. `out` is the directory that receives a
+`round-N/` directory. The remaining inputs are optional:
+
+| Input | Meaning |
+| --- | --- |
+| `criteria` | A non-empty file containing the rubric the panel should use. |
+| `evidence` | A directory of evidence files. `intake` bundles its non-empty regular files in sorted order. |
+| `sources` | A comma- or newline-delimited list of local checkout paths that only `verify` may inspect. |
+| `round` | A positive integer, default `1`. Use a new number when revising the brief after human feedback. |
+
+The workflow refuses to overwrite a non-empty round directory on a new run.
+Every run writes `proposal-a.md`, `proposal-b.md`, `proposal-c.md`,
+`critique-by-a.md`, `critique-by-b.md`, `critique-by-c.md`,
+`verification.md`, and `synthesis.md`, plus a `MANIFEST` with run provenance
+and checksums.
+
+## The shape
+
+Twelve nodes separate generative work, critique, verification, persistence,
+and the human decision. Brief, criteria, and evidence content enters every
+agent through `intake`. Only `verify` receives filesystem tools. The other
+agents cannot browse input paths or node output files.
+
+## Node by node
+
+| Node | Kind | What it does |
+| --- | --- | --- |
+| `intake` | bash | Validates inputs and the round destination, then emits one labeled bundle containing the brief, criteria, and evidence. |
+| `propose-a` | prompt | Produces an independent design focused on correctness, tradeoffs, and operability. No tools and no sibling output. |
+| `propose-b` | prompt | Produces an independent design focused on simplicity, boundaries, and testability. No tools and no sibling output. |
+| `propose-c` | prompt | Produces an independent design focused on resilience, edge cases, and reversibility. No tools and no sibling output. |
+| `critic-a` | prompt | Scores proposals B and C against the intake bundle and identifies claims that require verification. No tools. |
+| `critic-b` | prompt | Scores proposals A and C against the intake bundle and identifies claims that require verification. No tools. |
+| `critic-c` | prompt | Scores proposals A and B against the intake bundle and identifies claims that require verification. No tools. |
+| `verify` | prompt | Uses `Read`, `Glob`, and `Grep` to check load-bearing claims against the evidence and source paths. Reports `CONFIRMED`, `REFUTED`, or `UNVERIFIABLE-HERE` for each claim. |
+| `synthesize` | prompt | Weighs verified evidence over panel confidence and writes one design, a criterion scoreboard, a decision log, open assumptions, and explicit dissent. No tools. |
+| `persist` | bash | Reads each agent's complete spill file, including partial output from a failed node, and replaces the round directory from fresh staging. |
+| `complete` | bash | Checks the run id and all eight files, reports reduced verification coverage, and warns when the providers and models that actually ran collapsed the proposer or critic panel to fewer than three vendors. |
+| `decide` | approval | Pauses for a person to accept the synthesis or reply with changes for another round. |
+
+## Trust and failure behavior
+
+**Blind seats.** Proposers do not see sibling proposals. Critics receive only
+the two proposals assigned to their seat, under labels A, B, and C. The
+synthesizer receives seat-labelled text, not model identities.
+
+**One filesystem reader.** `intake` is deterministic shell code. Among agent
+nodes, only `verify` can use filesystem tools. Proposers, critics, and
+synthesis reason over content injected into their prompts.
+
+**Current-run artifacts.** `persist` reads the full node spill files rather
+than the capped environment values. If an agent fails after producing partial
+text, that text is preserved and its failed state is recorded in the
+`MANIFEST`. A resumed persist step rebuilds the directory from current run
+state, so files from a previous attempt cannot remain silently.
+
+**Effective diversity.** Model mappings request three vendor families for each
+panel, but provider fallback can change what actually runs. `complete` derives
+its warning from recorded effective provider and model values. A preflight
+configuration warning is not treated as proof of runtime diversity.
+
+## Related
+
+- [adversarial-review](../adversarial-review/): stress-test the accepted design
+  against logic, evidence, and operational risk.
+- [Authoring workflows](../../guides/authoring-workflows/): prompt isolation,
+  tool boundaries, and safe output handling.
+- [Workflow nodes](../../reference/workflow-nodes/): `depends_on`,
+  `trigger_rule`, `always_run`, and approval nodes.
