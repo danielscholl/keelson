@@ -70,6 +70,7 @@ import {
   type AwaitInteraction,
   bashHandler,
   checkWorkflowCatalog,
+  collectTransitiveDependents,
   createWorktree,
   type DagNode,
   defaultRunUntilBashProbe,
@@ -837,32 +838,63 @@ interface StartRunCoreParams {
   ribId?: string | null;
 }
 
-// Seed-map builder from persisted rows: maps succeeded rows to NodeOutput so
-// the executor can re-enter from the first incomplete node. Skipped rows are
-// deliberately NOT seeded: a persisted skip can be a failure cascade (upstream
-// failed → trigger_rule skipped the tail), and replaying it would keep the tail
-// skipped after the failed node re-runs. Skips are pure re-derivations —
-// trigger_rule / when: evaluate over the seeded upstream outputs, so a
-// legitimate condition-skip re-derives identically. Failed/awaiting rows are
-// likewise excluded so they re-run on resume. `alwaysRun` node ids are excluded
-// too, so a node marked `always_run: true` re-executes on resume even though it
-// succeeded (a gate/validation should re-check, not replay a stale pass).
+// Persisted skips are re-derived because a failure-cascade skip can change on
+// resume. `excluded` is descendant-closed so every seeded success remains
+// consistent with all ancestors that will re-execute.
 function buildResumeSeed(
   nodes: NodeOutputRow[],
-  alwaysRun: ReadonlySet<string> = new Set(),
+  excluded: ReadonlySet<string>,
 ): Map<string, NodeOutput> {
   const seed = new Map<string, NodeOutput>();
   for (const node of nodes) {
-    if (node.status === "succeeded" && !alwaysRun.has(node.nodeId)) {
+    if (node.status === "succeeded" && !excluded.has(node.nodeId)) {
       seed.set(node.nodeId, {
         state: "completed",
         output: node.outputText ?? "",
+        ...(node.provider !== null ? { provider: node.provider } : {}),
+        ...(node.model !== null ? { model: node.model } : {}),
         ...(node.startedAt !== null ? { startedAt: node.startedAt } : {}),
         ...(node.completedAt !== null ? { completedAt: node.completedAt } : {}),
       });
     }
   }
   return seed;
+}
+
+function collectDependencyClosure(nodes: readonly DagNode[], root: string): Set<string> {
+  const byId = new Map(nodes.map((node) => [node.id, node] as const));
+  const collected = new Set<string>();
+  const stack = [root];
+  while (stack.length > 0) {
+    const id = stack.pop();
+    if (id === undefined || collected.has(id)) continue;
+    collected.add(id);
+    stack.push(...(byId.get(id)?.depends_on ?? []));
+  }
+  return collected;
+}
+
+function buildResumeExclusions(
+  workflow: WorkflowDefinition,
+  persistedNodes: readonly NodeOutputRow[],
+): Set<string> {
+  const statuses = new Map(persistedNodes.map((node) => [node.nodeId, node.status] as const));
+  const roots = new Set<string>();
+  for (const node of workflow.nodes) {
+    const status = statuses.get(node.id);
+    if (node.always_run === true || (status !== "succeeded" && status !== "skipped")) {
+      roots.add(node.id);
+    }
+  }
+
+  let excluded = collectTransitiveDependents(workflow.nodes, roots);
+  const convergeGate = workflow.converge?.gate;
+  if (convergeGate !== undefined && excluded.has(convergeGate)) {
+    // The executor clears this ancestor closure whenever the gate is unseeded.
+    for (const id of collectDependencyClosure(workflow.nodes, convergeGate)) roots.add(id);
+    excluded = collectTransitiveDependents(workflow.nodes, roots);
+  }
+  return excluded;
 }
 
 // Bind a project notebook adapter (read + contribute), but only when the working
@@ -1280,12 +1312,8 @@ function resumeRunCore(
     };
   }
 
-  const alwaysRun = new Set(
-    workflow.nodes
-      .filter((n) => (n as { always_run?: boolean }).always_run === true)
-      .map((n) => n.id),
-  );
-  const completedNodeOutputs = buildResumeSeed(run.nodes, alwaysRun);
+  const excludedNodeIds = buildResumeExclusions(workflow, run.nodes);
+  const completedNodeOutputs = buildResumeSeed(run.nodes, excludedNodeIds);
 
   if (!run.workingDir) {
     return {

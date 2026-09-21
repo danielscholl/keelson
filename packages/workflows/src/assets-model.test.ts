@@ -28,7 +28,10 @@ const MIGRATED_WORKFLOWS = new Set([
   "resolve-pr",
   "workflow-builder",
 ]);
-const EXPECTED_PROVIDER_PINS = new Map([["adversarial-review", "copilot"]]);
+const EXPECTED_PROVIDER_PINS = new Map([
+  ["adversarial-review", "copilot"],
+  ["investigate", "copilot"],
+]);
 const COPILOT_CAPABILITIES = {
   defaultModel: "auto",
   reasoningEffort: true,
@@ -134,25 +137,6 @@ function loadBundledWorkflows(): Array<{ filename: string; workflow: WorkflowDef
   });
 }
 
-describe("bundled workflow resume safety", () => {
-  test("no all_done collector owns a file without always_run", () => {
-    const dir = path.join(import.meta.dir, "../assets/workflows");
-    const offenders: string[] = [];
-    for (const filename of fs
-      .readdirSync(dir)
-      .filter((f) => /\.ya?ml$/.test(f))
-      .sort()) {
-      const result = parseWorkflow(fs.readFileSync(path.join(dir, filename), "utf8"), filename);
-      for (const w of result.warnings) {
-        if (w.kind === "all_done_collector_without_always_run") {
-          offenders.push(`${filename} [${w.nodeId ?? "?"}]`);
-        }
-      }
-    }
-    expect(offenders).toEqual([]);
-  });
-});
-
 describe("resolve-pr workflow contract", () => {
   test("records metadata fixes without inventing commits", () => {
     const workflow = loadBundledWorkflows().find(
@@ -192,6 +176,16 @@ describe("resolve-pr workflow contract", () => {
     expect(fixPrompt).toContain("reviewed and accepted on the maintainer side.");
     expect(replyPrompt).toContain("resolve_authorized == true");
     expect(replyPrompt).toContain("Never resolve a `question`");
+  });
+});
+
+describe("smoke-test workflow contract", () => {
+  test("does not lock the checkout", () => {
+    const workflow = loadBundledWorkflows().find(
+      ({ workflow }) => workflow.name === "smoke-test",
+    )?.workflow;
+
+    expect(workflow?.mutates_checkout).toBe(false);
   });
 });
 

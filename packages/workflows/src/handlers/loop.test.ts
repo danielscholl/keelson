@@ -575,6 +575,7 @@ describe("makeLoopHandler — until_bash probe", () => {
       script: string;
       env: Readonly<Record<string, string>> | undefined;
       inputs: Readonly<Record<string, string>>;
+      runId: string | undefined;
       artifactsDir: string | undefined;
     }
     const calls: ProbeCall[] = [];
@@ -585,6 +586,7 @@ describe("makeLoopHandler — until_bash probe", () => {
           script,
           env: opts.env,
           inputs: opts.inputs,
+          runId: opts.runId,
           artifactsDir: opts.artifactsDir,
         });
         return { exitCode: 1, stdout: "", stderr: "" };
@@ -612,6 +614,7 @@ describe("makeLoopHandler — until_bash probe", () => {
     expect(calls[0].env?.LOOP_USER_INPUT).toBe("");
     expect(calls[0].inputs.ARGUMENTS).toBe("hello");
     expect(calls[0].inputs.lane).toBe("stable");
+    expect(calls[0].runId).toBe(ctx.runId);
     expect(calls[0].artifactsDir).toBe("/tmp/run-artifacts");
     // Script body untouched.
     expect(calls[0].script).toBe("test -f sentinel");

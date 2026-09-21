@@ -1,0 +1,105 @@
+---
+title: investigate
+description: Establishes cited facts for a focused question, independently verifies load-bearing claims, and writes a deterministic evidence tally with effective model attribution.
+sidebar:
+  order: 12
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`investigate` answers a focused factual question from source and read-only
+runtime probes. One model gathers evidence, another re-checks every load-bearing
+claim, and deterministic code tallies the verdicts and records which provider
+and model actually ran each role.
+
+Use it when the durable result should be an evidence file rather than a chat
+answer. It does not change source or post the result elsewhere.
+
+## Invoke it
+
+```sh
+keelson workflow run investigate \
+  --arguments "Which function validates workflow output, and when does it run?" \
+  --inputs out=evidence/output-validation.md
+```
+
+The question and `out` are required. Optional inputs refine the run:
+
+```sh
+keelson workflow run investigate \
+  --arguments "Which function validates workflow output, and when does it run?" \
+  --inputs out=evidence/output-validation.md \
+  --inputs context=packages/workflows/src \
+  --inputs access="Use only local source and read-only shell commands." \
+  --inputs tier=std \
+  --inputs verifier=grok
+```
+
+`context` accepts one readable file or a directory. A directory contributes its
+regular files one level deep in sorted order. `access` accepts either a readable
+file or literal guidance. `tier` is `deep` or `std`; `verifier` is `claude` or
+`grok`. When `verifier` is absent, `intake` selects one deterministically from
+the run id.
+
+## The shape
+
+Five nodes run in sequence:
+
+| Node | Kind | What it does |
+| --- | --- | --- |
+| `intake` | bash | Validates the question, output path, tier, and verifier; bundles context and access guidance; rotates the default verifier from the run id. |
+| `investigate` | prompt | Reads source and runs read-only probes, then writes the requested evidence file with cited claims and `NOT CHECKED` placeholders. |
+| `verify` | prompt | Re-reads or re-runs every load-bearing claim independently and returns one closed verdict per checked claim. |
+| `publish` | prompt | Updates only the evidence table's `Verified` and `Verification note` cells. It does not count claims or write attribution. |
+| `finalize` | script | Parses the Markdown table, validates its levels and verdicts, computes the tally, and writes effective run attribution. |
+
+The investigator and verifier use closed `model_by` maps. Copilot seats them on
+different model vendors. If the run falls back to a provider that can only
+serve one vendor, Keelson emits a run warning after comparing the provider and
+model recorded for the turns that actually ran.
+
+## The evidence-file contract
+
+The evidence file contains one or more claim tables with these columns:
+
+| Column | Values |
+| --- | --- |
+| `Claim #` | A unique positive integer used to associate a verifier verdict with its claim. |
+| `Claim` | One factual statement. |
+| `Level` | `documented`, `source-verified`, or `runtime-tested`. |
+| `Citation` | A source `path:line` or the exact read-only probe and relevant output. |
+| `Verified` | `CONFIRMED`, `CONFIRMED in part`, `REFUTED`, `UNVERIFIABLE`, or `NOT CHECKED`. |
+| `Verification note` | The verifier's reason, including partial or contrary evidence. |
+
+`finalize` finds columns by header name, so their order may change. It rejects
+unknown levels, unknown verdicts, malformed rows, and missing runtime
+attribution. It then writes one tally in fixed order and an attribution line
+using the effective models and providers, including provider fallback or a
+provider-reported model switch. Re-running it replaces its prior generated
+section instead of adding another.
+
+<Aside type="caution" title="Read-only is guidance, not enforcement">
+The prompt limits Bash to read-only probes, but the workflow does not provide an
+OS sandbox or command gate. A project that requires enforcement must supply its
+own policy or gated command. The requested `out` file is an intentional write:
+`investigate` creates it, `publish` updates verdict cells, and `finalize` writes
+the deterministic summary.
+</Aside>
+
+## Patterns it demonstrates
+
+- **Closed runtime selection.** `tier` and `verifier` select only declared
+  `model_by` cases.
+- **Effective independence diagnostics.** `different_vendor_from` compares the
+  models that ran, not the seats requested in YAML.
+- **Deterministic finalization.** A script owns parsing, tallying, run
+  attribution, and idempotent replacement of generated output.
+
+## Related
+
+- [adversarial-review](../adversarial-review/): pressure-tests an existing
+  artifact through parallel review lenses.
+- [Authoring workflows](../../guides/authoring-workflows/): model selection,
+  deterministic nodes, and safe data flow.
+- [Workflow nodes](../../reference/workflow-nodes/): `model_by`,
+  `different_vendor_from`, and subprocess provenance variables.

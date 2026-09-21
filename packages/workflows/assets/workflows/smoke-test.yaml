@@ -10,6 +10,7 @@
 # to exercise a specific backend.
 
 name: smoke-test
+mutates_checkout: false
 description: |
   Use when: User wants to verify the workflow engine end-to-end against a Bun-only environment,
             either after a fresh install or after changes to the executor / handlers.

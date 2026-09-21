@@ -263,6 +263,13 @@ A local Ollama needs no key, so omit `--key` for a keyless endpoint. `--key` als
 reads `KEELSON_GATEWAY_KEY`, so the key stays out of shell history. The same
 operations are available over the API at `/api/gateways`.
 
+Keyless endpoints may use remote HTTP. A gateway with a stored key must use HTTPS
+or HTTP on `localhost`, `127.0.0.1`, or `::1`. If a stored key would cross remote
+plain HTTP, model discovery makes no request, reports a server warning, and
+remains not checked. The picker can still use the configured model fallback.
+Chat makes no request and returns an explicit error directing you to HTTPS or a
+loopback host.
+
 ```jsonc
 // ~/.keelson/config.json (written by `keelson gateway add`)
 {

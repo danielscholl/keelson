@@ -113,6 +113,12 @@ A case replaces only the fields it sets. The set of cases is closed, so
 validation checks every branch and `--live` checks every branch's model against
 the provider catalog.
 
+Set `different_vendor_from: <ancestor-prompt-id>` when a prompt must provide an
+independent model-vendor check of an earlier prompt. The executor compares the
+effective provider/model recorded after fallback and emits a run warning when
+both models belong to the same known vendor. Unknown model vendors are not
+treated as proof of diversity.
+
 ## Description format
 
 Use the structured block-scalar convention — the Workflows UI cards and the
@@ -232,16 +238,9 @@ must already exist on disk; from chat, use an inline `prompt` node instead.
   `transient` (default) | `all`. Not allowed on loop nodes.
 - `always_run: true` — re-execute this node on a resumed run even if it
   succeeded before (a gate/validation re-checks instead of replaying a stale
-  pass). Off by default: a succeeded node is skipped on resume. Required on a
-  `bash` or `script` collector under `trigger_rule: all_done` that writes to
-  `$KEELSON_ARTIFACTS_DIR`: it runs even when the work it summarizes failed, so
-  it can succeed against a failed attempt and then stay seeded while that work
-  re-runs. A resume reuses the artifacts dir, so writing a file is not on its
-  own a reason to set this. Validation warns on the `all_done` shape.
-- Do **not** set it inside a converge subgraph (the gate and its ancestors).
-  A resume restarts the round counter at 1 while the rest of the seeded
-  subgraph stays at the round it converged on, so the node would rewrite its
-  file against the wrong round. Validation exempts those nodes for this reason.
+  pass). Its transitive descendants re-run too, including prompt nodes that
+  incur their normal provider cost. Off by default: a succeeded node is reused
+  unless an ancestor re-executes.
 - `require_tool_call: [tool-name, ...]` — fail if a listed tool is available to
   the node but the turn ends without a successful tool result. An error followed
   by a successful retry satisfies it. Only registry/MCP tools are checked: a
@@ -273,6 +272,7 @@ warning.
   parsing (empty string when the output isn't JSON).
 - `$ARTIFACTS_DIR` — per-run scratch directory in prompt text; bash nodes see
   it as the `$KEELSON_ARTIFACTS_DIR` environment variable.
+- `KEELSON_RUN_ID` — the current workflow run id in bash and script nodes.
 - `KEELSON_NODE_<id>_OUTPUT` — how a bash or script node reads an upstream
   output (`$<id>.output` does not expand in a shell body). Capped at 16 KiB and
   head+tail truncated past it, with a marker in the middle.
@@ -282,6 +282,9 @@ warning.
   structured output from this file; the marker above corrupts JSON. Validation
   warns when a body parses the capped variable instead.
 - `KEELSON_NODE_<id>_OUTPUT_TRUNCATED` — `1` when the variable was capped.
+- `KEELSON_NODE_<id>_PROVIDER` / `KEELSON_NODE_<id>_MODEL` — the effective
+  provider and model recorded for an upstream agent node, including fallback
+  and provider-reported model changes. Unset for deterministic nodes.
 - `$converge.round` — current converge round while a node runs inside a
   `converge` subgraph; empty outside converge rounds.
 

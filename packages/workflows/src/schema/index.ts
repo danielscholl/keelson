@@ -51,6 +51,7 @@ export {
   loopNodeSchema,
   modelBySchema,
   modelCaseSchema,
+  nodeReachesProvider,
   promptNodeSchema,
   SCRIPT_NODE_AI_FIELDS,
   sandboxSettingsSchema,
