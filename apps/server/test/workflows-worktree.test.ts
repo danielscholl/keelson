@@ -171,6 +171,8 @@ function makeRig(opts: { includeWorkspaceManager?: boolean; projectRootPath?: st
     store,
     conversationStore,
     controller,
+    activeRuns,
+    subscribers,
     workspaceManager,
     catalog,
     projectId: project.id,
@@ -617,7 +619,444 @@ async function pollUntilWorktreeCleared(
   throw new Error(`worktree for run ${runId} not cleared in ${timeoutMs}ms`);
 }
 
+async function pollUntilStoredStatus(
+  store: ReturnType<typeof createWorkflowStore>,
+  runId: string,
+  statuses: ReadonlySet<WorkflowRunStatus>,
+  timeoutMs = 5000,
+) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const run = store.getRun(runId);
+    if (run && statuses.has(run.status)) return run;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`run ${runId} did not reach ${[...statuses].join("/")} in ${timeoutMs}ms`);
+}
+
 describe("workflow run worktree isolation (slice 3)", () => {
+  for (const includeWorkspaceManager of [true, false]) {
+    for (const policy of ["yaml", "override"] as const) {
+      for (const failure of ["probe-false", "probe-throw", "prepare-throw"] as const) {
+        test(`fails closed for ${policy} isolation on ${failure} (workspaceManager=${includeWorkspaceManager})`, async () => {
+          await initRepo(repoDir);
+          writeWorkflow(
+            "setup-gate.yaml",
+            `name: setup-gate
+description: deterministic setup failure
+worktree:
+  enabled: ${policy === "yaml" ? "true" : "false"}
+nodes:
+  - id: work
+    bash: touch sentinel.txt
+`,
+          );
+          const rig = makeRig({ includeWorkspaceManager });
+          const mocks: Array<{ mockRestore(): void }> = [];
+          if (failure === "probe-false") {
+            mocks.push(spyOn(worktrees, "isGitRepo").mockResolvedValue(false));
+          } else if (failure === "probe-throw") {
+            mocks.push(
+              spyOn(worktrees, "isGitRepo").mockRejectedValue(new Error("injected probe failure")),
+            );
+          } else if (includeWorkspaceManager) {
+            mocks.push(
+              spyOn(rig.workspaceManager, "prepareWorktree").mockRejectedValue(
+                new Error("injected prepare failure"),
+              ),
+            );
+          } else {
+            mocks.push(
+              spyOn(worktrees, "createWorktree").mockRejectedValue(
+                new Error("injected prepare failure"),
+              ),
+            );
+          }
+
+          try {
+            const started = rig.controller.startRun({
+              name: "setup-gate",
+              inputs: {},
+              workingDir: repoDir,
+              ...(policy === "override" ? { isolation: "worktree" as const } : {}),
+            });
+            expect(started.ok).toBe(true);
+            if (!started.ok) throw new Error(started.message);
+            const run = await pollUntilStoredStatus(rig.store, started.runId, new Set(["failed"]));
+            expect(run.error).toContain("worktree setup failed:");
+            expect(run.error).toContain(
+              failure === "probe-false"
+                ? "could not confirm"
+                : failure === "probe-throw"
+                  ? "probe"
+                  : "prepare",
+            );
+            expect(run.nodes).toEqual([]);
+            expect(run.worktreePath).toBeNull();
+            expect(existsSync(join(repoDir, "sentinel.txt"))).toBe(false);
+            expect(rig.activeRuns.size()).toBe(0);
+          } finally {
+            for (const mock of mocks) mock.mockRestore();
+            await rig.activeRuns.abortAll();
+          }
+        });
+      }
+    }
+  }
+
+  test("retains the real Git error when an invalid branch prevents setup", async () => {
+    await initRepo(repoDir);
+    writeWorkflow(
+      "invalid-branch.yaml",
+      `name: invalid-branch
+description: deterministic real Git setup failure
+worktree:
+  enabled: true
+  branch: invalid..branch
+nodes:
+  - id: work
+    bash: touch sentinel.txt
+`,
+    );
+    const rig = makeRig({ includeWorkspaceManager: false });
+    const started = rig.controller.startRun({
+      name: "invalid-branch",
+      inputs: {},
+      workingDir: repoDir,
+    });
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error(started.message);
+
+    const run = await pollUntilStoredStatus(rig.store, started.runId, new Set(["failed"]));
+    expect(run.error).toContain("worktree setup failed:");
+    expect(run.error).toContain("invalid..branch");
+    expect(run.nodes).toEqual([]);
+    expect(existsSync(join(repoDir, "sentinel.txt"))).toBe(false);
+    expect(rig.activeRuns.size()).toBe(0);
+  });
+
+  test("fails after worktree creation without entering the executor", async () => {
+    await initRepo(repoDir);
+    writeWorkflow(
+      "post-create-failure.yaml",
+      `name: post-create-failure
+description: dependency preparation throws after checkout creation
+worktree:
+  enabled: true
+nodes:
+  - id: work
+    bash: touch sentinel.txt
+`,
+    );
+    const rig = makeRig({ includeWorkspaceManager: false });
+    const deps = spyOn(worktrees, "ensureWorktreeDeps").mockRejectedValue(
+      new Error("injected post-create failure"),
+    );
+    try {
+      const started = rig.controller.startRun({
+        name: "post-create-failure",
+        inputs: {},
+        workingDir: repoDir,
+      });
+      expect(started.ok).toBe(true);
+      if (!started.ok) throw new Error(started.message);
+      const run = await pollUntilStoredStatus(rig.store, started.runId, new Set(["failed"]));
+      expect(run.error).toContain("injected post-create failure");
+      expect(run.worktreeEstablished).toBe(true);
+      expect(run.worktreePath).not.toBeNull();
+      expect(existsSync(run.worktreePath ?? "")).toBe(true);
+      expect(run.nodes).toEqual([]);
+      expect(existsSync(join(repoDir, "sentinel.txt"))).toBe(false);
+    } finally {
+      deps.mockRestore();
+      await rig.activeRuns.abortAll();
+    }
+  });
+
+  test("fails when worktree identity cannot be persisted and preserves the checkout", async () => {
+    await initRepo(repoDir);
+    writeWorkflow(
+      "persist-failure.yaml",
+      `name: persist-failure
+description: worktree identity persistence failure
+worktree:
+  enabled: true
+nodes:
+  - id: work
+    bash: touch sentinel.txt
+`,
+    );
+    const rig = makeRig({ includeWorkspaceManager: false });
+    const persist = spyOn(rig.store, "setRunWorktreePath").mockImplementation(() => {
+      throw new Error("injected persistence failure");
+    });
+    try {
+      const started = rig.controller.startRun({
+        name: "persist-failure",
+        inputs: {},
+        workingDir: repoDir,
+      });
+      expect(started.ok).toBe(true);
+      if (!started.ok) throw new Error(started.message);
+      const run = await pollUntilStoredStatus(rig.store, started.runId, new Set(["failed"]));
+      expect(run.error).toContain("injected persistence failure");
+      expect(run.worktreePath).toBeNull();
+      expect(run.nodes).toEqual([]);
+      expect(existsSync(join(repoDir, "sentinel.txt"))).toBe(false);
+      const listing = await worktrees.listWorktreesWithStatus(repoDir);
+      const surviving = listing.worktrees.find((entry) => entry.path !== repoDir);
+      expect(surviving).toBeDefined();
+      expect(existsSync(surviving?.path ?? "")).toBe(true);
+    } finally {
+      persist.mockRestore();
+      await rig.activeRuns.abortAll();
+    }
+  });
+
+  test("resume retries a failed setup and repeated setup failures stay retryable", async () => {
+    await initRepo(repoDir);
+    writeWorkflow(
+      "setup-retry.yaml",
+      `name: setup-retry
+description: retry required setup before node execution
+worktree:
+  enabled: true
+nodes:
+  - id: work
+    bash: pwd
+`,
+    );
+    const rig = makeRig();
+    const original = rig.workspaceManager.prepareWorktree;
+    let attempts = 0;
+    const prepare = spyOn(rig.workspaceManager, "prepareWorktree").mockImplementation(
+      async (request) => {
+        attempts += 1;
+        if (attempts <= 2) throw new Error(`injected setup failure ${attempts}`);
+        return original(request);
+      },
+    );
+    try {
+      const started = rig.controller.startRun({
+        name: "setup-retry",
+        inputs: {},
+        workingDir: repoDir,
+      });
+      expect(started.ok).toBe(true);
+      if (!started.ok) throw new Error(started.message);
+      const first = await pollUntilStoredStatus(rig.store, started.runId, new Set(["failed"]));
+      expect(first.nodes).toEqual([]);
+      expect(first.error).toContain("injected setup failure 1");
+
+      expect(rig.controller.resumeRun(started.runId)).toEqual({ ok: true });
+      const second = await pollUntilStoredStatus(rig.store, started.runId, new Set(["failed"]));
+      expect(second.nodes).toEqual([]);
+      expect(second.error).toContain("injected setup failure 2");
+
+      expect(rig.controller.resumeRun(started.runId)).toEqual({ ok: true });
+      const completed = await pollUntilStoredStatus(
+        rig.store,
+        started.runId,
+        new Set(["succeeded"]),
+      );
+      expect(completed.nodes[0]?.outputText?.replaceAll("\\", "/")).toContain("/.worktrees/");
+      expect(attempts).toBe(3);
+    } finally {
+      prepare.mockRestore();
+      await rig.activeRuns.abortAll();
+    }
+  });
+
+  test("explicit in-place execution inside a caller lease remains caller-owned across resume", async () => {
+    await initRepo(repoDir);
+    writeWorkflow(
+      "leased-run.yaml",
+      `name: leased-run
+description: run inside a caller-owned checkout
+worktree:
+  enabled: true
+nodes:
+  - id: work
+    bash: |
+      if [ ! -f .resume-ready ]; then touch .resume-ready; exit 1; fi
+      pwd
+`,
+    );
+    const rig = makeRig();
+    const lease = await rig.workspaceManager.acquire({
+      projectId: rig.projectId,
+      purpose: "caller-owned",
+      owner: "test",
+    });
+    try {
+      const started = rig.controller.startRun({
+        name: "leased-run",
+        inputs: {},
+        workingDir: lease.path,
+        project: { id: rig.projectId, rootPath: repoDir },
+        isolation: "none",
+      });
+      expect(started.ok).toBe(true);
+      if (!started.ok) throw new Error(started.message);
+      const failed = await pollUntilStoredStatus(rig.store, started.runId, new Set(["failed"]));
+      expect(failed.isolationEnabled).toBe(false);
+      expect(failed.worktreePath).toBeNull();
+      expect(failed.workingDir).toBe(lease.path);
+
+      expect(rig.controller.resumeRun(started.runId)).toEqual({ ok: true });
+      const completed = await pollUntilStoredStatus(
+        rig.store,
+        started.runId,
+        new Set(["succeeded"]),
+      );
+      expect(completed.nodes[0]?.outputText?.trim()).toBe(lease.path);
+      expect(existsSync(lease.path)).toBe(true);
+      expect(rig.workspaceManager.list().some((record) => record.id === lease.id)).toBe(true);
+    } finally {
+      await rig.activeRuns.abortAll();
+      await lease.release();
+    }
+    expect(existsSync(lease.path)).toBe(false);
+  });
+
+  for (const injectFailure of [false, true]) {
+    test(`concurrent isolated starts keep distinct checkout identity (injectedFailure=${injectFailure})`, async () => {
+      await initRepo(repoDir);
+      writeWorkflow(
+        "concurrent.yaml",
+        `name: concurrent
+description: hold concurrent isolated runs for checkout inspection
+worktree:
+  enabled: true
+nodes:
+  - id: where
+    bash: pwd
+  - id: hold
+    depends_on: [where]
+    approval:
+      message: inspect checkout
+`,
+      );
+      const rig = makeRig();
+      const original = rig.workspaceManager.prepareWorktree;
+      let calls = 0;
+      const prepare = spyOn(rig.workspaceManager, "prepareWorktree").mockImplementation(
+        async (request) => {
+          calls += 1;
+          if (injectFailure && calls === 2) throw new Error("injected concurrent setup failure");
+          return original(request);
+        },
+      );
+      const runIds: string[] = [];
+      try {
+        for (let index = 0; index < 4; index++) {
+          const started = rig.controller.startRun({
+            name: "concurrent",
+            inputs: { index: String(index) },
+            workingDir: repoDir,
+          });
+          expect(started.ok).toBe(true);
+          if (!started.ok) throw new Error(started.message);
+          runIds.push(started.runId);
+        }
+        const runs = await Promise.all(
+          runIds.map((runId) =>
+            pollUntilStoredStatus(rig.store, runId, new Set(["paused", "failed"]), 10_000),
+          ),
+        );
+        const failed = runs.filter((run) => run.status === "failed");
+        const paused = runs.filter((run) => run.status === "paused");
+        expect(failed).toHaveLength(injectFailure ? 1 : 0);
+        expect(paused).toHaveLength(injectFailure ? 3 : 4);
+        if (failed[0]) {
+          expect(failed[0].error).toContain("injected concurrent setup failure");
+          expect(failed[0].nodes).toEqual([]);
+        }
+        const paths = paused.map((run) => run.worktreePath);
+        expect(paths.every((path) => path !== null && path !== repoDir)).toBe(true);
+        expect(new Set(paths).size).toBe(paths.length);
+        for (const run of paused) {
+          if (run.worktreePath === null) throw new Error("paused isolated run has no worktree");
+          expect(run.nodes.find((node) => node.nodeId === "where")?.outputText?.trim()).toBe(
+            run.worktreePath,
+          );
+        }
+      } finally {
+        prepare.mockRestore();
+        await rig.activeRuns.abortAll();
+      }
+      expect(rig.activeRuns.size()).toBe(0);
+    }, 15_000);
+  }
+
+  test("cancellation while setup and slot acquisition are pending drains and permits retry", async () => {
+    await initRepo(repoDir);
+    writeWorkflow(
+      "queued-cancel.yaml",
+      `name: queued-cancel
+description: hold setup and queue one isolated run
+worktree:
+  enabled: true
+nodes:
+  - id: where
+    bash: pwd
+  - id: hold
+    depends_on: [where]
+    approval:
+      message: hold
+`,
+    );
+    const rig = makeRig();
+    const release = Promise.withResolvers<void>();
+    const fourEntered = Promise.withResolvers<void>();
+    const original = rig.workspaceManager.prepareWorktree;
+    let entered = 0;
+    const prepare = spyOn(rig.workspaceManager, "prepareWorktree").mockImplementation(
+      async (request) => {
+        entered += 1;
+        if (entered === 4) fourEntered.resolve();
+        await release.promise;
+        return original(request);
+      },
+    );
+    const runIds: string[] = [];
+    try {
+      for (let index = 0; index < 5; index++) {
+        const started = rig.controller.startRun({
+          name: "queued-cancel",
+          inputs: { index: String(index) },
+          workingDir: repoDir,
+        });
+        expect(started.ok).toBe(true);
+        if (!started.ok) throw new Error(started.message);
+        runIds.push(started.runId);
+      }
+      await fourEntered.promise;
+      expect(rig.controller.cancelRun(runIds[0]!)).toBe(true);
+      expect(rig.controller.cancelRun(runIds[4]!)).toBe(true);
+      const queued = await pollUntilStoredStatus(rig.store, runIds[4]!, new Set(["cancelled"]));
+      expect(queued.nodes).toEqual([]);
+
+      release.resolve();
+      await rig.activeRuns.abortAll();
+      const setupPending = rig.store.getRun(runIds[0]!);
+      expect(setupPending?.status).toBe("cancelled");
+      expect(setupPending?.nodes).toEqual([]);
+      expect(rig.activeRuns.size()).toBe(0);
+    } finally {
+      release.resolve();
+      await rig.activeRuns.abortAll();
+      prepare.mockRestore();
+    }
+
+    expect(rig.controller.resumeRun(runIds[4]!)).toEqual({ ok: true });
+    const retried = await pollUntilStoredStatus(rig.store, runIds[4]!, new Set(["paused"]), 10_000);
+    expect(retried.worktreePath).not.toBeNull();
+    expect(retried.nodes.find((node) => node.nodeId === "where")?.status).toBe("succeeded");
+    await rig.activeRuns.abortAll();
+    expect(rig.activeRuns.size()).toBe(0);
+  }, 15_000);
+
   test("YAML worktree.enabled creates a worktree, runs in it, prunes on success", async () => {
     await initRepo(repoDir);
     writeWorkflow(
@@ -990,6 +1429,16 @@ nodes:
       ok: false,
       reason: "isolation_unavailable",
       message: `run '${runId}' executed nodes without its required worktree; start a fresh isolated run instead`,
+    });
+    expect(rig.store.getRun(runId)?.error).toBe("historical failure");
+
+    const legacy = openDatabase({ path: dbPath });
+    legacy.prepare("UPDATE workflow_runs SET isolation_enabled = NULL WHERE id = ?").run(runId);
+    legacy.close();
+    expect(rig.controller.resumeRun(runId)).toEqual({
+      ok: false,
+      reason: "isolation_unavailable",
+      message: `run '${runId}' isolation choice is unavailable and cannot be safely resumed`,
     });
     expect(rig.store.getRun(runId)?.error).toBe("historical failure");
     expect(existsSync(join(repoDir, "sentinel.txt"))).toBe(false);
