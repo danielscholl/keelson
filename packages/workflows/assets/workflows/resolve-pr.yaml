@@ -33,22 +33,34 @@ converge:
 
 nodes:
   - id: extract-pr
-    model: balanced
-    model_by_provider:
-      copilot: mai-code-1.1-flash
-    prompt: |
-      Find the PR or MR number for this request.
-
-      Request: $ARGUMENTS
-
-      Rules:
-      - If the message contains an explicit PR number ("#42", "PR 42", "42"),
-        extract it.
-      - If the message is ambiguous, return the literal string CURRENT; the next
-        node will resolve it from the current branch.
-
-      Output ONLY the bare integer, or the literal CURRENT. No quotes, no
-      markdown, no explanation.
+    runtime: bun
+    script: |
+      const request = (process.env.KEELSON_ARGUMENTS ?? "").trim();
+      if (request.includes("[keelson: input truncated")) {
+        console.error(
+          "resolve-pr arguments exceeded the 16 KiB input limit; pass a shorter request."
+        );
+        process.exit(1);
+      }
+      const targets = new Set();
+      if (/^[1-9]\d*$/.test(request)) targets.add(request);
+      const urlPattern = /https?:\/\/[^\s]+\/(?:pull|merge_requests)\/([1-9]\d*)(?![\w]|\.\d)/gi;
+      for (const match of request.matchAll(urlPattern)) targets.add(match[1]);
+      const referenceText = request.replace(urlPattern, "");
+      for (const match of referenceText.matchAll(
+        /(?:\b(?:pr|mr|pull\s+request|merge\s+request)\s*[#!]?\s*|[#!])([1-9]\d*)(?![\w]|\.\d)/gi,
+      )) {
+        targets.add(match[1]);
+      }
+      if (targets.size !== 1) {
+        console.error(
+          "resolve-pr needs exactly one explicit PR or MR number " +
+          "(for example '912' or 'resolve PR 912'). It runs in an isolated worktree " +
+          "and cannot infer the target from the current branch."
+        );
+        process.exit(1);
+      }
+      console.log([...targets][0]);
 
   - id: fetch-state
     depends_on: [extract-pr]
@@ -56,19 +68,9 @@ nodes:
       set -euo pipefail
 
       ROUND="$converge.round"
-      RAW=$(printf '%s' "$KEELSON_NODE_extract_pr_OUTPUT" | tr -d "'\"\`\n " )
-      if [ "$RAW" = "CURRENT" ] || [ -z "$RAW" ]; then
-        # This run executes in an isolated worktree on a generated branch, so the
-        # target PR cannot be inferred from the current branch — require it.
-        echo "resolve-pr needs an explicit PR number: it runs in an isolated worktree on a generated branch and cannot infer the PR from the current branch. Invoke like 'resolve pr 42'." >&2
-        exit 1
-      fi
-      # `|| true` so a no-digit input yields an empty PR_NUM and reaches the
-      # explicit check below, rather than tripping `set -o pipefail` (grep exits 1).
-      PR_NUM=$(printf '%s' "$RAW" | grep -oE '[0-9]+' | head -1 || true)
-
-      if [ -z "$PR_NUM" ]; then
-        echo "Could not parse a PR number from '$RAW'; pass one like 'converge pr 42'." >&2
+      PR_NUM="$KEELSON_NODE_extract_pr_OUTPUT"
+      if ! [[ "$PR_NUM" =~ ^[1-9][0-9]*$ ]]; then
+        echo "resolve-pr received an invalid PR number from extract-pr." >&2
         exit 1
       fi
 
