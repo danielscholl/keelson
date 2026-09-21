@@ -317,6 +317,9 @@ nodes:
   - id: select-mode
     depends_on: [approve-plan, detect-forge]
     context: fresh
+    model: balanced
+    model_by_provider:
+      copilot: mai-code-1.1-flash
     output_format:
       type: object
       required: [mode]
@@ -438,6 +441,9 @@ nodes:
     depends_on: [evaluate]
     when: "$select-mode.output.mode == 'local'"
     context: fresh
+    model: balanced
+    model_by_provider:
+      copilot: mai-code-1.1-flash
     prompt: |
       Push the branch and open a **draft** PR that links the plan issue. The PR's
       CI is the authoritative check, so getting it open is the point.
@@ -700,6 +706,9 @@ nodes:
     depends_on: [self-review]
     when: "$select-mode.output.mode == 'delegate'"
     context: fresh
+    model: balanced
+    model_by_provider:
+      copilot: mai-code-1.1-flash
     prompt: |
       Copilot wrote this PR — you may NOT edit its branch. Render your judgment as
       a formal GitHub PR review so Copilot can revise and a human can gate it.

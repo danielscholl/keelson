@@ -34,6 +34,8 @@ converge:
 nodes:
   - id: extract-pr
     model: balanced
+    model_by_provider:
+      copilot: mai-code-1.1-flash
     prompt: |
       Find the PR or MR number for this request.
 
@@ -1334,6 +1336,8 @@ nodes:
     depends_on: [converge-check]
     context: fresh
     model: balanced
+    model_by_provider:
+      copilot: mai-code-1.1-flash
     prompt: |
       Produce the final resolve-pr summary.
 

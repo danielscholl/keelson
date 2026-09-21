@@ -22,6 +22,7 @@ import type {
 } from "@keelson/shared";
 import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
 import type { OpStatus, OpStore } from "./op-store.ts";
+import { summarizeInputs } from "./workflow-tools.ts";
 import type { WorkflowController } from "./workflows-handler.ts";
 
 // Workflow ops carry this prefix so run_status/run_events/run_cancel route to the
@@ -196,7 +197,7 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
     return c.listRuns().map((run) => ({
       id: `${WF_PREFIX}${run.runId}`,
       kind: `workflow:${run.workflowName}`,
-      title: null,
+      title: summarizeInputs(c.getRun(run.runId)?.inputs) || null,
       owner: "workflow",
       status: mapWorkflowStatus(run.status),
       steerable: false,
@@ -214,7 +215,7 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
     return {
       id: `${WF_PREFIX}${runId}`,
       kind: `workflow:${detail.workflowName}`,
-      title: null,
+      title: summarizeInputs(detail.inputs) || null,
       owner: "workflow",
       status: mapWorkflowStatus(detail.status),
       steerable: false,

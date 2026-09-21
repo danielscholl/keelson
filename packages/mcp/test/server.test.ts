@@ -520,6 +520,36 @@ describe("createKeelsonMcpServer — policy gate", () => {
     expect((res.content as Array<{ text: string }>)[0]?.text).toBe("token=[REDACTED]");
   });
 
+  test("an error result is redacted too and stays an error", async () => {
+    registerTool({
+      name: "osdu_read",
+      description: "read",
+      inputSchema: z.object({}),
+      execute: async (_input, ctx) => {
+        ctx.emit({
+          type: "tool_result",
+          toolUseId: "",
+          content: "run failed\ninputs: token=SECRET123",
+          isError: true,
+        });
+      },
+    });
+    const client = await connect({
+      policyGate: {
+        evaluateToolCall: async () => ({ outcome: "allow" }),
+        evaluateToolResult: async ({ result }) => ({
+          outcome: "allow",
+          data: String(result).replace("SECRET123", "[REDACTED]"),
+        }),
+      },
+    });
+    const res = await client.callTool({ name: "osdu_read", arguments: {} });
+    expect(res.isError).toBe(true);
+    expect((res.content as Array<{ text: string }>)[0]?.text).toBe(
+      "run failed\ninputs: token=[REDACTED]",
+    );
+  });
+
   test("the gate sees the call's tool name and args", async () => {
     readTool("osdu_read", "rows");
     let seen: { tool: string; args?: unknown } | undefined;
