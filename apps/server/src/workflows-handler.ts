@@ -3112,7 +3112,15 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       // Held until run_started rather than broadcast here: preflight runs before
       // any client has subscribed, and broadcast drops frames with no listener.
       pendingPreflightNotice = `preflight not checked: ${result.notChecked.join(", ")}`;
-      store.setRunPreflightNotice(runId, pendingPreflightNotice);
+      try {
+        store.setRunPreflightNotice(runId, pendingPreflightNotice);
+      } catch (err) {
+        console.warn(
+          `[workflows] failed to persist preflight notice for ${runId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
     }
     if (result.violations.length > 0) {
       const error = `preflight failed:\n${formatPreflightViolations(result)}`;

@@ -1521,7 +1521,7 @@ nodes:
     prompt: run
 `,
       );
-      const { app, activeRuns, db, subscribers } = makeRig(makeSuccessfulPromptHandler());
+      const { app, activeRuns, db, store, subscribers } = makeRig(makeSuccessfulPromptHandler());
 
       const startRes = await app.fetch(
         postRun("http://test/api/workflows/preflight-offline/runs", { inputs: {} }),
@@ -1541,6 +1541,27 @@ nodes:
         nodeId: null,
         message: "preflight not checked: offline-catalog",
       });
+
+      const persistPreflightNotice = store.setRunPreflightNotice;
+      store.setRunPreflightNotice = () => {
+        throw new Error("notice write failed");
+      };
+      try {
+        const retryRes = await app.fetch(
+          postRun("http://test/api/workflows/preflight-offline/runs", { inputs: {} }),
+        );
+        const { runId: retryRunId } = (await retryRes.json()) as { runId: string };
+        const retryDone = activeRuns.get(retryRunId)?.done;
+        const retryRun = await pollUntilTerminal(app, retryRunId);
+        await retryDone;
+
+        expect(retryRun.status).toBe("succeeded");
+        expect(retryRun.preflightNotice).toBeNull();
+        expect(activeRuns.get(retryRunId)).toBeUndefined();
+      } finally {
+        store.setRunPreflightNotice = persistPreflightNotice;
+      }
+
       db.close();
       const reopened = openDatabase({ path: dbPath });
       try {
