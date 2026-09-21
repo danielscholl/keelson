@@ -652,9 +652,32 @@ nodes:
         local value="$3"
         local truncated="$4"
         local state="$5"
-        local filter="${6:-}"
+        local json_field="${6:-}"
         local target="$OUT/$filename"
         rm -f -- "$target"
+
+        extract_json_string() {
+          local source="${1:-}"
+          KEELSON_JSON_FIELD="$json_field" KEELSON_JSON_SOURCE="$source" bun -e '
+            const field = process.env.KEELSON_JSON_FIELD;
+            const source = process.env.KEELSON_JSON_SOURCE;
+            const input = source ? await Bun.file(source).text() : await Bun.stdin.text();
+            let payload;
+            try {
+              payload = JSON.parse(input);
+            } catch {
+              console.error("current output is malformed JSON");
+              process.exit(1);
+            }
+            const extracted = payload?.[field];
+            if (typeof extracted !== "string") {
+              console.error(`current output is missing string field: ${field}`);
+              process.exit(1);
+            }
+            process.stdout.write(`${extracted}\n`);
+          '
+        }
+
         if [ "$state" != "completed" ]; then
           printf 'left %s absent: current lane state is %s\n' "$filename" "${state:-unknown}"
           return
@@ -663,8 +686,8 @@ nodes:
             printf 'left %s absent: current output spill is unavailable\n' "$filename"
             return
           fi
-          if [ -n "$filter" ]; then
-            if ! jq -er "$filter" "$spill" > "$target"; then
+          if [ -n "$json_field" ]; then
+            if ! extract_json_string "$spill" > "$target"; then
               rm -f -- "$target"
               printf 'failed to extract %s from current output\n' "$filename" >&2
               return 1
@@ -676,8 +699,8 @@ nodes:
           printf 'left %s absent: full current output is unavailable\n' "$filename"
           return
         elif [ -n "$value" ]; then
-          if [ -n "$filter" ]; then
-            if ! printf '%s' "$value" | jq -er "$filter" > "$target"; then
+          if [ -n "$json_field" ]; then
+            if ! printf '%s' "$value" | extract_json_string > "$target"; then
               rm -f -- "$target"
               printf 'failed to extract %s from current output\n' "$filename" >&2
               return 1
@@ -717,5 +740,5 @@ nodes:
         "${KEELSON_NODE_synthesize_OUTPUT:-}" \
         "${KEELSON_NODE_synthesize_OUTPUT_TRUNCATED:-}" \
         "${KEELSON_NODE_synthesize_STATE:-}" \
-        '.report | select(type == "string")'
+        report
       finish

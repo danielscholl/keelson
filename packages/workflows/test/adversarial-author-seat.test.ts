@@ -9,7 +9,15 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ENV_VALUE_MAX_CHARS } from "../src/handlers/subprocess.ts";
@@ -102,6 +110,18 @@ function tempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "keelson-adversarial-author-"));
   tmps.push(dir);
   return dir;
+}
+
+function pathWithoutJq(): string {
+  const bin = tempDir();
+  const commands = ["bash", "cat", "mkdir", "rm", "sed"] as const;
+  for (const command of commands) {
+    const executable = Bun.which(command);
+    if (executable === null) throw new Error(`Unable to locate ${command}`);
+    symlinkSync(executable, join(bin, command));
+  }
+  symlinkSync(process.execPath, join(bin, "bun"));
+  return bin;
 }
 
 function runSave(definition: WorkflowDefinition, overrides: Readonly<Record<string, string>> = {}) {
@@ -214,6 +234,7 @@ shimDescribe("adversarial-review output persistence", () => {
       KEELSON_NODE_synthesize_OUTPUT: "[keelson: output truncated]",
       KEELSON_NODE_synthesize_OUTPUT_FILE: verdictSpill,
       KEELSON_NODE_synthesize_OUTPUT_TRUNCATED: "1",
+      PATH: pathWithoutJq(),
     });
 
     expect(result.exitCode).toBe(0);
@@ -256,12 +277,40 @@ shimDescribe("adversarial-review output persistence", () => {
         open_questions: [],
         report: "current verdict",
       }),
+      PATH: pathWithoutJq(),
     });
 
     expect(result.exitCode).toBe(0);
     expect(existsSync(join(out, "review-risk.md"))).toBe(false);
     expect(readFileSync(join(out, "review-logic.md"), "utf8")).toBe("current logic\n");
+    expect(readFileSync(join(out, "verdict.md"), "utf8")).toBe("current verdict\n");
     expect(result.stdout).toContain("left review-risk.md absent: current lane produced no output");
+  });
+
+  test.each([
+    {
+      label: "malformed JSON",
+      output: "not JSON",
+      error: "current output is malformed JSON",
+    },
+    {
+      label: "a missing report",
+      output: JSON.stringify({ verdict: "CONFIRMED" }),
+      error: "current output is missing string field: report",
+    },
+  ])("rejects $label without leaving a verdict artifact", ({ output, error }) => {
+    const definition = workflow();
+    const out = tempDir();
+    const result = runSave(definition, {
+      KEELSON_INPUTS_out: out,
+      KEELSON_NODE_synthesize_OUTPUT: output,
+      PATH: pathWithoutJq(),
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(existsSync(join(out, "verdict.md"))).toBe(false);
+    expect(result.stderr).toContain(error);
+    expect(result.stderr).toContain("failed to extract verdict.md from current output");
   });
 
   test("leaves a failed lane absent and propagates its failure after saving successful lanes", () => {
