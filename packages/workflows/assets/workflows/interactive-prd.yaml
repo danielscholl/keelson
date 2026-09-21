@@ -24,6 +24,8 @@ nodes:
   # ─── Phase 1: Initiate — understand the idea ────────────────────────────────
   - id: initiate
     model: balanced
+    model_by_provider:
+      copilot: mai-code-1.1-flash
     prompt: |
       You are a sharp product manager starting a PRD. Think from first principles
       — primitives, not features.

@@ -1,6 +1,6 @@
 ---
 title: design-artifact
-description: Authors and publishes a designed, self-contained HTML page to the canvas through a fail-closed palette-validation gate, on whatever model the server offers.
+description: Authors and publishes a designed, self-contained HTML page to the canvas through a fail-closed palette-validation gate, on the active provider's deep tier.
 sidebar:
   order: 9
 ---
@@ -30,9 +30,9 @@ keelson workflow run design-artifact --inputs ARGUMENTS="chart the last 30 days 
 ```
 
 It pins no provider, so it runs against whatever the server registered. A page's
-quality tracks the authoring model, so this is the one catalog workflow you pin
-*up*: set `provider:`/`model:` in the file (or `KEELSON_WORKFLOW_PROVIDER`) to
-author at your strongest option. Unlike the GitHub-facing workflows it needs no
+quality tracks the authoring model, so `author` runs the `deep` tier at
+`effort: xhigh`, and on Copilot it pins `gpt-6-astra`. Set `provider:` in the
+file (or `KEELSON_WORKFLOW_PROVIDER`) to author somewhere else. Unlike the GitHub-facing workflows it needs no
 `gh` CLI, no approval gate, and no human pause; any provider with the tool
 registry can run it.
 
@@ -55,7 +55,7 @@ retry chain of them.
 
 | Node | Kind | What it does |
 | --- | --- | --- |
-| `author` | prompt | Reads `canvas_design_guide` (`page`, then `form` when the page carries a chart, then `color`), authors one self-contained token-themed HTML page from `$ARGUMENTS`, and publishes it with `canvas_publish`, retrying on a rejected palette. Capped to `canvas_publish` and `canvas_design_guide`, bounded by a five-minute idle timeout. |
+| `author` | prompt | Reads `canvas_design_guide` (`page`, then `form` when the page carries a chart, then `color`), authors one self-contained token-themed HTML page from `$ARGUMENTS`, and publishes it with `canvas_publish`, retrying on a rejected palette. Capped to `canvas_publish` and `canvas_design_guide`, bounded by a 30-minute idle timeout. |
 
 ### The parts worth a second look
 
