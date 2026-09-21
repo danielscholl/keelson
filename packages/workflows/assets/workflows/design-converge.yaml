@@ -532,6 +532,10 @@ nodes:
         echo "manifest belongs to a different run" >&2
         exit 1
       fi
+      if [ "${KEELSON_NODE_synthesize_STATE:-unknown}" != "completed" ]; then
+        echo "complete requires a successful synthesis" >&2
+        exit 1
+      fi
       for FILE in \
         proposal-a.md proposal-b.md proposal-c.md \
         critique-by-a.md critique-by-b.md critique-by-c.md \

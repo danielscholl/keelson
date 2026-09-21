@@ -299,6 +299,22 @@ describe("design-converge", () => {
     }
   }, 30_000);
 
+  test("fails completion when every proposal fails", async () => {
+    const fixture = makeFixture();
+    try {
+      const { summary } = await runPanel(fixture, {
+        failed: new Set(["propose-a", "propose-b", "propose-c"]),
+      });
+      expect(summary.status).toBe("failed");
+      expect(summary.nodes.synthesize.state).toBe("skipped");
+      expect(summary.nodes.persist.state).toBe("completed");
+      expect(summary.nodes.complete.state).toBe("failed");
+      expect(summary.nodes.decide.state).toBe("skipped");
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   test("reports collapse from effective routes rather than intended model pins", async () => {
     const collapsedFixture = makeFixture();
     const diverseFixture = makeFixture();
