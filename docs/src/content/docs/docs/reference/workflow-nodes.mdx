@@ -281,12 +281,20 @@ provider taking precedence over both. A case that sets `model` but no
 that entry still wins. A model
 tier resolves through the operator's configured class override, the provider's
 `modelClasses`, then the provider default. `auto` also uses the provider default.
-For prompt nodes, a new run started from the CLI, the SPA, or the API checks
-pinned literal model ids and effort against the effective provider's live
-catalog before executing its first node. A resumed run keeps the result it
-already passed rather than re-checking, and a run started by a rib, such as a
-region's cadence refresh, skips the check entirely. Run the same check without
-executing with
+Static resolution includes every node that opens a provider session: `prompt`,
+`command`, and `loop`. Those nodes determine the native, degrades, or blocked
+tier and any model-diversity collapse. Deterministic and control nodes are
+excluded.
+
+For a new run started from the CLI, the SPA, or the API, the same provider-bound
+nodes are checked for pinned literal model ids and effort against the effective
+provider's live catalog before the first node executes. Preflight also checks a
+tier when the operator's `config.json` `modelClasses` override explicitly pins
+it to a concrete id. Tiers that use provider `modelClasses` or the provider
+default remain unchecked because they are not explicitly operator-pinned. A
+resumed run keeps the result it already passed rather than re-checking, and a
+run started by a rib, such as a region's cadence refresh, skips the check
+entirely. Run the same check without executing with
 `keelson workflow validate <name> --live`. An unavailable catalog is reported as
 `not checked` and does not block the run. A model that reports no effort list is
 not judged on effort.
