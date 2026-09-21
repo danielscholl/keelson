@@ -459,6 +459,11 @@ nodes:
       End with **Corrections**: any claim in the artifact or a reviewer's output
       that your check proved wrong — stated plainly.
 
+      The literal labels `Claim:` and `Result:` are machine checked. Use both
+      for every record. Leading list markers and Markdown bold markers are
+      accepted, but headings, numbering, or different labels must not replace
+      `Claim:` or `Result:`.
+
   - id: verify-gate
     depends_on: [verify]
     always_run: true
