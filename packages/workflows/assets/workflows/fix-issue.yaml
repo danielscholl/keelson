@@ -734,10 +734,14 @@ nodes:
            repos squash-merge the PR title into release notes, so a wrong
            format pollutes the changelog. Default to conventional commit
            style only when the repo shows no signal.
-         - Body: from the project's PR template if present, otherwise:
+         - Body: when a PR template exists, follow its sections exactly and add
+           no section it does not ask for. Otherwise use:
            - **What**: 1-2 sentences
            - **Why now**: motivation, link to the issue with `Fixes #<num>`
            - **Test plan**: commands you actually ran with PASS/FAIL
+         - Do not use em dashes in the body; use a comma, colon, parentheses, or
+           separate sentences instead.
+         - Describe the change under review, not the run that produced it.
          - Record results, not intent: the test plan lists what this run
            actually executed with outcomes, and the body ships NO unchecked
            checkboxes. When the template has a checklist, check the items

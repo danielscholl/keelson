@@ -463,6 +463,16 @@ describe("fix-issue criteria coverage placement", () => {
     expect(prompt).not.toContain("COVERAGE: SKIPPED");
     expect(workflowNode("approve-plan").depends_on).toContain("coverage-ready");
   });
+
+  test("makes the repository template authoritative", () => {
+    const prompt = workflowNode("create-pr").prompt;
+    expect(prompt).toContain("follow its sections exactly and add");
+    expect(prompt).toContain("no section it does not ask for");
+    expect(prompt).toContain("Do not use em dashes in the body");
+    expect(prompt).toContain("Describe the change under review, not the run that produced it");
+    expect(prompt).not.toContain("plain ASCII");
+    expect(prompt).not.toContain("en dashes");
+  });
 });
 
 describe("fix-issue CI triage criteria", () => {
