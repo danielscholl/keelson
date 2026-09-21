@@ -152,10 +152,10 @@ Repeats one agent prompt until a completion signal, hard-bounded by
 `until` is required even when you set `until_bash`, and `retry` is not allowed on
 a loop, which manages its own iteration.
 
-Node-level `model` and `provider` are forwarded to every iteration and validated
-by the run-start model-catalog preflight. Other AI-specific node fields, such as
-`model_by_provider`, `model_by`, `effort`, and tool filters, are ignored with a
-warning.
+Node-level `model` and `provider` are forwarded to every iteration and are subject
+to applicable run-start model-catalog preflight checks. Other AI-specific node
+fields, such as `model_by_provider`, `model_by`, `effort`, and tool filters, are
+ignored with a warning.
 
 ## Deterministic nodes
 
