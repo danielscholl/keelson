@@ -247,9 +247,7 @@ describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
 
     expect(result.status).toBe("failed");
     expect(result.nodes).toEqual({});
-    expect(result.error).toContain(
-      "- prompt: model 'retired-model' is not in stub's live catalog",
-    );
+    expect(result.error).toContain("- prompt: model 'retired-model' is not in stub's live catalog");
     expect(result.error).toContain(
       "- command: model 'retired-model' is not in stub's live catalog",
     );

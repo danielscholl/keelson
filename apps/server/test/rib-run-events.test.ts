@@ -166,196 +166,194 @@ describe("rib run events", () => {
   });
 
   test("a scheduled preflight violation fails durably and reaches the owning rib", async () => {
-      const events: RibRunEvent[] = [];
-      const { db, store, controller } = makeRig({
-        bash: "echo unused",
-        nodes: [{ id: "work", provider: "stub", model: "retired-model", prompt: "run" }],
-        onRibRunEvent: (_ribId, event) => events.push(event),
+    const events: RibRunEvent[] = [];
+    const { db, store, controller } = makeRig({
+      bash: "echo unused",
+      nodes: [{ id: "work", provider: "stub", model: "retired-model", prompt: "run" }],
+      onRibRunEvent: (_ribId, event) => events.push(event),
+    });
+    try {
+      const result = controller.startRun({
+        name: "provision",
+        inputs: {},
+        workingDir: tmpDir,
+        origin: "scheduled",
       });
-      try {
-        const result = controller.startRun({
-          name: "provision",
-          inputs: {},
-          workingDir: tmpDir,
-          origin: "scheduled",
-        });
-        if (!result.ok) throw new Error(result.message);
+      if (!result.ok) throw new Error(result.message);
 
-        await until(() => events.length === 2);
-        expect(store.getRun(result.runId)).toMatchObject({
-          status: "failed",
-          error:
-            "preflight failed:\n- work: model 'retired-model' is not in stub's live catalog",
-        });
-        expect(events[1]).toMatchObject({
-          runId: result.runId,
-          status: "failed",
-          error:
-            "preflight failed:\n- work: model 'retired-model' is not in stub's live catalog",
-        });
-      } finally {
-        db.close();
-      }
+      await until(() => events.length === 2);
+      expect(store.getRun(result.runId)).toMatchObject({
+        status: "failed",
+        error: "preflight failed:\n- work: model 'retired-model' is not in stub's live catalog",
+      });
+      expect(events[1]).toMatchObject({
+        runId: result.runId,
+        status: "failed",
+        error: "preflight failed:\n- work: model 'retired-model' is not in stub's live catalog",
+      });
+    } finally {
+      db.close();
+    }
   });
 
   test("a scheduled run persists an unavailable-catalog notice", async () => {
-      const capabilities = {
-        sessionResume: false,
-        streaming: false,
-        tools: false,
-        reasoningEffort: false,
-        models: ["offline-model"],
-        defaultModel: "offline-model",
-      };
-      registerProvider({
-        id: "offline-controller",
-        displayName: "Offline controller",
-        capabilities,
-        builtIn: false,
-        factory: () => ({
-          getType: () => "offline-controller",
-          getCapabilities: () => capabilities,
-          async *sendQuery() {
-            yield { type: "done" as const };
-          },
-          async listModels() {
-            return [{ id: "offline-model" }];
-          },
-          async listModelsLive() {
-            throw new Error("offline");
-          },
-        }),
+    const capabilities = {
+      sessionResume: false,
+      streaming: false,
+      tools: false,
+      reasoningEffort: false,
+      models: ["offline-model"],
+      defaultModel: "offline-model",
+    };
+    registerProvider({
+      id: "offline-controller",
+      displayName: "Offline controller",
+      capabilities,
+      builtIn: false,
+      factory: () => ({
+        getType: () => "offline-controller",
+        getCapabilities: () => capabilities,
+        async *sendQuery() {
+          yield { type: "done" as const };
+        },
+        async listModels() {
+          return [{ id: "offline-model" }];
+        },
+        async listModelsLive() {
+          throw new Error("offline");
+        },
+      }),
+    });
+    const { db, store, controller } = makeRig({
+      bash: "echo unused",
+      provider: "offline-controller",
+      nodes: [{ id: "work", model: "offline-model", prompt: "run" }],
+      promptHandler: successfulPromptHandler,
+    });
+    try {
+      const result = controller.startRun({
+        name: "provision",
+        inputs: {},
+        workingDir: tmpDir,
+        origin: "scheduled",
       });
-      const { db, store, controller } = makeRig({
-        bash: "echo unused",
-        provider: "offline-controller",
-        nodes: [{ id: "work", model: "offline-model", prompt: "run" }],
-        promptHandler: successfulPromptHandler,
-      });
-      try {
-        const result = controller.startRun({
-          name: "provision",
-          inputs: {},
-          workingDir: tmpDir,
-          origin: "scheduled",
-        });
-        if (!result.ok) throw new Error(result.message);
+      if (!result.ok) throw new Error(result.message);
 
-        await until(() => store.getRun(result.runId)?.status === "succeeded");
-        expect(store.getRun(result.runId)?.preflightNotice).toBe(
-          "preflight not checked: offline-controller",
-        );
-      } finally {
-        db.close();
-        unregisterProvider("offline-controller");
-      }
+      await until(() => store.getRun(result.runId)?.status === "succeeded");
+      expect(store.getRun(result.runId)?.preflightNotice).toBe(
+        "preflight not checked: offline-controller",
+      );
+    } finally {
+      db.close();
+      unregisterProvider("offline-controller");
+    }
   });
 
   test("a scheduled deterministic run performs no catalog I/O", async () => {
-      let catalogCalls = 0;
-      const capabilities = {
-        sessionResume: false,
-        streaming: false,
-        tools: false,
-        reasoningEffort: false,
-        models: ["unused-model"],
-        defaultModel: "unused-model",
-      };
-      registerProvider({
-        id: "unused-controller",
-        displayName: "Unused controller",
-        capabilities,
-        builtIn: false,
-        factory: () => ({
-          getType: () => "unused-controller",
-          getCapabilities: () => capabilities,
-          async *sendQuery() {
-            yield { type: "done" as const };
-          },
-          async listModels() {
-            return [{ id: "unused-model" }];
-          },
-          async listModelsLive() {
-            catalogCalls += 1;
-            return [{ id: "unused-model" }];
-          },
-        }),
+    let catalogCalls = 0;
+    const capabilities = {
+      sessionResume: false,
+      streaming: false,
+      tools: false,
+      reasoningEffort: false,
+      models: ["unused-model"],
+      defaultModel: "unused-model",
+    };
+    registerProvider({
+      id: "unused-controller",
+      displayName: "Unused controller",
+      capabilities,
+      builtIn: false,
+      factory: () => ({
+        getType: () => "unused-controller",
+        getCapabilities: () => capabilities,
+        async *sendQuery() {
+          yield { type: "done" as const };
+        },
+        async listModels() {
+          return [{ id: "unused-model" }];
+        },
+        async listModelsLive() {
+          catalogCalls += 1;
+          return [{ id: "unused-model" }];
+        },
+      }),
+    });
+    const { db, store, controller } = makeRig({
+      bash: "echo deterministic",
+      provider: "unused-controller",
+    });
+    try {
+      const result = controller.startRun({
+        name: "provision",
+        inputs: {},
+        workingDir: tmpDir,
+        origin: "scheduled",
       });
-      const { db, store, controller } = makeRig({
-        bash: "echo deterministic",
-        provider: "unused-controller",
-      });
-      try {
-        const result = controller.startRun({
-          name: "provision",
-          inputs: {},
-          workingDir: tmpDir,
-          origin: "scheduled",
-        });
-        if (!result.ok) throw new Error(result.message);
+      if (!result.ok) throw new Error(result.message);
 
-        await until(() => store.getRun(result.runId)?.status === "succeeded");
-        expect(catalogCalls).toBe(0);
-      } finally {
-        db.close();
-        unregisterProvider("unused-controller");
-      }
+      await until(() => store.getRun(result.runId)?.status === "succeeded");
+      expect(catalogCalls).toBe(0);
+    } finally {
+      db.close();
+      unregisterProvider("unused-controller");
+    }
   });
 
   test("the environment can disable scheduled preflight", async () => {
-      const prior = process.env.KEELSON_WORKFLOW_PREFLIGHT;
-      process.env.KEELSON_WORKFLOW_PREFLIGHT = "0";
-      const { db, store, controller } = makeRig({
-        bash: "echo unused",
-        nodes: [{ id: "work", provider: "stub", model: "retired-model", prompt: "run" }],
-        promptHandler: successfulPromptHandler,
+    const prior = process.env.KEELSON_WORKFLOW_PREFLIGHT;
+    process.env.KEELSON_WORKFLOW_PREFLIGHT = "0";
+    const { db, store, controller } = makeRig({
+      bash: "echo unused",
+      nodes: [{ id: "work", provider: "stub", model: "retired-model", prompt: "run" }],
+      promptHandler: successfulPromptHandler,
+    });
+    try {
+      const result = controller.startRun({
+        name: "provision",
+        inputs: {},
+        workingDir: tmpDir,
+        origin: "scheduled",
       });
-      try {
-        const result = controller.startRun({
-          name: "provision",
-          inputs: {},
-          workingDir: tmpDir,
-          origin: "scheduled",
-        });
-        if (!result.ok) throw new Error(result.message);
+      if (!result.ok) throw new Error(result.message);
 
-        await until(() => store.getRun(result.runId)?.status === "succeeded");
-      } finally {
-        if (prior === undefined) delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
-        else process.env.KEELSON_WORKFLOW_PREFLIGHT = prior;
-        db.close();
-      }
+      await until(() => store.getRun(result.runId)?.status === "succeeded");
+    } finally {
+      if (prior === undefined) delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
+      else process.env.KEELSON_WORKFLOW_PREFLIGHT = prior;
+      db.close();
+    }
   });
 
   test("config can disable scheduled preflight", async () => {
-      const priorConfig = process.env.KEELSON_CONFIG;
-      const priorEnv = process.env.KEELSON_WORKFLOW_PREFLIGHT;
-      const configPath = join(tmpDir, "config.json");
-      writeFileSync(configPath, JSON.stringify({ workflowPreflight: false }));
-      process.env.KEELSON_CONFIG = configPath;
-      delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
-      const { db, store, controller } = makeRig({
-        bash: "echo unused",
-        nodes: [{ id: "work", provider: "stub", model: "retired-model", prompt: "run" }],
-        promptHandler: successfulPromptHandler,
+    const priorConfig = process.env.KEELSON_CONFIG;
+    const priorEnv = process.env.KEELSON_WORKFLOW_PREFLIGHT;
+    const configPath = join(tmpDir, "config.json");
+    writeFileSync(configPath, JSON.stringify({ workflowPreflight: false }));
+    process.env.KEELSON_CONFIG = configPath;
+    delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
+    const { db, store, controller } = makeRig({
+      bash: "echo unused",
+      nodes: [{ id: "work", provider: "stub", model: "retired-model", prompt: "run" }],
+      promptHandler: successfulPromptHandler,
+    });
+    try {
+      const result = controller.startRun({
+        name: "provision",
+        inputs: {},
+        workingDir: tmpDir,
+        origin: "scheduled",
       });
-      try {
-        const result = controller.startRun({
-          name: "provision",
-          inputs: {},
-          workingDir: tmpDir,
-          origin: "scheduled",
-        });
-        if (!result.ok) throw new Error(result.message);
+      if (!result.ok) throw new Error(result.message);
 
-        await until(() => store.getRun(result.runId)?.status === "succeeded");
-      } finally {
-        if (priorConfig === undefined) delete process.env.KEELSON_CONFIG;
-        else process.env.KEELSON_CONFIG = priorConfig;
-        if (priorEnv === undefined) delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
-        else process.env.KEELSON_WORKFLOW_PREFLIGHT = priorEnv;
-        db.close();
-      }
+      await until(() => store.getRun(result.runId)?.status === "succeeded");
+    } finally {
+      if (priorConfig === undefined) delete process.env.KEELSON_CONFIG;
+      else process.env.KEELSON_CONFIG = priorConfig;
+      if (priorEnv === undefined) delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
+      else process.env.KEELSON_WORKFLOW_PREFLIGHT = priorEnv;
+      db.close();
+    }
   });
 
   test("a resume emits a fresh running→terminal pair for the same runId", async () => {

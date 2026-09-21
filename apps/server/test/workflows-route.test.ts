@@ -963,9 +963,9 @@ nodes:
     const definition: WorkflowDefinition = {
       name: opts.name,
       description: "bash",
-      nodes:
-        opts.nodes ??
-        [{ id: "x", bash: opts.sleepSeconds ? `sleep ${opts.sleepSeconds}` : "echo hi" }],
+      nodes: opts.nodes ?? [
+        { id: "x", bash: opts.sleepSeconds ? `sleep ${opts.sleepSeconds}` : "echo hi" },
+      ],
     };
     const catalog = bootstrapWorkflows({
       workflowDir: wfDir,
@@ -1030,8 +1030,7 @@ nodes:
 
     expect(await pollUntilTerminal(app, runId)).toMatchObject({
       status: "failed",
-      error:
-        "preflight failed:\n- collect: model 'retired-model' is not in stub's live catalog",
+      error: "preflight failed:\n- collect: model 'retired-model' is not in stub's live catalog",
     });
   });
 
