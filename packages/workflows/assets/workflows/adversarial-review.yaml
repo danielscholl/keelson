@@ -41,7 +41,9 @@ description: |
           under review. For a PR, use `refs/pull/N/head`; a bare SHA resolves
           only when its object is already local or advertised by the remote.
           Set `subject_required=1` to fail instead of falling back when a
-          provided subject cannot be snapshotted.
+          provided subject cannot be snapshotted. Optional `author` names the
+          model that wrote the artifact so it is excluded from every review,
+          verification, and synthesis seat.
   NOT for: Building or fixing code (use fix-issue), posting
            a GitHub PR review (use pr-review), or generating something new.
 
@@ -192,14 +194,35 @@ nodes:
         printf 'SUBJECT-SNAPSHOT: UNKNOWN marker-absent\n'
       fi
 
+  - id: author-seat
+    timeout: 15000
+    bash: |
+      set -euo pipefail
+      AUTHOR=$(printf '%s' "${KEELSON_INPUTS_author:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+      if [ -n "$AUTHOR" ]; then
+        printf '%s\n' "$AUTHOR"
+      else
+        printf 'seated\n'
+      fi
+
   # Three reviewers run in parallel with `context: fresh` so none sees another's
   # take, and with no tools — they reason over the inlined artifact alone.
   - id: reviewer-logic
-    depends_on: [intake]
+    depends_on: [intake, author-seat]
     context: fresh
     model: deep
     model_by_provider:
       copilot: claude-opus-5
+    model_by:
+      from: $author-seat.output
+      default: seated
+      cases:
+        seated:
+          model_by_provider:
+            copilot: claude-opus-5
+        claude-opus-5:
+          model_by_provider:
+            copilot: claude-opus-4.7
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: []
@@ -238,11 +261,21 @@ nodes:
       alone, hold-with-changes, or fail?
 
   - id: reviewer-evidence
-    depends_on: [intake]
+    depends_on: [intake, author-seat]
     context: fresh
     model: deep
     model_by_provider:
       copilot: gpt-5.6-sol
+    model_by:
+      from: $author-seat.output
+      default: seated
+      cases:
+        seated:
+          model_by_provider:
+            copilot: gpt-5.6-sol
+        gpt-5.6-sol:
+          model_by_provider:
+            copilot: gpt-6-astra
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: []
@@ -281,11 +314,21 @@ nodes:
       specific checkable claims the next node must independently confirm.
 
   - id: reviewer-risk
-    depends_on: [intake]
+    depends_on: [intake, author-seat]
     context: fresh
     model: deep
     model_by_provider:
       copilot: grok-4.6
+    model_by:
+      from: $author-seat.output
+      default: seated
+      cases:
+        seated:
+          model_by_provider:
+            copilot: grok-4.6
+        grok-4.6:
+          model_by_provider:
+            copilot: grok-4.5
     effort: high
     idle_timeout: 1800000
     allowed_tools: []
@@ -339,12 +382,22 @@ nodes:
   # than relaying any reviewer's citation. Default trigger_rule (all_success) —
   # a consensus verdict is not issued on a panel where a lane failed.
   - id: verify
-    depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk, subject-status]
+    depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk, subject-status, author-seat]
     always_run: true
     context: fresh
     model: deep
     model_by_provider:
       copilot: gpt-5.6-terra
+    model_by:
+      from: $author-seat.output
+      default: seated
+      cases:
+        seated:
+          model_by_provider:
+            copilot: gpt-5.6-terra
+        gpt-5.6-terra:
+          model_by_provider:
+            copilot: gpt-5.5
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: [Read, Glob, Grep]
@@ -432,6 +485,16 @@ nodes:
     model: deep
     model_by_provider:
       copilot: claude-opus-4.8
+    model_by:
+      from: $author-seat.output
+      default: seated
+      cases:
+        seated:
+          model_by_provider:
+            copilot: claude-opus-4.8
+        claude-opus-4.8:
+          model_by_provider:
+            copilot: claude-opus-4.7
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: []
