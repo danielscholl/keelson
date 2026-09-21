@@ -1194,7 +1194,7 @@ nodes:
     expect(echoed!.includes(`${sep}.worktrees${sep}`)).toBe(false);
   });
 
-  test("isolation requested but target is not a git repo: warns, runs in place", async () => {
+  test("isolation requested but target is not a git repo: fails before nodes", async () => {
     // Skip initRepo — directory is not a git repo.
     writeWorkflow(
       "bare.yaml",
@@ -1218,11 +1218,13 @@ nodes:
     const run = (await pollUntilTerminal(app, runId)) as {
       status: string;
       worktreePath: string | null;
+      error: string | null;
+      nodes: unknown[];
     };
-    // Run still succeeds — the warning is broadcast as a run_warning and
-    // execution falls back to the repo path.
-    expect(run.status).toBe("succeeded");
+    expect(run.status).toBe("failed");
     expect(run.worktreePath).toBeNull();
+    expect(run.error).toContain("worktree setup failed:");
+    expect(run.nodes).toEqual([]);
   });
 
   test("default base refreshes origin and excludes divergent checkout commits", async () => {

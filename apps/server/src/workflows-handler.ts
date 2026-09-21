@@ -240,6 +240,7 @@ function nodeTypeOf(node: DagNode): string {
 // isn't derivable here. bash / script / approval / cancel never call a model.
 const MODEL_NODE_TYPES: ReadonlySet<string> = new Set(["prompt", "command"]);
 const PREFLIGHT_FAILURE_PREFIX = "preflight failed:\n";
+const WORKTREE_SETUP_FAILURE_PREFIX = "worktree setup failed: ";
 
 function workflowToSummary(
   workflow: WorkflowDefinition,
@@ -1199,20 +1200,6 @@ function startRunCore(
         origin,
       })
     : undefined;
-  const isolationFallbackMode = resolveLockMode(workflow);
-  const isolationFallbackLock =
-    isolationOn &&
-    mutationLockManager !== undefined &&
-    isolationFallbackMode !== "none" &&
-    lockProjectId !== null
-      ? {
-          manager: mutationLockManager,
-          projectId: lockProjectId,
-          mode: isolationFallbackMode,
-          purpose: workflow.name,
-          owner: mutationLockOwner(origin, runId),
-        }
-      : undefined;
   const startedAt = new Date().toISOString();
   let conversation: ReturnType<ConversationStore["create"]> | undefined;
   try {
@@ -1300,7 +1287,6 @@ function startRunCore(
     ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
     ...(usageStore !== undefined ? { usageStore } : {}),
     ...(workspaceManager !== undefined ? { workspaceManager } : {}),
-    ...(isolationFallbackLock !== undefined ? { isolationFallbackLock } : {}),
   });
   try {
     activeRuns.register(runId, {
@@ -1508,20 +1494,6 @@ function resumeRunCore(
     workingDir: run.workingDir,
     projectsStore,
   });
-  const resumeIsolationFallbackMode = resolveLockMode(workflow);
-  const resumeIsolationFallbackLock =
-    resumeIsolation !== null &&
-    mutationLockManager !== undefined &&
-    resumeIsolationFallbackMode !== "none" &&
-    resumeLockProjectId !== null
-      ? {
-          manager: mutationLockManager,
-          projectId: resumeLockProjectId,
-          mode: resumeIsolationFallbackMode,
-          purpose: workflow.name,
-          owner: mutationLockOwner(run.origin, runId),
-        }
-      : undefined;
   let lockHandle: MutationLockHandle | undefined;
   try {
     lockHandle =
@@ -1593,9 +1565,6 @@ function resumeRunCore(
       ...(usageStore !== undefined ? { usageStore } : {}),
       ...(workspaceManager !== undefined ? { workspaceManager } : {}),
       ...(notebook !== undefined ? { notebook } : {}),
-      ...(resumeIsolationFallbackLock !== undefined
-        ? { isolationFallbackLock: resumeIsolationFallbackLock }
-        : {}),
       completedNodeOutputs,
       existingWorktreePath: run.worktreePath ?? undefined,
     });
@@ -3186,16 +3155,6 @@ interface ExecuteRunArgs {
   // a `workflow`-sourced event; undefined → capture is skipped.
   usageStore?: UsageStore;
   workspaceManager?: WorkspaceManager;
-  // Mutation lock to acquire before an isolation-requested run continues in
-  // place (repo probe/worktree creation fallback), so fallback never mutates
-  // the live checkout unlocked.
-  isolationFallbackLock?: {
-    manager: MutationLockManager;
-    projectId: string;
-    mode: "exclusive" | "shared";
-    purpose: string;
-    owner: string;
-  };
 }
 
 // Process-wide slot pool, lazily built so KEELSON_MAX_CONCURRENT_RUNS is read
@@ -3274,7 +3233,6 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     existingWorktreePath,
     usageStore,
     workspaceManager,
-    isolationFallbackLock,
   } = args;
   let pendingPreflightNotice: string | undefined;
   const closeBeforeStart = (status: "failed" | "cancelled", error: string | null) => {
@@ -3320,11 +3278,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     }
   }
   // Worktree lifecycle: create before the executor sees its first node, run
-  // against the worktree path, prune on success — but keep on failure so the
-  // operator can `cd` in and inspect. When the target isn't a git repo we
-  // warn-and-fall-back to running in place rather than failing the run; the
-  // workflow author may have isolation as a "best effort" preference for a
-  // shared workspace they don't always run in.
+  // against the worktree path, prune on success, and keep failures for inspection.
   let effectiveCwd = cwd;
   let worktreePathForCleanup: string | null = null;
   let cleanupOnSuccessOnly = false;
@@ -3333,8 +3287,6 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
   // this instead of re-reading from SQLite — test teardown can delete the DB
   // file between the executor returning and our cleanup running.
   let terminalStatus: WorkflowRunStatus | null = null;
-  let lockOnInPlaceIsolationFallback = false;
-  let isolationFallbackLockHandle: MutationLockHandle | undefined;
   // The run_done event is captured here rather than dispatched immediately so
   // the finally block can persist/broadcast it AFTER artifacts.cleanup() runs
   // — otherwise a client polling status can observe "succeeded" while the run's
@@ -3420,51 +3372,37 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       force: true,
     });
   };
-  if (existingWorktreePath !== undefined) {
-    effectiveCwd = existingWorktreePath;
-    worktreePathForCleanup = existingWorktreePath;
-    cleanupOnSuccessOnly = true;
-    const deps = await prepareDeps(existingWorktreePath, (await gitToplevel(cwd)) ?? cwd);
-    if (deps.error !== null) {
-      subscribers.broadcast(runId, {
-        type: "run_warning",
-        nodeId: null,
-        message: `worktree dependency install failed; continuing: ${deps.error}`,
-      });
-    }
-    if (deps.linkedLocalDeps.length > 0) {
-      subscribers.broadcast(runId, {
-        type: "run_warning",
-        nodeId: null,
-        message: `linked ${deps.linkedLocalDeps.length} local dependency symlink(s) into the worktree: ${deps.linkedLocalDeps.join(", ")}`,
-      });
-    }
-    if (deps.localDepLinkErrors.length > 0) {
-      subscribers.broadcast(runId, {
-        type: "run_warning",
-        nodeId: null,
-        message: `could not link ${deps.localDepLinkErrors.length} local dependency symlink(s); the worktree may not reach a green baseline: ${deps.localDepLinkErrors.join("; ")}`,
-      });
-    }
-  } else if (isolation !== null) {
-    let isRepo = false;
-    let probeError: string | null = null;
-    try {
-      isRepo = await isGitRepo(cwd);
-    } catch (err) {
-      probeError = err instanceof Error ? err.message : String(err);
-    }
-    if (!isRepo) {
-      lockOnInPlaceIsolationFallback = true;
-      subscribers.broadcast(runId, {
-        type: "run_warning",
-        nodeId: null,
-        message:
-          probeError !== null
-            ? `worktree isolation probe failed; running in place: ${probeError}`
-            : `worktree isolation requested but ${cwd} is not a git repo; running in place`,
-      });
-    } else {
+  try {
+    if (existingWorktreePath !== undefined) {
+      effectiveCwd = existingWorktreePath;
+      worktreePathForCleanup = existingWorktreePath;
+      cleanupOnSuccessOnly = true;
+      const deps = await prepareDeps(existingWorktreePath, (await gitToplevel(cwd)) ?? cwd);
+      if (deps.error !== null) {
+        subscribers.broadcast(runId, {
+          type: "run_warning",
+          nodeId: null,
+          message: `worktree dependency install failed; continuing: ${deps.error}`,
+        });
+      }
+      if (deps.linkedLocalDeps.length > 0) {
+        subscribers.broadcast(runId, {
+          type: "run_warning",
+          nodeId: null,
+          message: `linked ${deps.linkedLocalDeps.length} local dependency symlink(s) into the worktree: ${deps.linkedLocalDeps.join(", ")}`,
+        });
+      }
+      if (deps.localDepLinkErrors.length > 0) {
+        subscribers.broadcast(runId, {
+          type: "run_warning",
+          nodeId: null,
+          message: `could not link ${deps.localDepLinkErrors.length} local dependency symlink(s); the worktree may not reach a green baseline: ${deps.localDepLinkErrors.join("; ")}`,
+        });
+      }
+    } else if (isolation !== null) {
+      if (!(await isGitRepo(cwd))) {
+        throw new Error(`could not confirm '${cwd}' is a git repository`);
+      }
       const branch = resolveBranchTemplate(isolation.branchTemplate, {
         workflow: workflow.name,
         runId,
@@ -3484,84 +3422,78 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         }
       }
       const base = isolation.base ?? (await resolveDefaultBranch(cwd));
-      try {
-        if (base !== null) {
-          try {
-            store.setRunWorktreeBase(runId, base);
-          } catch (err) {
-            console.warn(
-              `[workflows] failed to persist worktree base for ${runId}: ${
-                err instanceof Error ? err.message : String(err)
-              }`,
-            );
-          }
-          if (await headDivergesFrom(cwd, base)) {
-            subscribers.broadcast(runId, {
-              type: "run_warning",
-              nodeId: null,
-              message: `current HEAD is not contained in ${base}; creating isolated worktree branch from ${base}`,
-            });
-          }
+      if (base !== null) {
+        try {
+          store.setRunWorktreeBase(runId, base);
+        } catch (err) {
+          console.warn(
+            `[workflows] failed to persist worktree base for ${runId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
         }
-        const created = await prepareWorktree({
-          repoPath: cwd,
-          // The link source is the checkout ROOT: the run's cwd may sit below it,
-          // and its node_modules would be the wrong one (or absent). Ask git
-          // rather than trusting projectRootPath, which falls back to the raw
-          // workingDir when that dir isn't inside a registered project.
-          linkSourceRepoPath: (await gitToplevel(cwd)) ?? isolation.projectRootPath,
-          branch,
-          dest,
-          base,
-          // Persist before the slow dependency install so a crash mid-install
-          // leaves a resumable run pointing at its (registered) worktree.
-          onCreated: (worktreePath) => {
-            effectiveCwd = worktreePath;
-            worktreePathForCleanup = worktreePath;
-            cleanupOnSuccessOnly = true;
-            try {
-              store.setRunWorktreePath(runId, worktreePath);
-            } catch (err) {
-              console.warn(
-                `[workflows] failed to persist worktree path for ${runId}: ${
-                  err instanceof Error ? err.message : String(err)
-                }`,
-              );
-            }
-          },
-        });
-        effectiveCwd = created.worktreePath;
-        if (created.depsError !== null) {
+        if (await headDivergesFrom(cwd, base)) {
           subscribers.broadcast(runId, {
             type: "run_warning",
             nodeId: null,
-            message: `worktree dependency install failed; continuing: ${created.depsError}`,
+            message: `current HEAD is not contained in ${base}; creating isolated worktree branch from ${base}`,
           });
         }
-        if (created.deps.linkedLocalDeps.length > 0) {
-          subscribers.broadcast(runId, {
-            type: "run_warning",
-            nodeId: null,
-            message: `linked ${created.deps.linkedLocalDeps.length} local dependency symlink(s) into the worktree: ${created.deps.linkedLocalDeps.join(", ")}`,
-          });
-        }
-        if (created.deps.localDepLinkErrors.length > 0) {
-          subscribers.broadcast(runId, {
-            type: "run_warning",
-            nodeId: null,
-            message: `could not link ${created.deps.localDepLinkErrors.length} local dependency symlink(s); the worktree may not reach a green baseline: ${created.deps.localDepLinkErrors.join("; ")}`,
-          });
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        lockOnInPlaceIsolationFallback = true;
+      }
+      const created = await prepareWorktree({
+        repoPath: cwd,
+        // The link source is the checkout ROOT: the run's cwd may sit below it,
+        // and its node_modules would be the wrong one (or absent). Ask git
+        // rather than trusting projectRootPath, which falls back to the raw
+        // workingDir when that dir isn't inside a registered project.
+        linkSourceRepoPath: (await gitToplevel(cwd)) ?? isolation.projectRootPath,
+        branch,
+        dest,
+        base,
+        // Persist before the slow dependency install so a crash mid-install
+        // leaves a resumable run pointing at its (registered) worktree.
+        onCreated: (worktreePath) => {
+          effectiveCwd = worktreePath;
+          worktreePathForCleanup = worktreePath;
+          cleanupOnSuccessOnly = true;
+          store.setRunWorktreePath(runId, worktreePath);
+        },
+      });
+      effectiveCwd = created.worktreePath;
+      if (created.depsError !== null) {
         subscribers.broadcast(runId, {
           type: "run_warning",
           nodeId: null,
-          message: `worktree creation failed; running in place: ${message}`,
+          message: `worktree dependency install failed; continuing: ${created.depsError}`,
+        });
+      }
+      if (created.deps.linkedLocalDeps.length > 0) {
+        subscribers.broadcast(runId, {
+          type: "run_warning",
+          nodeId: null,
+          message: `linked ${created.deps.linkedLocalDeps.length} local dependency symlink(s) into the worktree: ${created.deps.linkedLocalDeps.join(", ")}`,
+        });
+      }
+      if (created.deps.localDepLinkErrors.length > 0) {
+        subscribers.broadcast(runId, {
+          type: "run_warning",
+          nodeId: null,
+          message: `could not link ${created.deps.localDepLinkErrors.length} local dependency symlink(s); the worktree may not reach a green baseline: ${created.deps.localDepLinkErrors.join("; ")}`,
         });
       }
     }
+    if (abort.signal.aborted) {
+      closeBeforeStart("cancelled", null);
+      return;
+    }
+  } catch (err) {
+    if (abort.signal.aborted) {
+      closeBeforeStart("cancelled", null);
+      return;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    closeBeforeStart("failed", `${WORKTREE_SETUP_FAILURE_PREFIX}${message}`);
+    return;
   }
 
   // Per-node timestamps + content-parts accumulators. The executor emits
@@ -3903,14 +3835,6 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       : publishStructured;
 
   try {
-    if (lockOnInPlaceIsolationFallback && isolationFallbackLock !== undefined) {
-      isolationFallbackLockHandle = isolationFallbackLock.manager.acquire({
-        projectId: isolationFallbackLock.projectId,
-        mode: isolationFallbackLock.mode,
-        purpose: isolationFallbackLock.purpose,
-        owner: isolationFallbackLock.owner,
-      });
-    }
     await runWorkflow({
       workflow,
       runId,
@@ -3968,10 +3892,6 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     terminalStatus = "failed" as WorkflowRunStatus;
     subscribers.broadcast(runId, { type: "run_done", status: "failed" });
   } finally {
-    if (isolationFallbackLockHandle !== undefined) {
-      releaseMutationLockNow(runId, isolationFallbackLockHandle);
-      isolationFallbackLockHandle = undefined;
-    }
     // Worktree cleanup before activeRuns.delete so the shutdown drain awaits
     // it via `entry.done`. Only on a clean terminal status — failed /
     // cancelled runs leave the worktree behind for inspection. `keelson
