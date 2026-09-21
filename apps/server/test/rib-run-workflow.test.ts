@@ -100,6 +100,7 @@ describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
       efforts?: readonly ReasoningEffortLevel[];
       unavailable?: boolean;
       onCatalogCall?: () => void;
+      beforeCatalogResult?: (signal?: AbortSignal) => Promise<void>;
     } = {},
   ): void {
     const capabilities = {
@@ -124,8 +125,9 @@ describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
         async listModels() {
           return [{ id: model }];
         },
-        async listModelsLive() {
+        async listModelsLive(signal?: AbortSignal) {
           opts.onCatalogCall?.();
+          await opts.beforeCatalogResult?.(signal);
           if (opts.unavailable === true) throw new Error("offline");
           return [
             {
@@ -323,6 +325,50 @@ describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
       expect(result.status).toBe("succeeded");
     } finally {
       unregisterProvider("rib-offline");
+    }
+  });
+
+  test("shutdown aborts and drains an in-memory run during catalog preflight", async () => {
+    let catalogStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      catalogStarted = resolve;
+    });
+    let releaseCatalog = (): void => {};
+    registerCatalogProvider("rib-slow", "rib-model", {
+      beforeCatalogResult: (signal) =>
+        new Promise<void>((resolve) => {
+          catalogStarted();
+          const release = (): void => {
+            signal?.removeEventListener("abort", release);
+            resolve();
+          };
+          releaseCatalog = release;
+          if (signal?.aborted) release();
+          else signal?.addEventListener("abort", release, { once: true });
+        }),
+    });
+    const { controller, activeRuns } = makeController({ promptHandler: successfulPromptHandler });
+    const running = controller.runDefinition(
+      {
+        name: "slow-preflight",
+        description: "wait in catalog preflight",
+        provider: "rib-slow",
+        nodes: [{ id: "prompt", model: "rib-model", prompt: "run" }],
+      },
+      {},
+      tmpDir,
+    );
+
+    await started;
+    try {
+      expect(activeRuns.size()).toBe(1);
+      await activeRuns.abortAll();
+      expect(await running).toMatchObject({ status: "cancelled" });
+      expect(activeRuns.size()).toBe(0);
+    } finally {
+      releaseCatalog();
+      await running;
+      unregisterProvider("rib-slow");
     }
   });
 

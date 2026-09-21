@@ -1725,51 +1725,6 @@ export function createWorkflowController(
       const projectId = projectsStore?.findByPathPrefix(workingDir)?.id;
       const runId = crypto.randomUUID();
       const abort = new AbortController();
-      if (resolveWorkflowPreflight(loadKeelsonConfig())) {
-        const preflight = await resolveCatalogPreflight(definitionObj, {
-          defaultProviderId: defaultProvider,
-          signal: abort.signal,
-        });
-        if (preflight.notChecked.length > 0 && preflight.violations.length === 0) {
-          console.warn(
-            `[workflows] rib-run ${definitionObj.name} preflight not checked: ${preflight.notChecked.join(", ")}`,
-          );
-        }
-        if (preflight.violations.length > 0) {
-          return {
-            status: "failed",
-            nodes: {},
-            error: `preflight failed:\n${formatPreflightViolations(preflight)}`,
-          };
-        }
-      }
-      const handlers = new Map<string, NodeHandler>([
-        ["bash", bashHandler],
-        ["prompt", promptHandler],
-        // No UI to pause on for a rib-driven run — approval fails fast, cancel aborts.
-        [
-          "approval",
-          makeApprovalHandler({
-            awaitApproval: async (_runId, nodeId, message) => {
-              throw new Error(
-                `approval node '${nodeId}' cannot resolve in a rib-run workflow (message: "${message}")`,
-              );
-            },
-          }),
-        ],
-        [
-          "cancel",
-          makeCancelHandler({
-            requestCancel: async () => {
-              abort.abort();
-            },
-          }),
-        ],
-        ["command", makeCommandHandler({ promptHandler })],
-        ["loop", makeLoopHandler({ promptHandler, runUntilBashProbe: defaultRunUntilBashProbe })],
-        ["script", makeScriptHandler()],
-      ]);
-      const artifacts = await RunArtifactsDir.create(runId);
       // Register in the shared run table so a server shutdown aborts an in-flight
       // rib-run's bash/script subtree like a named run — a headless run writes no
       // store row (a unique key keeps it out of dedupe/findActive), leaving only a
@@ -1786,65 +1741,116 @@ export function createWorkflowController(
         dedupeKey: runId,
         conversationId: "",
       });
+      let artifacts: RunArtifactsDir | undefined;
       try {
-        const nodeStart = new Map<string, string>();
-        const summary = await runWorkflow({
-          workflow: definitionObj,
-          runId,
-          inputs,
-          handlers,
-          cwd: workingDir,
-          abortSignal: abort.signal,
-          ...(defaultProvider !== undefined ? { defaultProvider } : {}),
-          ...(usageStore !== undefined
-            ? {
-                onEvent: (event: RunStreamEvent) => {
-                  if (event.type === "node_started") {
-                    nodeStart.set(event.nodeId, new Date().toISOString());
-                    return;
-                  }
-                  if (event.type !== "node_done") return;
-                  const usage = coerceTokenUsage(event.result.usage);
-                  const provider = sanitizeProvenanceField(event.result.provider);
-                  const model = sanitizeProvenanceField(event.result.model);
-                  if (usage === undefined || provider === null || model === null) return;
-                  const completedAt = new Date().toISOString();
-                  recordNodeUsage({
-                    usageStore,
-                    usage,
-                    provider,
-                    model,
-                    status: event.result.status,
-                    startedAt: nodeStart.get(event.nodeId) ?? null,
-                    completedAt,
-                    attribution: {
-                      runId,
-                      nodeId: event.nodeId,
-                      workflowName: definitionObj.name,
-                      conversationId: null,
-                      projectId: projectId ?? null,
-                      ribId: ribId ?? null,
-                    },
-                  });
-                  nodeStart.delete(event.nodeId);
-                },
-              }
-            : {}),
-          ...artifacts.runWorkflowOptions(),
-          ...(memoryTools !== undefined ? { memoryTools } : {}),
-          ...(projectId !== undefined ? { projectId } : {}),
-        });
-        return summaryToRibWorkflowResult(summary);
-      } catch (err) {
-        return {
-          status: "failed",
-          nodes: {},
-          error: err instanceof Error ? err.message : String(err),
-        };
+        if (resolveWorkflowPreflight(loadKeelsonConfig())) {
+          const preflight = await resolveCatalogPreflight(definitionObj, {
+            defaultProviderId: defaultProvider,
+            signal: abort.signal,
+          });
+          if (preflight.notChecked.length > 0 && preflight.violations.length === 0) {
+            console.warn(
+              `[workflows] rib-run ${definitionObj.name} preflight not checked: ${preflight.notChecked.join(", ")}`,
+            );
+          }
+          if (preflight.violations.length > 0) {
+            return {
+              status: "failed",
+              nodes: {},
+              error: `preflight failed:\n${formatPreflightViolations(preflight)}`,
+            };
+          }
+        }
+        const handlers = new Map<string, NodeHandler>([
+          ["bash", bashHandler],
+          ["prompt", promptHandler],
+          // No UI to pause on for a rib-driven run — approval fails fast, cancel aborts.
+          [
+            "approval",
+            makeApprovalHandler({
+              awaitApproval: async (_runId, nodeId, message) => {
+                throw new Error(
+                  `approval node '${nodeId}' cannot resolve in a rib-run workflow (message: "${message}")`,
+                );
+              },
+            }),
+          ],
+          [
+            "cancel",
+            makeCancelHandler({
+              requestCancel: async () => {
+                abort.abort();
+              },
+            }),
+          ],
+          ["command", makeCommandHandler({ promptHandler })],
+          ["loop", makeLoopHandler({ promptHandler, runUntilBashProbe: defaultRunUntilBashProbe })],
+          ["script", makeScriptHandler()],
+        ]);
+        artifacts = await RunArtifactsDir.create(runId);
+        try {
+          const nodeStart = new Map<string, string>();
+          const summary = await runWorkflow({
+            workflow: definitionObj,
+            runId,
+            inputs,
+            handlers,
+            cwd: workingDir,
+            abortSignal: abort.signal,
+            ...(defaultProvider !== undefined ? { defaultProvider } : {}),
+            ...(usageStore !== undefined
+              ? {
+                  onEvent: (event: RunStreamEvent) => {
+                    if (event.type === "node_started") {
+                      nodeStart.set(event.nodeId, new Date().toISOString());
+                      return;
+                    }
+                    if (event.type !== "node_done") return;
+                    const usage = coerceTokenUsage(event.result.usage);
+                    const provider = sanitizeProvenanceField(event.result.provider);
+                    const model = sanitizeProvenanceField(event.result.model);
+                    if (usage === undefined || provider === null || model === null) return;
+                    const completedAt = new Date().toISOString();
+                    recordNodeUsage({
+                      usageStore,
+                      usage,
+                      provider,
+                      model,
+                      status: event.result.status,
+                      startedAt: nodeStart.get(event.nodeId) ?? null,
+                      completedAt,
+                      attribution: {
+                        runId,
+                        nodeId: event.nodeId,
+                        workflowName: definitionObj.name,
+                        conversationId: null,
+                        projectId: projectId ?? null,
+                        ribId: ribId ?? null,
+                      },
+                    });
+                    nodeStart.delete(event.nodeId);
+                  },
+                }
+              : {}),
+            ...artifacts.runWorkflowOptions(),
+            ...(memoryTools !== undefined ? { memoryTools } : {}),
+            ...(projectId !== undefined ? { projectId } : {}),
+          });
+          return summaryToRibWorkflowResult(summary);
+        } catch (err) {
+          return {
+            status: "failed",
+            nodes: {},
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
       } finally {
         activeRuns.delete(runId);
-        await artifacts.cleanup();
-        settleDone();
+        try {
+          await artifacts?.cleanup();
+        } finally {
+          settleDone();
+        }
       }
     },
     startRun({ name, inputs, workingDir: rawWorkingDir, project, isolation, origin }) {
