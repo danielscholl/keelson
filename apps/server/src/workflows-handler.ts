@@ -1374,12 +1374,9 @@ function resumeRunCore(
   const providerOverride = store.getRunProviderOverride(runId);
   const rerunPreflight = run.error?.startsWith(PREFLIGHT_FAILURE_PREFIX) === true;
   const persistedIsolationEnabled = store.getRunIsolationEnabled(runId);
-  if (
-    rerunPreflight &&
-    run.worktreePath === null &&
-    persistedIsolationEnabled === null &&
-    workflow.worktree?.enabled === undefined
-  ) {
+  // The workflow's current worktree.enabled can't stand in for a missing choice:
+  // a per-run isolation override may have forced the opposite.
+  if (rerunPreflight && run.worktreePath === null && persistedIsolationEnabled === null) {
     return {
       ok: false,
       reason: "not_terminal",
@@ -1387,9 +1384,7 @@ function resumeRunCore(
     };
   }
   const resumeIsolationEnabled =
-    rerunPreflight &&
-    run.worktreePath === null &&
-    (persistedIsolationEnabled ?? workflow.worktree?.enabled ?? false);
+    rerunPreflight && run.worktreePath === null && persistedIsolationEnabled === true;
   const resumeIsolation: IsolationConfig | null = resumeIsolationEnabled
     ? {
         branchTemplate: workflow.worktree?.branch,
@@ -3146,6 +3141,12 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     isolationFallbackLock,
   } = args;
   let pendingPreflightNotice: string | undefined;
+  const closeBeforeStart = (status: "failed" | "cancelled", error: string | null) => {
+    store.updateRunStatus({ runId, status, completedAt: new Date().toISOString(), error });
+    subscribers.broadcast(runId, { type: "run_done", status });
+    activeRuns.delete(runId);
+    subscribers.closeRun(runId);
+  };
   if (preflight) {
     // The same default the executor runs with, captured when the routes were
     // built; re-resolving here could preflight one provider and run another.
@@ -3154,6 +3155,12 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       ...(providerOverride !== undefined ? { providerOverride } : {}),
       signal: abort.signal,
     });
+    // An aborted lookup resolves as an unavailable catalog, so without this a
+    // cancelled run would record a notice and go on to prepare a worktree.
+    if (abort.signal.aborted) {
+      closeBeforeStart("cancelled", null);
+      return;
+    }
     if (result.notChecked.length > 0 && result.violations.length === 0) {
       console.warn(
         `[workflows] run ${runId} preflight not checked: ${result.notChecked.join(", ")}`,
@@ -3172,16 +3179,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       }
     }
     if (result.violations.length > 0) {
-      const error = `${PREFLIGHT_FAILURE_PREFIX}${formatPreflightViolations(result)}`;
-      store.updateRunStatus({
-        runId,
-        status: "failed",
-        completedAt: new Date().toISOString(),
-        error,
-      });
-      subscribers.broadcast(runId, { type: "run_done", status: "failed" });
-      activeRuns.delete(runId);
-      subscribers.closeRun(runId);
+      closeBeforeStart("failed", `${PREFLIGHT_FAILURE_PREFIX}${formatPreflightViolations(result)}`);
       return;
     }
   }

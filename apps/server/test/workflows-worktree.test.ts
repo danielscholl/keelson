@@ -21,7 +21,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import { isRegisteredProvider, registerStubProvider } from "@keelson/providers";
+import {
+  isRegisteredProvider,
+  registerProvider,
+  registerStubProvider,
+  unregisterProvider,
+} from "@keelson/providers";
 import { TERMINAL_RUN_STATUSES, type WorkflowRunStatus } from "@keelson/shared";
 import * as worktrees from "@keelson/workflows";
 import { Hono } from "hono";
@@ -881,8 +886,131 @@ nodes:
       nodes: Array<{ outputText: string | null }>;
     };
     expect(completed.status).toBe("succeeded");
-    expect(completed.nodes[0]?.outputText).toContain(`${sep}.worktrees${sep}`);
+    expect(completed.nodes[0]?.outputText?.replace(/\\/g, "/")).toContain("/.worktrees/");
     expect(existsSync(join(repoDir, "sentinel.txt"))).toBe(false);
+  });
+
+  test("resume refuses a preflight failure whose isolation choice was never persisted", async () => {
+    await initRepo(repoDir);
+    writeWorkflow(
+      "preflight-legacy.yaml",
+      `name: preflight-legacy
+description: a forced-isolation run recorded before isolation choices were persisted
+provider: stub
+worktree:
+  enabled: false
+nodes:
+  - id: probe
+    model: retired-model
+    prompt: run
+`,
+    );
+    const { app, catalog, projectId } = makeRig();
+    const start = await app.fetch(
+      new Request("http://test/api/workflows/preflight-legacy/runs", {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({ inputs: {}, projectId, isolation: "worktree" }),
+      }),
+    );
+    expect(start.status).toBe(200);
+    const { runId } = (await start.json()) as { runId: string };
+    const failed = (await pollUntilTerminal(app, runId)) as { status: string };
+    expect(failed.status).toBe("failed");
+
+    const legacy = openDatabase({ path: dbPath });
+    legacy.prepare("UPDATE workflow_runs SET isolation_enabled = NULL WHERE id = ?").run(runId);
+    legacy.close();
+
+    const workflow = catalog.get("preflight-legacy", { projectId });
+    if (!workflow) throw new Error("workflow missing from catalog");
+    workflow.nodes = [{ id: "probe", bash: "touch sentinel.txt" }];
+
+    const resume = await app.fetch(
+      new Request(`http://test/api/workflows/runs/${runId}/resume-run`, {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(resume.status).toBe(409);
+    expect(existsSync(join(repoDir, "sentinel.txt"))).toBe(false);
+  });
+
+  test("a run cancelled during preflight never prepares a worktree", async () => {
+    await initRepo(repoDir);
+    const capabilities = {
+      sessionResume: false,
+      streaming: false,
+      tools: false,
+      reasoningEffort: false,
+      models: ["slow-model"],
+      defaultModel: "slow-model",
+    };
+    registerProvider({
+      id: "slow-cancel-catalog",
+      displayName: "Slow cancel catalog",
+      capabilities,
+      builtIn: false,
+      factory: () => ({
+        getType: () => "slow-cancel-catalog",
+        getCapabilities: () => capabilities,
+        async *sendQuery() {
+          yield { type: "done" as const };
+        },
+        async listModels() {
+          throw new Error("offline");
+        },
+        async listModelsLive() {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          throw new Error("offline");
+        },
+      }),
+    });
+    try {
+      writeWorkflow(
+        "preflight-cancel.yaml",
+        `name: preflight-cancel
+description: cancel while the live catalog lookup is pending
+provider: slow-cancel-catalog
+worktree:
+  enabled: true
+nodes:
+  - id: pinned
+    model: slow-model
+    prompt: run
+`,
+      );
+      const { app, projectId } = makeRig();
+      const start = await app.fetch(
+        new Request("http://test/api/workflows/preflight-cancel/runs", {
+          method: "POST",
+          headers: { origin: ORIGIN, "content-type": "application/json" },
+          body: JSON.stringify({ inputs: {}, projectId }),
+        }),
+      );
+      expect(start.status).toBe(200);
+      const { runId } = (await start.json()) as { runId: string };
+      const cancel = await app.fetch(
+        new Request(`http://test/api/workflows/runs/${runId}`, {
+          method: "DELETE",
+          headers: { origin: ORIGIN },
+        }),
+      );
+      expect(cancel.status).toBe(200);
+
+      const run = (await pollUntilTerminal(app, runId)) as {
+        status: string;
+        worktreePath: string | null;
+        preflightNotice: string | null;
+      };
+      expect(run.status).toBe("cancelled");
+      expect(run.worktreePath).toBeNull();
+      expect(run.preflightNotice).toBeNull();
+      expect(existsSync(join(repoDir, ".worktrees"))).toBe(false);
+    } finally {
+      unregisterProvider("slow-cancel-catalog");
+    }
   });
 
   test("worktree isolation still runs when workspaceManager is omitted", async () => {
