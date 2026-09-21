@@ -111,7 +111,9 @@ When a run is isolated, keelson:
 
 </Steps>
 
-Isolation is **opt-in**, decided per run:
+Isolation is **opt-in** as workflow policy, but once requested it is a launch
+requirement. Keelson never turns an isolation setup error into in-place
+execution:
 
 - A workflow declares it in YAML with `worktree.enabled: true`. The bundled
   workflows that change code (`fix-issue`, `plan-act-evaluate`, `resolve-pr`)
@@ -120,6 +122,34 @@ Isolation is **opt-in**, decided per run:
   workflow's default.
 - With neither flag, the workflow's own default decides; a workflow that does not
   declare isolation runs in place.
+
+Before the first node starts, keelson confirms the source is a Git repository,
+prepares the worktree, and persists its identity. A failed repository probe,
+worktree creation, dependency preparation, or identity write fails the run with
+a setup error. No node executes in the source checkout. The server-down CLI path
+uses the same rule.
+
+Run status preserves the distinction after the live warning stream is gone.
+`isolationEnabled` records required, disabled, or unknown legacy intent;
+`worktreeEstablished` latches true once setup succeeds; and `worktreePath` is the
+retained checkout, if one remains. `workingDir` is the requested source, not an
+effective execution directory for a required run whose setup failed. After
+cleanup, `worktreeEstablished` remains true while `worktreePath` becomes null.
+
+Resume also fails closed. A known-required setup failure with no completed nodes
+can retry setup. A required run with node history but no retained worktree is
+refused, because those outputs cannot safely move to another checkout. A legacy
+run whose isolation intent is unknown and whose checkout is gone is also
+refused. Start a fresh isolated run when status reports that isolation is
+unavailable.
+
+An advanced caller that already owns a workspace lease can deliberately avoid a
+nested worktree. Pass the lease path as the working directory and set the API
+override to `isolation: "none"`, or use `--working-dir <lease-path>
+--no-worktree`. The workflow then runs in place from its perspective. Keep the
+lease alive across pauses and resume, and release it yourself in `finally`;
+workflow completion, cancellation, and cleanup do not release a caller-owned
+lease.
 
 A failed or cancelled run keeps its worktree so you can inspect it. Once the run
 is finished, `keelson worktree prune` removes the worktree and its `keelson/…`
