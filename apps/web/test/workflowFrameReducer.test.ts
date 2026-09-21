@@ -251,10 +251,20 @@ describe("hydrateFromSnapshot running overlay", () => {
 });
 
 describe("mergeWarnings", () => {
-  test("keeps a durable preflight notice once when its live frame was received", () => {
+  test("keeps identical ordinary warning frames as distinct events", () => {
+    const warning = { nodeId: "author", message: "provider fallback" };
+    const h = harness();
+
+    h.apply({ type: "run_warning", ...warning });
+    h.apply({ type: "run_warning", ...warning });
+
+    expect(h.run().warnings).toEqual([warning, warning]);
+  });
+
+  test("keeps a durable preflight notice once across live delivery and reconnect", () => {
     const notice = { nodeId: null, message: "preflight not checked: offline-catalog" };
-    expect(
-      mergeWarnings([notice], [notice, { nodeId: "author", message: "provider fallback" }]),
-    ).toEqual([notice, { nodeId: "author", message: "provider fallback" }]);
+    const hydratedWithLive = mergeWarnings([notice], [notice]);
+
+    expect(mergeWarnings([notice], hydratedWithLive)).toEqual([notice]);
   });
 });

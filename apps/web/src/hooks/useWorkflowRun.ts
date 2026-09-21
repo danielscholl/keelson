@@ -286,13 +286,14 @@ export function mergeWarnings(
 ): RunView["warnings"] {
   const merged = [...snapshot];
   for (const warning of live) {
+    const durablePreflightNotice =
+      warning.nodeId === null && warning.message.startsWith("preflight not checked:");
     if (
-      !merged.some(
-        (candidate) => candidate.nodeId === warning.nodeId && candidate.message === warning.message,
-      )
-    ) {
-      merged.push(warning);
-    }
+      durablePreflightNotice &&
+      merged.some((candidate) => candidate.nodeId === null && candidate.message === warning.message)
+    )
+      continue;
+    merged.push(warning);
   }
   return merged;
 }
