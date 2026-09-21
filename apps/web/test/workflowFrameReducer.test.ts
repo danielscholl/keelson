@@ -18,8 +18,8 @@ import {
 } from "../src/hooks/useWorkflowRun.ts";
 
 // Drives the pure frame reducer with plain state closures — no React, no WS.
-function harness() {
-  let run: RunView = { runId: "r1", status: "loading", warnings: [] };
+function harness(initialRun: RunView = { runId: "r1", status: "loading", warnings: [] }) {
+  let run = initialRun;
   let nodes: Record<string, NodeView> = {};
   const setRun = (update: RunView | ((prev: RunView) => RunView)): void => {
     run = typeof update === "function" ? update(run) : update;
@@ -39,6 +39,7 @@ function harness() {
         setNodes as React.Dispatch<React.SetStateAction<Record<string, NodeView>>>,
       ),
     node: (id: string) => nodes[id],
+    run: () => run,
   };
 }
 
@@ -193,6 +194,16 @@ describe("hydrateFromSnapshot running overlay", () => {
     expect(run.warnings).toEqual([
       { nodeId: null, message: "preflight not checked: offline-catalog" },
     ]);
+  });
+
+  test("a replayed preflight warning is not duplicated after hydration", () => {
+    const message = "preflight not checked: offline-catalog";
+    const { run } = hydrateFromSnapshot(detail({ preflightNotice: message }));
+    const h = harness(run);
+
+    h.apply({ type: "run_warning", nodeId: null, message });
+
+    expect(h.run().warnings).toEqual([{ nodeId: null, message }]);
   });
 
   test("an awaiting row keeps its approval state over the overlay", () => {

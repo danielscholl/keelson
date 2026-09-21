@@ -803,7 +803,7 @@ export function applyFrame(
     case "run_warning":
       setRun((prev) => ({
         ...prev,
-        warnings: [...prev.warnings, { nodeId: frame.nodeId, message: frame.message }],
+        warnings: mergeWarnings(prev.warnings, [{ nodeId: frame.nodeId, message: frame.message }]),
       }));
       return;
 
