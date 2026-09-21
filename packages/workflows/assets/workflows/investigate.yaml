@@ -218,9 +218,9 @@ nodes:
       Write the evidence file at `$intake.output.out`. That requested file is the
       only intentional write. Use this table:
 
-      | Claim | Level | Citation | Verified | Verification note |
-      | --- | --- | --- | --- | --- |
-      | ... | documented|source-verified|runtime-tested | ... | NOT CHECKED | |
+      | Claim # | Claim | Level | Citation | Verified | Verification note |
+      | --- | --- | --- | --- | --- | --- |
+      | n | ... | documented / source-verified / runtime-tested | ... | NOT CHECKED | |
 
       Include a `## Not checked` section. Do not publish or post the result.
       Do not write a tally or model attribution. Reply only with JSON containing
@@ -315,12 +315,13 @@ nodes:
     model: balanced
     allowed_tools: [Read, Edit]
     prompt: |
-      Update only the evidence file at `$intake.output.out`. Match verifier
-      verdicts to claim numbers. Put exactly CONFIRMED, CONFIRMED in part,
-      REFUTED, UNVERIFIABLE, or NOT CHECKED in each `Verified` cell. Put the
-      verifier's explanation in `Verification note`; keep refuted claims in
-      place. Preserve the claim, level, and citation. Do not add a count,
-      verification summary, run id, date, provider, or model attribution.
+      Update only the evidence file at `$intake.output.out`. Match each verifier
+      verdict's `n` to the evidence table's `Claim #` cell; never match by row
+      position. Put exactly CONFIRMED, CONFIRMED in part, REFUTED, UNVERIFIABLE,
+      or NOT CHECKED in each `Verified` cell. Put the verifier's explanation in
+      `Verification note`; keep refuted claims in place. Preserve the claim
+      number, claim, level, and citation. Do not add a count, verification
+      summary, run id, date, provider, or model attribution.
 
       Verifier output:
       $verify.output
@@ -329,102 +330,129 @@ nodes:
 
   - id: finalize
     depends_on: [publish]
-    runtime: uv
+    runtime: bun
     timeout: 60000
     script: |
-      import os
-      import re
-      from datetime import datetime, timezone
-      from pathlib import Path
+      import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 
-      LEVELS = {"documented", "source-verified", "runtime-tested"}
-      VERDICTS = (
-          "confirmed",
-          "confirmed in part",
-          "refuted",
-          "unverifiable",
-          "not checked",
-      )
-      HEADING = "## Verification summary"
+      const LEVELS = new Set(["documented", "source-verified", "runtime-tested"]);
+      const VERDICTS = [
+        "confirmed",
+        "confirmed in part",
+        "refuted",
+        "unverifiable",
+        "not checked",
+      ];
+      const HEADING = "## Verification summary";
 
-      def required_env(name):
-          value = os.environ.get(name, "").strip()
-          if not value:
-              raise SystemExit(f"missing required runtime attribution: {name}")
-          return value
+      function fail(message) {
+        console.error(message);
+        process.exit(1);
+      }
 
-      def cells(line):
-          value = line.strip()
-          if not value.startswith("|") or not value.endswith("|"):
-              return None
-          return [cell.strip().replace("\\|", "|") for cell in re.split(r"(?<!\\)\|", value[1:-1])]
+      function requiredEnv(name) {
+        const value = (process.env[name] ?? "").trim();
+        if (!value) fail(`missing required runtime attribution: ${name}`);
+        return value;
+      }
 
-      def separator(row, width):
-          return (
-              row is not None
-              and len(row) == width
-              and all(re.fullmatch(r":?-{3,}:?", cell) for cell in row)
-          )
+      function cells(line) {
+        const value = line.trim();
+        if (!value.startsWith("|") || !value.endsWith("|")) return null;
+        return value
+          .slice(1, -1)
+          .split(/(?<!\\)\|/)
+          .map((cell) => cell.trim().replaceAll("\\|", "|"));
+      }
 
-      out = Path(required_env("KEELSON_INPUTS_out"))
-      if not out.is_file() or out.stat().st_size == 0:
-          raise SystemExit(f"evidence file is missing or empty: {out}")
+      function separator(row, width) {
+        return row !== null && row.length === width && row.every((cell) => /^:?-{3,}:?$/.test(cell));
+      }
 
-      text = out.read_text(encoding="utf-8")
-      lines = text.splitlines()
-      counts = {verdict: 0 for verdict in VERDICTS}
-      claims = 0
-      index = 0
-      while index < len(lines):
-          header = cells(lines[index])
-          normalized = [cell.casefold() for cell in header] if header is not None else []
-          required = {"claim", "level", "citation", "verified"}
-          if not required.issubset(normalized):
-              index += 1
-              continue
-          positions = {name: normalized.index(name) for name in required}
-          if index + 1 >= len(lines) or not separator(cells(lines[index + 1]), len(header)):
-              raise SystemExit("claim table is missing its Markdown separator row")
-          index += 2
-          while index < len(lines):
-              row = cells(lines[index])
-              if row is None:
-                  break
-              if len(row) != len(header):
-                  raise SystemExit(f"claim table row has {len(row)} cells; expected {len(header)}")
-              claim = row[positions["claim"]].strip()
-              if not claim:
-                  raise SystemExit("claim table contains an empty Claim cell")
-              level = row[positions["level"]].strip().casefold()
-              if level not in LEVELS:
-                  raise SystemExit(f"unsupported claim level: {row[positions['level']]}")
-              verdict = row[positions["verified"]].strip().strip("*`").casefold()
-              if verdict not in counts:
-                  raise SystemExit(f"unsupported verification verdict: {row[positions['verified']]}")
-              counts[verdict] += 1
-              claims += 1
-              index += 1
-          continue
+      const out = requiredEnv("KEELSON_INPUTS_out");
+      if (!existsSync(out) || !statSync(out).isFile() || statSync(out).size === 0) {
+        fail(`evidence file is missing or empty: ${out}`);
+      }
 
-      if claims == 0:
-          raise SystemExit("evidence file has no claim table with Claim, Level, Citation, and Verified columns")
+      let text = readFileSync(out, "utf8");
+      const lines = text.split(/\r\n|\n|\r/);
+      const counts = Object.fromEntries(VERDICTS.map((verdict) => [verdict, 0]));
+      const claimNumbers = new Set();
+      let claims = 0;
+      let index = 0;
+      while (index < lines.length) {
+        const header = cells(lines[index]);
+        const normalized = header?.map((cell) => cell.toLowerCase()) ?? [];
+        const required = ["claim #", "claim", "level", "citation", "verified"];
+        if (!required.every((name) => normalized.includes(name))) {
+          index += 1;
+          continue;
+        }
+        const positions = Object.fromEntries(
+          required.map((name) => [name, normalized.indexOf(name)]),
+        );
+        if (
+          index + 1 >= lines.length ||
+          !separator(cells(lines[index + 1]), header.length)
+        ) {
+          fail("claim table is missing its Markdown separator row");
+        }
+        index += 2;
+        while (index < lines.length) {
+          const row = cells(lines[index]);
+          if (row === null) break;
+          if (row.length !== header.length) {
+            fail(`claim table row has ${row.length} cells; expected ${header.length}`);
+          }
+          const claimNumber = row[positions["claim #"]].trim();
+          if (!/^[1-9]\d*$/.test(claimNumber)) {
+            fail(`invalid Claim # cell: ${row[positions["claim #"]]}`);
+          }
+          if (claimNumbers.has(claimNumber)) {
+            fail(`duplicate Claim # cell: ${claimNumber}`);
+          }
+          claimNumbers.add(claimNumber);
+          const claim = row[positions.claim].trim();
+          if (!claim) fail("claim table contains an empty Claim cell");
+          const citation = row[positions.citation].trim();
+          if (!citation) fail("claim table contains an empty Citation cell");
+          const level = row[positions.level].trim().toLowerCase();
+          if (!LEVELS.has(level)) {
+            fail(`unsupported claim level: ${row[positions.level]}`);
+          }
+          const verdict = row[positions.verified]
+            .trim()
+            .replace(/^[*`]+|[*`]+$/g, "")
+            .toLowerCase();
+          if (!Object.hasOwn(counts, verdict)) {
+            fail(`unsupported verification verdict: ${row[positions.verified]}`);
+          }
+          counts[verdict] += 1;
+          claims += 1;
+          index += 1;
+        }
+      }
 
-      if f"\n{HEADING}\n" in text:
-          text = text.rsplit(f"\n{HEADING}\n", 1)[0].rstrip()
-      else:
-          text = text.rstrip()
+      if (claims === 0) {
+        fail(
+          "evidence file has no claim table with Claim #, Claim, Level, Citation, and Verified columns",
+        );
+      }
 
-      run_id = required_env("KEELSON_RUN_ID")[:8]
-      date = datetime.now(timezone.utc).date().isoformat()
-      investigator_provider = required_env("KEELSON_NODE_investigate_PROVIDER")
-      investigator_model = required_env("KEELSON_NODE_investigate_MODEL")
-      verifier_provider = required_env("KEELSON_NODE_verify_PROVIDER")
-      verifier_model = required_env("KEELSON_NODE_verify_MODEL")
-      attribution = (
-          f"Run {run_id}, {date}: investigated by `{investigator_model}` via "
-          f"`{investigator_provider}`; rows added or changed in this run were verified by "
-          f"`{verifier_model}` via `{verifier_provider}`."
-      )
-      tally = "Tally: " + "; ".join(f"{name}={counts[name]}" for name in VERDICTS) + "."
-      out.write_text(f"{text}\n\n{HEADING}\n\n{attribution}\n\n{tally}\n", encoding="utf-8")
-      print(f"Finalized {claims} claims for run {run_id}: {tally}")
+      const headingMarker = `\n${HEADING}\n`;
+      const headingIndex = text.lastIndexOf(headingMarker);
+      text = (headingIndex >= 0 ? text.slice(0, headingIndex) : text).trimEnd();
+
+      const runId = requiredEnv("KEELSON_RUN_ID").slice(0, 8);
+      const date = new Date().toISOString().slice(0, 10);
+      const investigatorProvider = requiredEnv("KEELSON_NODE_investigate_PROVIDER");
+      const investigatorModel = requiredEnv("KEELSON_NODE_investigate_MODEL");
+      const verifierProvider = requiredEnv("KEELSON_NODE_verify_PROVIDER");
+      const verifierModel = requiredEnv("KEELSON_NODE_verify_MODEL");
+      const attribution =
+        `Run ${runId}, ${date}: investigated by \`${investigatorModel}\` via ` +
+        `\`${investigatorProvider}\`; rows added or changed in this run were verified by ` +
+        `\`${verifierModel}\` via \`${verifierProvider}\`.`;
+      const tally = `Tally: ${VERDICTS.map((name) => `${name}=${counts[name]}`).join("; ")}.`;
+      writeFileSync(out, `${text}\n\n${HEADING}\n\n${attribution}\n\n${tally}\n`);
+      console.log(`Finalized ${claims} claims for run ${runId}: ${tally}`);

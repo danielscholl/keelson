@@ -15,6 +15,7 @@ interface WorkflowNode {
   id: string;
   bash?: string;
   script?: string;
+  runtime?: string;
   depends_on?: string[];
   different_vendor_from?: string;
   model_by?: {
@@ -137,7 +138,7 @@ function runFinalizer(
   Object.assign(env, values);
   const run = () =>
     Bun.spawnSync({
-      cmd: ["uv", "run", "python", "-c", nodeBody("finalize", "script")],
+      cmd: ["bun", "--no-env-file", "-e", nodeBody("finalize", "script")],
       cwd: tmpdir(),
       env,
       stdout: "pipe",
@@ -157,6 +158,7 @@ describe("investigate workflow shape", () => {
       "finalize",
     ]);
     expect(nodes.find(({ id }) => id === "verify")?.different_vendor_from).toBe("investigate");
+    expect(nodes.find(({ id }) => id === "finalize")?.runtime).toBe("bun");
   });
 
   test("maps each stable provider through its own model contract", () => {
@@ -298,13 +300,13 @@ describe("investigate intake", () => {
 describe("investigate finalizer", () => {
   const evidence = `# Evidence
 
-| Citation | Verified | Claim | Verification note | Level |
-| --- | --- | --- | --- | --- |
-| src/a.ts:1 | CONFIRMED | Alpha | reproduced | source-verified |
-| docs/a.md:2 | CONFIRMED in part | Beta | narrower than stated | documented |
-| command output | REFUTED | Gamma | opposite result | runtime-tested |
-| unavailable system | UNVERIFIABLE | Delta | no access | runtime-tested |
-| src/e.ts:5 | NOT CHECKED | Epsilon | verifier omitted it | source-verified |
+| Citation | Verified | Claim # | Claim | Verification note | Level |
+| --- | --- | --- | --- | --- | --- |
+| src/a.ts:1 | CONFIRMED | 1 | Alpha | reproduced | source-verified |
+| docs/a.md:2 | CONFIRMED in part | 2 | Beta | narrower than stated | documented |
+| command output | REFUTED | 3 | Gamma | opposite result | runtime-tested |
+| unavailable system | UNVERIFIABLE | 4 | Delta | no access | runtime-tested |
+| src/e.ts:5 | NOT CHECKED | 5 | Epsilon | verifier omitted it | source-verified |
 
 ## Not checked
 
@@ -342,20 +344,28 @@ describe("investigate finalizer", () => {
 
   test.each([
     [
-      "| Claim | Level | Citation |\n| --- | --- | --- |\n| A | documented | src/a.ts:1 |\n",
+      "| Claim # | Claim | Level | Citation |\n| --- | --- | --- | --- |\n| 1 | A | documented | src/a.ts:1 |\n",
       "no claim table",
     ],
     [
-      "| Claim | Level | Citation | Verified |\n| --- | --- | --- | --- |\n| A | guessed | x | CONFIRMED |\n",
+      "| Claim # | Claim | Level | Citation | Verified |\n| --- | --- | --- | --- | --- |\n| 1 | A | guessed | x | CONFIRMED |\n",
       "unsupported claim level",
     ],
     [
-      "| Claim | Level | Citation | Verified |\n| --- | --- | --- | --- |\n| A | documented | x | MAYBE |\n",
+      "| Claim # | Claim | Level | Citation | Verified |\n| --- | --- | --- | --- | --- |\n| 1 | A | documented | x | MAYBE |\n",
       "unsupported verification verdict",
     ],
     [
-      "| Claim | Level | Citation | Verified |\n| --- | --- |\n| A | documented | x | CONFIRMED |\n",
+      "| Claim # | Claim | Level | Citation | Verified |\n| --- | --- |\n| 1 | A | documented | x | CONFIRMED |\n",
       "claim table is missing its Markdown separator row",
+    ],
+    [
+      "| Claim # | Claim | Level | Citation | Verified |\n| --- | --- | --- | --- | --- |\n| 1 | A | documented | | CONFIRMED |\n",
+      "claim table contains an empty Citation cell",
+    ],
+    [
+      "| Claim # | Claim | Level | Citation | Verified |\n| --- | --- | --- | --- | --- |\n| one | A | documented | x | CONFIRMED |\n",
+      "invalid Claim # cell",
     ],
   ])("fails closed for malformed evidence", (contents, message) => {
     const { run } = runFinalizer(contents);
@@ -368,7 +378,7 @@ describe("investigate finalizer", () => {
     const { out } = runFinalizer(evidence);
     const artifacts = artifactsDir("missing-provenance");
     const proc = Bun.spawnSync({
-      cmd: ["uv", "run", "python", "-c", nodeBody("finalize", "script")],
+      cmd: ["bun", "--no-env-file", "-e", nodeBody("finalize", "script")],
       cwd: tmpdir(),
       env: {
         ...(process.env as Record<string, string>),
