@@ -48,10 +48,13 @@ function makeArtifacts(): string {
 function runBash(nodeId: string, artifacts: string, env: Record<string, string> = {}): string {
   const script = workflowNode(nodeId).bash;
   if (!script) throw new Error(`Missing bash script for ${nodeId} in fix-issue`);
+  const inheritedEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("KEELSON_NODE_")),
+  );
   const proc = Bun.spawnSync({
     cmd: ["bash", "-c", script],
     env: {
-      ...(process.env as Record<string, string>),
+      ...inheritedEnv,
       KEELSON_ARTIFACTS_DIR: artifacts,
       ...env,
     },
