@@ -957,11 +957,15 @@ nodes:
     bound?: boolean;
     regionWorkflows?: readonly string[];
     sleepSeconds?: number;
+    nodes?: WorkflowDefinition["nodes"];
+    promptHandler?: ReturnType<typeof makePromptHandler>;
   }) {
-    const definition = {
+    const definition: WorkflowDefinition = {
       name: opts.name,
       description: "bash",
-      nodes: [{ id: "x", bash: opts.sleepSeconds ? `sleep ${opts.sleepSeconds}` : "echo hi" }],
+      nodes:
+        opts.nodes ??
+        [{ id: "x", bash: opts.sleepSeconds ? `sleep ${opts.sleepSeconds}` : "echo hi" }],
     };
     const catalog = bootstrapWorkflows({
       workflowDir: wfDir,
@@ -977,6 +981,7 @@ nodes:
       store: createWorkflowStore(db),
       conversationStore: createConversationStore(db),
       refreshCwd: tmpDir,
+      ...(opts.promptHandler !== undefined ? { promptHandler: opts.promptHandler } : {}),
       ...(opts.bound
         ? { ribWorkflowBindings: new Map([[contributed, { publish: () => {} }]]) }
         : {}),
@@ -1010,6 +1015,24 @@ nodes:
     };
     expect(run.inputs).toEqual({ lens: "release-risks" });
     expect(run.workingDir).toBe(tmpDir);
+  });
+
+  test("POST .../refresh durably fails a producer with a retired model", async () => {
+    const { app } = makeRefreshRig({
+      name: "retired-producer",
+      bound: true,
+      nodes: [{ id: "collect", provider: "stub", model: "retired-model", prompt: "run" }],
+      promptHandler: makeSuccessfulPromptHandler(),
+    });
+    const res = await postRefresh(app, "retired-producer");
+    expect(res.status).toBe(200);
+    const { runId } = (await res.json()) as { runId: string };
+
+    expect(await pollUntilTerminal(app, runId)).toMatchObject({
+      status: "failed",
+      error:
+        "preflight failed:\n- collect: model 'retired-model' is not in stub's live catalog",
+    });
   });
 
   test("POST .../refresh 409s a region-declared name shadowed by a filesystem workflow", async () => {

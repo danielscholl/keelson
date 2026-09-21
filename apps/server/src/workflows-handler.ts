@@ -1882,6 +1882,7 @@ export function createWorkflowController(
             isolationOn,
             branchTemplate: workflow.worktree?.branch,
             worktreeBase: workflow.worktree?.base,
+            preflight: resolveWorkflowPreflight(loadKeelsonConfig()),
             origin: origin ?? "manual",
             ribId: ribIdFor(catalog, workflow.name, scope),
           },
@@ -2590,6 +2591,7 @@ export function workflowsRoutes(
           isolationOn: workflow.worktree?.enabled === true,
           branchTemplate: workflow.worktree?.branch,
           worktreeBase: workflow.worktree?.base,
+          preflight: resolveWorkflowPreflight(loadKeelsonConfig()),
           // A panel refresh is a producer run, same class as the heartbeat's —
           // keep it out of the default (manual) runs feed and subject to prune.
           origin: "scheduled",

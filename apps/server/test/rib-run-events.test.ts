@@ -9,10 +9,17 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  isRegisteredProvider,
+  registerProvider,
+  registerStubProvider,
+  unregisterProvider,
+} from "@keelson/providers";
 import type { Rib, RibRunEvent } from "@keelson/shared";
+import type { NodeHandler, WorkflowDefinition } from "@keelson/workflows";
 import { bootstrapWorkflows } from "../src/bootstrap.ts";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
@@ -39,6 +46,7 @@ describe("rib run events", () => {
   let wfDir: string;
 
   beforeEach(() => {
+    if (!isRegisteredProvider("stub")) registerStubProvider();
     tmpDir = mkdtempSync(join(tmpdir(), "keelson-run-events-"));
     wfDir = join(tmpDir, "workflows");
     mkdirSync(wfDir, { recursive: true });
@@ -50,6 +58,9 @@ describe("rib run events", () => {
 
   function makeRig(opts: {
     bash: string;
+    nodes?: WorkflowDefinition["nodes"];
+    provider?: string;
+    promptHandler?: NodeHandler;
     ribOwned?: boolean;
     onRibRunEvent?: (ribId: string, event: RibRunEvent) => void;
   }) {
@@ -57,10 +68,11 @@ describe("rib run events", () => {
     const store = createWorkflowStore(db);
     const conversationStore = createConversationStore(db);
     const projectsStore = createProjectsStore(db);
-    const definition = {
+    const definition: WorkflowDefinition = {
       name: "provision",
       description: "Use when: exercising the rib run-event seam",
-      nodes: [{ id: "work", bash: opts.bash }],
+      ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
+      nodes: opts.nodes ?? [{ id: "work", bash: opts.bash }],
     };
     const catalog = bootstrapWorkflows({
       workflowDir: wfDir,
@@ -77,6 +89,7 @@ describe("rib run events", () => {
         store,
         conversationStore,
         projectsStore,
+        ...(opts.promptHandler !== undefined ? { promptHandler: opts.promptHandler } : {}),
         ...(opts.onRibRunEvent !== undefined ? { onRibRunEvent: opts.onRibRunEvent } : {}),
       },
       activeRuns,
@@ -84,6 +97,18 @@ describe("rib run events", () => {
     );
     return { db, store, activeRuns, subscribers, controller };
   }
+
+  const successfulPromptHandler: NodeHandler = {
+    type: "prompt",
+    async handle() {
+      return {
+        status: "succeeded",
+        output: { kind: "text", text: "ok" },
+        provider: "stub",
+        model: "stub-echo",
+      };
+    },
+  };
 
   test("a rib-owned run emits running at launch and succeeded when it settles", async () => {
     const events: Array<{ ribId: string; event: RibRunEvent }> = [];
@@ -138,6 +163,199 @@ describe("rib run events", () => {
     } finally {
       db.close();
     }
+  });
+
+  test("a scheduled preflight violation fails durably and reaches the owning rib", async () => {
+      const events: RibRunEvent[] = [];
+      const { db, store, controller } = makeRig({
+        bash: "echo unused",
+        nodes: [{ id: "work", provider: "stub", model: "retired-model", prompt: "run" }],
+        onRibRunEvent: (_ribId, event) => events.push(event),
+      });
+      try {
+        const result = controller.startRun({
+          name: "provision",
+          inputs: {},
+          workingDir: tmpDir,
+          origin: "scheduled",
+        });
+        if (!result.ok) throw new Error(result.message);
+
+        await until(() => events.length === 2);
+        expect(store.getRun(result.runId)).toMatchObject({
+          status: "failed",
+          error:
+            "preflight failed:\n- work: model 'retired-model' is not in stub's live catalog",
+        });
+        expect(events[1]).toMatchObject({
+          runId: result.runId,
+          status: "failed",
+          error:
+            "preflight failed:\n- work: model 'retired-model' is not in stub's live catalog",
+        });
+      } finally {
+        db.close();
+      }
+  });
+
+  test("a scheduled run persists an unavailable-catalog notice", async () => {
+      const capabilities = {
+        sessionResume: false,
+        streaming: false,
+        tools: false,
+        reasoningEffort: false,
+        models: ["offline-model"],
+        defaultModel: "offline-model",
+      };
+      registerProvider({
+        id: "offline-controller",
+        displayName: "Offline controller",
+        capabilities,
+        builtIn: false,
+        factory: () => ({
+          getType: () => "offline-controller",
+          getCapabilities: () => capabilities,
+          async *sendQuery() {
+            yield { type: "done" as const };
+          },
+          async listModels() {
+            return [{ id: "offline-model" }];
+          },
+          async listModelsLive() {
+            throw new Error("offline");
+          },
+        }),
+      });
+      const { db, store, controller } = makeRig({
+        bash: "echo unused",
+        provider: "offline-controller",
+        nodes: [{ id: "work", model: "offline-model", prompt: "run" }],
+        promptHandler: successfulPromptHandler,
+      });
+      try {
+        const result = controller.startRun({
+          name: "provision",
+          inputs: {},
+          workingDir: tmpDir,
+          origin: "scheduled",
+        });
+        if (!result.ok) throw new Error(result.message);
+
+        await until(() => store.getRun(result.runId)?.status === "succeeded");
+        expect(store.getRun(result.runId)?.preflightNotice).toBe(
+          "preflight not checked: offline-controller",
+        );
+      } finally {
+        db.close();
+        unregisterProvider("offline-controller");
+      }
+  });
+
+  test("a scheduled deterministic run performs no catalog I/O", async () => {
+      let catalogCalls = 0;
+      const capabilities = {
+        sessionResume: false,
+        streaming: false,
+        tools: false,
+        reasoningEffort: false,
+        models: ["unused-model"],
+        defaultModel: "unused-model",
+      };
+      registerProvider({
+        id: "unused-controller",
+        displayName: "Unused controller",
+        capabilities,
+        builtIn: false,
+        factory: () => ({
+          getType: () => "unused-controller",
+          getCapabilities: () => capabilities,
+          async *sendQuery() {
+            yield { type: "done" as const };
+          },
+          async listModels() {
+            return [{ id: "unused-model" }];
+          },
+          async listModelsLive() {
+            catalogCalls += 1;
+            return [{ id: "unused-model" }];
+          },
+        }),
+      });
+      const { db, store, controller } = makeRig({
+        bash: "echo deterministic",
+        provider: "unused-controller",
+      });
+      try {
+        const result = controller.startRun({
+          name: "provision",
+          inputs: {},
+          workingDir: tmpDir,
+          origin: "scheduled",
+        });
+        if (!result.ok) throw new Error(result.message);
+
+        await until(() => store.getRun(result.runId)?.status === "succeeded");
+        expect(catalogCalls).toBe(0);
+      } finally {
+        db.close();
+        unregisterProvider("unused-controller");
+      }
+  });
+
+  test("the environment can disable scheduled preflight", async () => {
+      const prior = process.env.KEELSON_WORKFLOW_PREFLIGHT;
+      process.env.KEELSON_WORKFLOW_PREFLIGHT = "0";
+      const { db, store, controller } = makeRig({
+        bash: "echo unused",
+        nodes: [{ id: "work", provider: "stub", model: "retired-model", prompt: "run" }],
+        promptHandler: successfulPromptHandler,
+      });
+      try {
+        const result = controller.startRun({
+          name: "provision",
+          inputs: {},
+          workingDir: tmpDir,
+          origin: "scheduled",
+        });
+        if (!result.ok) throw new Error(result.message);
+
+        await until(() => store.getRun(result.runId)?.status === "succeeded");
+      } finally {
+        if (prior === undefined) delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
+        else process.env.KEELSON_WORKFLOW_PREFLIGHT = prior;
+        db.close();
+      }
+  });
+
+  test("config can disable scheduled preflight", async () => {
+      const priorConfig = process.env.KEELSON_CONFIG;
+      const priorEnv = process.env.KEELSON_WORKFLOW_PREFLIGHT;
+      const configPath = join(tmpDir, "config.json");
+      writeFileSync(configPath, JSON.stringify({ workflowPreflight: false }));
+      process.env.KEELSON_CONFIG = configPath;
+      delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
+      const { db, store, controller } = makeRig({
+        bash: "echo unused",
+        nodes: [{ id: "work", provider: "stub", model: "retired-model", prompt: "run" }],
+        promptHandler: successfulPromptHandler,
+      });
+      try {
+        const result = controller.startRun({
+          name: "provision",
+          inputs: {},
+          workingDir: tmpDir,
+          origin: "scheduled",
+        });
+        if (!result.ok) throw new Error(result.message);
+
+        await until(() => store.getRun(result.runId)?.status === "succeeded");
+      } finally {
+        if (priorConfig === undefined) delete process.env.KEELSON_CONFIG;
+        else process.env.KEELSON_CONFIG = priorConfig;
+        if (priorEnv === undefined) delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
+        else process.env.KEELSON_WORKFLOW_PREFLIGHT = priorEnv;
+        db.close();
+      }
   });
 
   test("a resume emits a fresh running→terminal pair for the same runId", async () => {
