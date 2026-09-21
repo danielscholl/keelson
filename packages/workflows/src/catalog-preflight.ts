@@ -124,7 +124,11 @@ export function checkWorkflowCatalog(
           effectiveModel === undefined
             ? undefined
             : live.find((candidate) => candidate.id === effectiveModel);
-        if (casePinned !== undefined && live.every((c) => c.id !== casePinned.literal)) {
+        if (
+          casePinned !== undefined &&
+          casePinned.literal === effectiveModel &&
+          live.every((c) => c.id !== casePinned.literal)
+        ) {
           violations.push({
             nodeId: node.id,
             provider,

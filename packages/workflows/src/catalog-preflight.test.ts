@@ -482,6 +482,24 @@ describe("checkWorkflowCatalog — model_by cases", () => {
     expect(result.violations[0]?.reason).toContain("config.json modelClasses");
   });
 
+  test("a branch pin superseded by a provider fallback is not reported", () => {
+    const result = checkWorkflowCatalog(
+      makeWorkflow({
+        model_by: { from: "$inputs.tier", cases: { deep: { model: "deep" } } },
+      }),
+      {
+        providers: PROVIDERS_WITH_CLAUDE,
+        defaultProviderId: "copilot",
+        runProviderId: "claude",
+        modelClassOverride: (providerId, modelClass) =>
+          providerId === "claude" && modelClass === "deep" ? "retired-claude-deep" : undefined,
+        liveCatalog: new Map([["claude", [{ id: "claude-model" }]]]),
+      },
+    );
+
+    expect(result).toEqual({ violations: [], notChecked: [] });
+  });
+
   test("a branch's effort is judged against that branch's own model", () => {
     const result = check(
       makeWorkflow({
