@@ -1372,7 +1372,10 @@ function resumeRunCore(
     };
   }
   const providerOverride = store.getRunProviderOverride(runId);
-  const rerunPreflight = run.error?.startsWith(PREFLIGHT_FAILURE_PREFIX) === true;
+  // A run with no node rows was cancelled while queued or mid-preflight, so it
+  // never cleared the gate either.
+  const rerunPreflight =
+    run.error?.startsWith(PREFLIGHT_FAILURE_PREFIX) === true || run.nodes.length === 0;
   const persistedIsolationEnabled = store.getRunIsolationEnabled(runId);
   // The workflow's current worktree.enabled can't stand in for a missing choice:
   // a per-run isolation override may have forced the opposite.
@@ -1383,8 +1386,7 @@ function resumeRunCore(
       message: `run '${runId}' isolation choice is unavailable and cannot be safely resumed`,
     };
   }
-  const resumeIsolationEnabled =
-    rerunPreflight && run.worktreePath === null && persistedIsolationEnabled === true;
+  const resumeIsolationEnabled = run.worktreePath === null && persistedIsolationEnabled === true;
   const resumeIsolation: IsolationConfig | null = resumeIsolationEnabled
     ? {
         branchTemplate: workflow.worktree?.branch,

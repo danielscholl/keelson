@@ -937,7 +937,7 @@ nodes:
     expect(existsSync(join(repoDir, "sentinel.txt"))).toBe(false);
   });
 
-  test("a run cancelled during preflight never prepares a worktree", async () => {
+  async function cancelDuringPreflight(name: string, model: string, catalog: "offline" | "listed") {
     await initRepo(repoDir);
     const capabilities = {
       sessionResume: false,
@@ -963,51 +963,103 @@ nodes:
         },
         async listModelsLive() {
           await new Promise((resolve) => setTimeout(resolve, 150));
-          throw new Error("offline");
+          if (catalog === "offline") throw new Error("offline");
+          return [{ id: "slow-model" }];
         },
       }),
     });
-    try {
-      writeWorkflow(
-        "preflight-cancel.yaml",
-        `name: preflight-cancel
+    writeWorkflow(
+      `${name}.yaml`,
+      `name: ${name}
 description: cancel while the live catalog lookup is pending
 provider: slow-cancel-catalog
 worktree:
   enabled: true
 nodes:
   - id: pinned
-    model: slow-model
+    model: ${model}
     prompt: run
 `,
-      );
-      const { app, projectId } = makeRig();
-      const start = await app.fetch(
-        new Request("http://test/api/workflows/preflight-cancel/runs", {
+    );
+    const rig = makeRig();
+    const start = await rig.app.fetch(
+      new Request(`http://test/api/workflows/${name}/runs`, {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({ inputs: {}, projectId: rig.projectId }),
+      }),
+    );
+    expect(start.status).toBe(200);
+    const { runId } = (await start.json()) as { runId: string };
+    const cancel = await rig.app.fetch(
+      new Request(`http://test/api/workflows/runs/${runId}`, {
+        method: "DELETE",
+        headers: { origin: ORIGIN },
+      }),
+    );
+    expect(cancel.status).toBe(200);
+    const cancelled = (await pollUntilTerminal(rig.app, runId)) as {
+      status: string;
+      worktreePath: string | null;
+      preflightNotice: string | null;
+    };
+    expect(cancelled.status).toBe("cancelled");
+    const resume = () =>
+      rig.app.fetch(
+        new Request(`http://test/api/workflows/runs/${runId}/resume-run`, {
           method: "POST",
           headers: { origin: ORIGIN, "content-type": "application/json" },
-          body: JSON.stringify({ inputs: {}, projectId }),
+          body: JSON.stringify({}),
         }),
       );
-      expect(start.status).toBe(200);
-      const { runId } = (await start.json()) as { runId: string };
-      const cancel = await app.fetch(
-        new Request(`http://test/api/workflows/runs/${runId}`, {
-          method: "DELETE",
-          headers: { origin: ORIGIN },
-        }),
-      );
-      expect(cancel.status).toBe(200);
+    return { ...rig, runId, cancelled, resume };
+  }
 
-      const run = (await pollUntilTerminal(app, runId)) as {
-        status: string;
-        worktreePath: string | null;
-        preflightNotice: string | null;
-      };
-      expect(run.status).toBe("cancelled");
-      expect(run.worktreePath).toBeNull();
-      expect(run.preflightNotice).toBeNull();
+  test("a run cancelled during preflight never prepares a worktree", async () => {
+    try {
+      const { cancelled } = await cancelDuringPreflight(
+        "preflight-cancel",
+        "slow-model",
+        "offline",
+      );
+      expect(cancelled.worktreePath).toBeNull();
+      expect(cancelled.preflightNotice).toBeNull();
       expect(existsSync(join(repoDir, ".worktrees"))).toBe(false);
+    } finally {
+      unregisterProvider("slow-cancel-catalog");
+    }
+  });
+
+  test("resuming a run cancelled during preflight restores its isolation", async () => {
+    try {
+      const rig = await cancelDuringPreflight("preflight-cancel-iso", "slow-model", "listed");
+      const workflow = rig.catalog.get("preflight-cancel-iso", { projectId: rig.projectId });
+      if (!workflow) throw new Error("workflow missing from catalog");
+      workflow.nodes = [{ id: "pinned", bash: "pwd; touch sentinel.txt" }];
+
+      expect((await rig.resume()).status).toBe(200);
+      const completed = (await pollUntilTerminal(rig.app, rig.runId)) as {
+        status: string;
+        nodes: Array<{ outputText: string | null }>;
+      };
+      expect(completed.status).toBe("succeeded");
+      expect(completed.nodes[0]?.outputText?.replace(/\\/g, "/")).toContain("/.worktrees/");
+      expect(existsSync(join(repoDir, "sentinel.txt"))).toBe(false);
+    } finally {
+      unregisterProvider("slow-cancel-catalog");
+    }
+  });
+
+  test("resuming a run cancelled during preflight still runs the preflight gate", async () => {
+    try {
+      const rig = await cancelDuringPreflight("preflight-cancel-gate", "retired-model", "listed");
+      expect((await rig.resume()).status).toBe(200);
+      const resumed = (await pollUntilTerminal(rig.app, rig.runId)) as {
+        status: string;
+        error: string | null;
+      };
+      expect(resumed.status).toBe("failed");
+      expect(resumed.error).toContain("preflight failed");
     } finally {
       unregisterProvider("slow-cancel-catalog");
     }
