@@ -54,6 +54,13 @@ let dbPath: string;
 const ORIGIN = "http://127.0.0.1:5173";
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(TERMINAL_RUN_STATUSES);
 
+function canonicalExistingPath(path: string | null | undefined): string {
+  if (!path) throw new Error("expected an existing path");
+  const nativePath =
+    process.platform === "win32" ? path.replace(/^\/([A-Za-z])(?=\/)/, "$1:") : path;
+  return realpathSync.native(nativePath);
+}
+
 async function git(args: string[], cwd: string): Promise<void> {
   const proc = Bun.spawn({
     cmd: ["git", ...args],
@@ -909,7 +916,9 @@ nodes:
         started.runId,
         new Set(["succeeded"]),
       );
-      expect(completed.nodes[0]?.outputText?.trim()).toBe(lease.path);
+      expect(canonicalExistingPath(completed.nodes[0]?.outputText?.trim())).toBe(
+        canonicalExistingPath(lease.path),
+      );
       expect(existsSync(lease.path)).toBe(true);
       expect(rig.workspaceManager.list().some((record) => record.id === lease.id)).toBe(true);
     } finally {
@@ -977,9 +986,11 @@ nodes:
         expect(new Set(paths).size).toBe(paths.length);
         for (const run of paused) {
           if (run.worktreePath === null) throw new Error("paused isolated run has no worktree");
-          expect(run.nodes.find((node) => node.nodeId === "where")?.outputText?.trim()).toBe(
-            run.worktreePath,
-          );
+          expect(
+            canonicalExistingPath(
+              run.nodes.find((node) => node.nodeId === "where")?.outputText?.trim(),
+            ),
+          ).toBe(canonicalExistingPath(run.worktreePath));
         }
       } finally {
         prepare.mockRestore();
