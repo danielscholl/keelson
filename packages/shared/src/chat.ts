@@ -23,7 +23,9 @@ export const WIRE_PROTOCOL_VERSION = "1.0" as const;
 // frame. Pre-0.4 clients strict-reject frames carrying them.
 // 0.5: node reasoning tier — new `effort` on NodeOutputRow and the node_done
 // frame. Pre-0.5 clients strict-reject frames carrying it.
-export const SCHEMA_VERSION = "0.5" as const;
+// 0.6: durable preflight notice — new `preflightNotice` on WorkflowRunSummary.
+// Pre-0.6 clients strict-reject run status and history responses carrying it.
+export const SCHEMA_VERSION = "0.6" as const;
 
 // A peer (the server on /api/health + /api/config, or a client's bundle)
 // reports its SCHEMA_VERSION. Any difference from this build's value signals

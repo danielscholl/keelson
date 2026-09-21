@@ -168,6 +168,19 @@ describe("buildSubprocessEnv", () => {
     expect(env.ARTIFACTS_DIR).toBe("/tmp/keelson-run-abc");
   });
 
+  test("sets the workflow run id without inheriting a stale value", () => {
+    const env = buildSubprocessEnv({}, new Map<string, NodeOutput>(), {
+      runId: "abcdef12-rest",
+      parentEnv: { KEELSON_RUN_ID: "stale" },
+    });
+    expect(env.KEELSON_RUN_ID).toBe("abcdef12-rest");
+
+    const withoutRun = buildSubprocessEnv({}, new Map<string, NodeOutput>(), {
+      parentEnv: { KEELSON_RUN_ID: "stale" },
+    });
+    expect(Object.hasOwn(withoutRun, "KEELSON_RUN_ID")).toBe(false);
+  });
+
   test("omits both ARTIFACTS_DIR vars when options.artifactsDir is undefined (no PARENT_ENV leak)", () => {
     // The implementation unconditionally deletes env.KEELSON_ARTIFACTS_DIR
     // and env.ARTIFACTS_DIR after spreading PARENT_ENV — so even if the
@@ -191,6 +204,51 @@ describe("buildSubprocessEnv", () => {
   test("ARGUMENTS defaults to '' when not provided in inputs", () => {
     const env = buildSubprocessEnv({}, new Map<string, NodeOutput>());
     expect(env.KEELSON_ARGUMENTS).toBe("");
+  });
+
+  test("projects effective provider and model for upstream agent nodes", () => {
+    const upstream = new Map<string, NodeOutput>([
+      [
+        "verify-seat",
+        {
+          state: "completed",
+          output: "ok",
+          provider: "claude",
+          model: "claude-sonnet-5",
+        },
+      ],
+    ]);
+    const env = buildSubprocessEnv({}, upstream);
+    expect(env.KEELSON_NODE_verify_seat_PROVIDER).toBe("claude");
+    expect(env.KEELSON_NODE_verify_seat_MODEL).toBe("claude-sonnet-5");
+  });
+
+  test("caps effective provider and model values", () => {
+    const upstream = new Map<string, NodeOutput>([
+      [
+        "verify",
+        {
+          state: "completed",
+          output: "ok",
+          provider: "p".repeat(300),
+          model: "m".repeat(300),
+        },
+      ],
+    ]);
+    const env = buildSubprocessEnv({}, upstream);
+    expect(env.KEELSON_NODE_verify_PROVIDER).toBe("p".repeat(200));
+    expect(env.KEELSON_NODE_verify_MODEL).toBe("m".repeat(200));
+  });
+
+  test("clears inherited provenance when the current upstream has none", () => {
+    const env = buildSubprocessEnv({}, upstreamOf("verify", "ok"), {
+      parentEnv: {
+        KEELSON_NODE_verify_PROVIDER: "stale-provider",
+        KEELSON_NODE_verify_MODEL: "stale-model",
+      },
+    });
+    expect(Object.hasOwn(env, "KEELSON_NODE_verify_PROVIDER")).toBe(false);
+    expect(Object.hasOwn(env, "KEELSON_NODE_verify_MODEL")).toBe(false);
   });
 });
 
@@ -269,6 +327,7 @@ describe("buildSubprocessEnv — env value cap (issue #442)", () => {
       expect(spillPath).toBe(join(dir, "node-outputs", "run_tests.txt"));
       expect(readFileSync(spillPath, "utf8")).toBe(small);
       expect(env.KEELSON_NODE_run_tests_OUTPUT).toBe(small);
+      expect(env.KEELSON_NODE_run_tests_STATE).toBe("completed");
       expect(Object.hasOwn(env, "KEELSON_NODE_run_tests_OUTPUT_TRUNCATED")).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });

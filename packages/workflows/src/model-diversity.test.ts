@@ -82,4 +82,31 @@ describe("diagnoseModelDiversity", () => {
     expect(diagnoseModelDiversity(workflow, "claude")).toEqual([]);
     expect(diagnoseModelDiversity(workflow, undefined, "claude")).toHaveLength(1);
   });
+
+  test("includes command and loop nodes but excludes non-agent nodes", () => {
+    const workflow = makeWorkflow([
+      {
+        id: "command",
+        command: "review",
+        model: "deep",
+        model_by_provider: { copilot: "model-a" },
+      },
+      {
+        id: "loop",
+        loop: { prompt: "Review again.", until: "DONE", max_iterations: 2, fresh_context: false },
+        model: "deep",
+        model_by_provider: { copilot: "model-b" },
+      },
+      {
+        id: "bash",
+        bash: "true",
+        model: "deep",
+        model_by_provider: { copilot: "model-c" },
+      },
+    ]);
+
+    expect(diagnoseModelDiversity(workflow, "claude")).toEqual([
+      "diversity-test: no 'claude' entry in model_by_provider for nodes command, loop -- all resolve to 'deep'; lens/role diversity collapsed on this provider.",
+    ]);
+  });
 });

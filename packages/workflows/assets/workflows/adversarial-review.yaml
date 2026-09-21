@@ -41,7 +41,10 @@ description: |
           under review. For a PR, use `refs/pull/N/head`; a bare SHA resolves
           only when its object is already local or advertised by the remote.
           Set `subject_required=1` to fail instead of falling back when a
-          provided subject cannot be snapshotted.
+          provided subject cannot be snapshotted. Optional `author` names the
+          model that wrote the artifact so it is excluded from every review,
+          verification, and synthesis seat. Optional `out` names a directory
+          where the five review artifacts are written.
   NOT for: Building or fixing code (use fix-issue), posting
            a GitHub PR review (use pr-review), or generating something new.
 
@@ -192,14 +195,35 @@ nodes:
         printf 'SUBJECT-SNAPSHOT: UNKNOWN marker-absent\n'
       fi
 
+  - id: author-seat
+    timeout: 15000
+    bash: |
+      set -euo pipefail
+      AUTHOR=$(printf '%s' "${KEELSON_INPUTS_author:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+      if [ -n "$AUTHOR" ]; then
+        printf '%s\n' "$AUTHOR"
+      else
+        printf 'seated\n'
+      fi
+
   # Three reviewers run in parallel with `context: fresh` so none sees another's
   # take, and with no tools — they reason over the inlined artifact alone.
   - id: reviewer-logic
-    depends_on: [intake]
+    depends_on: [intake, author-seat]
     context: fresh
     model: deep
     model_by_provider:
       copilot: claude-opus-5
+    model_by:
+      from: $author-seat.output
+      default: seated
+      cases:
+        seated:
+          model_by_provider:
+            copilot: claude-opus-5
+        claude-opus-5:
+          model_by_provider:
+            copilot: claude-opus-4.7
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: []
@@ -238,11 +262,21 @@ nodes:
       alone, hold-with-changes, or fail?
 
   - id: reviewer-evidence
-    depends_on: [intake]
+    depends_on: [intake, author-seat]
     context: fresh
     model: deep
     model_by_provider:
       copilot: gpt-5.6-sol
+    model_by:
+      from: $author-seat.output
+      default: seated
+      cases:
+        seated:
+          model_by_provider:
+            copilot: gpt-5.6-sol
+        gpt-5.6-sol:
+          model_by_provider:
+            copilot: gpt-6-astra
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: []
@@ -281,11 +315,21 @@ nodes:
       specific checkable claims the next node must independently confirm.
 
   - id: reviewer-risk
-    depends_on: [intake]
+    depends_on: [intake, author-seat]
     context: fresh
     model: deep
     model_by_provider:
       copilot: grok-4.6
+    model_by:
+      from: $author-seat.output
+      default: seated
+      cases:
+        seated:
+          model_by_provider:
+            copilot: grok-4.6
+        grok-4.6:
+          model_by_provider:
+            copilot: grok-4.5
     effort: high
     idle_timeout: 1800000
     allowed_tools: []
@@ -339,12 +383,22 @@ nodes:
   # than relaying any reviewer's citation. Default trigger_rule (all_success) —
   # a consensus verdict is not issued on a panel where a lane failed.
   - id: verify
-    depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk, subject-status]
+    depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk, subject-status, author-seat]
     always_run: true
     context: fresh
     model: deep
     model_by_provider:
       copilot: gpt-5.6-terra
+    model_by:
+      from: $author-seat.output
+      default: seated
+      cases:
+        seated:
+          model_by_provider:
+            copilot: gpt-5.6-terra
+        gpt-5.6-terra:
+          model_by_provider:
+            copilot: gpt-5.5
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: [Read, Glob, Grep]
@@ -405,6 +459,11 @@ nodes:
       End with **Corrections**: any claim in the artifact or a reviewer's output
       that your check proved wrong — stated plainly.
 
+      The literal labels `Claim:` and `Result:` are machine checked. Use both
+      for every record. Leading list markers and Markdown bold markers are
+      accepted, but headings, numbering, or different labels must not replace
+      `Claim:` or `Result:`.
+
   - id: verify-gate
     depends_on: [verify]
     always_run: true
@@ -432,6 +491,16 @@ nodes:
     model: deep
     model_by_provider:
       copilot: claude-opus-4.8
+    model_by:
+      from: $author-seat.output
+      default: seated
+      cases:
+        seated:
+          model_by_provider:
+            copilot: claude-opus-4.8
+        claude-opus-4.8:
+          model_by_provider:
+            copilot: claude-opus-4.7
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: []
@@ -528,3 +597,148 @@ nodes:
       untruncated. The `report` field is this workflow's human-readable
       output; the sibling fields exist so callers can consume the verdict
       without parsing prose.
+
+  - id: save
+    depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk, verify, synthesize]
+    trigger_rule: all_done
+    always_run: true
+    timeout: 30000
+    bash: |
+      set -euo pipefail
+
+      AUTHOR=$(printf '%s' "${KEELSON_NODE_author_seat_OUTPUT:-seated}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+      case "$AUTHOR" in
+        seated) echo "no author model set; seating unchanged" ;;
+        claude-opus-5) echo "reseated reviewer-logic: claude-opus-5 -> claude-opus-4.7" ;;
+        gpt-5.6-sol) echo "reseated reviewer-evidence: gpt-5.6-sol -> gpt-6-astra" ;;
+        grok-4.6) echo "reseated reviewer-risk: grok-4.6 -> grok-4.5" ;;
+        gpt-5.6-terra) echo "reseated verify: gpt-5.6-terra -> gpt-5.5" ;;
+        claude-opus-4.8) echo "reseated synthesize: claude-opus-4.8 -> claude-opus-4.7" ;;
+        *) printf 'author %s holds no default seat; seating unchanged\n' "$AUTHOR" ;;
+      esac
+
+      FAILED_LANES=""
+      record_failure() {
+        local lane="$1"
+        local state="$2"
+        if [ "$state" = "failed" ]; then
+          FAILED_LANES="${FAILED_LANES}${FAILED_LANES:+, }${lane}"
+        fi
+      }
+      record_failure reviewer-logic "${KEELSON_NODE_reviewer_logic_STATE:-}"
+      record_failure reviewer-evidence "${KEELSON_NODE_reviewer_evidence_STATE:-}"
+      record_failure reviewer-risk "${KEELSON_NODE_reviewer_risk_STATE:-}"
+      record_failure verify "${KEELSON_NODE_verify_STATE:-}"
+      record_failure synthesize "${KEELSON_NODE_synthesize_STATE:-}"
+
+      finish() {
+        if [ -n "$FAILED_LANES" ]; then
+          printf 'upstream lane failure(s): %s\n' "$FAILED_LANES" >&2
+          exit 1
+        fi
+      }
+
+      OUT="${KEELSON_INPUTS_out:-}"
+      if [ -z "$OUT" ]; then
+        echo "no out directory set; nothing written"
+        finish
+        exit 0
+      fi
+      mkdir -p -- "$OUT"
+
+      save() {
+        local filename="$1"
+        local spill="$2"
+        local value="$3"
+        local truncated="$4"
+        local state="$5"
+        local json_field="${6:-}"
+        local target="$OUT/$filename"
+        rm -f -- "$target"
+
+        extract_json_string() {
+          local source="${1:-}"
+          KEELSON_JSON_FIELD="$json_field" KEELSON_JSON_SOURCE="$source" bun -e '
+            const field = process.env.KEELSON_JSON_FIELD;
+            const source = process.env.KEELSON_JSON_SOURCE;
+            const input = source ? await Bun.file(source).text() : await Bun.stdin.text();
+            let payload;
+            try {
+              payload = JSON.parse(input);
+            } catch {
+              console.error("current output is malformed JSON");
+              process.exit(1);
+            }
+            const extracted = payload?.[field];
+            if (typeof extracted !== "string") {
+              console.error(`current output is missing string field: ${field}`);
+              process.exit(1);
+            }
+            process.stdout.write(`${extracted}\n`);
+          '
+        }
+
+        if [ "$state" != "completed" ]; then
+          printf 'left %s absent: current lane state is %s\n' "$filename" "${state:-unknown}"
+          return
+        elif [ -n "$spill" ]; then
+          if [ ! -s "$spill" ]; then
+            printf 'left %s absent: current output spill is unavailable\n' "$filename"
+            return
+          fi
+          if [ -n "$json_field" ]; then
+            if ! extract_json_string "$spill" > "$target"; then
+              rm -f -- "$target"
+              printf 'failed to extract %s from current output\n' "$filename" >&2
+              return 1
+            fi
+          else
+            cat -- "$spill" > "$target"
+          fi
+        elif [ "$truncated" = "1" ]; then
+          printf 'left %s absent: full current output is unavailable\n' "$filename"
+          return
+        elif [ -n "$value" ]; then
+          if [ -n "$json_field" ]; then
+            if ! printf '%s' "$value" | extract_json_string > "$target"; then
+              rm -f -- "$target"
+              printf 'failed to extract %s from current output\n' "$filename" >&2
+              return 1
+            fi
+          else
+            printf '%s\n' "$value" > "$target"
+          fi
+        else
+          printf 'left %s absent: current lane produced no output\n' "$filename"
+          return
+        fi
+        printf 'wrote %s\n' "$filename"
+      }
+
+      save review-logic.md \
+        "${KEELSON_NODE_reviewer_logic_OUTPUT_FILE:-}" \
+        "${KEELSON_NODE_reviewer_logic_OUTPUT:-}" \
+        "${KEELSON_NODE_reviewer_logic_OUTPUT_TRUNCATED:-}" \
+        "${KEELSON_NODE_reviewer_logic_STATE:-}"
+      save review-evidence.md \
+        "${KEELSON_NODE_reviewer_evidence_OUTPUT_FILE:-}" \
+        "${KEELSON_NODE_reviewer_evidence_OUTPUT:-}" \
+        "${KEELSON_NODE_reviewer_evidence_OUTPUT_TRUNCATED:-}" \
+        "${KEELSON_NODE_reviewer_evidence_STATE:-}"
+      save review-risk.md \
+        "${KEELSON_NODE_reviewer_risk_OUTPUT_FILE:-}" \
+        "${KEELSON_NODE_reviewer_risk_OUTPUT:-}" \
+        "${KEELSON_NODE_reviewer_risk_OUTPUT_TRUNCATED:-}" \
+        "${KEELSON_NODE_reviewer_risk_STATE:-}"
+      save verification.md \
+        "${KEELSON_NODE_verify_OUTPUT_FILE:-}" \
+        "${KEELSON_NODE_verify_OUTPUT:-}" \
+        "${KEELSON_NODE_verify_OUTPUT_TRUNCATED:-}" \
+        "${KEELSON_NODE_verify_STATE:-}"
+      save verdict.md \
+        "${KEELSON_NODE_synthesize_OUTPUT_FILE:-}" \
+        "${KEELSON_NODE_synthesize_OUTPUT:-}" \
+        "${KEELSON_NODE_synthesize_OUTPUT_TRUNCATED:-}" \
+        "${KEELSON_NODE_synthesize_STATE:-}" \
+        report
+      finish

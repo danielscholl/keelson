@@ -249,6 +249,7 @@ const PARENT_ENV: Readonly<Record<string, string>> = (() => {
 export const ENV_VALUE_MAX_CHARS = 16 * 1024;
 const ENV_VALUE_HEAD_CHARS = 8 * 1024;
 const ENV_VALUE_TAIL_CHARS = 8 * 1024;
+const PROVENANCE_ENV_MAX_CHARS = 200;
 
 function truncateEnvValue(value: string, note: string): string {
   return `${value.slice(0, ENV_VALUE_HEAD_CHARS)}\n[keelson: ${note}]\n${value.slice(-ENV_VALUE_TAIL_CHARS)}`;
@@ -256,9 +257,11 @@ function truncateEnvValue(value: string, note: string): string {
 
 /**
  * Build the env block for a workflow subprocess. Layers `KEELSON_INPUTS_*`,
- * `KEELSON_NODE_*`, `KEELSON_ARGUMENTS`, and run metadata onto a snapshot of
- * the parent env. Non-alphanumeric chars in keys/node ids are normalized to `_`
- * so the resulting names are valid POSIX env-var identifiers.
+ * `KEELSON_NODE_*_{STATE,ERROR,OUTPUT}`, node provenance, `KEELSON_ARGUMENTS`,
+ * `KEELSON_RUN_ID`, and (when provided) the per-run
+ * `KEELSON_ARTIFACTS_DIR` onto a snapshot of the parent env. Non-alphanumeric
+ * chars in keys/node ids are normalized to `_` so the resulting names are valid
+ * POSIX env-var identifiers.
  *
  * Every node output is written in full to `<artifactsDir>/node-outputs/<id>.txt`
  * and the path published as `KEELSON_NODE_<id>_OUTPUT_FILE`, so a consumer can
@@ -273,8 +276,8 @@ export function buildSubprocessEnv(
   upstream: ReadonlyMap<string, NodeOutput>,
   options?: {
     artifactsDir?: string;
-    parentEnv?: Readonly<Record<string, string>>;
     runId?: string;
+    parentEnv?: Readonly<Record<string, string>>;
   },
 ): Record<string, string> {
   const env: Record<string, string> = { ...(options?.parentEnv ?? PARENT_ENV) };
@@ -298,7 +301,10 @@ export function buildSubprocessEnv(
   for (const [id, out] of upstream.entries()) {
     const full = out.output ?? "";
     const name = `KEELSON_NODE_${envSafe(id)}_OUTPUT`;
-    const base = name.slice(0, -"_OUTPUT".length);
+    const provenanceName = name.slice(0, -"_OUTPUT".length);
+    // An inherited value must not outlive the output that produced it: a node
+    // reached without an artifacts dir (or without a failure/provenance this
+    // time) would otherwise read a prior run's stale value.
     for (const suffix of [
       "OUTPUT_FILE",
       "OUTPUT_TRUNCATED",
@@ -307,16 +313,10 @@ export function buildSubprocessEnv(
       "PROVIDER",
       "MODEL",
     ]) {
-      delete env[`${base}_${suffix}`];
+      delete env[`${provenanceName}_${suffix}`];
     }
-    env[`${base}_STATE`] = out.state;
-    if (out.state === "failed") env[`${base}_ERROR`] = capInput(out.error);
-    if ("provider" in out && out.provider !== undefined) {
-      env[`${base}_PROVIDER`] = capInput(out.provider);
-    }
-    if ("model" in out && out.model !== undefined) {
-      env[`${base}_MODEL`] = capInput(out.model);
-    }
+    env[`${provenanceName}_STATE`] = out.state;
+    if (out.state === "failed") env[`${provenanceName}_ERROR`] = capInput(out.error);
     let fileNote = "";
     if (options?.artifactsDir !== undefined) {
       try {
@@ -340,6 +340,12 @@ export function buildSubprocessEnv(
     } else {
       env[name] = full;
     }
+    if ("provider" in out && out.provider !== undefined) {
+      env[`${provenanceName}_PROVIDER`] = out.provider.slice(0, PROVENANCE_ENV_MAX_CHARS);
+    }
+    if ("model" in out && out.model !== undefined) {
+      env[`${provenanceName}_MODEL`] = out.model.slice(0, PROVENANCE_ENV_MAX_CHARS);
+    }
   }
   // Two env vars for the same path: `KEELSON_ARTIFACTS_DIR` is the prefixed
   // channel that matches the rest of our env contract (KEELSON_INPUTS_*,
@@ -352,6 +358,9 @@ export function buildSubprocessEnv(
   if (options?.artifactsDir !== undefined) {
     env.KEELSON_ARTIFACTS_DIR = options.artifactsDir;
     env.ARTIFACTS_DIR = options.artifactsDir;
+  }
+  if (options?.runId !== undefined) {
+    env.KEELSON_RUN_ID = options.runId;
   }
   return env;
 }

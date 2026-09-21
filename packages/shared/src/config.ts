@@ -103,6 +103,19 @@ export type GatewayProtocol = (typeof GATEWAY_PROTOCOLS)[number];
 // its own name, so it must not collide with a built-in or the synthetic
 // non-chat 'workflow' provider.
 const RESERVED_GATEWAY_NAMES = new Set<string>([...BUILT_IN_PROVIDER_IDS, "workflow"]);
+const GATEWAY_LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "::1", "localhost"]);
+
+export function gatewayCredentialTransportSafe(baseUrl: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === "https:") return true;
+  if (parsed.protocol !== "http:") return false;
+  return GATEWAY_LOOPBACK_HOSTS.has(parsed.hostname.replace(/^\[|\]$/g, ""));
+}
 
 // A gateway name is the provider id AND part of the keychain account
 // (`gateway-<name>`); cap at 48 so that account stays within

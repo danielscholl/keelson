@@ -57,6 +57,16 @@ describe("makeScriptHandler — inline bun", () => {
     expect(result.output).toEqual({ kind: "text", text: "hello-bun" });
   });
 
+  test("projects the current workflow run id", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "keelson-script-"));
+    const handler = makeScriptHandler();
+    const node = { id: "s", runtime: "bun" } as unknown as DagNode;
+    const ctx = buildCtx({ cwd, body: "console.log(process.env.KEELSON_RUN_ID)" });
+    const result = await handler.handle(node, ctx);
+    expect(result.status).toBe("succeeded");
+    expect(result.output).toEqual({ kind: "text", text: "run-script" });
+  });
+
   test("replaces $converge.round in inline script rawBody", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "keelson-script-"));
     const handler = makeScriptHandler();

@@ -12,6 +12,7 @@ import { evaluateCondition } from "./conditions.ts";
 import { buildTopologicalLayers, type DagShapeError, validateDagShape } from "./graph.ts";
 import { applyModelCase, selectModelCase } from "./model-by.ts";
 import { diagnoseModelDiversity } from "./model-diversity.ts";
+import { classifyModelVendor } from "./model-vendor.ts";
 import type {
   DagNode,
   NodeMemoryBlock,
@@ -797,6 +798,39 @@ function toCompletedOutput(output: NodeOutput, text = output.output): NodeOutput
   };
 }
 
+function emitVendorCollapseWarning(
+  node: DagNode,
+  output: NodeOutput,
+  nodeOutputs: ReadonlyMap<string, NodeOutput>,
+  emit: (event: RunStreamEvent) => void,
+): void {
+  const reference = node.different_vendor_from;
+  if (reference === undefined || !("provider" in output) || !("model" in output)) return;
+  const upstream = nodeOutputs.get(reference);
+  if (
+    upstream === undefined ||
+    !("provider" in upstream) ||
+    !("model" in upstream) ||
+    output.provider === undefined ||
+    output.model === undefined ||
+    upstream.provider === undefined ||
+    upstream.model === undefined
+  ) {
+    return;
+  }
+  const vendor = classifyModelVendor(output.provider, output.model);
+  const upstreamVendor = classifyModelVendor(upstream.provider, upstream.model);
+  if (vendor === undefined || vendor !== upstreamVendor) return;
+  emit({
+    type: "run_warning",
+    nodeId: node.id,
+    message:
+      `cross-vendor verification collapsed to '${vendor}': ` +
+      `'${reference}' ran on '${upstream.provider}/${upstream.model}' and ` +
+      `'${node.id}' ran on '${output.provider}/${output.model}'`,
+  });
+}
+
 function emitSucceededNodeDone(
   emit: (event: RunStreamEvent) => void,
   nodeId: string,
@@ -1192,6 +1226,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
       }
     }
     const recordedOutput = bodyToSchemaOutput(result, startedAtMs, Date.now());
+    emitVendorCollapseWarning(node, recordedOutput, nodeOutputs, emit);
     layerResults.set(node.id, recordedOutput);
     // 6. Memory writeback fires after the recorded output is captured but before `node_done`,
     // so subscribers see writeback events as node-scoped. Gated on `on === "always" || succeeded`.

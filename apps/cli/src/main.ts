@@ -409,7 +409,7 @@ export function buildProgram(): Command {
     .description("show recent runs or a single run's status (server-required)")
     .option("--workflow <name>", "list runs for a specific workflow name")
     .option("--brief", "compact status: node id/status only, no node outputs")
-    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .option("--base-url <url>", "explicit server base URL")
     .action(async function statusAction(
       this: Command,
       runId: string | undefined,

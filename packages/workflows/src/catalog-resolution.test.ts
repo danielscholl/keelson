@@ -143,6 +143,69 @@ describe("resolveWorkflowResolution", () => {
     expect(result.nodes[0]?.effectiveProvider).toBeUndefined();
   });
 
+  test("blocks command and loop nodes while excluding non-agent nodes", () => {
+    const workflow = makeWorkflow([
+      { id: "command", command: "review" },
+      {
+        id: "loop",
+        loop: { prompt: "Review again.", until: "DONE", max_iterations: 2 },
+      },
+      { id: "bash", bash: "true" },
+      { id: "script", script: "console.log('done')", runtime: "bun" },
+      { id: "approval", approval: { message: "Continue?" } },
+      { id: "cancel", cancel: "Stop." },
+    ]);
+
+    const result = resolveWorkflowResolution(workflow, { providers: new Map() });
+
+    expect(result.tier).toBe("blocked");
+    expect(result.nodes.map((node) => node.nodeId)).toEqual(["command", "loop"]);
+    expect(result.nodes.every((node) => node.effectiveProvider === undefined)).toBe(true);
+  });
+
+  test("falls command and loop provider pins back through their model settings", () => {
+    const workflow = makeWorkflow(
+      [
+        {
+          id: "command",
+          command: "review",
+          model: "deep",
+          model_by_provider: { copilot: "gpt-5.6-sol" },
+        },
+        {
+          id: "loop",
+          loop: { prompt: "Review again.", until: "DONE", max_iterations: 2 },
+        },
+      ],
+      { provider: "copilot", model: "balanced" },
+    );
+
+    const result = resolveWorkflowResolution(workflow, {
+      providers: new Map([["claude", CLAUDE_CAPABILITIES]]),
+      defaultProviderId: "claude",
+    });
+
+    expect(result.tier).toBe("degrades");
+    expect(result.nodes).toMatchObject([
+      {
+        nodeId: "command",
+        effectiveProvider: "claude",
+        model: "claude-fable-5",
+        providerFellBack: true,
+      },
+      {
+        nodeId: "loop",
+        effectiveProvider: "claude",
+        model: "claude-opus-4-8",
+        providerFellBack: true,
+      },
+    ]);
+    expect(result.fallbackNodes).toEqual([
+      { nodeId: "command", to: "claude/claude-fable-5" },
+      { nodeId: "loop", to: "claude/claude-opus-4-8" },
+    ]);
+  });
+
   test("blocks a run provider override that is not registered", () => {
     const result = resolveWorkflowResolution(makeWorkflow([{ id: "draft", prompt: "Draft." }]), {
       providers: new Map([["claude", CLAUDE_CAPABILITIES]]),

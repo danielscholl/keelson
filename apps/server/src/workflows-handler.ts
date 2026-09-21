@@ -70,6 +70,7 @@ import {
   type AwaitInteraction,
   bashHandler,
   checkWorkflowCatalog,
+  collectTransitiveDependents,
   createWorktree,
   type DagNode,
   defaultRunUntilBashProbe,
@@ -91,6 +92,7 @@ import {
   type NodeOutput,
   type NodeResult,
   type NotebookAdapter,
+  type PreflightResult,
   type RequestCancel,
   type RunStreamEvent,
   type RunSummary,
@@ -237,6 +239,7 @@ function nodeTypeOf(node: DagNode): string {
 // (dag-node.ts builds loop nodes without the AI fields), so its effective model
 // isn't derivable here. bash / script / approval / cancel never call a model.
 const MODEL_NODE_TYPES: ReadonlySet<string> = new Set(["prompt", "command"]);
+const PREFLIGHT_FAILURE_PREFIX = "preflight failed:\n";
 
 function workflowToSummary(
   workflow: WorkflowDefinition,
@@ -819,6 +822,51 @@ function emitRibRunEvents(opts: {
   void done.then(observeSettle, observeSettle);
 }
 
+async function resolveCatalogPreflight(
+  workflow: WorkflowDefinition,
+  opts: {
+    defaultProviderId: string | undefined;
+    providerOverride?: string;
+    signal?: AbortSignal;
+  },
+): Promise<PreflightResult> {
+  const config = loadKeelsonConfig();
+  const providers = new Map(
+    getProviderInfoList().map(({ id, capabilities }) => [
+      id,
+      {
+        defaultModel: capabilities.defaultModel,
+        models: capabilities.models,
+        ...(capabilities.modelClasses !== undefined
+          ? { modelClasses: capabilities.modelClasses }
+          : {}),
+      },
+    ]),
+  );
+  const modelClassOverride = (id: string, modelClass: "fast" | "balanced" | "deep") =>
+    readModelClassOverride(config, id)?.[modelClass];
+  const resolution = resolveWorkflowResolution(workflow, {
+    providers,
+    defaultProviderId: opts.defaultProviderId,
+    runProviderId: opts.providerOverride,
+    modelClassOverride,
+  });
+  const effectiveProviders = resolution.nodes
+    .map(({ effectiveProvider }) => effectiveProvider)
+    .filter((id): id is string => id !== undefined);
+  const liveCatalog = await fetchLiveModelCatalog(
+    effectiveProviders,
+    opts.signal !== undefined ? { signal: opts.signal } : {},
+  );
+  return checkWorkflowCatalog(workflow, {
+    providers,
+    defaultProviderId: opts.defaultProviderId,
+    runProviderId: opts.providerOverride,
+    modelClassOverride,
+    liveCatalog,
+  });
+}
+
 interface StartRunCoreParams {
   workflow: WorkflowDefinition;
   inputs: Record<string, string>;
@@ -837,23 +885,16 @@ interface StartRunCoreParams {
   ribId?: string | null;
 }
 
-// Seed-map builder from persisted rows: maps succeeded rows to NodeOutput so
-// the executor can re-enter from the first incomplete node. Skipped rows are
-// deliberately NOT seeded: a persisted skip can be a failure cascade (upstream
-// failed → trigger_rule skipped the tail), and replaying it would keep the tail
-// skipped after the failed node re-runs. Skips are pure re-derivations —
-// trigger_rule / when: evaluate over the seeded upstream outputs, so a
-// legitimate condition-skip re-derives identically. Failed/awaiting rows are
-// likewise excluded so they re-run on resume. `alwaysRun` node ids are excluded
-// too, so a node marked `always_run: true` re-executes on resume even though it
-// succeeded (a gate/validation should re-check, not replay a stale pass).
+// Persisted skips are re-derived because a failure-cascade skip can change on
+// resume. `excluded` is descendant-closed so every seeded success remains
+// consistent with all ancestors that will re-execute.
 function buildResumeSeed(
   nodes: NodeOutputRow[],
-  alwaysRun: ReadonlySet<string> = new Set(),
+  excluded: ReadonlySet<string>,
 ): Map<string, NodeOutput> {
   const seed = new Map<string, NodeOutput>();
   for (const node of nodes) {
-    if (node.status === "succeeded" && !alwaysRun.has(node.nodeId)) {
+    if (node.status === "succeeded" && !excluded.has(node.nodeId)) {
       seed.set(node.nodeId, {
         state: "completed",
         output: node.outputText ?? "",
@@ -865,6 +906,42 @@ function buildResumeSeed(
     }
   }
   return seed;
+}
+
+function collectDependencyClosure(nodes: readonly DagNode[], root: string): Set<string> {
+  const byId = new Map(nodes.map((node) => [node.id, node] as const));
+  const collected = new Set<string>();
+  const stack = [root];
+  while (stack.length > 0) {
+    const id = stack.pop();
+    if (id === undefined || collected.has(id)) continue;
+    collected.add(id);
+    stack.push(...(byId.get(id)?.depends_on ?? []));
+  }
+  return collected;
+}
+
+function buildResumeExclusions(
+  workflow: WorkflowDefinition,
+  persistedNodes: readonly NodeOutputRow[],
+): Set<string> {
+  const statuses = new Map(persistedNodes.map((node) => [node.nodeId, node.status] as const));
+  const roots = new Set<string>();
+  for (const node of workflow.nodes) {
+    const status = statuses.get(node.id);
+    if (node.always_run === true || (status !== "succeeded" && status !== "skipped")) {
+      roots.add(node.id);
+    }
+  }
+
+  let excluded = collectTransitiveDependents(workflow.nodes, roots);
+  const convergeGate = workflow.converge?.gate;
+  if (convergeGate !== undefined && excluded.has(convergeGate)) {
+    // The executor clears this ancestor closure whenever the gate is unseeded.
+    for (const id of collectDependencyClosure(workflow.nodes, convergeGate)) roots.add(id);
+    excluded = collectTransitiveDependents(workflow.nodes, roots);
+  }
+  return excluded;
 }
 
 // Bind a project notebook adapter (read + contribute), but only when the working
@@ -1097,6 +1174,7 @@ function startRunCore(
       origin,
       ribId,
       providerOverride: providerOverride ?? null,
+      isolationEnabled: isolationOn,
     });
   } catch (err) {
     if (lockHandle !== undefined) {
@@ -1282,12 +1360,8 @@ function resumeRunCore(
     };
   }
 
-  const alwaysRun = new Set(
-    workflow.nodes
-      .filter((n) => (n as { always_run?: boolean }).always_run === true)
-      .map((n) => n.id),
-  );
-  const completedNodeOutputs = buildResumeSeed(run.nodes, alwaysRun);
+  const excludedNodeIds = buildResumeExclusions(workflow, run.nodes);
+  const completedNodeOutputs = buildResumeSeed(run.nodes, excludedNodeIds);
 
   if (!run.workingDir) {
     return {
@@ -1326,6 +1400,33 @@ function resumeRunCore(
     };
   }
   const providerOverride = store.getRunProviderOverride(runId);
+  // A run with no node rows was cancelled while queued or mid-preflight, so it
+  // never cleared the gate either.
+  const rerunPreflight =
+    run.error?.startsWith(PREFLIGHT_FAILURE_PREFIX) === true || run.nodes.length === 0;
+  const persistedIsolationEnabled = store.getRunIsolationEnabled(runId);
+  // The workflow's current worktree.enabled can't stand in for a missing choice:
+  // a per-run isolation override may have forced the opposite.
+  if (rerunPreflight && run.worktreePath === null && persistedIsolationEnabled === null) {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run '${runId}' isolation choice is unavailable and cannot be safely resumed`,
+    };
+  }
+  const resumeIsolationEnabled = run.worktreePath === null && persistedIsolationEnabled === true;
+  const resumeIsolation: IsolationConfig | null = resumeIsolationEnabled
+    ? {
+        branchTemplate: workflow.worktree?.branch,
+        base: workflow.worktree?.base,
+        projectRootPath:
+          resumeProject &&
+          (run.workingDir === resumeProject.rootPath ||
+            run.workingDir.startsWith(`${resumeProject.rootPath}${sep}`))
+            ? resumeProject.rootPath
+            : run.workingDir,
+      }
+    : null;
   if (
     providerOverride !== null &&
     (providerOverride === "workflow" || !isRegisteredProvider(providerOverride))
@@ -1341,10 +1442,24 @@ function resumeRunCore(
     workingDir: run.workingDir,
     projectsStore,
   });
+  const resumeIsolationFallbackMode = resolveLockMode(workflow);
+  const resumeIsolationFallbackLock =
+    resumeIsolation !== null &&
+    mutationLockManager !== undefined &&
+    resumeIsolationFallbackMode !== "none" &&
+    resumeLockProjectId !== null
+      ? {
+          manager: mutationLockManager,
+          projectId: resumeLockProjectId,
+          mode: resumeIsolationFallbackMode,
+          purpose: workflow.name,
+          owner: mutationLockOwner(run.origin, runId),
+        }
+      : undefined;
   let lockHandle: MutationLockHandle | undefined;
   try {
     lockHandle =
-      run.worktreePath === null
+      run.worktreePath === null && resumeIsolation === null
         ? acquireRunMutationLock({
             mutationLockManager,
             workflow,
@@ -1401,10 +1516,10 @@ function resumeRunCore(
       subscribers,
       promptHandler,
       defaultProvider,
-      preflight: false,
+      preflight: rerunPreflight && resolveWorkflowPreflight(loadKeelsonConfig()),
       pendingApprovals,
       ...(providerOverride !== null ? { providerOverride } : {}),
-      isolation: null,
+      isolation: resumeIsolation,
       ...(run.projectId !== null ? { projectId: run.projectId } : {}),
       ...(memoryTools !== undefined ? { memoryTools } : {}),
       ...(snapshotManager !== undefined ? { snapshotManager } : {}),
@@ -1412,6 +1527,9 @@ function resumeRunCore(
       ...(usageStore !== undefined ? { usageStore } : {}),
       ...(workspaceManager !== undefined ? { workspaceManager } : {}),
       ...(notebook !== undefined ? { notebook } : {}),
+      ...(resumeIsolationFallbackLock !== undefined
+        ? { isolationFallbackLock: resumeIsolationFallbackLock }
+        : {}),
       completedNodeOutputs,
       existingWorktreePath: run.worktreePath ?? undefined,
     });
@@ -1681,33 +1799,6 @@ export function createWorkflowController(
       const projectId = projectsStore?.findByPathPrefix(workingDir)?.id;
       const runId = crypto.randomUUID();
       const abort = new AbortController();
-      const handlers = new Map<string, NodeHandler>([
-        ["bash", bashHandler],
-        ["prompt", promptHandler],
-        // No UI to pause on for a rib-driven run — approval fails fast, cancel aborts.
-        [
-          "approval",
-          makeApprovalHandler({
-            awaitApproval: async (_runId, nodeId, message) => {
-              throw new Error(
-                `approval node '${nodeId}' cannot resolve in a rib-run workflow (message: "${message}")`,
-              );
-            },
-          }),
-        ],
-        [
-          "cancel",
-          makeCancelHandler({
-            requestCancel: async () => {
-              abort.abort();
-            },
-          }),
-        ],
-        ["command", makeCommandHandler({ promptHandler })],
-        ["loop", makeLoopHandler({ promptHandler, runUntilBashProbe: defaultRunUntilBashProbe })],
-        ["script", makeScriptHandler()],
-      ]);
-      const artifacts = await RunArtifactsDir.create(runId);
       // Register in the shared run table so a server shutdown aborts an in-flight
       // rib-run's bash/script subtree like a named run — a headless run writes no
       // store row (a unique key keeps it out of dedupe/findActive), leaving only a
@@ -1724,65 +1815,116 @@ export function createWorkflowController(
         dedupeKey: runId,
         conversationId: "",
       });
+      let artifacts: RunArtifactsDir | undefined;
       try {
-        const nodeStart = new Map<string, string>();
-        const summary = await runWorkflow({
-          workflow: definitionObj,
-          runId,
-          inputs,
-          handlers,
-          cwd: workingDir,
-          abortSignal: abort.signal,
-          ...(defaultProvider !== undefined ? { defaultProvider } : {}),
-          ...(usageStore !== undefined
-            ? {
-                onEvent: (event: RunStreamEvent) => {
-                  if (event.type === "node_started") {
-                    nodeStart.set(event.nodeId, new Date().toISOString());
-                    return;
-                  }
-                  if (event.type !== "node_done") return;
-                  const usage = coerceTokenUsage(event.result.usage);
-                  const provider = sanitizeProvenanceField(event.result.provider);
-                  const model = sanitizeProvenanceField(event.result.model);
-                  if (usage === undefined || provider === null || model === null) return;
-                  const completedAt = new Date().toISOString();
-                  recordNodeUsage({
-                    usageStore,
-                    usage,
-                    provider,
-                    model,
-                    status: event.result.status,
-                    startedAt: nodeStart.get(event.nodeId) ?? null,
-                    completedAt,
-                    attribution: {
-                      runId,
-                      nodeId: event.nodeId,
-                      workflowName: definitionObj.name,
-                      conversationId: null,
-                      projectId: projectId ?? null,
-                      ribId: ribId ?? null,
-                    },
-                  });
-                  nodeStart.delete(event.nodeId);
-                },
-              }
-            : {}),
-          ...artifacts.runWorkflowOptions(),
-          ...(memoryTools !== undefined ? { memoryTools } : {}),
-          ...(projectId !== undefined ? { projectId } : {}),
-        });
-        return summaryToRibWorkflowResult(summary);
-      } catch (err) {
-        return {
-          status: "failed",
-          nodes: {},
-          error: err instanceof Error ? err.message : String(err),
-        };
+        if (resolveWorkflowPreflight(loadKeelsonConfig())) {
+          const preflight = await resolveCatalogPreflight(definitionObj, {
+            defaultProviderId: defaultProvider,
+            signal: abort.signal,
+          });
+          if (preflight.notChecked.length > 0 && preflight.violations.length === 0) {
+            console.warn(
+              `[workflows] rib-run ${definitionObj.name} preflight not checked: ${preflight.notChecked.join(", ")}`,
+            );
+          }
+          if (preflight.violations.length > 0) {
+            return {
+              status: "failed",
+              nodes: {},
+              error: `preflight failed:\n${formatPreflightViolations(preflight)}`,
+            };
+          }
+        }
+        const handlers = new Map<string, NodeHandler>([
+          ["bash", bashHandler],
+          ["prompt", promptHandler],
+          // No UI to pause on for a rib-driven run — approval fails fast, cancel aborts.
+          [
+            "approval",
+            makeApprovalHandler({
+              awaitApproval: async (_runId, nodeId, message) => {
+                throw new Error(
+                  `approval node '${nodeId}' cannot resolve in a rib-run workflow (message: "${message}")`,
+                );
+              },
+            }),
+          ],
+          [
+            "cancel",
+            makeCancelHandler({
+              requestCancel: async () => {
+                abort.abort();
+              },
+            }),
+          ],
+          ["command", makeCommandHandler({ promptHandler })],
+          ["loop", makeLoopHandler({ promptHandler, runUntilBashProbe: defaultRunUntilBashProbe })],
+          ["script", makeScriptHandler()],
+        ]);
+        artifacts = await RunArtifactsDir.create(runId);
+        try {
+          const nodeStart = new Map<string, string>();
+          const summary = await runWorkflow({
+            workflow: definitionObj,
+            runId,
+            inputs,
+            handlers,
+            cwd: workingDir,
+            abortSignal: abort.signal,
+            ...(defaultProvider !== undefined ? { defaultProvider } : {}),
+            ...(usageStore !== undefined
+              ? {
+                  onEvent: (event: RunStreamEvent) => {
+                    if (event.type === "node_started") {
+                      nodeStart.set(event.nodeId, new Date().toISOString());
+                      return;
+                    }
+                    if (event.type !== "node_done") return;
+                    const usage = coerceTokenUsage(event.result.usage);
+                    const provider = sanitizeProvenanceField(event.result.provider);
+                    const model = sanitizeProvenanceField(event.result.model);
+                    if (usage === undefined || provider === null || model === null) return;
+                    const completedAt = new Date().toISOString();
+                    recordNodeUsage({
+                      usageStore,
+                      usage,
+                      provider,
+                      model,
+                      status: event.result.status,
+                      startedAt: nodeStart.get(event.nodeId) ?? null,
+                      completedAt,
+                      attribution: {
+                        runId,
+                        nodeId: event.nodeId,
+                        workflowName: definitionObj.name,
+                        conversationId: null,
+                        projectId: projectId ?? null,
+                        ribId: ribId ?? null,
+                      },
+                    });
+                    nodeStart.delete(event.nodeId);
+                  },
+                }
+              : {}),
+            ...artifacts.runWorkflowOptions(),
+            ...(memoryTools !== undefined ? { memoryTools } : {}),
+            ...(projectId !== undefined ? { projectId } : {}),
+          });
+          return summaryToRibWorkflowResult(summary);
+        } catch (err) {
+          return {
+            status: "failed",
+            nodes: {},
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
       } finally {
         activeRuns.delete(runId);
-        await artifacts.cleanup();
-        settleDone();
+        try {
+          await artifacts?.cleanup();
+        } finally {
+          settleDone();
+        }
       }
     },
     startRun({ name, inputs, workingDir: rawWorkingDir, project, isolation, origin }) {
@@ -1838,6 +1980,7 @@ export function createWorkflowController(
             isolationOn,
             branchTemplate: workflow.worktree?.branch,
             worktreeBase: workflow.worktree?.base,
+            preflight: resolveWorkflowPreflight(loadKeelsonConfig()),
             origin: origin ?? "manual",
             ribId: ribIdFor(catalog, workflow.name, scope),
           },
@@ -2546,6 +2689,7 @@ export function workflowsRoutes(
           isolationOn: workflow.worktree?.enabled === true,
           branchTemplate: workflow.worktree?.branch,
           worktreeBase: workflow.worktree?.base,
+          preflight: resolveWorkflowPreflight(loadKeelsonConfig()),
           // A panel refresh is a producer run, same class as the heartbeat's —
           // keep it out of the default (manual) runs feed and subject to prune.
           origin: "scheduled",
@@ -3027,44 +3171,26 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     isolationFallbackLock,
   } = args;
   let pendingPreflightNotice: string | undefined;
+  const closeBeforeStart = (status: "failed" | "cancelled", error: string | null) => {
+    store.updateRunStatus({ runId, status, completedAt: new Date().toISOString(), error });
+    subscribers.broadcast(runId, { type: "run_done", status });
+    activeRuns.delete(runId);
+    subscribers.closeRun(runId);
+  };
   if (preflight) {
-    const config = loadKeelsonConfig();
-    const providers = new Map(
-      getProviderInfoList().map(({ id, capabilities }) => [
-        id,
-        {
-          defaultModel: capabilities.defaultModel,
-          models: capabilities.models,
-          ...(capabilities.modelClasses !== undefined
-            ? { modelClasses: capabilities.modelClasses }
-            : {}),
-        },
-      ]),
-    );
     // The same default the executor runs with, captured when the routes were
     // built; re-resolving here could preflight one provider and run another.
-    const defaultProviderId = defaultProvider;
-    const modelClassOverride = (id: string, modelClass: "fast" | "balanced" | "deep") =>
-      readModelClassOverride(config, id)?.[modelClass];
-    const resolution = resolveWorkflowResolution(workflow, {
-      providers,
-      defaultProviderId,
-      runProviderId: providerOverride,
-      modelClassOverride,
-    });
-    const effectiveProviders = resolution.nodes
-      .map(({ effectiveProvider }) => effectiveProvider)
-      .filter((id): id is string => id !== undefined);
-    const liveCatalog = await fetchLiveModelCatalog(effectiveProviders, {
+    const result = await resolveCatalogPreflight(workflow, {
+      defaultProviderId: defaultProvider,
+      ...(providerOverride !== undefined ? { providerOverride } : {}),
       signal: abort.signal,
     });
-    const result = checkWorkflowCatalog(workflow, {
-      providers,
-      defaultProviderId,
-      runProviderId: providerOverride,
-      modelClassOverride,
-      liveCatalog,
-    });
+    // An aborted lookup resolves as an unavailable catalog, so without this a
+    // cancelled run would record a notice and go on to prepare a worktree.
+    if (abort.signal.aborted) {
+      closeBeforeStart("cancelled", null);
+      return;
+    }
     if (result.notChecked.length > 0 && result.violations.length === 0) {
       console.warn(
         `[workflows] run ${runId} preflight not checked: ${result.notChecked.join(", ")}`,
@@ -3072,18 +3198,18 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       // Held until run_started rather than broadcast here: preflight runs before
       // any client has subscribed, and broadcast drops frames with no listener.
       pendingPreflightNotice = `preflight not checked: ${result.notChecked.join(", ")}`;
+      try {
+        store.setRunPreflightNotice(runId, pendingPreflightNotice);
+      } catch (err) {
+        console.warn(
+          `[workflows] failed to persist preflight notice for ${runId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
     }
     if (result.violations.length > 0) {
-      const error = `preflight failed:\n${formatPreflightViolations(result)}`;
-      store.updateRunStatus({
-        runId,
-        status: "failed",
-        completedAt: new Date().toISOString(),
-        error,
-      });
-      subscribers.broadcast(runId, { type: "run_done", status: "failed" });
-      activeRuns.delete(runId);
-      subscribers.closeRun(runId);
+      closeBeforeStart("failed", `${PREFLIGHT_FAILURE_PREFIX}${formatPreflightViolations(result)}`);
       return;
     }
   }

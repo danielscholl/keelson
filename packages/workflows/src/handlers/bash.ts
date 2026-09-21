@@ -53,6 +53,7 @@ export function makeBashHandler(opts: MakeBashHandlerOptions = {}): NodeHandler 
           ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
         });
         const nodeEnv = buildSubprocessEnv(ctx.inputs, ctx.upstreamOutputs, {
+          runId: ctx.runId,
           ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
           runId: ctx.runId,
         });

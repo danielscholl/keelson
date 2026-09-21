@@ -9,9 +9,16 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  isRegisteredProvider,
+  registerProvider,
+  registerStubProvider,
+  unregisterProvider,
+} from "@keelson/providers";
+import type { ReasoningEffortLevel } from "@keelson/shared";
 import type { NodeHandler } from "@keelson/workflows";
 
 import { bootstrapWorkflows } from "../src/bootstrap.ts";
@@ -66,6 +73,7 @@ function makeController(opts?: { promptHandler?: NodeHandler; usageStore?: Usage
 }
 
 beforeEach(() => {
+  if (!isRegisteredProvider("stub")) registerStubProvider();
   tmpDir = mkdtempSync(join(tmpdir(), "keelson-rib-runwf-"));
 });
 afterEach(() => {
@@ -73,6 +81,67 @@ afterEach(() => {
 });
 
 describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
+  const successfulPromptHandler: NodeHandler = {
+    type: "prompt",
+    async handle() {
+      return {
+        status: "succeeded",
+        output: { kind: "text", text: "ok" },
+        provider: "stub",
+        model: "stub-echo",
+      };
+    },
+  };
+
+  function registerCatalogProvider(
+    id: string,
+    model: string,
+    opts: {
+      efforts?: readonly ReasoningEffortLevel[];
+      unavailable?: boolean;
+      onCatalogCall?: () => void;
+      beforeCatalogResult?: (signal?: AbortSignal) => Promise<void>;
+    } = {},
+  ): void {
+    const capabilities = {
+      sessionResume: false,
+      streaming: false,
+      tools: false,
+      reasoningEffort: opts.efforts !== undefined,
+      models: [model],
+      defaultModel: model,
+    };
+    registerProvider({
+      id,
+      displayName: id,
+      capabilities,
+      builtIn: false,
+      factory: () => ({
+        getType: () => id,
+        getCapabilities: () => capabilities,
+        async *sendQuery() {
+          yield { type: "done" as const };
+        },
+        async listModels() {
+          return [{ id: model }];
+        },
+        async listModelsLive(signal?: AbortSignal) {
+          opts.onCatalogCall?.();
+          await opts.beforeCatalogResult?.(signal);
+          if (opts.unavailable === true) throw new Error("offline");
+          return [
+            {
+              id: model,
+              ...(opts.efforts !== undefined
+                ? { supportedReasoningEfforts: [...opts.efforts] }
+                : {}),
+            },
+          ];
+        },
+      }),
+    });
+  }
+
   test("runs an in-memory bash workflow and returns the terminal result", async () => {
     const { controller, activeRuns } = makeController();
     const res = await controller.runDefinition(
@@ -155,6 +224,231 @@ describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
     });
     expect(events?.[0]?.runId).toEqual(expect.any(String));
     expect(events?.[0]?.durationMs).toEqual(expect.any(Number));
+  });
+
+  test("returns a failed result for retired prompt, command, and loop model pins", async () => {
+    const { controller, activeRuns } = makeController({ promptHandler: successfulPromptHandler });
+    const result = await controller.runDefinition(
+      {
+        name: "provider-bound-preflight",
+        description: "reject retired provider-bound pins",
+        provider: "stub",
+        model: "retired-model",
+        nodes: [
+          { id: "prompt", prompt: "run" },
+          { id: "command", command: "review" },
+          {
+            id: "loop",
+            loop: { prompt: "run", until: "DONE", max_iterations: 1 },
+          },
+        ],
+      },
+      {},
+      tmpDir,
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.nodes).toEqual({});
+    expect(result.error).toContain("- prompt: model 'retired-model' is not in stub's live catalog");
+    expect(result.error).toContain(
+      "- command: model 'retired-model' is not in stub's live catalog",
+    );
+    expect(result.error).toContain("- loop: model 'retired-model' is not in stub's live catalog");
+    expect(activeRuns.size()).toBe(0);
+  });
+
+  test("returns a failed result for an unsupported effort pin", async () => {
+    registerCatalogProvider("effort-catalog", "effort-model", { efforts: ["low", "high"] });
+    try {
+      const { controller } = makeController({ promptHandler: successfulPromptHandler });
+      const result = await controller.runDefinition(
+        {
+          name: "effort-preflight",
+          description: "reject an unsupported effort",
+          provider: "effort-catalog",
+          nodes: [{ id: "prompt", model: "effort-model", effort: "xhigh", prompt: "run" }],
+        },
+        {},
+        tmpDir,
+      );
+
+      expect(result).toMatchObject({
+        status: "failed",
+        nodes: {},
+        error:
+          "preflight failed:\n- prompt: effort 'xhigh' exceeds effort-catalog/effort-model (supports low, high)",
+      });
+    } finally {
+      unregisterProvider("effort-catalog");
+    }
+  });
+
+  test("preflights with the effective default provider and model", async () => {
+    registerCatalogProvider("rib-default", "rib-model");
+    const prior = process.env.KEELSON_WORKFLOW_PROVIDER;
+    process.env.KEELSON_WORKFLOW_PROVIDER = "rib-default";
+    try {
+      const { controller } = makeController({ promptHandler: successfulPromptHandler });
+      const result = await controller.runDefinition(
+        {
+          name: "default-preflight",
+          description: "use the effective default",
+          nodes: [{ id: "prompt", model: "rib-model", prompt: "run" }],
+        },
+        {},
+        tmpDir,
+      );
+
+      expect(result.status).toBe("succeeded");
+    } finally {
+      if (prior === undefined) delete process.env.KEELSON_WORKFLOW_PROVIDER;
+      else process.env.KEELSON_WORKFLOW_PROVIDER = prior;
+      unregisterProvider("rib-default");
+    }
+  });
+
+  test("continues when the effective provider catalog is unavailable", async () => {
+    registerCatalogProvider("rib-offline", "rib-model", { unavailable: true });
+    try {
+      const { controller } = makeController({ promptHandler: successfulPromptHandler });
+      const result = await controller.runDefinition(
+        {
+          name: "offline-preflight",
+          description: "continue without an authoritative catalog",
+          provider: "rib-offline",
+          nodes: [{ id: "prompt", model: "rib-model", prompt: "run" }],
+        },
+        {},
+        tmpDir,
+      );
+
+      expect(result.status).toBe("succeeded");
+    } finally {
+      unregisterProvider("rib-offline");
+    }
+  });
+
+  test("shutdown aborts and drains an in-memory run during catalog preflight", async () => {
+    let catalogStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      catalogStarted = resolve;
+    });
+    let releaseCatalog = (): void => {};
+    registerCatalogProvider("rib-slow", "rib-model", {
+      beforeCatalogResult: (signal) =>
+        new Promise<void>((resolve) => {
+          catalogStarted();
+          const release = (): void => {
+            signal?.removeEventListener("abort", release);
+            resolve();
+          };
+          releaseCatalog = release;
+          if (signal?.aborted) release();
+          else signal?.addEventListener("abort", release, { once: true });
+        }),
+    });
+    const { controller, activeRuns } = makeController({ promptHandler: successfulPromptHandler });
+    const running = controller.runDefinition(
+      {
+        name: "slow-preflight",
+        description: "wait in catalog preflight",
+        provider: "rib-slow",
+        nodes: [{ id: "prompt", model: "rib-model", prompt: "run" }],
+      },
+      {},
+      tmpDir,
+    );
+
+    await started;
+    try {
+      expect(activeRuns.size()).toBe(1);
+      await activeRuns.abortAll();
+      expect(await running).toMatchObject({ status: "cancelled" });
+      expect(activeRuns.size()).toBe(0);
+    } finally {
+      releaseCatalog();
+      await running;
+      unregisterProvider("rib-slow");
+    }
+  });
+
+  test("performs no catalog I/O for a deterministic in-memory workflow", async () => {
+    let catalogCalls = 0;
+    registerCatalogProvider("rib-unused", "rib-model", {
+      onCatalogCall: () => {
+        catalogCalls += 1;
+      },
+    });
+    try {
+      const { controller } = makeController();
+      const result = await controller.runDefinition(
+        {
+          name: "deterministic-preflight",
+          description: "no provider-bound nodes",
+          provider: "rib-unused",
+          nodes: [{ id: "shell", bash: "echo deterministic" }],
+        },
+        {},
+        tmpDir,
+      );
+
+      expect(result.status).toBe("succeeded");
+      expect(catalogCalls).toBe(0);
+    } finally {
+      unregisterProvider("rib-unused");
+    }
+  });
+
+  test("the environment can disable in-memory preflight", async () => {
+    const prior = process.env.KEELSON_WORKFLOW_PREFLIGHT;
+    process.env.KEELSON_WORKFLOW_PREFLIGHT = "off";
+    try {
+      const { controller } = makeController({ promptHandler: successfulPromptHandler });
+      const result = await controller.runDefinition(
+        {
+          name: "disabled-preflight",
+          description: "operator-disabled preflight",
+          provider: "stub",
+          nodes: [{ id: "prompt", model: "retired-model", prompt: "run" }],
+        },
+        {},
+        tmpDir,
+      );
+
+      expect(result.status).toBe("succeeded");
+    } finally {
+      if (prior === undefined) delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
+      else process.env.KEELSON_WORKFLOW_PREFLIGHT = prior;
+    }
+  });
+
+  test("config can disable in-memory preflight", async () => {
+    const priorConfig = process.env.KEELSON_CONFIG;
+    const priorEnv = process.env.KEELSON_WORKFLOW_PREFLIGHT;
+    const configPath = join(tmpDir, "config.json");
+    writeFileSync(configPath, JSON.stringify({ workflowPreflight: false }));
+    process.env.KEELSON_CONFIG = configPath;
+    delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
+    try {
+      const { controller } = makeController({ promptHandler: successfulPromptHandler });
+      const result = await controller.runDefinition(
+        {
+          name: "config-disabled-preflight",
+          description: "config-disabled preflight",
+          provider: "stub",
+          nodes: [{ id: "prompt", model: "retired-model", prompt: "run" }],
+        },
+        {},
+        tmpDir,
+      );
+
+      expect(result.status).toBe("succeeded");
+    } finally {
+      if (priorConfig === undefined) delete process.env.KEELSON_CONFIG;
+      else process.env.KEELSON_CONFIG = priorConfig;
+      if (priorEnv === undefined) delete process.env.KEELSON_WORKFLOW_PREFLIGHT;
+      else process.env.KEELSON_WORKFLOW_PREFLIGHT = priorEnv;
+    }
   });
 
   test("fails closed on a structurally-invalid definition (no run)", async () => {

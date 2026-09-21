@@ -4,8 +4,8 @@
  *
  * Keelson stores run state in SQLite, so `conversation_id`,
  * `parent_conversation_id`, and `codebase_id` are optional here. NodeOutput
- * carries optional runtime fields (`usage`, `startedAt`, `completedAt`,
- * `durationMs`) used by the executor's lifecycle hooks.
+ * carries optional runtime fields (`usage`, `provider`, `model`, `startedAt`,
+ * `completedAt`, `durationMs`) used by lifecycle hooks and deterministic nodes.
  */
 import { z } from "zod";
 
@@ -92,8 +92,8 @@ export type TokenUsage = z.infer<typeof tokenUsageSchema>;
  * output_format is set). Empty string for failed/skipped nodes.
  * `error` is required when state is 'failed', absent on all other states.
  *
- * `usage` / `startedAt` / `completedAt` / `durationMs` are Keelson-only
- * runtime extras (see file header). All optional and additive.
+ * `usage` / `provider` / `model` / timestamps are Keelson-only runtime extras
+ * (see file header). All optional and additive.
  */
 export const nodeOutputSchema = z.discriminatedUnion("state", [
   z.object({

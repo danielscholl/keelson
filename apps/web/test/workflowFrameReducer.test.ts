@@ -12,13 +12,14 @@ import {
   applyFrame,
   hydrateFromSnapshot,
   mergeNode,
+  mergeWarnings,
   type NodeView,
   type RunView,
 } from "../src/hooks/useWorkflowRun.ts";
 
 // Drives the pure frame reducer with plain state closures — no React, no WS.
-function harness() {
-  let run: RunView = { runId: "r1", status: "loading", warnings: [] };
+function harness(initialRun: RunView = { runId: "r1", status: "loading", warnings: [] }) {
+  let run = initialRun;
   let nodes: Record<string, NodeView> = {};
   const setRun = (update: RunView | ((prev: RunView) => RunView)): void => {
     run = typeof update === "function" ? update(run) : update;
@@ -38,6 +39,7 @@ function harness() {
         setNodes as React.Dispatch<React.SetStateAction<Record<string, NodeView>>>,
       ),
     node: (id: string) => nodes[id],
+    run: () => run,
   };
 }
 
@@ -185,6 +187,25 @@ describe("hydrateFromSnapshot running overlay", () => {
     expect(Object.keys(nodes)).toEqual([]);
   });
 
+  test("a persisted preflight notice hydrates as a run warning", () => {
+    const { run } = hydrateFromSnapshot(
+      detail({ preflightNotice: "preflight not checked: offline-catalog" }),
+    );
+    expect(run.warnings).toEqual([
+      { nodeId: null, message: "preflight not checked: offline-catalog" },
+    ]);
+  });
+
+  test("a replayed preflight warning is not duplicated after hydration", () => {
+    const message = "preflight not checked: offline-catalog";
+    const { run } = hydrateFromSnapshot(detail({ preflightNotice: message }));
+    const h = harness(run);
+
+    h.apply({ type: "run_warning", nodeId: null, message });
+
+    expect(h.run().warnings).toEqual([{ nodeId: null, message }]);
+  });
+
   test("an awaiting row keeps its approval state over the overlay", () => {
     const { nodes } = hydrateFromSnapshot(
       detail({
@@ -226,5 +247,24 @@ describe("hydrateFromSnapshot running overlay", () => {
     expect(nodes.author?.status).toBe("running");
     expect(nodes.author?.logLines).toEqual([]);
     expect(nodes.author?.completedAt).toBeUndefined();
+  });
+});
+
+describe("mergeWarnings", () => {
+  test("keeps identical ordinary warning frames as distinct events", () => {
+    const warning = { nodeId: "author", message: "provider fallback" };
+    const h = harness();
+
+    h.apply({ type: "run_warning", ...warning });
+    h.apply({ type: "run_warning", ...warning });
+
+    expect(h.run().warnings).toEqual([warning, warning]);
+  });
+
+  test("keeps a durable preflight notice once across live delivery and reconnect", () => {
+    const notice = { nodeId: null, message: "preflight not checked: offline-catalog" };
+    const hydratedWithLive = mergeWarnings([notice], [notice]);
+
+    expect(mergeWarnings([notice], hydratedWithLive)).toEqual([notice]);
   });
 });
