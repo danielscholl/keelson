@@ -2914,6 +2914,47 @@ nodes:
     expect(existsSync(neverMarkPath)).toBe(false);
   });
 
+  test("POST /resume-run refreshes descendants of a condition-skipped node", async () => {
+    const collectorCountPath = join(tmpDir, "condition-skipped-collector-count.txt");
+    writeWorkflow(
+      "resume-condition-skipped.yaml",
+      `name: resume-condition-skipped
+description: descendants of condition-skipped nodes refresh on resume
+nodes:
+  - id: prepare
+    bash: echo ready
+  - id: skipped
+    depends_on: [prepare]
+    when: "$prepare.output == 'nope'"
+    bash: echo should-not-run
+  - id: collector
+    depends_on: [skipped]
+    trigger_rule: all_done
+    bash: |
+      n=0
+      if [ -f "${collectorCountPath}" ]; then n=$(cat "${collectorCountPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${collectorCountPath}"
+  - id: fail
+    depends_on: [collector]
+    bash: exit 7
+`,
+    );
+    const { app } = makeRig();
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-condition-skipped/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
+
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+    expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
+    expect(readFileSync(collectorCountPath, "utf8").trim()).toBe("2");
+  });
+
   test("POST /resume-run reuses the artifacts dir so seeded nodes' files survive", async () => {
     const artifactsFlakyCountPath = join(tmpDir, "artifacts-flaky-count.txt");
     writeWorkflow(
