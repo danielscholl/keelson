@@ -51,6 +51,9 @@ export interface CreateRunInput {
   origin?: WorkflowRunOrigin;
   // The rib that owns this run's workflow, resolved from the catalog at start.
   ribId?: string | null;
+  // The rib that started the run through RibContext.startWorkflow; null for
+  // every other launch source.
+  startedByRibId?: string | null;
   providerOverride?: string | null;
 }
 
@@ -125,6 +128,10 @@ export interface WorkflowStore {
   getRunUsageTotals(runId: string): { totalTokens: number; turns: number };
   getRunProviderOverride(runId: string): string | null;
   getRunIsolationEnabled(runId: string): boolean | null;
+  getRunStartedByRibId(runId: string): string | null;
+  // True once the run has executed in its own worktree, even after cleanup
+  // cleared worktree_path.
+  getRunWorktreeEstablished(runId: string): boolean;
   getRun(runId: string): WorkflowRunDetail | undefined;
   listRuns(workflowName?: string): WorkflowRunSummary[];
   // General filtered feed backing GET /api/workflows/runs and bulk delete.
@@ -294,7 +301,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   );
 
   const insertRun = db.prepare(
-    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, worktree_base, origin, rib_id, provider_override, isolation_enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, worktree_base, origin, rib_id, provider_override, isolation_enabled, started_by_rib_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const updateRun = db.prepare(
     "UPDATE workflow_runs SET status = ?, completed_at = ?, error = ? WHERE id = ?",
@@ -305,7 +312,14 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   const claimResume = db.prepare(
     "UPDATE workflow_runs SET status = 'running', completed_at = NULL, error = NULL WHERE id = ? AND status IN ('failed', 'cancelled') AND worktree_pruned = 0",
   );
-  const updateWorktreePath = db.prepare("UPDATE workflow_runs SET worktree_path = ? WHERE id = ?");
+  // worktree_established latches: clearing the path after cleanup must not erase
+  // the record that the run executed in its own worktree.
+  const updateWorktreePath = db.prepare(
+    "UPDATE workflow_runs SET worktree_path = ?1, worktree_established = CASE WHEN ?1 IS NOT NULL THEN 1 ELSE worktree_established END WHERE id = ?2",
+  );
+  const selectWorktreeEstablished = db.prepare(
+    "SELECT worktree_established FROM workflow_runs WHERE id = ?",
+  );
   const selectWorktreePruned = db.prepare("SELECT worktree_pruned FROM workflow_runs WHERE id = ?");
   const updateWorktreePruned = db.prepare(
     "UPDATE workflow_runs SET worktree_pruned = ? WHERE id = ? AND worktree_pruned != ?",
@@ -335,6 +349,9 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   );
   const selectRunIsolationEnabled = db.prepare(
     "SELECT isolation_enabled FROM workflow_runs WHERE id = ?",
+  );
+  const selectRunStartedByRibId = db.prepare(
+    "SELECT started_by_rib_id FROM workflow_runs WHERE id = ?",
   );
   const listRunsAll = db.prepare(
     "SELECT * FROM workflow_runs ORDER BY started_at DESC, rowid DESC",
@@ -409,6 +426,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
           : input.isolationEnabled
             ? 1
             : 0,
+        input.startedByRibId ?? null,
       );
     },
     updateRunStatus(input) {
@@ -487,6 +505,14 @@ export function createWorkflowStore(db: Database): WorkflowStore {
       } | null;
       if (row === null || row.isolation_enabled === null) return null;
       return row.isolation_enabled === 1;
+    },
+    getRunWorktreeEstablished(runId) {
+      const row = selectWorktreeEstablished.get(runId) as { worktree_established: number } | null;
+      return row?.worktree_established === 1;
+    },
+    getRunStartedByRibId(runId) {
+      const row = selectRunStartedByRibId.get(runId) as { started_by_rib_id: string | null } | null;
+      return row?.started_by_rib_id ?? null;
     },
     getRun(runId) {
       const row = selectRun.get(runId) as RunRow | null;

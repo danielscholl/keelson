@@ -8,12 +8,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   BUILT_IN_PROVIDER_IDS,
+  isRibWorkflowGrantAllowed,
   type KeelsonConfig,
   loadKeelsonConfig,
   readKeelsonConfig,
   resolveDefaultProvider,
   resolveEnabledProviders,
   resolveMcpSettings,
+  resolveRibWorkflowGrants,
   resolveWorkflowPreflight,
 } from "../src/config.ts";
 
@@ -372,5 +374,30 @@ describe("resolveMcpSettings", () => {
     expect(out.exposeStateChanging).toBe(true);
     expect(out.requireToken).toBe(true);
     expect(out.toolDenylist).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("resolveRibWorkflowGrants", () => {
+  test("denies a rib with no entry", () => {
+    const grants = resolveRibWorkflowGrants({}, {});
+    expect(isRibWorkflowGrantAllowed(grants, "chat", "fix-issue")).toBe(false);
+  });
+
+  test("grants only the named workflows to the named rib", () => {
+    const grants = resolveRibWorkflowGrants({ ribWorkflowGrants: { chat: ["fix-issue"] } }, {});
+    expect(isRibWorkflowGrantAllowed(grants, "chat", "fix-issue")).toBe(true);
+    expect(isRibWorkflowGrantAllowed(grants, "chat", "resolve-pr")).toBe(false);
+    expect(isRibWorkflowGrantAllowed(grants, "squad", "fix-issue")).toBe(false);
+  });
+
+  test("unions the env string with the config and trims both", () => {
+    const grants = resolveRibWorkflowGrants(
+      { ribWorkflowGrants: { chat: [" fix-issue "] } },
+      { KEELSON_RIB_WORKFLOW_GRANTS: "chat: resolve-pr ; squad:*; malformed" },
+    );
+    expect(isRibWorkflowGrantAllowed(grants, "chat", "fix-issue")).toBe(true);
+    expect(isRibWorkflowGrantAllowed(grants, "chat", "resolve-pr")).toBe(true);
+    expect(isRibWorkflowGrantAllowed(grants, "squad", "anything")).toBe(true);
+    expect(grants.has("malformed")).toBe(false);
   });
 });

@@ -59,6 +59,7 @@ enabled.
 | `codex.network` | boolean | Whether the Codex subprocess may reach the network. Default `false`. |
 | `mcp` | object | Tunes the MCP gateway, the `/api/mcp` endpoint other agents call. See [MCP gateway](#mcp-gateway). |
 | `crossRibGrants` | object of `caller: { target: [tool] }` | Which ribs may call which other ribs' tools. Default-deny without an entry. See [Cross-rib grants](#cross-rib-grants). |
+| `ribWorkflowGrants` | object of `rib: [workflow]` | Which ribs may start which catalog workflows. Default-deny without an entry. See [Rib workflow grants](#rib-workflow-grants). |
 | `gateways` | array | OpenAI-compatible endpoints registered as providers. Managed with `keelson gateway`, not by hand. See [Gateways](#gateways). |
 
 The built-in provider ids are `copilot`, `claude`, `pi`, `codex`, and `stub` (the
@@ -356,6 +357,36 @@ unreadable rather than read as granting nothing. All of this needs the server up
 with it down there are no grants in force to observe, so doctor skips the section
 rather than guessing.
 
+### Rib workflow grants
+
+A rib cannot start a catalog workflow by default. When a rib calls
+`startWorkflow`, the harness refuses unless the operator has granted that rib
+that workflow name. Grant it in the config file, under `ribWorkflowGrants`:
+
+```json
+{
+  "ribWorkflowGrants": {
+    "chat": ["fix-issue", "resolve-pr"]
+  }
+}
+```
+
+That reads as: the Chat rib may start `fix-issue` and `resolve-pr`. `"*"` covers
+every catalog workflow; list names to keep it narrow. The grant is checked before
+the policy engine, so a rib with no entry gets a plain denial and the operator is
+never prompted. A granted start still passes through policy as a `workflow_run`
+tool call on the `rib` surface. If a policy asks you to approve it, the rib waits
+up to `KEELSON_CROSS_RIB_CALL_TIMEOUT_MS`, and no answer counts as a denial.
+
+The grant names a workflow, not a file. When the rib starts a workflow on a
+project, the name resolves in that project's scope, so a `fix-issue.yaml` under
+the project's `.keelson/workflows/` runs in place of the bundled one.
+
+`KEELSON_RIB_WORKFLOW_GRANTS` unions with this key, and the same advice applies:
+keep a standing grant in the config file. A granted rib can start a run, read the
+status of runs it started, and cancel them. It cannot answer an approval, which
+stays with the operator.
+
 ## MCP gateway
 
 The server exposes its tool registry over the [Model Context Protocol](https://modelcontextprotocol.io)
@@ -410,6 +441,7 @@ replacing it, so a grant from either source stands.
 | `KEELSON_WORKFLOW_PROMPT_TIMEOUT_S` | `600` | Per-node timeout, in seconds, for workflow `prompt` nodes. |
 | `KEELSON_MAX_CONCURRENT_RUNS` | `4` | Process-wide ceiling on worktree-isolated workflow runs executing at once; further runs queue. Raise on a larger host. |
 | `KEELSON_CROSS_RIB_GRANTS` | unset | `;`-separated `caller:target:tool` grant triples (the tool field takes a comma-separated list or `*`); default-deny when unset. **Unions with** (does not override) the config file's `crossRibGrants`, which is the durable place for a standing grant. See [Cross-rib grants](#cross-rib-grants). |
+| `KEELSON_RIB_WORKFLOW_GRANTS` | unset | `;`-separated `rib:workflow` grants (the workflow field takes a comma-separated list or `*`); default-deny when unset. **Unions with** the config file's `ribWorkflowGrants`, like the cross-rib variable above. See [Rib workflow grants](#rib-workflow-grants). |
 | `KEELSON_CROSS_RIB_CALL_TIMEOUT_MS` | `30000` | Timeout, in milliseconds, for one cross-rib tool call. See [Governance](../governance/#cross-rib-grants). |
 | `KEELSON_COPILOT_WARM_IDLE_MS` | `600000` | How long the Copilot language-server subprocess stays warm between turns before it is evicted, in milliseconds. `0` or negative disables warmth (every turn spawns fresh). |
 | `KEELSON_RIBS` | all discovered | Comma-separated rib ids to activate. |

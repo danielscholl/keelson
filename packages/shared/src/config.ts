@@ -92,6 +92,11 @@ const crossRibGrantsSchema = z.record(
 );
 export type CrossRibGrantsConfig = z.infer<typeof crossRibGrantsSchema>;
 
+// `{ ribId: [workflowName, …] }`, `"*"` meaning every catalog workflow. Unioned
+// with KEELSON_RIB_WORKFLOW_GRANTS (see resolveRibWorkflowGrants).
+const ribWorkflowGrantsSchema = z.record(z.string(), z.array(z.string().min(1)).min(1));
+export type RibWorkflowGrantsConfig = z.infer<typeof ribWorkflowGrantsSchema>;
+
 // Wire flavors a gateway speaks. Only "openai" (OpenAI Chat Completions, the
 // universal IR for OpenRouter / Ollama / vLLM / Azure / LiteLLM) is implemented
 // today; the enum is single-valued so adding "anthropic" later is a
@@ -204,6 +209,7 @@ const keelsonConfigSchema = z.object({
   mcp: mcpSettingsSchema.optional(),
   // Which ribs may call which other ribs' tools. Default-deny without an entry.
   crossRibGrants: crossRibGrantsSchema.optional(),
+  ribWorkflowGrants: ribWorkflowGrantsSchema.optional(),
   // OpenAI-compatible gateway endpoints, each registered as a provider named
   // for the gateway. Non-secret metadata only — the API key lives in the
   // keychain (see gatewayCredentialServiceId).
@@ -480,6 +486,62 @@ export function isCrossRibGrantAllowed(
 ): boolean {
   const tools = grants.get(callerRibId)?.get(targetRibId);
   return tools?.has(name) === true || tools?.has("*") === true;
+}
+
+// The workflow-start grants in force, resolved: rib id → catalog workflow names
+// it may start through RibContext.startWorkflow ("*" = every workflow).
+export type RibWorkflowGrants = Map<string, Set<string>>;
+
+function addRibWorkflowGrant(
+  grants: RibWorkflowGrants,
+  rawRibId: string,
+  rawNames: readonly string[],
+): void {
+  const ribId = rawRibId.trim();
+  const names = rawNames.map((name) => name.trim()).filter((name) => name.length > 0);
+  if (!ribId || names.length === 0) return;
+  let workflows = grants.get(ribId);
+  if (!workflows) {
+    workflows = new Set();
+    grants.set(ribId, workflows);
+  }
+  for (const name of names) {
+    workflows.add(name);
+  }
+}
+
+// `rib:workflow,workflow;rib:workflow` — the cross-rib env grammar minus the target.
+export function parseRibWorkflowGrants(raw: string | undefined): RibWorkflowGrants {
+  const grants: RibWorkflowGrants = new Map();
+  if (raw === undefined || raw.trim() === "") return grants;
+  for (const segment of raw.split(";")) {
+    const [ribId, workflows, ...rest] = segment.split(":").map((part) => part.trim());
+    if (!ribId || !workflows || rest.length > 0) continue;
+    addRibWorkflowGrant(grants, ribId, workflows.split(","));
+  }
+  return grants;
+}
+
+// config.json's `ribWorkflowGrants` unioned with KEELSON_RIB_WORKFLOW_GRANTS, for
+// the same reason resolveCrossRibGrants unions its two sources.
+export function resolveRibWorkflowGrants(
+  config: KeelsonConfig,
+  env: Record<string, string | undefined> = process.env,
+): RibWorkflowGrants {
+  const grants = parseRibWorkflowGrants(env.KEELSON_RIB_WORKFLOW_GRANTS);
+  for (const [ribId, names] of Object.entries(config.ribWorkflowGrants ?? {})) {
+    addRibWorkflowGrant(grants, ribId, names);
+  }
+  return grants;
+}
+
+export function isRibWorkflowGrantAllowed(
+  grants: ReadonlyMap<string, ReadonlySet<string>>,
+  ribId: string,
+  workflowName: string,
+): boolean {
+  const workflows = grants.get(ribId);
+  return workflows?.has(workflowName) === true || workflows?.has("*") === true;
 }
 
 // Tolerant read of the gateways array from a raw config object: keep the

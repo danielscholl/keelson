@@ -209,6 +209,17 @@ surfaces an approval prompt for a call that would be denied regardless. See
 [Configuration](../configuration/#cross-rib-grants) for the config key, the env
 string, and the cross-rib call timeout.
 
+## Rib workflow grants
+
+A rib starting a catalog workflow through `startWorkflow` follows the same order.
+It is **default-deny**, the operator opts a rib in per workflow name under
+`ribWorkflowGrants`, and the grant is checked before the policy stack. A granted
+start is then evaluated as a `workflow_run` tool call on the `rib` surface, so a
+policy can still deny it. The rib can read and cancel the runs it started, and
+answering an approval stays with the operator. See
+[Configuration](../configuration/#rib-workflow-grants) for the config key and the
+env string.
+
 ## Related
 
 - [Configuration](../configuration/): every `KEELSON_*` variable, including the
