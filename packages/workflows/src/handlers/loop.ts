@@ -57,7 +57,7 @@ export interface UntilBashResult {
 }
 
 export interface RunUntilBashProbeOptions {
-  runId: string;
+  runId?: string;
   cwd: string;
   signal: AbortSignal;
   /**
