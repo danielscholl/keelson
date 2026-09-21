@@ -107,6 +107,15 @@ soon as its reply is posted, so an authorized thread whose resolve failed is
 never re-replied, only re-resolved. The per-entry authorization keeps default-mode
 `wontfix` replies out of the retry lane.
 
+**Each round reads its own fixes before the reviewer does.** A review fix is
+narrow by construction: it repairs the path the reviewer cited. With review on
+push enabled, anything the fix breaks elsewhere comes back as the next round's
+thread, one defect per round. So between `fix-validation` and the push gate,
+`review-fix` reads only the commits the forge has not seen, on a different model from
+the fixer and with read-only tools, and `apply-review-fix` repairs what survives
+a refutation attempt. `revalidate` then gates the whole result. A failed review
+node fails the round instead of pushing unreviewed code.
+
 Public mutation failures also persist in
 `$ARTIFACTS_DIR/reply-failures.json`. `reply-audit` checks only the current
 round. If `reply-gate`, a reply call, or a resolve call failed, the workflow
@@ -129,8 +138,11 @@ without context.
 | `fix` | prompt | Applies code fixes or PR body, title, and label fixes. Results carry `fix_kind: "code"` with a commit or `fix_kind: "metadata"` with `commit: null`, plus the per-entry `resolve_authorized` decision. |
 | `validate` | bash | Soft-runs the discovered `verify.sh`, reporting `VALIDATION_STATUS` for the fixer. |
 | `fix-validation` | prompt | Repairs broken validation, if any, and commits the repair. |
-| `revalidate` | bash | Hard gate: refuses to push if `verify.sh` is missing or failing. |
-| `push` | bash | Pushes the detached HEAD back to the recorded PR head ref on `origin`. |
+| `capture-fix-diff` | bash | Writes every commit the forge does not have yet to `fix-diff.patch` and emits `has_fix`. The base is the PR head `fetch-state` checked out, and only a successful `push` advances it, so a fix that a failed attempt left unpushed is still inside the next attempt's review. It fails when no base was recorded, so a missing base never reads as a clean round. |
+| `review-fix` | prompt | **`model: gpt-6-astra`**, **`effort: xhigh`**, `allowed_tools: [Read, Glob, Grep]`, typed JSON. Runs only when the round committed code. Reads the round's delta as the last reader before the push: every entry path that reaches the changed code, what the fix newly assumes, and the docs, version constants, and exported types that must move with it. |
+| `apply-review-fix` | prompt | **`model: gpt-5.6-sol`**, **`effort: high`**. Tries to refute each CRITICAL or HIGH finding at confidence 80 or above, fixes the ones that hold, commits without pushing, and logs the outcome per finding in `pre-push-review.md`. |
+| `revalidate` | bash | Hard gate: refuses to push if `verify.sh` is missing or failing. It runs after the pre-push review, so it covers the review's fixes too, and it still runs when that review was skipped because the round committed no code. |
+| `push` | bash | Pushes the detached HEAD back to the recorded PR head ref on `origin`, then advances the review base to the pushed SHA. |
 | `reply-gate` | bash | Fail-closed honesty check. It validates full result coverage, code versus metadata fix evidence, the approved decision, per-entry resolution authorization, comment targets, and required owner-side closing language before review replies or thread resolutions. Failures enter `reply-failures.json`. |
 | `reply-resolve` | prompt | Replies on every result entry and resolves exactly those with `resolve_authorized: true`. It records reply or resolve call failures and persists the authorization in `handled.json` for safe retries. |
 | `reply-audit` | bash | Reads current-round `reply-failures.json` entries after both reply nodes finish and emits whether operator attention is required. |

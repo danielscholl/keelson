@@ -190,8 +190,8 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: claude-opus-4.8
-    effort: xhigh
+      copilot: gpt-6-astra
+    effort: high
     # Bug investigation has the same chunk-sparse, single-turn shape as planning.
     idle_timeout: 1800000
     prompt: |
@@ -265,8 +265,8 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: claude-opus-4.8
-    effort: xhigh
+      copilot: gpt-6-astra
+    effort: high
     # Single-turn large-codebase planning can sit >600s between provider chunks.
     # Match the heavy edit nodes' idle budget so chunk-sparse work can finish.
     idle_timeout: 1800000
@@ -833,7 +833,7 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-5.6-terra
+      copilot: gpt-6-astra
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
     output_format:
@@ -887,6 +887,10 @@ nodes:
          - empty-state, null, timeout, and degraded-dependency behavior
          - version or constant drift between files that must agree (a bump
            applied in one place but not its siblings)
+         - docs that must agree with the code: Grep the docs, READMEs, and
+           reference tables for every symbol, flag, env var, default, and
+           count this diff changes. A page that now contradicts the behavior,
+           or omits a contract the diff adds, is HIGH.
          - observability gaps that would hide a failure
          Then the classic pass: logic bugs, broken/missing error handling,
          unhandled null/edge cases, off-by-one, and regressions in the changed
@@ -900,13 +904,20 @@ nodes:
          Grep the existing call sites that flow through it and confirm every
          argument the codebase itself passes today still passes. A guard that
          rejects an input the repo produces is CRITICAL.
-      5. After your first plausible finding, keep digging before you finalize:
+      5. The diff shows one path; the defect is usually on another. For each
+         changed function that owns state or lifecycle, Grep its callers and
+         list every entry path that reaches it: first start, resume or retry,
+         cancel and shutdown, scheduled or background invocation, the
+         disabled or opt-out configuration, and data written before this
+         change. Confirm the change holds on each one, not only the path the
+         author edited.
+      6. After your first plausible finding, keep digging before you finalize:
          second-order failures, empty-state behavior, retries, stale state, and
          rollback paths.
-      6. Do NOT review style, naming, comments, or test coverage — other
+      7. Do NOT review style, naming, comments, or test coverage — other
          reviewers own those. Ignore pre-existing issues on lines this branch
          did not touch, and anything a type-checker / linter / CI already catches.
-      7. When a claim rests on inferred behavior of an external API, library, or
+      8. When a claim rests on inferred behavior of an external API, library, or
          runtime you did not verify in this repo, label it INFERRED and cap its
          confidence at 60.
 
@@ -1129,6 +1140,12 @@ nodes:
       - For each issue: read the file, make the change, then run the NARROWEST
         check that covers it (the touched workspace's type-check + tests), not the
         full suite.
+      - Before committing a fix, name what else it touches: the other callers
+        and entry paths of the changed code (resume or retry, cancel and
+        shutdown, the disabled or opt-out configuration, data written before
+        this change) and whatever must move with it (docs, schema or version
+        constants, exported types). Check each. A fix that holds only on the
+        path the finding cited is incomplete.
       - Stage edited files by name. Never `git add -A`. Never commit anything
         under `$ARTIFACTS_DIR`.
       - Commit the fixes by name (`git commit -m "fix: address review findings"`,
@@ -1156,7 +1173,11 @@ nodes:
       For each must-fix issue, inspect the current code
       (`git diff "$(cat $ARTIFACTS_DIR/.default-branch)"...HEAD` for the relevant
       files) and confirm it is genuinely resolved and the fix introduced no new
-      CRITICAL/HIGH defect. If any issue is still open, or a fix added a new defect,
+      CRITICAL/HIGH defect. Look past the line each fix touched: the other entry
+      paths that reach the changed code (resume or retry, cancel and shutdown,
+      the disabled or opt-out configuration, data written before this change)
+      and the docs, version constants, or exported types that must move with it.
+      If any issue is still open, or a fix added a new defect,
       fix it now: read, edit, run the narrowest covering check, then
       `git add <files>; git commit -m "fix: complete review follow-up"; git push`.
       Otherwise make no changes.

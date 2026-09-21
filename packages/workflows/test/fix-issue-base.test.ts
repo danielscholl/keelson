@@ -48,6 +48,29 @@ describe("fix-issue default branch", () => {
     expect(source).not.toContain("Coverage adequate.");
   });
 
+  test("the correctness lens follows changed code to its other entry paths and its docs", () => {
+    const filePath = join(import.meta.dir, "../assets/workflows/fix-issue.yaml");
+    const result = parseWorkflow(readFileSync(filePath, "utf8"), filePath);
+    const node = result.workflow?.nodes.find((candidate) => candidate.id === "review-correctness");
+    const prompt = node?.prompt?.replace(/\s+/g, " ");
+
+    expect(result.error).toBeNull();
+    expect(prompt).toContain("list every entry path that reaches it");
+    expect(prompt).toContain("data written before this change");
+    expect(prompt).toContain("docs that must agree with the code");
+    expect(node?.allowed_tools).toEqual(["Read", "Glob", "Grep"]);
+  });
+
+  test("the fix loop checks what else a fix touches", () => {
+    const filePath = join(import.meta.dir, "../assets/workflows/fix-issue.yaml");
+    const result = parseWorkflow(readFileSync(filePath, "utf8"), filePath);
+    const promptOf = (id: string) =>
+      result.workflow?.nodes.find((node) => node.id === id)?.prompt?.replace(/\s+/g, " ");
+
+    expect(promptOf("apply-fixes")).toContain("Before committing a fix, name what else it touches");
+    expect(promptOf("re-review")).toContain("Look past the line each fix touched");
+  });
+
   test("triage requires a correctness verdict before declaring ship-ready", () => {
     const filePath = join(import.meta.dir, "../assets/workflows/fix-issue.yaml");
     const result = parseWorkflow(readFileSync(filePath, "utf8"), filePath);
