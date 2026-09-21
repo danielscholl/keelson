@@ -25,8 +25,12 @@ state until the review and CI surface stops changing.
 keelson workflow run resolve-pr --inputs ARGUMENTS="resolve PR 42"
 ```
 
-Pass an explicit PR number. resolve-pr runs in an isolated worktree on a
-generated branch, so it cannot infer the target PR from the current branch.
+Pass exactly one explicit PR or MR number: a bare number (`42`), a reference
+(`PR #42` or `MR !42`), or a GitHub PR or GitLab MR URL. The target is parsed
+without an agent call, so every convergence round uses the same number.
+Missing or conflicting targets fail extraction. resolve-pr runs in an isolated
+worktree on a generated branch, so it cannot infer the target from the current
+branch.
 
 Approved `invalid` and `already-addressed` verdicts resolve in either mode. Repos
 that also require approved `wontfix` threads to close can opt in:
@@ -129,7 +133,7 @@ without context.
 
 | Node | Kind | What it does |
 | --- | --- | --- |
-| `extract-pr` | prompt | Parses the PR number from `$ARGUMENTS`. An explicit number is required, since the run cannot infer the PR from the branch in an isolated worktree. |
+| `extract-pr` | script (Bun) | Deterministically parses one explicit PR or MR number from `$ARGUMENTS`, including PR/MR references and URLs. Rejects missing or conflicting targets instead of guessing from the isolated worktree's branch. |
 | `fetch-state` | bash | Resolves the PR, refuses forks by emitting `is_fork`, checks out the head commit detached on round 1, pages the `reviewThreads` GraphQL query, and splits unresolved threads against `handled.json` into new threads and ledger-authorized resolve retries. |
 | `refuse-fork` | cancel | Stops the run cleanly when `fetch-state` reports a fork PR. |
 | `triage` | prompt | Runs only when there are new threads. Reads the cited code and classifies each new thread, including separate `actionable-code-change` and `actionable-metadata-change` decisions. |

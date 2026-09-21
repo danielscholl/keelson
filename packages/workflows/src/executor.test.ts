@@ -2471,6 +2471,58 @@ import { makeCommandHandler } from "./handlers/command.ts";
 import { makeLoopHandler } from "./handlers/loop.ts";
 import { makeScriptHandler } from "./handlers/script.ts";
 
+describe("runWorkflow - resolve-pr target extraction", () => {
+  async function extractTarget(request: string) {
+    const workflow = loadBundled("resolve-pr");
+    const extract = workflow.nodes.find((node) => node.id === "extract-pr");
+    if (!extract) throw new Error("resolve-pr must declare extract-pr");
+    return runWorkflow({
+      ...baseOpts({ ...workflow, converge: undefined, nodes: [extract] }),
+      inputs: { ARGUMENTS: request },
+      handlers: new Map([["script", makeScriptHandler()]]),
+    });
+  }
+
+  test.each([
+    "912",
+    " 912\n",
+    "#912",
+    "resolve PR 912",
+    "resolve pr #912",
+    "finish pull request 912",
+    "resolve MR !912",
+    "finish merge request 912",
+    "https://github.com/owner/repo-2026/pull/912",
+    "https://gitlab.com/group/repo/-/merge_requests/912",
+    "resolve PR 912 (https://github.com/owner/repo/pull/912)",
+    "resolve PR 912 and retry CI 3 times",
+    "resolve PR 912; $(exit 1)",
+  ])("extracts one explicit target without a provider: %s", async (request) => {
+    const summary = await extractTarget(request);
+    expect(summary.status).toBe("succeeded");
+    expect(summary.nodes["extract-pr"]).toMatchObject({ state: "completed", output: "912" });
+  });
+
+  test.each([
+    "",
+    "CURRENT",
+    "finish this PR",
+    "retry CI 3 times",
+    "0",
+    "-912",
+    "PR 912abc",
+    "resolve PR 912 and PR 913",
+    "https://github.com/owner/repo/pull/912 and #913",
+  ])("rejects a missing or ambiguous target: %s", async (request) => {
+    const summary = await extractTarget(request);
+    expect(summary.status).toBe("failed");
+    expect(summary.nodes["extract-pr"]).toMatchObject({
+      state: "failed",
+      error: expect.stringContaining("exactly one explicit PR or MR number"),
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // resolve-pr — drives the real converge loop with its deterministic jq gates
 // (triage-gate, reply-gate, converge-check) run for real and the gh/git/CI nodes
@@ -2499,6 +2551,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
   }
 
   interface ConvergeOpts {
+    arguments?: string;
     isFork?: boolean;
     resolveWontfix?: string;
     hasNew: boolean;
@@ -2539,10 +2592,6 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     const write = (name: string, value: unknown): void =>
       writeFileSync(join(artifactsDir, name), JSON.stringify(value));
 
-    // fetch-state writes .pr-number early and unconditionally; resolve-retry
-    // (which depends on it) reads it for the forge resolve call. Seed it so the
-    // node's `cat .pr-number` under `set -e` matches production.
-    writeFileSync(join(artifactsDir, ".pr-number"), "42");
     write("threads.json", threadRows(threads));
     write("all-unresolved-threads.json", threadRows(threads));
     write("handled.json", opts.handled ?? []);
@@ -2585,6 +2634,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     });
 
     const approvalCalls: string[] = [];
+    const extractedTargets: string[] = [];
     let convergeCheckCalls = 0;
     const canned = {
       status: "succeeded" as const,
@@ -2618,6 +2668,10 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
           return bashHandler.handle(node, ctx);
         }
         if (node.id === "fetch-state") {
+          writeFileSync(
+            join(artifactsDir, ".pr-number"),
+            ctx.upstreamOutputs.get("extract-pr")?.output ?? "",
+          );
           return { status: "succeeded", output: { kind: "text", text: fetchStateOutput } };
         }
         if (node.id === "await-ci") {
@@ -2645,21 +2699,50 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
       workflow: loadBundled("resolve-pr"),
       runId: "run-cpr",
       inputs: {
-        ARGUMENTS: "converge pr 42",
+        ARGUMENTS: opts.arguments ?? "converge pr 42",
         ...(opts.resolveWontfix !== undefined ? { resolve_wontfix: opts.resolveWontfix } : {}),
       },
       cwd: artifactsDir,
       artifactsDir,
       abortSignal: controller.signal,
+      onEvent(event) {
+        if (
+          event.type === "node_done" &&
+          event.nodeId === "extract-pr" &&
+          event.result.output.kind === "text"
+        ) {
+          extractedTargets.push(event.result.output.text);
+        }
+      },
       handlers: new Map([
         ["prompt", prompt],
         ["bash", bash],
+        ["script", makeScriptHandler()],
         ["approval", approval],
         ["cancel", cancel],
       ]),
     });
-    return { run, approvalCalls, convergeCheckCalls: () => convergeCheckCalls, artifactsDir };
+    return {
+      run,
+      approvalCalls,
+      extractedTargets,
+      convergeCheckCalls: () => convergeCheckCalls,
+      artifactsDir,
+    };
   }
+
+  test("keeps a bare numeric PR target unchanged across all convergence rounds", async () => {
+    const { run, extractedTargets, convergeCheckCalls, artifactsDir } = convergeRun({
+      arguments: "912",
+      hasNew: false,
+      ciStatus: "PASS",
+      postCiThreads: threadRows([{ threadId: "late", commentId: 9 }]),
+    });
+    await run;
+    expect(convergeCheckCalls()).toBe(8);
+    expect(extractedTargets).toEqual(Array(8).fill("912"));
+    expect(readFileSync(join(artifactsDir, ".pr-number"), "utf8")).toBe("912");
+  });
 
   test("a new-thread round drives the fix/reply subgraph then converges", async () => {
     const { run, approvalCalls, convergeCheckCalls } = convergeRun({

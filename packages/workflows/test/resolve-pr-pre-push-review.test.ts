@@ -268,7 +268,7 @@ esac
     run("push", 1);
 
     const pushed = git(repo, "rev-parse", "HEAD");
-    expect(git(origin, "rev-parse", "refs/heads/feature")).toBe(pushed);
+    expect(git(origin, "--git-dir", origin, "rev-parse", "refs/heads/feature")).toBe(pushed);
     expect(base()).toBe(pushed);
     run("fetch-state", 2);
     expect(JSON.parse(run("capture-fix-diff", 2))).toEqual({ has_fix: "false", lines: 0 });
