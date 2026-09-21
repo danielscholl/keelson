@@ -2914,12 +2914,12 @@ nodes:
     expect(existsSync(neverMarkPath)).toBe(false);
   });
 
-  test("POST /resume-run refreshes descendants of a condition-skipped node", async () => {
+  test("POST /resume-run keeps successful descendants of a condition-skipped node", async () => {
     const collectorCountPath = join(tmpDir, "condition-skipped-collector-count.txt");
     writeWorkflow(
       "resume-condition-skipped.yaml",
       `name: resume-condition-skipped
-description: descendants of condition-skipped nodes refresh on resume
+description: successful descendants of condition-skipped nodes stay seeded
 nodes:
   - id: prepare
     bash: echo ready
@@ -2952,7 +2952,7 @@ nodes:
     );
     expect(resumed.status).toBe(200);
     expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
-    expect(readFileSync(collectorCountPath, "utf8").trim()).toBe("2");
+    expect(readFileSync(collectorCountPath, "utf8").trim()).toBe("1");
   });
 
   test("POST /resume-run reuses the artifacts dir so seeded nodes' files survive", async () => {

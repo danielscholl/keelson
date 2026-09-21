@@ -880,7 +880,7 @@ function buildResumeExclusions(
   const roots = new Set<string>();
   for (const node of workflow.nodes) {
     const status = statuses.get(node.id);
-    if (node.always_run === true || status !== "succeeded") {
+    if (node.always_run === true || (status !== "succeeded" && status !== "skipped")) {
       roots.add(node.id);
     }
   }
