@@ -169,12 +169,18 @@ picker under its own name, so the model picker treats it like a built-in.
 | Stream | yes |
 | Tool projection | no (`tools: false`; OpenAI function-calling is not wired yet) |
 | Protocol | `openai` (Chat Completions) only today |
-| Auth | OS keychain under `gateway-<name>`, or keyless for a local endpoint |
+| Auth | OS keychain under `gateway-<name>`, or keyless |
 
 `listModels` probes the endpoint's `/models`, falling back to the gateway's
 configured model if that call fails, so the picker is never empty for a gateway
 with a model set. Configure one in the [Gateways](../../guides/configuration/#gateways)
 section of the configuration guide.
+
+Keyless gateways may use remote HTTP. A gateway with a stored key must use HTTPS
+or loopback HTTP. On keyed remote HTTP, live model discovery makes no request,
+reports a warning, and remains not checked; `listModels` may still return the
+configured-model fallback. Chat returns an explicit error without sending a
+request.
 
 ## Where a provider is chosen
 
