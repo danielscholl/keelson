@@ -33,6 +33,7 @@ const EXPECTED_PROVIDER_PINS = new Map([
   ["adversarial-review", "copilot"],
   ["design-converge", "copilot"],
 ]);
+const REQUIRED_PROVIDER_PINS = new Set(["design-converge"]);
 const COPILOT_CAPABILITIES = {
   defaultModel: "auto",
   reasoningEffort: true,
@@ -200,7 +201,7 @@ describe("resolve-pr workflow contract", () => {
 });
 
 describe("bundled workflow model policy", () => {
-  test("uses portable tiers and only soft provider pins", () => {
+  test("uses portable tiers and the declared provider pin policy", () => {
     const violations: string[] = [];
     for (const { filename, workflow } of loadBundledWorkflows()) {
       for (const finding of bareConcreteModelIds(workflow)) {
@@ -212,9 +213,10 @@ describe("bundled workflow model policy", () => {
           `${filename}:<workflow> provider is '${workflow.provider}' instead of '${expectedProvider}'`,
         );
       }
-      if (workflow.provider_required === true) {
+      const expectedProviderRequired = REQUIRED_PROVIDER_PINS.has(workflow.name);
+      if ((workflow.provider_required === true) !== expectedProviderRequired) {
         violations.push(
-          `${filename}:<workflow> hard-requires provider '${workflow.provider ?? "<unspecified>"}'`,
+          `${filename}:<workflow> provider_required is '${String(workflow.provider_required === true)}' instead of '${String(expectedProviderRequired)}'`,
         );
       }
       if (workflow.model === "auto") {

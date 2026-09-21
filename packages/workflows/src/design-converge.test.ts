@@ -20,6 +20,13 @@ const AGENT_IDS = [
   "verify",
   "synthesize",
 ] as const;
+const MODEL_VENDORS = new Map([
+  ["claude-opus-5", "anthropic"],
+  ["claude-opus-4.8", "anthropic"],
+  ["gpt-5.6-sol", "openai"],
+  ["gpt-5.6-terra", "openai"],
+  ["grok-4.6", "xai"],
+]);
 
 interface PanelFixture {
   root: string;
@@ -45,6 +52,12 @@ function loadWorkflow(): WorkflowDefinition {
     throw new Error(parsed.error?.error ?? "design-converge did not parse");
   }
   return parsed.workflow;
+}
+
+function modelVendor(model: string | undefined): string {
+  const vendor = model === undefined ? undefined : MODEL_VENDORS.get(model);
+  if (vendor === undefined) throw new Error(`unknown design-converge model '${model ?? ""}'`);
+  return vendor;
 }
 
 function makeFixture(): PanelFixture {
@@ -154,6 +167,55 @@ function completedResumeSeed(summary: RunSummary): Map<string, NodeOutput> {
 }
 
 describe("design-converge", () => {
+  test("pins Copilot and assigns every critic to the vendor of the omitted proposal", () => {
+    const workflow = loadWorkflow();
+    const proposalModels = new Map([
+      ["propose-a", "claude-opus-5"],
+      ["propose-b", "gpt-5.6-sol"],
+      ["propose-c", "grok-4.6"],
+    ]);
+    const criticRoutes = [
+      {
+        id: "critic-a",
+        model: "claude-opus-4.8",
+        effort: "xhigh",
+        omitted: "propose-a",
+        inputs: ["propose-b", "propose-c"],
+      },
+      {
+        id: "critic-b",
+        model: "gpt-5.6-terra",
+        effort: "xhigh",
+        omitted: "propose-b",
+        inputs: ["propose-a", "propose-c"],
+      },
+      {
+        id: "critic-c",
+        model: "grok-4.6",
+        effort: "high",
+        omitted: "propose-c",
+        inputs: ["propose-a", "propose-b"],
+      },
+    ] as const;
+
+    expect(workflow.provider).toBe("copilot");
+    expect(workflow.provider_required).toBe(true);
+    for (const [id, model] of proposalModels) {
+      expect(workflow.nodes.find((node) => node.id === id)?.model_by_provider?.copilot).toBe(model);
+    }
+    for (const route of criticRoutes) {
+      const critic = workflow.nodes.find((node) => node.id === route.id);
+      expect(critic?.model_by_provider?.copilot).toBe(route.model);
+      expect(critic?.effort).toBe(route.effort);
+      expect(critic?.depends_on).toEqual(route.inputs);
+      const criticVendor = modelVendor(route.model);
+      expect(criticVendor).toBe(modelVendor(proposalModels.get(route.omitted)));
+      for (const input of route.inputs) {
+        expect(modelVendor(proposalModels.get(input))).not.toBe(criticVendor);
+      }
+    }
+  });
+
   test("intake deterministically bundles content and protects a non-empty round", async () => {
     const fixture = makeFixture();
     try {
@@ -339,9 +401,9 @@ describe("design-converge", () => {
       "propose-a": { provider: "copilot", model: "claude-opus-5" },
       "propose-b": { provider: "copilot", model: "gpt-5.6-sol" },
       "propose-c": { provider: "copilot", model: "grok-4.6" },
-      "critic-a": { provider: "copilot", model: "gpt-5.6-terra" },
-      "critic-b": { provider: "copilot", model: "grok-4.6" },
-      "critic-c": { provider: "copilot", model: "claude-opus-4.8" },
+      "critic-a": { provider: "copilot", model: "claude-opus-4.8" },
+      "critic-b": { provider: "copilot", model: "gpt-5.6-terra" },
+      "critic-c": { provider: "copilot", model: "grok-4.6" },
       verify: { provider: "copilot", model: "gpt-5.6-terra" },
       synthesize: { provider: "copilot", model: "claude-opus-4.8" },
     };
