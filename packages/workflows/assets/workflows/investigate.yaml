@@ -78,8 +78,17 @@ nodes:
       FIXTURES_NOTE=""
       if [ -n "$FIXTURES" ]; then
         SAME_PATH=$(A="$OUT" B="$FIXTURES" bun --no-env-file -e '
-          import { resolve } from "node:path";
-          console.log(resolve(process.env.A ?? "") === resolve(process.env.B ?? "") ? "yes" : "no");
+          import { existsSync, realpathSync } from "node:fs";
+          import { dirname, join, relative, resolve } from "node:path";
+          // Neither path need exist yet, so canonicalize the nearest existing
+          // ancestor: a symlinked parent must not hide that both name one place.
+          const canonical = (p) => {
+            const abs = resolve(p);
+            let base = abs;
+            while (!existsSync(base) && dirname(base) !== base) base = dirname(base);
+            return join(realpathSync(base), relative(base, abs));
+          };
+          console.log(canonical(process.env.A ?? "") === canonical(process.env.B ?? "") ? "yes" : "no");
         ')
         if [ "$SAME_PATH" = "yes" ]; then
           echo "fixtures and out name the same path: $FIXTURES" >&2

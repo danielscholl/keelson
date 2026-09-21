@@ -12,6 +12,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -304,6 +305,21 @@ describe("investigate intake", () => {
     const result = runIntake("What does the search API return?", {
       out,
       fixtures: `${root}/./evidence/`,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("fixtures and out name the same path");
+    expect(existsSync(out)).toBe(false);
+  });
+
+  test("rejects a fixtures path that reaches the evidence file through a symlink", () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-investigate-fixtures-"));
+    tmps.push(root);
+    mkdirSync(join(root, "real"));
+    symlinkSync(join(root, "real"), join(root, "link"), "junction");
+    const out = join(root, "real", "evidence");
+    const result = runIntake("What does the search API return?", {
+      out,
+      fixtures: join(root, "link", "evidence"),
     });
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("fixtures and out name the same path");
