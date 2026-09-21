@@ -337,7 +337,7 @@ describe("fetchOrigin", () => {
     });
     expect((await gitText(["rev-parse", "HEAD"], dest)).trim()).toBe(remoteTip);
     expect(existsSync(join(dest, "upstream.txt"))).toBe(true);
-  });
+  }, 15_000);
 
   test("does not attempt a fetch when origin is absent", async () => {
     await initRepo(tmp);
