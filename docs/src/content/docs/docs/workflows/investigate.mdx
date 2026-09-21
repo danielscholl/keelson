@@ -31,13 +31,17 @@ keelson workflow run investigate \
   --inputs out=evidence/output-validation.md \
   --inputs context=packages/workflows/src \
   --inputs access="Use only local source and read-only shell commands." \
+  --inputs fixtures=evidence/fixtures/output-validation \
   --inputs tier=std \
   --inputs verifier=grok
 ```
 
 `context` accepts one readable file or a directory. A directory contributes its
 regular files one level deep in sorted order. `access` accepts either a readable
-file or literal guidance. `tier` is `deep` or `std`; `verifier` is `claude` or
+file or literal guidance. `fixtures` names a directory for raw probe responses:
+`intake` creates it, and the investigator saves each runtime probe's output
+there as its own file and cites it, which keeps large payloads out of the
+evidence file. `tier` is `deep` or `std`; `verifier` is `claude` or
 `grok`. When `verifier` is absent, `intake` selects one deterministically from
 the run id.
 
@@ -47,7 +51,7 @@ Five nodes run in sequence:
 
 | Node | Kind | What it does |
 | --- | --- | --- |
-| `intake` | bash | Validates the question, output path, tier, and verifier; bundles context and access guidance; rotates the default verifier from the run id. |
+| `intake` | bash | Validates the question, output path, fixtures directory, tier, and verifier; bundles context and access guidance; rotates the default verifier from the run id. |
 | `investigate` | prompt | Reads source and runs read-only probes, then writes the requested evidence file with cited claims and `NOT CHECKED` placeholders. |
 | `verify` | prompt | Re-reads or re-runs every load-bearing claim independently and returns one closed verdict per checked claim. |
 | `publish` | prompt | Updates only the evidence table's `Verified` and `Verification note` cells. It does not count claims or write attribution. |
@@ -83,7 +87,8 @@ The prompt limits Bash to read-only probes, but the workflow does not provide an
 OS sandbox or command gate. A project that requires enforcement must supply its
 own policy or gated command. The requested `out` file is an intentional write:
 `investigate` creates it, `publish` updates verdict cells, and `finalize` writes
-the deterministic summary.
+the deterministic summary. With `fixtures` set, the files the investigator saves
+under that directory are intentional writes too.
 </Aside>
 
 ## Patterns it demonstrates

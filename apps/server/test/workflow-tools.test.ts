@@ -20,7 +20,7 @@ import { type ConversationStore, createConversationStore } from "../src/conversa
 import { openDatabase } from "../src/db/init.ts";
 import { canonicalPath, createProjectsStore } from "../src/projects-store.ts";
 import { createWorkflowStore, type WorkflowStore } from "../src/workflow-store.ts";
-import { createWorkflowChatTools } from "../src/workflow-tools.ts";
+import { createWorkflowChatTools, summarizeInputs } from "../src/workflow-tools.ts";
 import {
   createActiveRuns,
   createWorkflowController,
@@ -278,6 +278,57 @@ nodes:
     const result = lastToolResult(chunks);
     expect(result.isError).toBe(false);
     expect(result.content).toContain("lens=release-status service=search");
+  });
+
+  test("parallel runs of one workflow each reply with their own inputs", async () => {
+    writeWorkflow(
+      "probe.yaml",
+      `name: probe
+description: |
+  Use when: probing
+nodes:
+  - id: ok
+    bash: echo done
+`,
+    );
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const run = toolByName(tools, "workflow_run");
+
+    const first = makeCtx(cwd);
+    const second = makeCtx(cwd);
+    await Promise.all([
+      run.execute(
+        { name: "probe", arguments: "search question", inputs: { out: "a.md" } },
+        first.ctx,
+      ),
+      run.execute(
+        { name: "probe", arguments: "reservoir question", inputs: { out: "b.md" } },
+        second.ctx,
+      ),
+    ]);
+
+    const a = lastToolResult(first.chunks).content;
+    const b = lastToolResult(second.chunks).content;
+    expect(a).toContain('inputs: ARGUMENTS="search question", out="a.md"');
+    expect(a).not.toContain("b.md");
+    expect(b).toContain('inputs: ARGUMENTS="reservoir question", out="b.md"');
+    expect(b).not.toContain("a.md");
+  });
+
+  test("summarizeInputs leads with ARGUMENTS, keeps one capped line, and drops empties", () => {
+    expect(summarizeInputs(undefined)).toBe("");
+    expect(summarizeInputs({ ARGUMENTS: "", out: "  " })).toBe("");
+    expect(summarizeInputs({ out: "x.md", ARGUMENTS: "first line\nsecond line" })).toBe(
+      'inputs: ARGUMENTS="first line", out="x.md"',
+    );
+    const long = summarizeInputs({ ARGUMENTS: "q".repeat(200) });
+    expect(long).toBe(`inputs: ARGUMENTS="${"q".repeat(80)}…"`);
+    const many = summarizeInputs(
+      Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`k${i}`, "v"])),
+    );
+    expect(many).toContain("+2 more");
+    expect(summarizeInputs({ "bad\nkey": "v" })).toBe('inputs: "bad\\nkey"="v"');
   });
 
   test("workflow_run refuses ARGUMENTS named twice rather than picking a winner", async () => {
@@ -815,8 +866,9 @@ nodes:
     const status = toolByName(tools, "workflow_status");
 
     const runCtx = makeCtx(cwd);
-    await run.execute({ name: "pa" }, runCtx.ctx);
+    await run.execute({ name: "pa", arguments: "ship it" }, runCtx.ctx);
     const refs = extractPauseRefs(lastToolResult(runCtx.chunks).content);
+    expect(lastToolResult(runCtx.chunks).content).toContain('inputs: ARGUMENTS="ship it"');
 
     const listCtx = makeCtx(cwd);
     await status.execute({}, listCtx.ctx);
@@ -824,12 +876,14 @@ nodes:
     expect(listed.content).toContain(refs.runId);
     expect(listed.content).toContain("paused");
     expect(listed.content).toContain("Isolation: disabled");
+    expect(listed.content).toContain('inputs: ARGUMENTS="ship it"');
 
     const detailCtx = makeCtx(cwd);
     await status.execute({ runId: refs.runId }, detailCtx.ctx);
     const detail = lastToolResult(detailCtx.chunks);
     expect(detail.content).toContain("pa");
     expect(detail.content).toContain(`in-place execution directory: "${canonicalPath(cwd)}"`);
+    expect(detail.content).toContain('inputs: ARGUMENTS="ship it"');
     expect(detail.content).toContain('Awaiting approval at node "review"');
     // Status surfaces the live pauseId so a status-polled approval can resume
     // with the same protocol as workflow_run (regression for the in-memory token).

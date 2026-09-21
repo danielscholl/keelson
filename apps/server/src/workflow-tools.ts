@@ -54,6 +54,27 @@ const PER_NODE_OUTPUT_CAP = 2_000;
 const PAUSED_OUTPUT_CAP = 8_000;
 const TERMINAL_OUTPUT_CAP = 12_000;
 
+const INPUT_VALUE_CAP = 80;
+const INPUT_SUMMARY_MAX_KEYS = 6;
+
+// Parallel runs of one workflow differ only by their inputs, so every reply
+// that names a run carries them; without it a client pairs ids by arrival order.
+export function summarizeInputs(inputs: Record<string, string> | undefined): string {
+  if (inputs === undefined) return "";
+  const entries = Object.entries(inputs)
+    .filter(([, value]) => value.trim() !== "")
+    .sort(([a], [b]) => (a === "ARGUMENTS" ? -1 : b === "ARGUMENTS" ? 1 : 0));
+  if (entries.length === 0) return "";
+  const shown = entries.slice(0, INPUT_SUMMARY_MAX_KEYS).map(([key, value]) => {
+    const line = value.trim().split(/\r\n|\n|\r/, 1)[0] ?? "";
+    const clipped = line.length > INPUT_VALUE_CAP ? `${line.slice(0, INPUT_VALUE_CAP)}…` : line;
+    const label = /^[\w.-]+$/.test(key) ? key : JSON.stringify(key);
+    return `${label}=${JSON.stringify(clipped)}`;
+  });
+  const more = entries.length - shown.length;
+  return `inputs: ${shown.join(", ")}${more > 0 ? `, +${more} more` : ""}`;
+}
+
 export function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}\n…[truncated ${text.length - max} chars]`;
@@ -151,6 +172,8 @@ function renderBriefStatus(
     `Run ${detail.runId} — workflow "${detail.workflowName}" — status ${detail.status} — started ${detail.startedAt}.`,
     ...renderRunFacts(detail),
   ];
+  const inputs = summarizeInputs(detail.inputs);
+  if (inputs !== "") lines.push(inputs);
   if (opts.current.length > 0) {
     lines.push(`current: ${opts.current.join(", ")}`);
   }
@@ -194,6 +217,7 @@ function describeState(
       const content = [
         `Workflow run ${runId} is PAUSED awaiting approval at node "${state.nodeId}".`,
         ...(detail ? renderRunFacts(detail) : []),
+        summarizeInputs(detail?.inputs),
         "",
         "Approval prompt:",
         state.message,
@@ -216,6 +240,7 @@ function describeState(
       const content = [
         `Workflow run ${runId} ${verb}.`,
         ...(detail ? renderRunFacts(detail) : []),
+        summarizeInputs(detail?.inputs),
         nodeView ? `\nRun output:\n${nodeView}` : "",
         hint,
       ]
@@ -225,11 +250,13 @@ function describeState(
     }
     case "running": {
       const detail = controller.getRun(runId);
+      const inputs = summarizeInputs(detail?.inputs);
       return {
         content: [
           `Workflow run ${runId} is still in progress and continues in the background.`,
           ...(detail ? renderRunFacts(detail) : []),
           `Call workflow_status with runId="${runId}" to check on it.`,
+          ...(inputs === "" ? [] : [inputs]),
         ].join("\n"),
         isError: false,
       };
@@ -678,6 +705,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         const lines = [
           `Run ${runId} — workflow "${detail.workflowName}" — status ${detail.status}.`,
           ...renderRunFacts(detail),
+          summarizeInputs(detail.inputs),
         ];
         if (detail.status === "failed" || detail.status === "cancelled") {
           lines.push(
@@ -706,13 +734,15 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         return;
       }
       const rendered = active
-        .map((r) =>
-          [
+        .map((r) => {
+          const inputs = summarizeInputs(controller.getRun(r.runId)?.inputs);
+          return [
             `• ${r.runId} — ${r.workflowName} [${r.status}] started ${r.startedAt}` +
               (r.status === "paused" ? " (awaiting approval — use workflow_respond)" : ""),
             ...renderRunFacts(r).map((line) => `  ${line}`),
-          ].join("\n"),
-        )
+            ...(inputs === "" ? [] : [`  ${inputs}`]),
+          ].join("\n");
+        })
         .join("\n");
       emitResult(
         ctx,

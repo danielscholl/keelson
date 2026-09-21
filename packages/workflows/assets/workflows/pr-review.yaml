@@ -54,6 +54,8 @@ nodes:
 
   - id: extract-pr
     model: balanced
+    model_by_provider:
+      copilot: mai-code-1.1-flash
     prompt: |
       Find the PR or MR number for this request.
 
@@ -165,6 +167,8 @@ nodes:
   - id: classify
     depends_on: [scope]
     model: balanced
+    model_by_provider:
+      copilot: mai-code-1.1-flash
     context: fresh
     output_format:
       type: object

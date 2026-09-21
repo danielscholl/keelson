@@ -315,6 +315,40 @@ describe("op tools — workflow projection", () => {
     expect(res.content).toContain("workflow:fix-issue");
   });
 
+  test("run_list and run_status name a workflow run's inputs", async () => {
+    const base = {
+      workflowName: "investigate",
+      status: "running",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: null,
+    };
+    fakeRuns = [
+      { runId: "ra", ...base },
+      { runId: "rb", ...base },
+    ] as typeof fakeRuns;
+    fakeDetails.ra = {
+      ...base,
+      runId: "ra",
+      error: null,
+      nodes: [],
+      inputs: { ARGUMENTS: "search question", out: "a.md" },
+    } as unknown as (typeof fakeDetails)[string];
+    fakeDetails.rb = {
+      ...base,
+      runId: "rb",
+      error: null,
+      nodes: [],
+      inputs: { ARGUMENTS: "reservoir question", out: "b.md" },
+    } as unknown as (typeof fakeDetails)[string];
+
+    const listed = (await run("run_list", {})).content;
+    expect(listed).toMatch(/wf:ra[^\n]*\n\s+inputs: ARGUMENTS="search question", out="a.md"/);
+    expect(listed).toMatch(/wf:rb[^\n]*\n\s+inputs: ARGUMENTS="reservoir question", out="b.md"/);
+
+    const status = (await run("run_status", { id: "wf:rb" })).content;
+    expect(status).toContain('inputs: ARGUMENTS="reservoir question", out="b.md"');
+  });
+
   test("run_events projects node-level frames ordered by completion", async () => {
     fakeDetails.r1 = {
       workflowName: "fix-issue",
