@@ -135,6 +135,56 @@ describe("SQLite WorkflowStore", () => {
     expect(store.getRunProviderOverride("missing")).toBeNull();
     expect(store.getRunIsolationEnabled("r1")).toBe(true);
     expect(store.getRunIsolationEnabled("missing")).toBeNull();
+    expect(run!.isolationEnabled).toBe(true);
+    expect(run!.worktreeEstablished).toBe(false);
+  });
+
+  test("persists isolation intent, establishment, and setup errors across reopen", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    store.createRun({
+      runId: "isolated",
+      workflowName: "fix-issue",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:00.000Z",
+      conversationId: mintConv(db, "isolated"),
+      worktreePath: "/repo/.worktrees/isolated",
+      isolationEnabled: true,
+    });
+    store.updateRunStatus({
+      runId: "isolated",
+      status: "failed",
+      completedAt: "2025-01-01T00:01:00.000Z",
+      error: "worktree setup failed: persistence interrupted",
+    });
+    store.setRunWorktreePath("isolated", null);
+
+    store.createRun({
+      runId: "legacy",
+      workflowName: "legacy",
+      inputs: {},
+      startedAt: "2025-01-01T00:02:00.000Z",
+      conversationId: mintConv(db, "legacy"),
+    });
+    db.close();
+
+    const reopened = openDatabase({ path: dbPath });
+    try {
+      const restored = createWorkflowStore(reopened);
+      expect(restored.getRun("isolated")).toMatchObject({
+        status: "failed",
+        error: "worktree setup failed: persistence interrupted",
+        worktreePath: null,
+        isolationEnabled: true,
+        worktreeEstablished: true,
+      });
+      expect(restored.getRun("legacy")).toMatchObject({
+        isolationEnabled: null,
+        worktreeEstablished: false,
+      });
+    } finally {
+      reopened.close();
+    }
   });
 
   test("listWorktreeRuns reports every worktree-bearing run with its status", () => {
