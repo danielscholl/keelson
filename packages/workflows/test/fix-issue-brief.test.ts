@@ -53,6 +53,8 @@ function runBash(nodeId: string, artifacts: string, env: Record<string, string> 
     env: {
       ...(process.env as Record<string, string>),
       KEELSON_ARTIFACTS_DIR: artifacts,
+      KEELSON_NODE_fetch_issue_OUTPUT_FILE: "",
+      KEELSON_NODE_extract_brief_llm_OUTPUT_FILE: "",
       ...env,
     },
     stdout: "pipe",
