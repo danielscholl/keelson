@@ -53,6 +53,8 @@ function runBash(nodeId: string, artifacts: string, env: Record<string, string> 
     env: {
       ...(process.env as Record<string, string>),
       KEELSON_ARTIFACTS_DIR: artifacts,
+      KEELSON_NODE_fetch_issue_OUTPUT_FILE: "",
+      KEELSON_NODE_extract_brief_llm_OUTPUT_FILE: "",
       ...env,
     },
     stdout: "pipe",
@@ -451,14 +453,15 @@ macOS with the Copilot provider.
   });
 });
 
-describe("fix-issue PR divergence status", () => {
-  test("requires coverage details or an explicit skipped line in every PR body", () => {
+describe("fix-issue criteria coverage placement", () => {
+  test("keeps coverage in the approval gate and out of the PR body", () => {
     const prompt = workflowNode("create-pr").prompt;
     expect(prompt).toContain("$ARTIFACTS_DIR/brief.json");
-    expect(prompt).toContain("$ARTIFACTS_DIR/coverage.json");
-    expect(prompt).toContain("- [COVERED] {criterion} -> {step}");
-    expect(prompt).toContain("- [MISSING] {criterion}");
-    expect(prompt).toContain("COVERAGE: SKIPPED — no acceptance criteria found in the issue body");
+    expect(prompt).not.toContain("$ARTIFACTS_DIR/coverage.json");
+    expect(prompt).not.toContain("Divergence check");
+    expect(prompt).not.toContain("Criteria coverage");
+    expect(prompt).not.toContain("COVERAGE: SKIPPED");
+    expect(workflowNode("approve-plan").depends_on).toContain("coverage-ready");
   });
 });
 
