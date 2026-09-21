@@ -182,14 +182,27 @@ describe("design-converge", () => {
       expect(output).not.toContain(fixture.brief);
       expect(output).not.toContain(fixture.evidence);
 
-      const target = join(fixture.out, "round-1");
+      const reserved = await runWorkflow({
+        workflow: intakeOnly,
+        runId: "intake-contender",
+        inputs: { brief: fixture.brief, out: fixture.out, round: "1" },
+        handlers: new Map([["bash", bashHandler]]),
+        cwd: fixture.root,
+        artifactsDir: fixture.artifacts,
+      });
+      expect(reserved.nodes.intake.state).toBe("failed");
+      expect(
+        readFileSync(join(fixture.out, ".design-converge-round-1.reservation", "run-id"), "utf8"),
+      ).toBe("intake-ok\n");
+
+      const target = join(fixture.out, "round-2");
       mkdirSync(target, { recursive: true });
       const sentinel = join(target, "keep.txt");
       writeFileSync(sentinel, "prior run");
       const rejected = await runWorkflow({
         workflow: intakeOnly,
         runId: "intake-rejected",
-        inputs: { brief: fixture.brief, out: fixture.out, round: "1" },
+        inputs: { brief: fixture.brief, out: fixture.out, round: "2" },
         handlers: new Map([["bash", bashHandler]]),
         cwd: fixture.root,
         artifactsDir: fixture.artifacts,
@@ -318,6 +331,7 @@ describe("design-converge", () => {
   test("reports collapse from effective routes rather than intended model pins", async () => {
     const collapsedFixture = makeFixture();
     const diverseFixture = makeFixture();
+    const partialFixture = makeFixture();
     const collapsedRoutes = Object.fromEntries(
       AGENT_IDS.map((id) => [id, { provider: "claude", model: "claude-fable-5" }]),
     );
@@ -343,9 +357,21 @@ describe("design-converge", () => {
 
       const diverse = await runPanel(diverseFixture, { routes: diverseRoutes });
       expect(diverse.summary.nodes.complete.output).not.toContain("effective routing collapsed");
+
+      const partial = await runPanel(partialFixture, {
+        failed: new Set(["propose-b", "propose-c"]),
+        routes: diverseRoutes,
+      });
+      expect(partial.summary.nodes["critic-a"].state).toBe("skipped");
+      expect(partial.summary.nodes["critic-b"].state).toBe("completed");
+      expect(partial.summary.nodes["critic-c"].state).toBe("completed");
+      expect(partial.summary.nodes.complete.output).toContain(
+        "WARNING: effective routing collapsed critic vendor diversity to 2/3",
+      );
     } finally {
       rmSync(collapsedFixture.root, { recursive: true, force: true });
       rmSync(diverseFixture.root, { recursive: true, force: true });
+      rmSync(partialFixture.root, { recursive: true, force: true });
     }
   }, 30_000);
 });

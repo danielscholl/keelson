@@ -29,6 +29,7 @@ nodes:
       ROUND="${KEELSON_INPUTS_round:-1}"
       CRITERIA="${KEELSON_INPUTS_criteria:-}"
       EVIDENCE="${KEELSON_INPUTS_evidence:-}"
+      RUN_ID="${KEELSON_RUN_ID:-}"
 
       if [ -z "$BRIEF" ] || [ ! -f "$BRIEF" ] || [ ! -s "$BRIEF" ]; then
         echo "brief must name a non-empty file" >&2
@@ -36,6 +37,10 @@ nodes:
       fi
       if [ -z "$OUT" ]; then
         echo "out is required" >&2
+        exit 1
+      fi
+      if [ -z "$RUN_ID" ]; then
+        echo "intake requires current run metadata" >&2
         exit 1
       fi
       case "$ROUND" in
@@ -99,6 +104,26 @@ nodes:
         echo "intake bundle is ${CHARS} characters; reduce the supplied evidence" >&2
         exit 1
       fi
+
+      RESERVATION="$OUT/.design-converge-round-${ROUND}.reservation"
+      RESERVATION_OWNER="$RESERVATION/run-id"
+      if mkdir -- "$RESERVATION" 2>/dev/null; then
+        if ! printf '%s\n' "$RUN_ID" > "$RESERVATION_OWNER"; then
+          rmdir -- "$RESERVATION"
+          echo "could not record round reservation ownership" >&2
+          exit 1
+        fi
+      else
+        RESERVED_RUN=""
+        if [ -f "$RESERVATION_OWNER" ]; then
+          RESERVED_RUN=$(cat -- "$RESERVATION_OWNER")
+        fi
+        if [ "$RESERVED_RUN" != "$RUN_ID" ]; then
+          echo "round destination is reserved by another run: $TARGET" >&2
+          exit 1
+        fi
+      fi
+
       echo "intake bundled ${CHARS} characters for round ${ROUND}" >&2
       cat -- "$BUNDLE"
 
@@ -427,7 +452,16 @@ nodes:
 
       SAFE_RUN=$(printf '%s' "$RUN_ID" | tr -c 'A-Za-z0-9._-' '_')
       TARGET="$OUT/round-$ROUND"
+      RESERVATION_OWNER="$OUT/.design-converge-round-${ROUND}.reservation/run-id"
       STAGE="$OUT/.design-converge-${SAFE_RUN}-round-${ROUND}.tmp"
+      RESERVED_RUN=""
+      if [ -f "$RESERVATION_OWNER" ]; then
+        RESERVED_RUN=$(cat -- "$RESERVATION_OWNER")
+      fi
+      if [ "$RESERVED_RUN" != "$RUN_ID" ]; then
+        echo "round reservation belongs to a different run" >&2
+        exit 1
+      fi
       rm -rf -- "$STAGE"
       mkdir -p -- "$STAGE"
       MANIFEST="$STAGE/MANIFEST"
@@ -550,7 +584,7 @@ nodes:
       collapse_warning() {
         ROLE="$1"
         LABEL="$2"
-        COUNT=$(awk -F '\t' -v role="$ROLE" '$1 == "route" && $3 == role { print $6 }' "$MANIFEST" | LC_ALL=C sort -u | wc -l | tr -d ' ')
+        COUNT=$(awk -F '\t' -v role="$ROLE" '$1 == "route" && $3 == role && $6 != "unresolved" { print $6 }' "$MANIFEST" | LC_ALL=C sort -u | wc -l | tr -d ' ')
         if [ "$COUNT" -lt 3 ]; then
           DETAILS=$(awk -F '\t' -v role="$ROLE" '$1 == "route" && $3 == role { printf "%s=%s/%s ", $2, $4, $5 }' "$MANIFEST")
           printf 'WARNING: effective routing collapsed %s vendor diversity to %s/3 (%s)\n' "$LABEL" "$COUNT" "$DETAILS"
