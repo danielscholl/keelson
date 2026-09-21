@@ -3515,7 +3515,15 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     }
   } catch (err) {
     if (worktreePathForCleanup !== null && !existsSync(worktreePathForCleanup)) {
-      store.setRunWorktreePath(runId, null);
+      try {
+        store.setRunWorktreePath(runId, null);
+      } catch (clearErr) {
+        console.warn(
+          `[workflows] failed to clear removed worktree path for ${runId}: ${
+            clearErr instanceof Error ? clearErr.message : String(clearErr)
+          }`,
+        );
+      }
       worktreePathForCleanup = null;
     }
     if (abort.signal.aborted) {
