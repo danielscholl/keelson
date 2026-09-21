@@ -21,10 +21,19 @@ afterEach(() => {
 function verifyGateBash(): string {
   const document = parse(
     readFileSync(join(bundledWorkflowsDir(), "adversarial-review.yaml"), "utf8"),
-  ) as { nodes: Array<{ id: string; bash?: string }> };
+  ) as { nodes: Array<{ id: string; bash?: string; prompt?: string }> };
   const script = document.nodes.find((node) => node.id === "verify-gate")?.bash;
   if (!script) throw new Error("Missing verify-gate bash node in adversarial-review");
   return script;
+}
+
+function verifyPrompt(): string {
+  const document = parse(
+    readFileSync(join(bundledWorkflowsDir(), "adversarial-review.yaml"), "utf8"),
+  ) as { nodes: Array<{ id: string; prompt?: string }> };
+  const prompt = document.nodes.find((node) => node.id === "verify")?.prompt;
+  if (!prompt) throw new Error("Missing verify prompt node in adversarial-review");
+  return prompt;
 }
 
 function runVerifyGate(output: string, outputFile?: string) {
@@ -48,6 +57,14 @@ function runVerifyGate(output: string, outputFile?: string) {
 }
 
 shimDescribe("adversarial-review verify gate", () => {
+  test("the prompt names the machine-checked literal labels", () => {
+    const prompt = verifyPrompt();
+
+    expect(prompt).toContain("`Claim:` and `Result:` are machine checked");
+    expect(prompt).toMatch(/Leading list markers and Markdown bold markers are\s+accepted/);
+    expect(prompt).toContain("headings, numbering, or different labels must not replace");
+  });
+
   test("rejects the observed 141-character preamble", () => {
     const output =
       "I'll inspect the pinned snapshot directly, then trace the implementation, all process-launch sites, and the checked-in test/CI configuration.";

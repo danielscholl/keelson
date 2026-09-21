@@ -35,6 +35,15 @@ keelson workflow run adversarial-review --arguments ./review-bundle/
 
 # Reviewing a change? Pin the tree the claims are about with `subject`:
 keelson workflow run adversarial-review --arguments ./review-bundle/ --inputs subject=refs/pull/50/head
+
+# Persist the five review artifacts:
+keelson workflow run adversarial-review --arguments ./proposal.md --inputs out=./review-out
+
+# Keep the artifact's author out of the panel:
+keelson workflow run adversarial-review --arguments ./proposal.md --inputs author=claude-opus-5
+
+# Combine author-safe seating with persisted artifacts:
+keelson workflow run adversarial-review --arguments ./proposal.md --inputs author=claude-opus-5 --inputs out=./review-out
 ```
 
 The argument is a path to a file, a directory, or the artifact text itself. A
@@ -54,12 +63,25 @@ directory happens to have checked out. It needs a Copilot subscription; the
 verdict lands in the run record as structured output (`verdict`, `headline`,
 `must_fix`, `open_questions`) with the full prose in `report`.
 
+Set `author` to the model id that wrote the artifact. A matching default seat
+moves to a same-vendor alternate, every effective seat excludes the author, and
+the run reports the moved seat. When `author` is omitted or blank, the workflow
+normalizes it to `seated` and keeps the default panel.
+
+Set `out` to a directory to save `review-logic.md`, `review-evidence.md`,
+`review-risk.md`, `verification.md`, and `verdict.md`. The collector runs after
+all five lanes settle. A successful run writes all five files. If a lane fails
+or is skipped, its file is absent and any same-name file from an earlier run is
+removed, so a reused directory never presents stale output as current.
+
 ## The shape
 
-Six nodes: `intake` captures the artifact, three reviewers fan out in parallel
-over it, `verify` converges on their claims and checks them against source, and
-`synthesize` issues the verdict. Only the reviewers run concurrently; the rest
-is sequential. The reviewers never see each other's work; the only thing that
+Ten nodes: `intake` captures the artifact, `subject-status` records snapshot
+availability, and `author-seat` normalizes the optional author. Three reviewers
+fan out in parallel, `verify` checks their claims against source,
+`verify-gate` enforces a substantive result, and `synthesize` issues the
+verdict. The final `save` collector persists the five prompt outputs when
+requested. The reviewers never see each other's work; the only thing that
 crosses between stages is each node's output.
 
 ## Node by node
@@ -67,11 +89,15 @@ crosses between stages is each node's output.
 | Node | Kind | What it does |
 | --- | --- | --- |
 | `intake` | bash | Captures the artifact (file path, evidence directory, or inline text), rejects empty or truncated input, snapshots the optional `subject` ref read-only via `git archive`, and emits the artifact as its output for the rest to inline. |
+| `subject-status` | bash | Publishes whether the optional subject snapshot succeeded, failed, or was not requested. |
+| `author-seat` | bash | Trims `author` and emits `seated` when it is omitted or blank, giving every model selector a defined value. |
 | `reviewer-logic` | prompt | **`model: claude-opus-5`**, **`effort: xhigh`**: attacks internal soundness (does the conclusion follow, what is assumed) with a per-claim verdict. No tools. |
 | `reviewer-evidence` | prompt | **`model: gpt-5.6-sol`**, **`effort: xhigh`**: separates what the artifact *shows* from what it *asserts*, and lists the checkable claims. No tools. |
 | `reviewer-risk` | prompt | **`model: grok-4.6`**, **`effort: high`**: assumes the artifact is adopted and finds what breaks, tracing bad inputs, retries, and partial completion through the proposal, weighted by cost of failure; where the artifact chooses an approach, it also names the strongest alternative ignored. No tools. |
 | `verify` | prompt | **`model: gpt-5.6-terra`**, **`effort: xhigh`**: re-checks the reviewers' load-bearing claims against real source with `Read`/`Glob`/`Grep`, trusting no one. Checks against the `subject` snapshot when one was taken, else the working directory (where absence of the change is `UNVERIFIABLE-HERE`, never refutation). |
+| `verify-gate` | bash | Requires literal `Claim:` and `Result:` records before synthesis. Leading list and bold markers are accepted. |
 | `synthesize` | prompt | **`model: claude-opus-4.8`**, **`effort: xhigh`**: weighs the lenses against the verification and issues the verdict as structured output (`verdict` / `headline` / `must_fix` / `open_questions` + full prose `report`), a terse ship/no-ship call with dissent; a comparative artifact must get a choice, not a fence-sit. No tools. |
+| `save` | bash | Runs after all five prompt lanes settle and writes their current outputs to `out`, preferring the full output spill over the capped environment value and removing stale files for lanes with no current output. |
 
 Every prompt node is pinned to the highest effort tier its model serves (`xhigh`,
 or `high` for `grok-4.6`) with a generous `idle_timeout`: a no-tool reviewer at
@@ -83,6 +109,11 @@ flaw through unanimously; the verifier re-derives their claims on
 so no node checks or judges its own reasoning. All five ids are
 account-dependent: swap or drop any to `auto` (dropping its `effort:` tier with
 it) if your Copilot list lacks it.
+
+When `author` matches one of those five defaults, that seat moves to a
+same-vendor alternate from the workflow's closed `model_by` map. Other seats
+keep their defaults, and the collector names the effective move in the run
+record.
 
 ### The parts worth a second look
 
@@ -124,6 +155,9 @@ smooth it over: a split panel reads as a split verdict, not a false consensus.
 - **Re-seat the panel.** The pins are choices, not requirements: any model in
   your Copilot list can hold a lens. Keep the seating rule when you swap: no
   two lenses on one model, and the verifier and judge on models no lens uses.
+- **Keep author-aware seating aligned.** When a default or alternate changes,
+  update its `model_by` case and the collector's moved-seat message together.
+  Every effective seat must exclude the model supplied through `author`.
 - **Cheaper runs.** The maximum-effort posture buys depth; for a quick
   pressure-test, drop the lenses to a lighter `effort:` tier (or `auto`) and
   keep `verify` and `synthesize` strong; the verdict degrades last.
