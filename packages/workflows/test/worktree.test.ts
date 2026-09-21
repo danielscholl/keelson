@@ -111,7 +111,7 @@ async function addOrigin(path: string): Promise<void> {
   await git(["init", "--bare", "--initial-branch=main", remote], path);
   await git(["remote", "add", "origin", remote], path);
   await git(["push", "-u", "origin", "main"], path);
-  await git(["remote", "set-head", "origin", "-a"], path);
+  await git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], path);
 }
 
 async function writeInstallablePackage(path: string, name: string): Promise<void> {

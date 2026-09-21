@@ -738,6 +738,29 @@ nodes:
     ).toBe(false);
   });
 
+  test("loop provider and model pins survive parsing", () => {
+    const yaml = `
+name: pinned-loop
+description: pins each loop iteration
+nodes:
+  - id: l
+    provider: claude
+    model: claude-sonnet-5
+    loop:
+      prompt: keep going
+      until: DONE
+      max_iterations: 3
+`;
+    const result = parseWorkflow(yaml, "pinned-loop.yaml");
+
+    expect(result.error).toBeNull();
+    expect(result.workflow?.nodes[0]).toMatchObject({
+      id: "l",
+      provider: "claude",
+      model: "claude-sonnet-5",
+    });
+  });
+
   test("interactive loop node loads without a runtime-unsupported warning (now wired)", () => {
     const yaml = `
 name: int-loop

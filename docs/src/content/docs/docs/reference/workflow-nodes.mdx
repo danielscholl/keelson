@@ -87,9 +87,9 @@ top of any kind.
 ## Agent nodes
 
 Agent nodes run a model turn. `prompt` and `command` take the per-node agent
-fields from [common fields](#common-node-fields) (`model`, `provider`, `context`,
-`allowed_tools` / `denied_tools`, structured output, the Claude reasoning
-controls); `loop` carries its own field set, below.
+fields from [common fields](#common-node-fields). A `loop` also takes node-level
+`model` and `provider`; both are forwarded to every iteration. Other
+AI-specific fields are ignored with a warning.
 
 ### `prompt`
 
@@ -151,6 +151,11 @@ Repeats one agent prompt until a completion signal, hard-bounded by
 
 `until` is required even when you set `until_bash`, and `retry` is not allowed on
 a loop, which manages its own iteration.
+
+Node-level `model` and `provider` are forwarded to every iteration and are subject
+to applicable run-start model-catalog preflight checks. Other AI-specific node
+fields, such as `model_by_provider`, `model_by`, `effort`, and tool filters, are
+ignored with a warning.
 
 ## Deterministic nodes
 
@@ -242,24 +247,24 @@ These apply across kinds (some only to agent nodes, as noted).
 | `depends_on` | all | `[id, ...]` DAG edges. Omitted means a root node. |
 | `when` | all | A condition that must hold or the node skips. See [conditions](#conditions). |
 | `trigger_rule` | all | Join semantics across dependencies. See the table below. |
-| `model` | agent | Per-node override: `fast`, `balanced`, `deep`, `auto`, or a literal model id. |
-| `provider` | agent | Per-node provider override. |
-| `model_by_provider` | agent | Map of provider ids to concrete model ids. The effective provider's entry takes precedence over `model`. |
-| `model_by` | agent | Pick the model and/or effort from run data: see [model_by](#model_by). |
-| `different_vendor_from` | prompt | Ancestor prompt id that should run on a different model vendor. Emits a run warning when effective provider/model attribution proves both turns used the same vendor. |
-| `context` | agent | `fresh` forces a new agent session for the node; `shared` reuses one. |
-| `allowed_tools`, `denied_tools` | agent | Tool-name filters. Rib tools are default-off; opt in with `allowed_tools`. |
-| `output_schema` | agent | A JSON-Schema subset the output must satisfy, or the node fails. |
-| `output_format` | agent | Provider structured-output request (Claude). |
+| `model` | `prompt`, `command`, `loop` | Per-node override: `fast`, `balanced`, `deep`, `auto`, or a literal model id. |
+| `provider` | `prompt`, `command`, `loop` | Per-node provider override. |
+| `model_by_provider` | `prompt`, `command` | Map of provider ids to concrete model ids. The effective provider's entry takes precedence over `model`. |
+| `model_by` | `prompt`, `command` | Pick the model and/or effort from run data: see [model_by](#model_by). |
+| `different_vendor_from` | `prompt` | Ancestor prompt id that should run on a different model vendor. Emits a run warning when effective provider/model attribution proves both turns used the same vendor. |
+| `context` | `prompt`, `command` | `fresh` forces a new agent session for the node; `shared` reuses one. |
+| `allowed_tools`, `denied_tools` | `prompt`, `command` | Tool-name filters. Rib tools are default-off; opt in with `allowed_tools`. |
+| `output_schema` | all | A JSON-Schema subset the output must satisfy, or the node fails. |
+| `output_format` | `prompt`, `command` | Provider structured-output request (Claude). |
 | `retry` | all but `loop` | `{ max_attempts: 1-5, delay_ms: 1000-60000, on_error }`. `delay_ms` doubles each attempt; `on_error` is `transient` (default) or `all`. |
 | `always_run` | all | `true` re-executes the node on a resumed run even if it previously succeeded (default `false`). Its transitive descendants also re-run, including prompt nodes that make provider calls and incur their normal token cost. Use it for a gate or validation that must re-check rather than replay a prior pass: see [resume and side effects](#resume-and-side-effects). |
-| `fail_on_tool_error` | agent | `true` fails the node if any invoked tool errored. |
-| `require_tool_call` | agent | `[tool-name, ...]` — fails the node if a listed tool was available but the turn ended without a successful call to it, so a node whose deliverable is a tool call cannot report success having produced nothing. An error followed by a successful retry satisfies it. Only registry/MCP tools are checked: a provider SDK's own built-ins (`Read`, `Bash`, …) are never in the catalog, so naming one has no effect, and providers that take no keelson tools (`codex`, gateways, `stub`) skip the check rather than fail it. |
-| `idle_timeout` | agent | Milliseconds of stream silence before the node fails. |
-| `effort` | agent | Reasoning tier, forwarded as `reasoningEffort`: `none` / `low` / `medium` / `high` / `xhigh` (`max` is a legacy alias for `xhigh`). Overrides the workflow-level `effort` on `prompt` and `command` nodes; a `loop` node's own value is dropped, so loop iterations take the workflow value. Copilot and Codex consume it on reasoning models; Claude ignores it. Omit it to take the model's own default — a model with no reasoning tier, such as Copilot's `auto`, errors on any value. |
-| `systemPrompt`, `thinking` | agent | Claude-only per-node controls. `thinking` is `adaptive` / `enabled` / `disabled`. |
+| `fail_on_tool_error` | `prompt`, `command` | `true` fails the node if any invoked tool errored. |
+| `require_tool_call` | `prompt`, `command` | `[tool-name, ...]` fails the node if a listed tool was available but the turn ended without a successful call to it, so a node whose deliverable is a tool call cannot report success having produced nothing. An error followed by a successful retry satisfies it. Only registry/MCP tools are checked: a provider SDK's own built-ins (`Read`, `Bash`, …) are never in the catalog, so naming one has no effect, and providers that take no keelson tools (`codex`, gateways, `stub`) skip the check rather than fail it. |
+| `idle_timeout` | `prompt`, `command`, `loop` | Milliseconds of stream silence before the node fails. |
+| `effort` | `prompt`, `command` | Reasoning tier, forwarded as `reasoningEffort`: `none` / `low` / `medium` / `high` / `xhigh` (`max` is a legacy alias for `xhigh`). Overrides the workflow-level `effort`; a `loop` node's own value is dropped, so loop iterations take the workflow value. Copilot and Codex consume it on reasoning models; Claude ignores it. Omit it to take the model's own default. A model with no reasoning tier, such as Copilot's `auto`, errors on any value. |
+| `systemPrompt`, `thinking` | `prompt`, `command` | Claude-only per-node controls. `thinking` is `adaptive` / `enabled` / `disabled`. |
 | `memory`, `notebook` | all | Recall/writeback blocks wired to the memory store and the project notebook. |
-| `hooks` | agent | Fully honored only by Claude; Copilot covers `PreToolUse` / `PostToolUse`. |
+| `hooks` | `prompt`, `command` | Fully honored only by Claude; Copilot covers `PreToolUse` / `PostToolUse`. |
 
 ### Model resolution
 
@@ -274,25 +279,30 @@ Provider selection follows this order:
 `--provider` wins over the environment default. Node and workflow pins also
 override that default.
 
-A matched [`model_by`](#model_by) case is applied first, replacing only the
-fields it declares. Model selection then runs as usual: the node's `model`, then
-the workflow's `model`, with a `model_by_provider` entry for the effective
-provider taking precedence over both. A case that sets `model` but no
-`model_by_provider` therefore leaves a static per-provider entry in place, and
-that entry still wins. A model
-tier resolves through the operator's configured class override, the provider's
-`modelClasses`, then the provider default. `auto` also uses the provider default.
-Static resolution includes every node that opens a provider session: `prompt`,
-`command`, and `loop`. Those nodes determine the native, degrades, or blocked
-tier and any model-diversity collapse. Deterministic and control nodes are
-excluded.
+For `prompt` and `command`, a matched [`model_by`](#model_by) case is applied
+first, replacing only the fields it declares. Model selection then uses the
+node's `model`, then the workflow's `model`, with a `model_by_provider` entry for
+the effective provider taking precedence over both. A case that sets `model` but
+no `model_by_provider` therefore leaves a static per-provider entry in place,
+and that entry still wins. A `loop` uses its node-level `model`, then the
+workflow model.
+
+A model tier resolves through the operator's configured class override, the
+provider's `modelClasses`, then the provider default. `auto` also uses the
+provider default. Static resolution and model-catalog preflight include every
+node that opens a provider session: `prompt`, `command`, and `loop`. Model
+diversity diagnostics include `prompt` and `command`, the kinds that support
+`model_by_provider`. Deterministic and control nodes are excluded.
 
 Every new run checks those provider-bound nodes for pinned literal model ids and
 effort against the effective provider's live catalog before the first node
-executes. This includes CLI, SPA, API, scheduled controller, producer refresh,
-and in-memory rib starts. A resumed run keeps the result its first launch passed
-rather than re-checking. Run the same check without executing with
-`keelson workflow validate <name> --live`.
+executes. Preflight also checks a tier when the operator's `config.json`
+`modelClasses` override explicitly pins it to a concrete id. Tiers that use
+provider `modelClasses` or the provider default remain unchecked because they
+are not explicitly operator-pinned. This includes CLI, SPA, API, scheduled
+controller, producer refresh, and in-memory rib starts. A resumed run keeps the
+result its first launch passed rather than re-checking. Run the same check
+without executing with `keelson workflow validate <name> --live`.
 
 An unavailable catalog is reported as `not checked` and does not block the run.
 For named runs, the notice is stored with the run and remains visible through
@@ -304,10 +314,10 @@ Use `--no-preflight` for one run, set `"workflowPreflight": false` in
 check.
 
 Ignored with a warning on any node: `agents`, `sandbox`, `betas`,
-`fallbackModel`, `maxBudgetUsd`, `mcp`, `skills`. The per-turn agent fields are
-also ignored, with a warning, on a node that does not take one: `bash`, `script`,
-`approval`, `cancel`, and `loop` (an agent kind, but one that carries its own
-`loop.prompt` and field set, so the node-level agent fields do not apply to it).
+`fallbackModel`, `maxBudgetUsd`, `mcp`, `skills`. AI-specific fields are also
+ignored, with a warning, on `bash`, `script`, `approval`, and `cancel`. A `loop`
+accepts node-level `model` and `provider`; its other AI-specific fields are
+ignored with a warning.
 
 ### `model_by`
 

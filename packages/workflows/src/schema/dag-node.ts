@@ -308,7 +308,7 @@ export type ScriptNode = z.infer<typeof scriptNodeSchema> & {
 
 /**
  * Loop node schema — extends base with `loop` config.
- * AI-specific fields from the base are present in the type but ignored at runtime with a warning.
+ * Provider and model are forwarded to each iteration; other AI-specific fields are ignored.
  * retry is not supported on loop nodes (enforced at parse time).
  */
 export const loopNodeSchema = dagNodeBaseSchema.extend({
@@ -629,9 +629,14 @@ export const dagNodeSchema = dagNodeBaseSchema
       ...(data.retry !== undefined ? { retry: data.retry } : {}),
     };
 
+    const providerAndModel = {
+      ...(data.model !== undefined ? { model: data.model } : {}),
+      ...(data.provider !== undefined ? { provider: data.provider } : {}),
+    };
+
     // AI-only fields (not applicable to bash/loop nodes)
     const aiOnly = {
-      ...(data.model !== undefined ? { model: data.model } : {}),
+      ...providerAndModel,
       ...(data.model_by_provider !== undefined
         ? { model_by_provider: data.model_by_provider }
         : {}),
@@ -639,7 +644,6 @@ export const dagNodeSchema = dagNodeBaseSchema
       ...(data.different_vendor_from !== undefined
         ? { different_vendor_from: data.different_vendor_from }
         : {}),
-      ...(data.provider !== undefined ? { provider: data.provider } : {}),
       ...(data.context !== undefined ? { context: data.context } : {}),
       ...(data.output_format !== undefined ? { output_format: data.output_format } : {}),
       ...(data.allowed_tools !== undefined ? { allowed_tools: data.allowed_tools } : {}),
@@ -697,7 +701,7 @@ export const dagNodeSchema = dagNodeBaseSchema
     }
     // loop — guaranteed by superRefine to be defined at this point
     if (!data.loop) throw new Error("unreachable: loop must be defined after superRefine");
-    return { ...base, loop: data.loop } as LoopNode;
+    return { ...base, ...providerAndModel, loop: data.loop } as LoopNode;
   });
 
 // ---------------------------------------------------------------------------

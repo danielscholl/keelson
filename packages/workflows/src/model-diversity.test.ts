@@ -1,6 +1,7 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
+import { parseWorkflow } from "./loader.ts";
 import { diagnoseModelDiversity } from "./model-diversity.ts";
 import type { WorkflowDefinition } from "./schema/index.ts";
 
@@ -83,30 +84,46 @@ describe("diagnoseModelDiversity", () => {
     expect(diagnoseModelDiversity(workflow, undefined, "claude")).toHaveLength(1);
   });
 
-  test("includes command and loop nodes but excludes non-agent nodes", () => {
-    const workflow = makeWorkflow([
-      {
-        id: "command",
-        command: "review",
-        model: "deep",
-        model_by_provider: { copilot: "model-a" },
-      },
-      {
-        id: "loop",
-        loop: { prompt: "Review again.", until: "DONE", max_iterations: 2, fresh_context: false },
-        model: "deep",
-        model_by_provider: { copilot: "model-b" },
-      },
-      {
-        id: "bash",
-        bash: "true",
-        model: "deep",
-        model_by_provider: { copilot: "model-c" },
-      },
-    ]);
+  test("diagnoses parsed command mappings and ignores an unsupported loop mapping", () => {
+    const result = parseWorkflow(
+      `
+name: parsed-diversity
+description: exercises parsed model diversity
+nodes:
+  - id: first-command
+    command: first-review
+    model: deep
+    model_by_provider:
+      copilot: model-a
+  - id: second-command
+    command: second-review
+    model: deep
+    model_by_provider:
+      copilot: model-b
+  - id: review-loop
+    loop:
+      prompt: Review again.
+      until: DONE
+      max_iterations: 2
+    model: deep
+    model_by_provider:
+      copilot: model-c
+`,
+      "parsed-diversity.yaml",
+    );
 
-    expect(diagnoseModelDiversity(workflow, "claude")).toEqual([
-      "diversity-test: no 'claude' entry in model_by_provider for nodes command, loop -- all resolve to 'deep'; lens/role diversity collapsed on this provider.",
+    expect(result.error).toBeNull();
+    if (result.workflow === null) throw new Error("expected parsed workflow");
+    expect(result.workflow.nodes[2]?.model_by_provider).toBeUndefined();
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.kind === "ai_fields_on_non_ai_node" &&
+          warning.message.includes("model_by_provider"),
+      ),
+    ).toBe(true);
+    expect(diagnoseModelDiversity(result.workflow, "claude")).toEqual([
+      "parsed-diversity: no 'claude' entry in model_by_provider for nodes first-command, second-command -- all resolve to 'deep'; lens/role diversity collapsed on this provider.",
     ]);
   });
 });
