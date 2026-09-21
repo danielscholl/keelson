@@ -268,13 +268,34 @@ export function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
     startedAt: Date.parse(snapshot.startedAt),
     completedAt: snapshot.completedAt ? Date.parse(snapshot.completedAt) : undefined,
     error: snapshot.error,
-    warnings: [],
+    warnings:
+      snapshot.preflightNotice === null
+        ? []
+        : [{ nodeId: null, message: snapshot.preflightNotice }],
     conversationId: snapshot.conversationId ?? null,
     projectId: snapshot.projectId,
     workingDir: snapshot.workingDir,
     worktreePath: snapshot.worktreePath,
   };
   return { run, nodes };
+}
+
+export function mergeWarnings(
+  snapshot: RunView["warnings"],
+  live: RunView["warnings"],
+): RunView["warnings"] {
+  const merged = [...snapshot];
+  for (const warning of live) {
+    const durablePreflightNotice =
+      warning.nodeId === null && warning.message.startsWith("preflight not checked:");
+    if (
+      durablePreflightNotice &&
+      merged.some((candidate) => candidate.nodeId === null && candidate.message === warning.message)
+    )
+      continue;
+    merged.push(warning);
+  }
+  return merged;
 }
 
 // Wire-level terminal run statuses. Mirrors TERMINAL_RUN_STATUSES from
@@ -393,7 +414,7 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
           //      since it reflects WS frames newer than the snapshot fetch.
           //   4. Otherwise — snapshot.
           status: chooseRunStatus(live.status, hydrated.run.status),
-          warnings: live.warnings,
+          warnings: mergeWarnings(hydrated.run.warnings, live.warnings),
         }));
         setStatus("ready");
       } catch (err) {
@@ -783,7 +804,7 @@ export function applyFrame(
     case "run_warning":
       setRun((prev) => ({
         ...prev,
-        warnings: [...prev.warnings, { nodeId: frame.nodeId, message: frame.message }],
+        warnings: mergeWarnings(prev.warnings, [{ nodeId: frame.nodeId, message: frame.message }]),
       }));
       return;
 

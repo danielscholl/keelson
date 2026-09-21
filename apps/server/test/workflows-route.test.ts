@@ -58,6 +58,8 @@ afterEach(() => {
 
 interface Rig {
   app: Hono;
+  activeRuns: ReturnType<typeof createActiveRuns>;
+  db: ReturnType<typeof openDatabase>;
   store: WorkflowStore;
   projectsStore: ProjectsStore;
   subscribers: ReturnType<typeof createWorkflowSubscribers>;
@@ -88,6 +90,7 @@ function makeRig(promptHandler?: ReturnType<typeof makePromptHandler>): Rig {
   });
   const app = new Hono();
   const subscribers = createWorkflowSubscribers();
+  const activeRuns = createActiveRuns();
   workflowsRoutes(
     app,
     {
@@ -97,10 +100,18 @@ function makeRig(promptHandler?: ReturnType<typeof makePromptHandler>): Rig {
       projectsStore,
       ...(promptHandler !== undefined ? { promptHandler } : {}),
     },
-    createActiveRuns(),
+    activeRuns,
     subscribers,
   );
-  return { app, store, projectsStore, subscribers, defaultProjectId: defaultProject.id };
+  return {
+    app,
+    activeRuns,
+    db,
+    store,
+    projectsStore,
+    subscribers,
+    defaultProjectId: defaultProject.id,
+  };
 }
 
 function writeWorkflow(filename: string, body: string): void {
@@ -946,11 +957,15 @@ nodes:
     bound?: boolean;
     regionWorkflows?: readonly string[];
     sleepSeconds?: number;
+    nodes?: WorkflowDefinition["nodes"];
+    promptHandler?: ReturnType<typeof makePromptHandler>;
   }) {
-    const definition = {
+    const definition: WorkflowDefinition = {
       name: opts.name,
       description: "bash",
-      nodes: [{ id: "x", bash: opts.sleepSeconds ? `sleep ${opts.sleepSeconds}` : "echo hi" }],
+      nodes: opts.nodes ?? [
+        { id: "x", bash: opts.sleepSeconds ? `sleep ${opts.sleepSeconds}` : "echo hi" },
+      ],
     };
     const catalog = bootstrapWorkflows({
       workflowDir: wfDir,
@@ -966,6 +981,7 @@ nodes:
       store: createWorkflowStore(db),
       conversationStore: createConversationStore(db),
       refreshCwd: tmpDir,
+      ...(opts.promptHandler !== undefined ? { promptHandler: opts.promptHandler } : {}),
       ...(opts.bound
         ? { ribWorkflowBindings: new Map([[contributed, { publish: () => {} }]]) }
         : {}),
@@ -999,6 +1015,23 @@ nodes:
     };
     expect(run.inputs).toEqual({ lens: "release-risks" });
     expect(run.workingDir).toBe(tmpDir);
+  });
+
+  test("POST .../refresh durably fails a producer with a retired model", async () => {
+    const { app } = makeRefreshRig({
+      name: "retired-producer",
+      bound: true,
+      nodes: [{ id: "collect", provider: "stub", model: "retired-model", prompt: "run" }],
+      promptHandler: makeSuccessfulPromptHandler(),
+    });
+    const res = await postRefresh(app, "retired-producer");
+    expect(res.status).toBe(200);
+    const { runId } = (await res.json()) as { runId: string };
+
+    expect(await pollUntilTerminal(app, runId)).toMatchObject({
+      status: "failed",
+      error: "preflight failed:\n- collect: model 'retired-model' is not in stub's live catalog",
+    });
   });
 
   test("POST .../refresh 409s a region-declared name shadowed by a filesystem workflow", async () => {
@@ -1488,25 +1521,112 @@ nodes:
     prompt: run
 `,
       );
-      const { app, subscribers } = makeRig(makeSuccessfulPromptHandler());
+      const { app, activeRuns, db, store, subscribers } = makeRig(makeSuccessfulPromptHandler());
 
       const startRes = await app.fetch(
         postRun("http://test/api/workflows/preflight-offline/runs", { inputs: {} }),
       );
       const { runId } = (await startRes.json()) as { runId: string };
+      const done = activeRuns.get(runId)?.done;
       const frames: Array<{ type: string; nodeId?: string | null; message?: string }> = [];
       const unsubscribe = subscribers.onFrame(runId, (frame) => frames.push(frame));
       const run = await pollUntilTerminal(app, runId);
+      await done;
       unsubscribe();
 
       expect(run.status).toBe("succeeded");
+      expect(run.preflightNotice).toBe("preflight not checked: offline-catalog");
       expect(frames).toContainEqual({
         type: "run_warning",
         nodeId: null,
         message: "preflight not checked: offline-catalog",
       });
+
+      const persistPreflightNotice = store.setRunPreflightNotice;
+      store.setRunPreflightNotice = () => {
+        throw new Error("notice write failed");
+      };
+      try {
+        const retryRes = await app.fetch(
+          postRun("http://test/api/workflows/preflight-offline/runs", { inputs: {} }),
+        );
+        const { runId: retryRunId } = (await retryRes.json()) as { runId: string };
+        const retryDone = activeRuns.get(retryRunId)?.done;
+        const retryRun = await pollUntilTerminal(app, retryRunId);
+        await retryDone;
+
+        expect(retryRun.status).toBe("succeeded");
+        expect(retryRun.preflightNotice).toBeNull();
+        expect(activeRuns.get(retryRunId)).toBeUndefined();
+      } finally {
+        store.setRunPreflightNotice = persistPreflightNotice;
+      }
+
+      db.close();
+      const reopened = openDatabase({ path: dbPath });
+      try {
+        expect(createWorkflowStore(reopened).getRun(runId)?.preflightNotice).toBe(
+          "preflight not checked: offline-catalog",
+        );
+      } finally {
+        reopened.close();
+      }
     } finally {
       unregisterProvider("offline-catalog");
+    }
+  });
+
+  test("POST .../runs does no catalog I/O for a deterministic workflow", async () => {
+    let catalogCalls = 0;
+    const capabilities = {
+      sessionResume: false,
+      streaming: false,
+      tools: false,
+      reasoningEffort: false,
+      models: ["unused-model"],
+      defaultModel: "unused-model",
+    };
+    registerProvider({
+      id: "unused-catalog",
+      displayName: "Unused catalog",
+      capabilities,
+      builtIn: false,
+      factory: () => ({
+        getType: () => "unused-catalog",
+        getCapabilities: () => capabilities,
+        async *sendQuery() {
+          yield { type: "done" as const };
+        },
+        async listModels() {
+          return [{ id: "unused-model" }];
+        },
+        async listModelsLive() {
+          catalogCalls += 1;
+          return [{ id: "unused-model" }];
+        },
+      }),
+    });
+    try {
+      writeWorkflow(
+        "preflight-deterministic.yaml",
+        `name: preflight-deterministic
+description: no provider-bound nodes
+provider: unused-catalog
+nodes:
+  - id: shell
+    bash: echo deterministic
+`,
+      );
+      const { app } = makeRig();
+      const startRes = await app.fetch(
+        postRun("http://test/api/workflows/preflight-deterministic/runs", { inputs: {} }),
+      );
+      const { runId } = (await startRes.json()) as { runId: string };
+
+      expect((await pollUntilTerminal(app, runId)).status).toBe("succeeded");
+      expect(catalogCalls).toBe(0);
+    } finally {
+      unregisterProvider("unused-catalog");
     }
   });
 

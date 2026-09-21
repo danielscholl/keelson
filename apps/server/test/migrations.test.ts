@@ -30,11 +30,16 @@ describe("migrations", () => {
         version: number;
       }>
     ).map((r) => r.version);
-    expect(versions).toEqual([12, 13, 14]);
+    expect(versions).toEqual([12, 13, 14, 15, 16]);
 
     expect(tableNames(db)).toContain("conversations");
     expect(tableNames(db)).toContain("memories");
     expect(tableNames(db)).toContain("workflow_runs");
+    const runColumns = db.query("PRAGMA table_info(workflow_runs)").all() as Array<{
+      name: string;
+    }>;
+    expect(runColumns.map((column) => column.name)).toContain("preflight_notice");
+    expect(runColumns.map((column) => column.name)).toContain("isolation_enabled");
     expect(tableNames(db)).toContain("usage_events");
     expect(tableNames(db)).toContain("ops");
     db.close();
@@ -56,7 +61,7 @@ describe("migrations", () => {
     const columns = db.query("PRAGMA table_info(workflow_runs)").all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toContain("provider_override");
     expect(db.query("SELECT MAX(version) AS v FROM schema_version").get() as { v: number }).toEqual(
-      { v: 14 },
+      { v: 16 },
     );
     db.close();
   });
@@ -83,7 +88,7 @@ describe("migrations", () => {
 
     expect(tableNames(db)).toEqual(before);
     expect(db.query("SELECT count(*) AS c FROM schema_version").get() as { c: number }).toEqual({
-      c: 3,
+      c: 5,
     });
     db.close();
   });
@@ -100,6 +105,9 @@ describe("migrations", () => {
     expect(db.query("SELECT id, worktree_pruned FROM workflow_runs").get()).toEqual({
       id: "existing-run",
       worktree_pruned: 0,
+    });
+    expect(db.query("SELECT isolation_enabled FROM workflow_runs").get()).toEqual({
+      isolation_enabled: null,
     });
     db.close();
   });

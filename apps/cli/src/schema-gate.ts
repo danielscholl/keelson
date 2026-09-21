@@ -43,10 +43,10 @@ export function schemaSkewError(serverVersion: string): string {
   return `server schema version '${serverVersion}' does not match this CLI's '${SCHEMA_VERSION}'; run \`keelson update\`, then restart the server (\`keelson restart\`)`;
 }
 
-// Fail fast before the strict-parsing WS opens when the server's schema differs.
+// Fail fast before a command consumes strict-parsed server responses or frames.
 // Returns (so the caller proceeds) on a match or an unreachable server; exits
 // EXIT_FAIL on skew. The single emit/exit site keeps the SCHEMA_SKEW code and
-// exit semantics in one place across the chat and workflow-run commands.
+// exit semantics in one place across chat and workflow commands.
 export async function gateSchemaSkew(
   effectiveBase: string,
   knownServerVersion: string | undefined,

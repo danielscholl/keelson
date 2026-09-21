@@ -294,18 +294,20 @@ node that opens a provider session: `prompt`, `command`, and `loop`. Model
 diversity diagnostics include `prompt` and `command`, the kinds that support
 `model_by_provider`. Deterministic and control nodes are excluded.
 
-For a new run started from the CLI, the SPA, or the API, the same provider-bound
-nodes are checked for pinned literal model ids and effort against the effective
-provider's live catalog before the first node executes. Preflight also checks a
-tier when the operator's `config.json` `modelClasses` override explicitly pins
-it to a concrete id. Tiers that use provider `modelClasses` or the provider
-default remain unchecked because they are not explicitly operator-pinned. A
-resumed run keeps the result it already passed rather than re-checking, and a
-run started by a rib, such as a region's cadence refresh, skips the check
-entirely. Run the same check without executing with
-`keelson workflow validate <name> --live`. An unavailable catalog is reported as
-`not checked` and does not block the run. A model that reports no effort list is
-not judged on effort.
+Every new run checks those provider-bound nodes for pinned literal model ids and
+effort against the effective provider's live catalog before the first node
+executes. Preflight also checks a tier when the operator's `config.json`
+`modelClasses` override explicitly pins it to a concrete id. Tiers that use
+provider `modelClasses` or the provider default remain unchecked because they
+are not explicitly operator-pinned. This includes CLI, SPA, API, scheduled
+controller, producer refresh, and in-memory rib starts. A resumed run keeps the
+result its first launch passed rather than re-checking. Run the same check
+without executing with `keelson workflow validate <name> --live`.
+
+An unavailable catalog is reported as `not checked` and does not block the run.
+For named runs, the notice is stored with the run and remains visible through
+`keelson workflow status <run-id>` after completion or a server restart. A model
+that reports no effort list is not judged on effort.
 
 Use `--no-preflight` for one run, set `"workflowPreflight": false` in
 `config.json`, or set `KEELSON_WORKFLOW_PREFLIGHT=0` to disable the run-start
