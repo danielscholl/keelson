@@ -226,6 +226,9 @@ nodes:
       | --- | --- | --- | --- | --- | --- |
       | n | ... | documented / source-verified / runtime-tested | ... | NOT CHECKED | |
 
+      Write `\|` for every literal `|` inside a table cell, including inside
+      backticks, so GitHub renders the row with the intended columns.
+
       Include a `## Not checked` section. Do not publish or post the result.
       Do not write a tally or model attribution. Reply only with JSON containing
       `claims`, `done_when_met`, and `not_checked`.
@@ -324,8 +327,10 @@ nodes:
       position. Put exactly CONFIRMED, CONFIRMED in part, REFUTED, UNVERIFIABLE,
       or NOT CHECKED in each `Verified` cell. Put the verifier's explanation in
       `Verification note`; keep refuted claims in place. Preserve the claim
-      number, claim, level, and citation. Do not add a count, verification
-      summary, run id, date, provider, or model attribution.
+      number, claim, level, and citation. Write `\|` for every literal `|` inside
+      a table cell, including inside backticks, so GitHub renders the row with
+      the intended columns. Do not add a count, verification summary, run id,
+      date, provider, or model attribution.
 
       Verifier output:
       $verify.output
@@ -364,13 +369,65 @@ nodes:
         return value;
       }
 
+      function precedingBackslashRun(str, pos) {
+        let count = 0;
+        while (pos - count - 1 >= 0 && str[pos - count - 1] === "\\") count += 1;
+        return count;
+      }
+
       function cells(line) {
         const value = line.trim();
         if (!value.startsWith("|") || !value.endsWith("|")) return null;
-        return value
-          .slice(1, -1)
-          .split(/(?<!\\)\|/)
-          .map((cell) => cell.trim().replaceAll("\\|", "|"));
+        const inner = value.slice(1, -1);
+        const parts = [];
+        let current = "";
+        let i = 0;
+        while (i < inner.length) {
+          const ch = inner[i];
+          if (ch === "\\" && inner[i + 1] === "|") {
+            current += "|";
+            i += 2;
+            continue;
+          }
+          if (ch === "`" && precedingBackslashRun(inner, i) % 2 === 0) {
+            let run = 0;
+            while (inner[i + run] === "`") run += 1;
+            let j = i + run;
+            let close = -1;
+            while (j < inner.length) {
+              if (inner[j] === "`") {
+                let len = 0;
+                while (inner[j + len] === "`") len += 1;
+                if (len === run) {
+                  close = j;
+                  break;
+                }
+                j += len;
+              } else {
+                j += 1;
+              }
+            }
+            if (close >= 0) {
+              const end = close + run;
+              current += inner.slice(i, end).replaceAll("\\|", "|");
+              i = end;
+              continue;
+            }
+            current += inner.slice(i, i + run);
+            i += run;
+            continue;
+          }
+          if (ch === "|") {
+            parts.push(current);
+            current = "";
+            i += 1;
+            continue;
+          }
+          current += ch;
+          i += 1;
+        }
+        parts.push(current);
+        return parts.map((cell) => cell.trim());
       }
 
       function separator(row, width) {
@@ -445,7 +502,13 @@ nodes:
           const row = cells(lines[index]);
           if (row === null) break;
           if (row.length !== header.length) {
-            fail(`claim table row has ${row.length} cells; expected ${header.length}`);
+            const claimId = row[positions["claim #"]]?.trim();
+            const label = /^[1-9]\d*$/.test(claimId ?? "")
+              ? `Claim ${claimId}`
+              : "a claim table row";
+            fail(
+              `${label} has ${row.length} cells; expected ${header.length}: ${lines[index].trim()}`,
+            );
           }
           const claimNumber = row[positions["claim #"]].trim();
           if (!/^[1-9]\d*$/.test(claimNumber)) {
