@@ -216,8 +216,11 @@ describe("design-converge", () => {
           .filter((node) => node.id !== "verify")
           .every((node) => node.allowed_tools?.length === 0),
       ).toBe(true);
-      expect(workflow.nodes.at(-1)?.id).toBe("decide");
-      expect(workflow.nodes.at(-1)?.approval?.capture_response).toBe(true);
+      const decide = workflow.nodes.at(-1);
+      expect(decide?.id).toBe("decide");
+      expect(decide?.approval?.capture_response).toBe(true);
+      expect(decide?.approval?.message).toContain("preceding");
+      expect(decide?.approval?.message).not.toContain("$");
 
       const { prompts } = await runPanel(fixture);
       for (const id of AGENT_IDS) {

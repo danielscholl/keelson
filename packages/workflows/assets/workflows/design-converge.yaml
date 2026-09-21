@@ -566,11 +566,9 @@ nodes:
     depends_on: [complete]
     approval:
       message: |
-        Review the design artifacts reported below. Start with synthesis.md and
-        inspect its scoreboard, decisions, open assumptions, and Dissent section.
-
-        $complete.output
-
-        Approve to adopt this draft, or reply with the changes the next round must
-        address.
+        Review synthesis.md in the artifact directory printed by the preceding
+        complete node. Its output also reports verification coverage and any
+        effective-routing collapse warning. Inspect the scoreboard, decisions,
+        open assumptions, and Dissent section. Approve to adopt this draft, or
+        reply with the changes the next round must address.
       capture_response: true
