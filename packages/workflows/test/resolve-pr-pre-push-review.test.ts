@@ -3,9 +3,9 @@
 // Licensed under the Apache License, Version 2.0 (the "License");
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import { parseWorkflow } from "../src/loader.ts";
 import type { DagNode, NodeOutput } from "../src/schema/index.ts";
@@ -171,5 +171,106 @@ bashDescribe("resolve-pr capture-fix-diff", () => {
 
     expect(result.exitCode).not.toBe(0);
     expect(result.stdout).toBe("");
+  });
+});
+
+bashDescribe("resolve-pr review base across converge attempts", () => {
+  const tmps: string[] = [];
+  afterEach(() => {
+    for (const dir of tmps.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function git(cwd: string, ...args: string[]): string {
+    const proc = Bun.spawnSync({
+      cmd: ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", ...args],
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (proc.exitCode !== 0) throw new Error(proc.stderr.toString());
+    return proc.stdout.toString().trim();
+  }
+
+  function scratch(prefix: string): string {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    tmps.push(dir);
+    return dir;
+  }
+
+  function setup() {
+    const origin = scratch("keelson-base-origin-");
+    const repo = scratch("keelson-base-repo-");
+    const artifacts = scratch("keelson-base-art-");
+    const bin = scratch("keelson-base-bin-");
+    git(origin, "init", "-q", "--bare");
+    git(repo, "init", "-q");
+    git(repo, "remote", "add", "origin", origin);
+    writeFileSync(join(repo, "a.txt"), "one\n");
+    git(repo, "add", "a.txt");
+    git(repo, "commit", "-q", "-m", "pr head");
+    git(repo, "push", "-q", "origin", "HEAD:refs/heads/feature");
+    const forge = `#!/usr/bin/env bash
+case "$1 $2" in
+  "pr threads") echo '[]' ;;
+  "pr checkout") git fetch -q origin feature && git checkout -q --detach FETCH_HEAD ;;
+  "pr view")
+    case "$*" in
+      *isCrossRepository*) echo false ;;
+      *headRefName*) echo feature ;;
+    esac ;;
+esac
+`;
+    writeFileSync(join(bin, "forge"), forge);
+    chmodSync(join(bin, "forge"), 0o755);
+    const env = {
+      ...(process.env as Record<string, string>),
+      KEELSON_ARTIFACTS_DIR: artifacts,
+      KEELSON_NODE_extract_pr_OUTPUT: "42",
+      PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+    };
+    const run = (id: string, round: number) => {
+      const script = node(loadResolvePr(), id).bash?.replaceAll("$converge.round", String(round));
+      if (!script) throw new Error(`${id} has no bash body`);
+      const proc = Bun.spawnSync({
+        cmd: ["bash", "-c", script],
+        cwd: repo,
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      if (proc.exitCode !== 0) throw new Error(`${id}: ${proc.stderr.toString()}`);
+      return proc.stdout.toString().trim();
+    };
+    const base = () => readFileSync(join(artifacts, ".round-base-sha"), "utf8").trim();
+    return { repo, origin, run, base };
+  }
+
+  test("a fix left unpushed by a failed attempt is still reviewed on the next one", () => {
+    const { repo, run, base } = setup();
+    run("fetch-state", 1);
+    const prHead = git(repo, "rev-parse", "HEAD");
+    expect(base()).toBe(prHead);
+
+    writeFileSync(join(repo, "a.txt"), "one\ntwo\n");
+    git(repo, "commit", "-q", "-am", "fix: thread");
+    run("fetch-state", 2);
+
+    expect(base()).toBe(prHead);
+    expect(JSON.parse(run("capture-fix-diff", 2)).has_fix).toBe("true");
+  });
+
+  test("a successful push advances the base so the next round reviews only new commits", () => {
+    const { repo, origin, run, base } = setup();
+    run("fetch-state", 1);
+    writeFileSync(join(repo, "a.txt"), "one\ntwo\n");
+    git(repo, "commit", "-q", "-am", "fix: thread");
+
+    run("push", 1);
+
+    const pushed = git(repo, "rev-parse", "HEAD");
+    expect(git(origin, "rev-parse", "refs/heads/feature")).toBe(pushed);
+    expect(base()).toBe(pushed);
+    run("fetch-state", 2);
+    expect(JSON.parse(run("capture-fix-diff", 2))).toEqual({ has_fix: "false", lines: 0 });
   });
 });

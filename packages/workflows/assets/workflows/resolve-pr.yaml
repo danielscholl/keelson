@@ -148,8 +148,11 @@ nodes:
       if [ "$ROUND" = "1" ] || [ ! -f "$KEELSON_ARTIFACTS_DIR/.checked-out-pr" ]; then
         forge pr checkout "$PR_NUM" --detach >&2
         printf '%s\n' "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.checked-out-pr"
+        # The review base is the last SHA the forge has. Only a checkout or a
+        # successful push moves it, so a fix an earlier attempt left unpushed
+        # stays inside the next attempt's review.
+        git rev-parse HEAD > "$KEELSON_ARTIFACTS_DIR/.round-base-sha"
       fi
-      git rev-parse HEAD > "$KEELSON_ARTIFACTS_DIR/.round-base-sha"
 
       HANDLED="$KEELSON_ARTIFACTS_DIR/handled.json"
       if [ ! -f "$HANDLED" ]; then
@@ -732,6 +735,7 @@ nodes:
         exit 1
       fi
       git push origin "HEAD:refs/heads/$HEAD_REF"
+      git rev-parse HEAD > "$KEELSON_ARTIFACTS_DIR/.round-base-sha"
       echo "Pushed to origin/$HEAD_REF."
 
   # Deterministic honesty gate: validate the model's results.json against the
