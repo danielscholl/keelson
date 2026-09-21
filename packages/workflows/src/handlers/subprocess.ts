@@ -250,6 +250,7 @@ const PARENT_ENV: Readonly<Record<string, string>> = (() => {
 export const ENV_VALUE_MAX_CHARS = 16 * 1024;
 const ENV_VALUE_HEAD_CHARS = 8 * 1024;
 const ENV_VALUE_TAIL_CHARS = 8 * 1024;
+const PROVENANCE_ENV_MAX_CHARS = 200;
 
 function truncateEnvValue(value: string, note: string): string {
   return `${value.slice(0, ENV_VALUE_HEAD_CHARS)}\n[keelson: ${note}]\n${value.slice(-ENV_VALUE_TAIL_CHARS)}`;
@@ -332,10 +333,10 @@ export function buildSubprocessEnv(
       env[name] = full;
     }
     if ("provider" in out && out.provider !== undefined) {
-      env[`${provenanceName}_PROVIDER`] = out.provider;
+      env[`${provenanceName}_PROVIDER`] = out.provider.slice(0, PROVENANCE_ENV_MAX_CHARS);
     }
     if ("model" in out && out.model !== undefined) {
-      env[`${provenanceName}_MODEL`] = out.model;
+      env[`${provenanceName}_MODEL`] = out.model.slice(0, PROVENANCE_ENV_MAX_CHARS);
     }
   }
   // Two env vars for the same path: `KEELSON_ARTIFACTS_DIR` is the prefixed

@@ -189,6 +189,23 @@ describe("buildSubprocessEnv", () => {
     expect(env.KEELSON_NODE_verify_seat_MODEL).toBe("claude-sonnet-5");
   });
 
+  test("caps effective provider and model values", () => {
+    const upstream = new Map<string, NodeOutput>([
+      [
+        "verify",
+        {
+          state: "completed",
+          output: "ok",
+          provider: "p".repeat(300),
+          model: "m".repeat(300),
+        },
+      ],
+    ]);
+    const env = buildSubprocessEnv({}, upstream);
+    expect(env.KEELSON_NODE_verify_PROVIDER).toBe("p".repeat(200));
+    expect(env.KEELSON_NODE_verify_MODEL).toBe("m".repeat(200));
+  });
+
   test("clears inherited provenance when the current upstream has none", () => {
     const env = buildSubprocessEnv({}, upstreamOf("verify", "ok"), {
       parentEnv: {
