@@ -620,14 +620,15 @@ export class CopilotProvider implements IAgentProvider {
       if (!resumeClaim) createdClaim = this.claimSession(session.sessionId);
       options?.onSessionId?.(session.sessionId);
 
-      // ResumeSessionConfig doesn't reliably retarget effort on the next
+      // ResumeSessionConfig doesn't retarget the model or effort on the next
       // turn; setModel is the documented per-turn override. Create-session
-      // already carries effort via buildSessionConfig.
-      if (resumeSessionId && options?.reasoningEffort && options?.model) {
+      // already carries both via buildSessionConfig.
+      if (resumeSessionId && options?.model) {
         try {
-          await session.setModel(options.model, {
-            reasoningEffort: options.reasoningEffort,
-          });
+          await session.setModel(
+            options.model,
+            options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : undefined,
+          );
         } catch (err) {
           // Non-fatal — the SDK will resurface this as a session.error if
           // the model genuinely rejects the effort tier.
