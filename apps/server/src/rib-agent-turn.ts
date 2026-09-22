@@ -304,7 +304,6 @@ async function runTurn(
     };
   };
   const drainCutoff = cutoffAfterAbort(controller.signal, deps.abortDrainGraceMs);
-  let drainSteps = 0;
   try {
     const iterator = provider
       .sendQuery(req.prompt, cwd, req.resumeSessionId, options)
@@ -317,7 +316,7 @@ async function runTurn(
         void iterator.return?.(undefined).catch(() => {});
         break;
       }
-      if (controller.signal.aborted && ++drainSteps % ABORT_DRAIN_YIELD_INTERVAL === 0) {
+      if (controller.signal.aborted) {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
         if (drainCutoff.passed()) {
           void iterator.return?.(undefined).catch(() => {});
@@ -590,7 +589,6 @@ function parseToolDenylist(raw: string | undefined): string[] {
 // How long a turn keeps draining after its signal fires, so the provider's
 // trailing usage report reaches the ledger, before it settles without it.
 const DEFAULT_ABORT_DRAIN_GRACE_MS = 5_000;
-const ABORT_DRAIN_YIELD_INTERVAL = 64;
 
 const DRAIN_CUTOFF = Symbol("drain-cutoff");
 
