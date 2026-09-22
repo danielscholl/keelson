@@ -1399,6 +1399,28 @@ describe("makeRibAgentTurn — usage capture", () => {
     });
   });
 
+  it("records the usage a provider reports after the host timeout, with the timeout status", async () => {
+    const { store, events } = fakeUsageStore();
+    const provider: IAgentProvider = {
+      getType: () => "fake",
+      getCapabilities: () => ({}) as never,
+      listModels: async () => [],
+      async *sendQuery(_prompt, _cwd, _resume, options) {
+        yield { type: "text", content: "partial" } as MessageChunk;
+        await new Promise<void>((resolve) => {
+          options?.abortSignal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        yield { type: "usage", usage: { inputTokens: 12, outputTokens: 3 } } as MessageChunk;
+      },
+    };
+    const run = makeRun(provider, { getUsageStore: () => store });
+    const result = await run("chat", { prompt: "hi", timeoutMs: 20 }).result;
+    expect(result.status).toBe("timeout");
+    expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 3 });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ status: "timeout", inputTokens: 12, outputTokens: 3 });
+  });
+
   it("keeps the caller's abort status when the host timeout fires during the drain", async () => {
     const { store, events } = fakeUsageStore();
     const ac = new AbortController();
