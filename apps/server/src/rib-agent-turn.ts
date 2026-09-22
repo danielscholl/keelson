@@ -309,7 +309,9 @@ async function runTurn(
       .sendQuery(req.prompt, cwd, req.resumeSessionId, options)
       [Symbol.asyncIterator]();
     while (true) {
-      const step = await Promise.race([iterator.next(), drainCutoff.reached]);
+      const next = iterator.next();
+      void next.catch(() => {});
+      const step = await Promise.race([next, drainCutoff.reached]);
       if (step === DRAIN_CUTOFF || drainCutoff.passed()) {
         void iterator.return?.(undefined).catch(() => {});
         break;
