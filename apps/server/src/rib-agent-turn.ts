@@ -310,7 +310,7 @@ async function runTurn(
       [Symbol.asyncIterator]();
     while (true) {
       const step = await Promise.race([iterator.next(), drainCutoff.reached]);
-      if (step === DRAIN_CUTOFF) {
+      if (step === DRAIN_CUTOFF || drainCutoff.passed()) {
         // The provider is still streaming past the abort; settle without it.
         void iterator.return?.(undefined).catch(() => {});
         break;
@@ -587,11 +587,13 @@ const DRAIN_CUTOFF = Symbol("drain-cutoff");
 function cutoffAfterAbort(
   signal: AbortSignal,
   graceMs: number,
-): { reached: Promise<typeof DRAIN_CUTOFF>; cancel: () => void } {
+): { reached: Promise<typeof DRAIN_CUTOFF>; passed: () => boolean; cancel: () => void } {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let deadline: number | undefined;
   let arm: (() => void) | undefined;
   const reached = new Promise<typeof DRAIN_CUTOFF>((resolve) => {
     arm = () => {
+      deadline = Date.now() + graceMs;
       timer = setTimeout(() => resolve(DRAIN_CUTOFF), graceMs);
     };
     if (signal.aborted) arm();
@@ -599,6 +601,8 @@ function cutoffAfterAbort(
   });
   return {
     reached,
+    // The timer alone can't bound a provider that yields without a macrotask gap.
+    passed: () => deadline !== undefined && Date.now() >= deadline,
     cancel: () => {
       if (timer) clearTimeout(timer);
       if (arm) signal.removeEventListener("abort", arm);

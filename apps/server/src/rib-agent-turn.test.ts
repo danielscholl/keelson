@@ -1448,6 +1448,28 @@ describe("makeRibAgentTurn — usage capture", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(returned).toBe(true);
   });
+
+  it("settles after the drain grace when the provider yields past the abort without a timer gap", async () => {
+    const ac = new AbortController();
+    let ranOut = false;
+    const provider: IAgentProvider = {
+      getType: () => "fake",
+      getCapabilities: () => ({}) as never,
+      listModels: async () => [],
+      async *sendQuery() {
+        yield { type: "text", content: "partial" } as MessageChunk;
+        ac.abort();
+        // Bounded so a missed cutoff fails the test instead of hanging the runner.
+        const until = Date.now() + 1_000;
+        while (Date.now() < until) yield { type: "text", content: "ignored" } as MessageChunk;
+        ranOut = true;
+      },
+    };
+    const run = makeRun(provider, { abortDrainGraceMs: 30 });
+    const result = await run("chat", { prompt: "hi", abortSignal: ac.signal }).result;
+    expect(result.status).toBe("aborted");
+    expect(ranOut).toBe(false);
+  });
 });
 
 describe("applyRibs wiring", () => {
