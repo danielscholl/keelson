@@ -27,7 +27,7 @@ import {
   projectToolsForCopilot,
 } from "./factory.ts";
 import { buildCopilotSessionHooks } from "./hooks-shim.ts";
-import { buildPermissionGate } from "./permission-gate.ts";
+import { buildPermissionGate, buildSessionToolFilter } from "./permission-gate.ts";
 
 export const COPILOT_CREDENTIAL_SERVICE_ID = "copilot" as const;
 
@@ -962,7 +962,8 @@ function buildSessionConfig(
   // Apply the same allow/deny rail to the projected custom tools so the
   // provider enforces its own contract (`allowedTools: []` ⇒ no tools) rather
   // than relying on the workflow handler's prefiltering. Built-in tools are
-  // gated separately via the permission handler below.
+  // filtered from the session's tool list and gated via the permission handler
+  // below.
   if (options?.tools && options.tools.length > 0) {
     const railed = filterToolsByRail(
       options.tools,
@@ -973,6 +974,7 @@ function buildSessionConfig(
       config.tools = projectToolsForCopilot(railed, toolProjection);
     }
   }
+  Object.assign(config, buildSessionToolFilter(options?.allowedTools, options?.disallowedTools));
   // Per-node `allowed_tools` / `denied_tools` gate the SDK's BUILT-IN tools
   // (custom/rib tools are already filtered upstream). The permission handler
   // only sees a coarse capability `kind`, so the rail is enforced there. The

@@ -38,6 +38,33 @@ export const GATED_KINDS: ReadonlySet<CopilotPermissionKind> = new Set([
   "memory",
 ]);
 
+// Copilot CLI built-ins by the capability kind their calls request, under the
+// names a session advertises to the model (bash and PowerShell shells alike).
+// Kept out of NAME_TO_KIND so a Bash hook matcher doesn't start firing on the
+// shell companions (read_bash, stop_bash, …).
+const BUILTINS_BY_KIND: Readonly<Partial<Record<CopilotPermissionKind, readonly string[]>>> = {
+  read: ["view", "grep", "glob", "rg"],
+  write: ["create", "edit", "apply_patch", "str_replace_editor"],
+  shell: [
+    "bash",
+    "read_bash",
+    "write_bash",
+    "stop_bash",
+    "list_bash",
+    "powershell",
+    "read_powershell",
+    "write_powershell",
+    "stop_powershell",
+    "list_powershell",
+  ],
+  url: ["web_fetch", "web_search"],
+  memory: ["store_memory"],
+};
+
+export function builtinToolNames(kind: CopilotPermissionKind): readonly string[] {
+  return BUILTINS_BY_KIND[kind] ?? [];
+}
+
 // Lowercased tool name → capability kind. Covers the Claude tool names workflows
 // author against and the Copilot CLI built-ins observed on `tool.execution_start`
 // / PreToolUse input. Names absent here (rib tools, unknown built-ins) return

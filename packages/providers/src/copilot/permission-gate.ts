@@ -23,6 +23,7 @@ import { checkToolCallGate } from "../tool-gate.ts";
 import type { ToolCallGate } from "../types.ts";
 import type { CopilotPermissionHandler } from "./factory.ts";
 import {
+  builtinToolNames,
   type CopilotPermissionKind,
   capabilityToolName,
   GATED_KINDS,
@@ -59,6 +60,33 @@ function gatedKindsOf(names: readonly string[]): Set<CopilotPermissionKind> {
     if (kind !== undefined && GATED_KINDS.has(kind)) out.add(kind);
   }
   return out;
+}
+
+export interface SessionToolFilter {
+  availableTools?: string[];
+  excludedTools?: string[];
+}
+
+// The same rail as a session tool filter, so the model is never offered a
+// built-in the gate would reject. Custom (rib) tools are railed before they are
+// projected, so an allow-list admits every one that reached the session.
+export function buildSessionToolFilter(
+  allowedTools: readonly string[] | undefined,
+  disallowedTools: readonly string[] | undefined,
+): SessionToolFilter {
+  const builtins = (names: readonly string[]): string[] =>
+    [...gatedKindsOf(names)].flatMap((kind) =>
+      builtinToolNames(kind).map((name) => `builtin:${name}`),
+    );
+  const filter: SessionToolFilter = {};
+  if (allowedTools !== undefined) {
+    filter.availableTools = ["custom:*", ...builtins(allowedTools)];
+  }
+  if (disallowedTools !== undefined) {
+    const excluded = builtins(disallowedTools);
+    if (excluded.length > 0) filter.excludedTools = excluded;
+  }
+  return filter;
 }
 
 export function buildPermissionGate(opts: PermissionGateOptions): CopilotPermissionHandler {

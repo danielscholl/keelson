@@ -2209,6 +2209,59 @@ describe("CopilotProvider — per-node tool rails + hooks", () => {
     );
     expect(sdk.lastSessionConfig()!.tools).toBeUndefined();
   });
+
+  it("advertises only the allowed built-ins and the railed custom tools", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    await drain(
+      makeProvider(sdk).sendQuery("hi", "/tmp", undefined, {
+        tools: [ribTool],
+        allowedTools: ["Read", "Glob", "Grep", "cluster"],
+      }),
+    );
+    const cfg = sdk.lastSessionConfig()!;
+    expect(cfg.availableTools).toEqual([
+      "custom:*",
+      "builtin:view",
+      "builtin:grep",
+      "builtin:glob",
+      "builtin:rg",
+    ]);
+    expect(cfg.excludedTools).toBeUndefined();
+    expect((cfg.tools as Array<{ name: string }>).map((t) => t.name)).toEqual(["cluster"]);
+  });
+
+  it("allowedTools: [] advertises no built-ins", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    await drain(makeProvider(sdk).sendQuery("hi", "/tmp", undefined, { allowedTools: [] }));
+    expect(sdk.lastSessionConfig()!.availableTools).toEqual(["custom:*"]);
+  });
+
+  it("excludes the denied built-ins when denied_tools is set", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    await drain(
+      makeProvider(sdk).sendQuery("hi", "/tmp", undefined, { disallowedTools: ["Bash"] }),
+    );
+    const cfg = sdk.lastSessionConfig()!;
+    expect(cfg.availableTools).toBeUndefined();
+    expect(cfg.excludedTools).toContain("builtin:bash");
+    expect(cfg.excludedTools).toContain("builtin:read_bash");
+    expect(cfg.excludedTools).not.toContain("builtin:view");
+  });
+
+  it("sets no tool filter when no rails are set", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    await drain(makeProvider(sdk).sendQuery("hi", "/tmp", undefined, { model: "auto" }));
+    const cfg = sdk.lastSessionConfig()!;
+    expect(cfg.availableTools).toBeUndefined();
+    expect(cfg.excludedTools).toBeUndefined();
+  });
+
+  it("applies the tool filter when resuming a session", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    await drain(makeProvider(sdk).sendQuery("hi", "/tmp", "S", { allowedTools: ["Read"] }));
+    expect(sdk.lastSessionConfig()!.availableTools).toContain("builtin:view");
+    expect(sdk.lastSessionConfig()!.availableTools).not.toContain("builtin:bash");
+  });
 });
 
 describe("CopilotProvider — defaultModel + listModels", () => {

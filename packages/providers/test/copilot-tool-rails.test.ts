@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { buildCopilotSessionHooks } from "../src/copilot/hooks-shim.ts";
-import { buildPermissionGate } from "../src/copilot/permission-gate.ts";
+import { buildPermissionGate, buildSessionToolFilter } from "../src/copilot/permission-gate.ts";
 import { capabilityToolName, GATED_KINDS, toolKind } from "../src/copilot/tool-names.ts";
 import type { ToolCallGate } from "../src/types.ts";
 
@@ -99,6 +99,59 @@ describe("buildPermissionGate", () => {
     expect(decisionKind(gate({ kind: "write" }, { sessionId: "s" }))).toBe("reject");
     // the rib tool itself still flows through as custom-tool
     expect(decisionKind(gate({ kind: "custom-tool" }, { sessionId: "s" }))).toBe("approve-once");
+  });
+});
+
+describe("buildSessionToolFilter", () => {
+  it("an allow-list advertises custom tools plus the built-ins of its kinds", () => {
+    expect(buildSessionToolFilter(["Read", "Glob", "Grep", "chat_post"], undefined)).toEqual({
+      availableTools: ["custom:*", "builtin:view", "builtin:grep", "builtin:glob", "builtin:rg"],
+    });
+  });
+
+  it("an empty or rib-only allow-list advertises no built-ins", () => {
+    expect(buildSessionToolFilter([], undefined)).toEqual({ availableTools: ["custom:*"] });
+    expect(buildSessionToolFilter(["chat_post", "chat_done"], undefined)).toEqual({
+      availableTools: ["custom:*"],
+    });
+  });
+
+  it("allowing Bash advertises the whole shell family", () => {
+    const { availableTools } = buildSessionToolFilter(["Bash"], undefined);
+    for (const name of [
+      "bash",
+      "read_bash",
+      "write_bash",
+      "stop_bash",
+      "list_bash",
+      "powershell",
+    ]) {
+      expect(availableTools).toContain(`builtin:${name}`);
+    }
+    expect(availableTools).not.toContain("builtin:create");
+  });
+
+  it("a deny-list excludes the built-ins of its kinds", () => {
+    expect(buildSessionToolFilter(undefined, ["Write"])).toEqual({
+      excludedTools: [
+        "builtin:create",
+        "builtin:edit",
+        "builtin:apply_patch",
+        "builtin:str_replace_editor",
+      ],
+    });
+  });
+
+  it("a deny-list of only rib tools excludes nothing, and no rail sets no filter", () => {
+    expect(buildSessionToolFilter(undefined, ["mcp__keelson__cluster"])).toEqual({});
+    expect(buildSessionToolFilter(undefined, undefined)).toEqual({});
+  });
+
+  it("combines both lists; the runtime lets the exclusion win", () => {
+    expect(buildSessionToolFilter(["Read", "Bash"], ["Bash"])).toMatchObject({
+      availableTools: expect.arrayContaining(["builtin:view", "builtin:bash"]),
+      excludedTools: expect.arrayContaining(["builtin:bash", "builtin:read_bash"]),
+    });
   });
 });
 
