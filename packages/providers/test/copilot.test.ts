@@ -908,6 +908,185 @@ describe("CopilotProvider — abort", () => {
     await provider.dispose();
     expect(sdk.lastClient()!.stopped).toBe(true);
   });
+
+  it("still yields the usage the turn spent before the abort", async () => {
+    const ac = new AbortController();
+    const sdk = makeMockSdk({
+      scenario: (session) => {
+        session.emit("assistant.usage", { model: "gpt-5", inputTokens: 30, outputTokens: 12 });
+        ac.abort();
+      },
+    });
+    const provider = new CopilotProvider({
+      getCredential: async () => "real-token",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const chunks = await drain(
+      provider.sendQuery("hi", "/tmp", undefined, { abortSignal: ac.signal }),
+    );
+
+    expect(sdk.lastSession()!.aborted).toBe(true);
+    expect(chunks.filter((c) => c.type === "usage")).toEqual([
+      { type: "usage", usage: { inputTokens: 30, outputTokens: 12 } },
+    ]);
+  });
+});
+
+describe("CopilotProvider — resume right after an abort", () => {
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+  // Emulates the runtime rule the resume race trips: every turn on the warm
+  // client is the same owner (one connection), so a detach that completes after
+  // the next turn's resume closes the session that turn just resumed, and its
+  // prompt never runs (no events, no idle, no error).
+  const makeRuntime = (opts: { detach: (idx: number) => Promise<void> }) => {
+    const log: string[] = [];
+    let attached = false;
+    let sessions = 0;
+    const makeSession = (idx: number): CopilotSessionLike => {
+      const handlers = new Map<string, Set<(event: unknown) => void>>();
+      const emit = (type: string, data: Record<string, unknown> = {}) => {
+        for (const h of handlers.get(type) ?? []) h({ type, data });
+      };
+      return {
+        sessionId: "S",
+        async send({ prompt }: { prompt: string }) {
+          setTimeout(() => {
+            if (!attached) return;
+            log.push(`run:${prompt}`);
+            emit("assistant.usage", { model: "m", inputTokens: 10, outputTokens: 4 });
+            if (idx === 0) return;
+            emit("assistant.message_delta", { deltaContent: `reply to ${prompt}` });
+            emit("session.idle");
+          }, 40);
+          return "msg-id";
+        },
+        on(t: string, h: (e: unknown) => void) {
+          let set = handlers.get(t);
+          if (!set) {
+            set = new Set();
+            handlers.set(t, set);
+          }
+          set.add(h);
+          return () => set!.delete(h);
+        },
+        async abort() {
+          log.push(`abort:${idx}`);
+        },
+        async disconnect() {
+          await opts.detach(idx);
+          attached = false;
+          log.push(`detach:${idx}`);
+        },
+        async setModel() {},
+      };
+    };
+    class RuntimeClient {
+      constructor(public readonly options: Record<string, unknown>) {}
+      async start() {}
+      async stop() {
+        return [];
+      }
+      async createSession() {
+        attached = true;
+        log.push("create");
+        return makeSession(sessions++);
+      }
+      async resumeSession(id: string) {
+        attached = true;
+        log.push(`resume:${id}`);
+        return makeSession(sessions++);
+      }
+      async getAuthStatus() {
+        return { isAuthenticated: true };
+      }
+      async listModels() {
+        return [];
+      }
+    }
+    return {
+      log,
+      module: {
+        CopilotClient: RuntimeClient as unknown as CopilotSdkModule["CopilotClient"],
+        approveAll: (() => ({ kind: "permit" })) as unknown as CopilotSdkModule["approveAll"],
+      },
+    };
+  };
+
+  const textOf = (chunks: MessageChunk[]) =>
+    chunks.map((c) => (c.type === "text" ? c.content : "")).join("");
+
+  it("resumes only after the aborted turn's detach lands, so the next prompt runs", async () => {
+    // The detach lands inside the resumed turn's model latency, as in the field
+    // log (resume, then shutdown 55ms later, and the prompt never processed).
+    const runtime = makeRuntime({ detach: () => sleep(10) });
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: async () => runtime.module }),
+    });
+
+    const acFirst = new AbortController();
+    const first = drain(
+      provider.sendQuery("first", "/tmp", undefined, { abortSignal: acFirst.signal }),
+    );
+    while (!runtime.log.includes("run:first")) await sleep(1);
+    acFirst.abort();
+
+    // Issued without waiting for the aborted turn to settle, as a caller that
+    // times a turn out does. The guard bounds the hang this regresses to.
+    const acSecond = new AbortController();
+    const guard = setTimeout(() => acSecond.abort(), 1000);
+    const second = drain(
+      provider.sendQuery("second", "/tmp", "S", { abortSignal: acSecond.signal }),
+    );
+    const [, secondChunks] = await Promise.all([first, second]);
+    clearTimeout(guard);
+
+    expect(textOf(secondChunks)).toBe("reply to second");
+    expect(runtime.log.indexOf("detach:0")).toBeLessThan(runtime.log.indexOf("resume:S"));
+    expect(runtime.log).toContain("run:second");
+    await provider.dispose();
+  });
+
+  it("fails fast with a clear error when the earlier turn never releases the session", async () => {
+    const runtime = makeRuntime({
+      detach: (idx) => (idx === 0 ? new Promise<void>(() => {}) : Promise.resolve()),
+    });
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: async () => runtime.module }),
+      sessionReleaseWaitMs: 30,
+    });
+
+    const acFirst = new AbortController();
+    const first = drain(
+      provider.sendQuery("first", "/tmp", undefined, { abortSignal: acFirst.signal }),
+    );
+    while (!runtime.log.includes("run:first")) await sleep(1);
+    acFirst.abort();
+    await first;
+
+    const chunks: MessageChunk[] = [];
+    let thrown: unknown;
+    try {
+      for await (const c of provider.sendQuery("second", "/tmp", "S")) chunks.push(c);
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect((thrown as Error).message).toContain(
+      "Copilot session S is still held by an earlier turn",
+    );
+    expect(chunks).toEqual([{ type: "error", message: (thrown as Error).message }]);
+    expect(runtime.log).not.toContain("resume:S");
+
+    // The wedged claim keeps holding later resumes back rather than letting one through.
+    await expect(drain(provider.sendQuery("third", "/tmp", "S"))).rejects.toThrow(
+      "still held by an earlier turn",
+    );
+    expect(runtime.log).not.toContain("resume:S");
+  });
 });
 
 describe("CopilotProvider — warm client (issue #327)", () => {
