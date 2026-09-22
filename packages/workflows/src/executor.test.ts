@@ -175,7 +175,7 @@ function baseOpts(workflow: WorkflowDefinition): Omit<RunOptions, "handlers"> {
     workflow,
     runId: "run-1",
     inputs: {},
-    cwd: "/tmp",
+    cwd: tmpdir(),
   };
 }
 

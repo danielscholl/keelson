@@ -58,10 +58,10 @@ function buildSpawnSpec(
     // Inline.
     // --no-env-file prevents Bun from auto-loading .env from the target
     // repo, which would otherwise leak repo secrets into the subprocess.
-    if (runtime === "bun") return { cmd: process.execPath, args: ["--no-env-file", "-e", body] };
+    if (runtime === "bun") return { cmd: "bun", args: ["--no-env-file", "-e", body] };
     return { cmd: "uv", args: ["run", ...withFlags, "python", "-c", body] };
   }
-  if (runtime === "bun") return { cmd: process.execPath, args: ["--no-env-file", resolvedPath] };
+  if (runtime === "bun") return { cmd: "bun", args: ["--no-env-file", resolvedPath] };
   return { cmd: "uv", args: ["run", ...withFlags, resolvedPath] };
 }
 
