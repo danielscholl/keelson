@@ -395,21 +395,27 @@ export class CopilotProvider implements IAgentProvider {
 
   // The slot settles only when prior claims and this one have released, so a
   // turn that gives up waiting still holds the next resume back.
-  private claimSession(sessionId: string): {
-    prior: Promise<void> | undefined;
-    release: () => void;
-  } {
+  private claimSession(sessionId: string): SessionClaim {
     const prior = this.sessionReleases.get(sessionId);
-    let release!: () => void;
+    const holds: Promise<void>[] = [];
+    let settle!: () => void;
     const own = new Promise<void>((resolve) => {
-      release = resolve;
+      settle = resolve;
     });
     const slot = prior ? Promise.all([prior, own]).then(() => {}) : own;
     this.sessionReleases.set(sessionId, slot);
     void slot.then(() => {
       if (this.sessionReleases.get(sessionId) === slot) this.sessionReleases.delete(sessionId);
     });
-    return { prior, release };
+    return {
+      prior,
+      holdUntil: (teardown) => {
+        holds.push(teardown);
+      },
+      release: () => {
+        void Promise.all(holds).then(settle);
+      },
+    };
   }
 
   // (Re)arm the idle-eviction timer after a turn. unref so a resident warm
@@ -439,53 +445,82 @@ export class CopilotProvider implements IAgentProvider {
     // CLI process that nothing will read.
     if (options?.abortSignal?.aborted) return;
 
-    // Optional: undefined opts the factory into the `copilot auth login`
-    // fallback. Missing both surfaces as a session-error from the SDK.
-    const token = await this.getCredential(COPILOT_CREDENTIAL_SERVICE_ID);
-    if (options?.abortSignal?.aborted) return;
+    // Claimed before the first await so resumes of one id open in call order.
+    const claim = resumeSessionId ? this.claimSession(resumeSessionId) : undefined;
+    try {
+      if (claim) {
+        const outcome = await waitForSessionRelease(
+          claim.prior,
+          this.sessionReleaseWaitMs,
+          options?.abortSignal,
+        );
+        if (outcome === "aborted") return;
+        if (outcome === "timeout") {
+          const msg = `Copilot session ${resumeSessionId} is still held by an earlier turn that did not release it within ${this.sessionReleaseWaitMs}ms; not resuming it concurrently.`;
+          yield { type: "error", message: msg };
+          throw new Error(msg);
+        }
+      }
 
-    for (let attempt = 0; attempt < 2; attempt++) {
+      // Optional: undefined opts the factory into the `copilot auth login`
+      // fallback. Missing both surfaces as a session-error from the SDK.
+      const token = await this.getCredential(COPILOT_CREDENTIAL_SERVICE_ID);
       if (options?.abortSignal?.aborted) return;
 
-      // Acquire the warm client (reused across turns; spawned on the first turn
-      // or after eviction). A spawn failure surfaces as a friendly system error,
-      // the same shape as a session-open failure below.
-      let warm: WarmClient;
-      try {
-        warm = await this.acquireClient(token, cwd);
-      } catch (err) {
-        const msg = buildFriendlyCopilotError(err);
-        yield { type: "system", content: msg };
-        throw err instanceof Error ? err : new Error(msg);
-      }
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (options?.abortSignal?.aborted) return;
 
-      // Abort raced the spawn: release this turn's lease and leave the client
-      // warm for the next turn rather than stopping it, and don't open a
-      // session or send. Arm the idle timer so a freshly spawned,
-      // then-abandoned client is still bounded by eviction.
-      if (options?.abortSignal?.aborted) {
-        this.release(warm);
-        this.armIdleTimer();
-        return;
-      }
-
-      // A turn is starting on the warm client: cancel any pending idle eviction
-      // so a timer armed by the previous turn can't fire mid-stream here.
-      this.cancelIdleTimer();
-
-      try {
-        yield* this.streamTurn(prompt, warm, token, cwd, resumeSessionId, options, attempt === 0);
-        return;
-      } catch (err) {
-        if (err instanceof RetryableConnectionError && attempt === 0) {
-          continue;
+        // Acquire the warm client (reused across turns; spawned on the first turn
+        // or after eviction). A spawn failure surfaces as a friendly system error,
+        // the same shape as a session-open failure below.
+        let warm: WarmClient;
+        try {
+          warm = await this.acquireClient(token, cwd);
+        } catch (err) {
+          const msg = buildFriendlyCopilotError(err);
+          yield { type: "system", content: msg };
+          throw err instanceof Error ? err : new Error(msg);
         }
-        if (err instanceof RetryableConnectionError) {
-          yield { type: "error", message: err.message };
-          throw err.cause ?? err;
+
+        // Abort raced the spawn: release this turn's lease and leave the client
+        // warm for the next turn rather than stopping it, and don't open a
+        // session or send. Arm the idle timer so a freshly spawned,
+        // then-abandoned client is still bounded by eviction.
+        if (options?.abortSignal?.aborted) {
+          this.release(warm);
+          this.armIdleTimer();
+          return;
         }
-        throw err;
+
+        // A turn is starting on the warm client: cancel any pending idle eviction
+        // so a timer armed by the previous turn can't fire mid-stream here.
+        this.cancelIdleTimer();
+
+        try {
+          yield* this.streamTurn(
+            prompt,
+            warm,
+            token,
+            cwd,
+            resumeSessionId,
+            options,
+            attempt === 0,
+            claim,
+          );
+          return;
+        } catch (err) {
+          if (err instanceof RetryableConnectionError && attempt === 0) {
+            continue;
+          }
+          if (err instanceof RetryableConnectionError) {
+            yield { type: "error", message: err.message };
+            throw err.cause ?? err;
+          }
+          throw err;
+        }
       }
+    } finally {
+      claim?.release();
     }
   }
 
@@ -497,6 +532,7 @@ export class CopilotProvider implements IAgentProvider {
     resumeSessionId: string | undefined,
     options: SendQueryOptions | undefined,
     canRetry: boolean,
+    resumeClaim: SessionClaim | undefined,
   ): AsyncGenerator<MessageChunk> {
     const queue = new ChunkQueue();
     const unsubs: Array<() => void> = [];
@@ -515,7 +551,7 @@ export class CopilotProvider implements IAgentProvider {
     // to a freshly respawned one) and whether we hold a refcount on it.
     let activeWarm = warm;
     let retained = false;
-    let releaseSession: (() => void) | undefined;
+    let createdClaim: SessionClaim | undefined;
 
     // Per-request wiring for custom tools. The closure captures queue + cwd +
     // abortSignal so SDK-side handlers emit into the stream the UI drains.
@@ -553,24 +589,6 @@ export class CopilotProvider implements IAgentProvider {
         options.abortSignal.addEventListener("abort", abortListener);
       }
 
-      if (resumeSessionId !== undefined) {
-        const claim = this.claimSession(resumeSessionId);
-        releaseSession = claim.release;
-        const outcome = await waitForSessionRelease(
-          claim.prior,
-          this.sessionReleaseWaitMs,
-          options?.abortSignal,
-        );
-        if (outcome !== "released") {
-          // openSessionWithRetry never took over the lease acquireClient gave us.
-          this.release(warm);
-          if (outcome === "aborted") return;
-          const msg = `Copilot session ${resumeSessionId} is still held by an earlier turn that did not release it within ${this.sessionReleaseWaitMs}ms; not resuming it concurrently.`;
-          yield yieldChunk({ type: "error", message: msg });
-          throw new Error(msg);
-        }
-      }
-
       try {
         const opened = await this.openSessionWithRetry(
           warm,
@@ -599,7 +617,7 @@ export class CopilotProvider implements IAgentProvider {
       // Surface the session id so the handler can persist it for the next
       // turn's resume. createSession mints a new id; resumeSession echoes the
       // one we passed in.
-      releaseSession ??= this.claimSession(session.sessionId).release;
+      if (!resumeClaim) createdClaim = this.claimSession(session.sessionId);
       options?.onSessionId?.(session.sessionId);
 
       // ResumeSessionConfig doesn't reliably retarget effort on the next
@@ -845,19 +863,25 @@ export class CopilotProvider implements IAgentProvider {
       // the disconnect settles so a resume of this id can't overtake it.
       if (connectionFailure) {
         if (retained) this.discardClient(activeWarm);
-        releaseSession?.();
       } else {
         if (session) {
           const disconnect = settleSessionDisconnect(session);
           this.trackTeardown(disconnect);
-          void disconnect.then(() => releaseSession?.());
-        } else {
-          releaseSession?.();
+          (resumeClaim ?? createdClaim)?.holdUntil(disconnect);
         }
         this.armIdleTimer();
       }
+      createdClaim?.release();
     }
   }
+}
+
+// A turn's hold on a session id. release() settles it once every teardown
+// passed to holdUntil has settled.
+interface SessionClaim {
+  prior: Promise<void> | undefined;
+  holdUntil: (teardown: Promise<void>) => void;
+  release: () => void;
 }
 
 // Best-effort SDK teardown, detached from the turn (see sendQuery's finally).

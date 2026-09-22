@@ -1017,35 +1017,100 @@ describe("CopilotProvider — resume right after an abort", () => {
   const textOf = (chunks: MessageChunk[]) =>
     chunks.map((c) => (c.type === "text" ? c.content : "")).join("");
 
-  it("resumes only after the aborted turn's detach lands, so the next prompt runs", async () => {
-    // The detach lands inside the resumed turn's model latency, as in the field
-    // log (resume, then shutdown 55ms later, and the prompt never processed).
-    const runtime = makeRuntime({ detach: () => sleep(10) });
+  it.each([
+    ["no resume id", undefined],
+    ["an empty resume id", ""],
+  ])(
+    "resumes only after the aborted turn's detach lands (first turn given %s)",
+    async (_label, firstResumeId) => {
+      // The detach lands inside the resumed turn's model latency, as in the field
+      // log (resume, then shutdown 55ms later, and the prompt never processed).
+      const runtime = makeRuntime({ detach: () => sleep(10) });
+      const provider = new CopilotProvider({
+        getCredential: async () => "tok",
+        clientFactory: new CopilotClientFactory({ sdkLoader: async () => runtime.module }),
+      });
+
+      const acFirst = new AbortController();
+      const first = drain(
+        provider.sendQuery("first", "/tmp", firstResumeId, { abortSignal: acFirst.signal }),
+      );
+      while (!runtime.log.includes("run:first")) await sleep(1);
+      acFirst.abort();
+
+      // Issued without waiting for the aborted turn to settle, as a caller that
+      // times a turn out does. The guard bounds the hang this regresses to.
+      const acSecond = new AbortController();
+      const guard = setTimeout(() => acSecond.abort(), 1000);
+      const second = drain(
+        provider.sendQuery("second", "/tmp", "S", { abortSignal: acSecond.signal }),
+      );
+      const [, secondChunks] = await Promise.all([first, second]);
+      clearTimeout(guard);
+
+      expect(textOf(secondChunks)).toBe("reply to second");
+      expect(runtime.log.indexOf("detach:0")).toBeLessThan(runtime.log.indexOf("resume:S"));
+      expect(runtime.log).toContain("run:second");
+      await provider.dispose();
+    },
+  );
+
+  // A mock SDK whose sends record the prompt order; the first `failFirst` sends
+  // hit a connection error before any content, which the provider retries.
+  const orderedSdk = (failFirst = 0) => {
+    const order: string[] = [];
+    let sends = 0;
+    const sdk = makeMockSdk({
+      scenario: (session) => {
+        const prompt = session.sent.at(-1)!.prompt;
+        if (sends++ < failFirst) {
+          session.emit("session.error", { message: "not connected" });
+          return;
+        }
+        order.push(prompt);
+        session.emit("assistant.message_delta", { deltaContent: `reply to ${prompt}` });
+        session.emit("session.idle");
+      },
+    });
+    return { sdk, order };
+  };
+
+  it("opens resumes of one session id in call order when the earlier one is slower to start", async () => {
+    const { sdk, order } = orderedSdk();
+    let credentialCalls = 0;
     const provider = new CopilotProvider({
-      getCredential: async () => "tok",
-      clientFactory: new CopilotClientFactory({ sdkLoader: async () => runtime.module }),
+      getCredential: async () => {
+        if (credentialCalls++ === 0) await sleep(30);
+        return "tok";
+      },
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
     });
 
-    const acFirst = new AbortController();
-    const first = drain(
-      provider.sendQuery("first", "/tmp", undefined, { abortSignal: acFirst.signal }),
-    );
-    while (!runtime.log.includes("run:first")) await sleep(1);
-    acFirst.abort();
+    const [firstChunks, secondChunks] = await Promise.all([
+      drain(provider.sendQuery("first", "/tmp", "S")),
+      drain(provider.sendQuery("second", "/tmp", "S")),
+    ]);
 
-    // Issued without waiting for the aborted turn to settle, as a caller that
-    // times a turn out does. The guard bounds the hang this regresses to.
-    const acSecond = new AbortController();
-    const guard = setTimeout(() => acSecond.abort(), 1000);
-    const second = drain(
-      provider.sendQuery("second", "/tmp", "S", { abortSignal: acSecond.signal }),
-    );
-    const [, secondChunks] = await Promise.all([first, second]);
-    clearTimeout(guard);
-
+    expect(order).toEqual(["first", "second"]);
+    expect(textOf(firstChunks)).toBe("reply to first");
     expect(textOf(secondChunks)).toBe("reply to second");
-    expect(runtime.log.indexOf("detach:0")).toBeLessThan(runtime.log.indexOf("resume:S"));
-    expect(runtime.log).toContain("run:second");
+    await provider.dispose();
+  });
+
+  it("keeps a resume's place in line across its connection retry", async () => {
+    const { sdk, order } = orderedSdk(1);
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const [firstChunks] = await Promise.all([
+      drain(provider.sendQuery("first", "/tmp", "S")),
+      drain(provider.sendQuery("second", "/tmp", "S")),
+    ]);
+
+    expect(order).toEqual(["first", "second"]);
+    expect(textOf(firstChunks)).toBe("reply to first");
     await provider.dispose();
   });
 
