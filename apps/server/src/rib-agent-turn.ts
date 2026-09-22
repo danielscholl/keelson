@@ -304,6 +304,7 @@ async function runTurn(
     };
   };
   const drainCutoff = cutoffAfterAbort(controller.signal, deps.abortDrainGraceMs);
+  let drainSteps = 0;
   try {
     const iterator = provider
       .sendQuery(req.prompt, cwd, req.resumeSessionId, options)
@@ -315,6 +316,13 @@ async function runTurn(
       if (step === DRAIN_CUTOFF || drainCutoff.passed()) {
         void iterator.return?.(undefined).catch(() => {});
         break;
+      }
+      if (controller.signal.aborted && ++drainSteps % 64 === 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        if (drainCutoff.passed()) {
+          void iterator.return?.(undefined).catch(() => {});
+          break;
+        }
       }
       if (step.done) break;
       const chunk = step.value;

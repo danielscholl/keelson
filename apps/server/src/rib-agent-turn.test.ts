@@ -1474,6 +1474,7 @@ describe("makeRibAgentTurn — usage capture", () => {
   it("settles after the drain grace when the provider yields past the abort without a timer gap", async () => {
     const ac = new AbortController();
     let ranOut = false;
+    let yieldedToTimer = false;
     const provider: IAgentProvider = {
       getType: () => "fake",
       getCapabilities: () => ({}) as never,
@@ -1481,6 +1482,9 @@ describe("makeRibAgentTurn — usage capture", () => {
       async *sendQuery() {
         yield { type: "text", content: "partial" } as MessageChunk;
         ac.abort();
+        setTimeout(() => {
+          yieldedToTimer = true;
+        }, 0);
         // Bounded so a missed cutoff fails the test instead of hanging the runner.
         const until = Date.now() + 1_000;
         while (Date.now() < until) yield { type: "text", content: "ignored" } as MessageChunk;
@@ -1491,6 +1495,7 @@ describe("makeRibAgentTurn — usage capture", () => {
     const result = await run("chat", { prompt: "hi", abortSignal: ac.signal }).result;
     expect(result.status).toBe("aborted");
     expect(ranOut).toBe(false);
+    expect(yieldedToTimer).toBe(true);
   });
 });
 
