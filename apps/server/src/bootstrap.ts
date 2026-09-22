@@ -709,7 +709,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
           const allowed = await ribCallAllowedByPolicy(
             ribId,
             "workflow_respond",
-            { runId, nodeId, text },
+            { runId, ...body.data },
             run.workingDir ?? refreshCwd ?? process.cwd(),
           );
           if (!allowed) {

@@ -455,7 +455,15 @@ describe("rib startWorkflow / getRunStatus / cancelRun / respondToRun", () => {
   });
 
   test("a rib granted a workflow's approvals answers its gate", async () => {
-    const { db, ctx, eventsFor } = await makeRig({ grants: "lead:gated", approvals: "lead:gated" });
+    const respondArgs: unknown[] = [];
+    const { db, ctx, eventsFor } = await makeRig({
+      grants: "lead:gated",
+      approvals: "lead:gated",
+      engine: policyEngine(async (call) => {
+        if (call.tool === "workflow_respond") respondArgs.push(call.args);
+        return { outcome: "allow" };
+      }),
+    });
     try {
       const { runId } = await ctx("lead").startWorkflow("gated");
       await until(() => eventsFor("lead").some((e) => e.status === "paused"));
@@ -470,6 +478,8 @@ describe("rib startWorkflow / getRunStatus / cancelRun / respondToRun", () => {
       expect(await ctx("lead").respondToRun(runId, "review", "approve", pauseId)).toEqual({
         ok: true,
       });
+      // Policy sees the arguments workflow_respond would carry.
+      expect(respondArgs).toEqual([{ runId, nodeId: "review", text: "approve", pauseId }]);
       await until(() => eventsFor("lead").some((e) => e.status === "succeeded"));
       const settled = await ctx("lead").getRunStatus(runId);
       expect(settled?.nodes).toEqual([

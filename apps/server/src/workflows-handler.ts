@@ -1686,6 +1686,22 @@ export function readRunArtifactFile(
   }
   try {
     const stat = fstatSync(fd);
+    // O_NOFOLLOW covers only the last component: a parent swapped for a symlink
+    // between the realpath check and the open would be followed. Re-resolve after
+    // the open and require the fd to be the file the sandboxed path names now.
+    let current: ReturnType<typeof statSync>;
+    try {
+      const again = realpathSync(resolve(baseDir, rel));
+      if (again !== realBase && !again.startsWith(`${realBase}${sep}`)) {
+        return { ok: false, status: 400, error: "invalid artifact path" };
+      }
+      current = statSync(again);
+    } catch {
+      return { ok: false, status: 404, error: `artifact not found: ${rel}` };
+    }
+    if (current.dev !== stat.dev || current.ino !== stat.ino) {
+      return { ok: false, status: 400, error: "invalid artifact path" };
+    }
     if (!stat.isFile()) return { ok: false, status: 400, error: `not a file: ${rel}` };
     if (stat.size > ARTIFACT_MAX_BYTES) {
       return { ok: false, status: 400, error: "artifact too large" };
