@@ -89,9 +89,23 @@ const WORKFLOWS: WorkflowDefinition[] = [
     requiresProject: true,
     nodes: [{ id: "work", bash: "echo done" }],
   },
+  {
+    name: "planned",
+    description: "Use when: exercising a gate that names its plan",
+    nodes: [
+      { id: "plan", bash: 'printf "# Plan\\nstep one\\n" > "$KEELSON_ARTIFACTS_DIR/plan.md"' },
+      {
+        id: "review",
+        depends_on: ["plan"],
+        approval: {
+          message: "Approve this plan?\n\n$ARTIFACTS_DIR/plan.md\n$ARTIFACTS_DIR/gone.md",
+        },
+      },
+    ],
+  },
 ];
 
-describe("rib startWorkflow / getRunStatus / cancelRun", () => {
+describe("rib startWorkflow / getRunStatus / cancelRun / respondToRun", () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -104,7 +118,7 @@ describe("rib startWorkflow / getRunStatus / cancelRun", () => {
     rmTemp(tmpDir);
   });
 
-  async function makeRig(opts: { grants: string; engine?: PolicyEngine }) {
+  async function makeRig(opts: { grants: string; approvals?: string; engine?: PolicyEngine }) {
     const db = openDatabase({ path: join(tmpDir, "test.db") });
     const store = createWorkflowStore(db);
     const projectsStore = createProjectsStore(db);
@@ -136,6 +150,7 @@ describe("rib startWorkflow / getRunStatus / cancelRun", () => {
       // Injected so a grant in the developer's real config.json can't turn the
       // default-deny assertion green.
       ribWorkflowGrants: parseRibWorkflowGrants(opts.grants),
+      ribApprovalGrants: parseRibWorkflowGrants(opts.approvals),
       crossRibGrants: new Map(),
     });
     controller = createWorkflowController(
@@ -151,15 +166,18 @@ describe("rib startWorkflow / getRunStatus / cancelRun", () => {
     );
     const ctx = (
       id: string,
-    ): Required<Pick<RibContext, "startWorkflow" | "getRunStatus" | "cancelRun">> => {
+    ): Required<
+      Pick<RibContext, "startWorkflow" | "getRunStatus" | "cancelRun" | "respondToRun">
+    > => {
       const c = contexts.get(id);
-      if (!c?.startWorkflow || !c.getRunStatus || !c.cancelRun) {
+      if (!c?.startWorkflow || !c.getRunStatus || !c.cancelRun || !c.respondToRun) {
         throw new Error(`rib '${id}' is missing the run seams`);
       }
       return {
         startWorkflow: c.startWorkflow,
         getRunStatus: c.getRunStatus,
         cancelRun: c.cancelRun,
+        respondToRun: c.respondToRun,
       };
     };
     return {
@@ -250,7 +268,7 @@ describe("rib startWorkflow / getRunStatus / cancelRun", () => {
     }
   });
 
-  test("a run paused on approval reports the gate, and only the operator can answer it", async () => {
+  test("a run paused on approval reports the gate, and the operator can answer it", async () => {
     const { db, controller, ctx, eventsFor } = await makeRig({ grants: "lead:gated" });
     try {
       const { runId } = await ctx("lead").startWorkflow("gated");
@@ -410,6 +428,123 @@ describe("rib startWorkflow / getRunStatus / cancelRun", () => {
       expect((await ctx("lead").cancelRun(started.runId)).ok).toBe(false);
       expect(controller.cancelRun(started.runId)).toBe(true);
       await until(() => store.getRun(started.runId)?.status === "cancelled");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("a paused run's status carries the files its gate names", async () => {
+    const { db, ctx, eventsFor } = await makeRig({ grants: "lead:planned" });
+    try {
+      const { runId } = await ctx("lead").startWorkflow("planned");
+      await until(() => eventsFor("lead").some((e) => e.status === "paused"));
+      expect(eventsFor("lead").at(-1)?.pendingApproval?.artifacts).toBeUndefined();
+
+      const paused = await ctx("lead").getRunStatus(runId);
+      expect(paused?.pendingApproval?.pauseId).toEqual(expect.any(String));
+      expect(paused?.pendingApproval?.artifacts).toEqual([
+        { path: "plan.md", text: "# Plan\nstep one\n" },
+        { path: "gone.md", error: "artifact not found: gone.md" },
+      ]);
+
+      expect(await ctx("lead").cancelRun(runId)).toEqual({ ok: true });
+      await until(() => eventsFor("lead").some((e) => e.status === "cancelled"));
+    } finally {
+      db.close();
+    }
+  });
+
+  test("a rib granted a workflow's approvals answers its gate", async () => {
+    const respondArgs: unknown[] = [];
+    const { db, ctx, eventsFor } = await makeRig({
+      grants: "lead:gated",
+      approvals: "lead:gated",
+      engine: policyEngine(async (call) => {
+        if (call.tool === "workflow_respond") respondArgs.push(call.args);
+        return { outcome: "allow" };
+      }),
+    });
+    try {
+      const { runId } = await ctx("lead").startWorkflow("gated");
+      await until(() => eventsFor("lead").some((e) => e.status === "paused"));
+
+      const pauseId = (await ctx("lead").getRunStatus(runId))?.pendingApproval?.pauseId;
+      const stale = await ctx("lead").respondToRun(runId, "review", "approve", "an-old-pause");
+      expect(stale.ok).toBe(false);
+      expect(stale.ok ? "" : stale.error).toContain("pauseId mismatch");
+      const huge = await ctx("lead").respondToRun(runId, "review", "x".repeat(16_385), pauseId);
+      expect(huge.ok).toBe(false);
+
+      expect(await ctx("lead").respondToRun(runId, "review", "approve", pauseId)).toEqual({
+        ok: true,
+      });
+      // Policy sees the arguments workflow_respond would carry.
+      expect(respondArgs).toEqual([{ runId, nodeId: "review", text: "approve", pauseId }]);
+      await until(() => eventsFor("lead").some((e) => e.status === "succeeded"));
+      const settled = await ctx("lead").getRunStatus(runId);
+      expect(settled?.nodes).toEqual([
+        { nodeId: "review", status: "succeeded", output: "approve" },
+      ]);
+      expect((await ctx("lead").respondToRun(runId, "review", "approve")).ok).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("answering takes the approval grant, before policy, on a run the rib started", async () => {
+    const policyCalls: string[] = [];
+    const { db, ctx, eventsFor } = await makeRig({
+      grants: "lead:gated;bystander:gated",
+      approvals: "bystander:gated",
+      engine: policyEngine(async (call) => {
+        policyCalls.push(call.tool);
+        return { outcome: "allow" };
+      }),
+    });
+    try {
+      const { runId } = await ctx("lead").startWorkflow("gated");
+      await until(() => eventsFor("lead").some((e) => e.status === "paused"));
+
+      expect(await ctx("lead").respondToRun(runId, "review", "approve")).toEqual({
+        ok: false,
+        error:
+          "rib 'lead' is not granted approvals for workflow 'gated' (config.json ribApprovalGrants)",
+      });
+      expect(await ctx("bystander").respondToRun(runId, "review", "approve")).toEqual({
+        ok: false,
+        error: `rib 'bystander' did not start run '${runId}'`,
+      });
+      expect(policyCalls).not.toContain("workflow_respond");
+      expect((await ctx("lead").getRunStatus(runId))?.status).toBe("paused");
+
+      expect(await ctx("lead").cancelRun(runId)).toEqual({ ok: true });
+      await until(() => eventsFor("lead").some((e) => e.status === "cancelled"));
+    } finally {
+      db.close();
+    }
+  });
+
+  test("a granted answer is still subject to policy", async () => {
+    const { db, ctx, eventsFor } = await makeRig({
+      grants: "lead:gated",
+      approvals: "lead:gated",
+      engine: policyEngine(async (call) =>
+        call.tool === "workflow_respond" ? { outcome: "deny", reason: "no" } : { outcome: "allow" },
+      ),
+    });
+    try {
+      const { runId } = await ctx("lead").startWorkflow("gated");
+      await until(() => eventsFor("lead").some((e) => e.status === "paused"));
+
+      const answered = await ctx("lead").respondToRun(runId, "review", "approve");
+      expect(answered).toEqual({
+        ok: false,
+        error: `rib 'lead' answering 'review' on run '${runId}' was denied by policy`,
+      });
+      expect((await ctx("lead").getRunStatus(runId))?.status).toBe("paused");
+
+      expect(await ctx("lead").cancelRun(runId)).toEqual({ ok: true });
+      await until(() => eventsFor("lead").some((e) => e.status === "cancelled"));
     } finally {
       db.close();
     }

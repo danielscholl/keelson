@@ -42,6 +42,7 @@ import type {
   OpHandle,
   Project,
   RegisterOpRequest,
+  RespondToRunResult,
   Rib,
   RibAction,
   RibActionResult,
@@ -62,7 +63,11 @@ import type {
   WorkflowSource,
   WorkspaceLease,
 } from "@keelson/shared";
-import { recallRequestSchema, writebackRequestSchema } from "@keelson/shared";
+import {
+  recallRequestSchema,
+  resumeWorkflowRunBodySchema,
+  writebackRequestSchema,
+} from "@keelson/shared";
 import {
   BUILT_IN_PROVIDER_IDS,
   type CrossRibGrants,
@@ -74,6 +79,7 @@ import {
   resolveCrossRibGrants,
   resolveDefaultProvider,
   resolveEnabledProviders,
+  resolveRibApprovalGrants,
   resolveRibWorkflowGrants,
 } from "@keelson/shared/config";
 import { runJSON, runText } from "@keelson/shared/exec";
@@ -99,6 +105,7 @@ import {
   type WorkflowWithSource,
   workflowDefinitionSchema,
 } from "@keelson/workflows";
+import { pendingApprovalWithArtifacts } from "./approval-artifacts.ts";
 import type { DynamicRegionStore } from "./dynamic-region-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
 import type { MutationLockManager } from "./mutation-lock-manager.ts";
@@ -265,6 +272,8 @@ export interface BootstrapRibsOptions {
   // Which ribs may start which catalog workflows. Same default and the same
   // reason to inject as crossRibGrants.
   ribWorkflowGrants?: RibWorkflowGrants;
+  // Which ribs may answer approval gates on which workflows' runs they started.
+  ribApprovalGrants?: RibWorkflowGrants;
   // Lazy resolver for the policy engine the default makeRibAgentTurn consults
   // when gating a turn's projected tools. Lazy because the engine is built from
   // these same ribs' policies AFTER bootstrapRibs returns — the getter reads the
@@ -490,6 +499,34 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   const ribWorkflowGrants =
     options.ribWorkflowGrants ?? resolveRibWorkflowGrants(loadKeelsonConfig());
   const getProjectsForStart = options.getProjects;
+  // A granted rib call still passes policy as the tool an operator would call. A
+  // policy may ASK the operator; bound the wait like a cross-rib call so an
+  // unanswered prompt can't hold the rib forever.
+  const ribCallAllowedByPolicy = async (
+    ribId: string,
+    tool: string,
+    args: Record<string, unknown>,
+    cwd: string,
+  ): Promise<boolean> => {
+    const engine = options.getPolicyEngine?.();
+    if (!engine) throw new Error("policy engine unavailable");
+    const ask = new AbortController();
+    const askTimer = setTimeout(
+      () => ask.abort(),
+      parseCrossRibCallTimeoutMs(process.env.KEELSON_CROSS_RIB_CALL_TIMEOUT_MS),
+    );
+    try {
+      const decision = await engine.evaluateToolCall(
+        { tool, args },
+        { surface: "rib", ribId, cwd, signal: ask.signal },
+      );
+      return decision.outcome === "allow" && !ask.signal.aborted;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(askTimer);
+    }
+  };
   const startWorkflowSeam =
     getWorkflowController && refreshCwd !== undefined
       ? async (
@@ -538,30 +575,12 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
             }
           }
           const workingDir = project?.rootPath ?? refreshCwd;
-          const engine = options.getPolicyEngine?.();
-          if (!engine) throw new Error("policy engine unavailable");
-          // A policy may ASK the operator; bound the wait like a cross-rib call so
-          // an unanswered prompt can't hold the rib forever.
-          const ask = new AbortController();
-          const askTimer = setTimeout(
-            () => ask.abort(),
-            parseCrossRibCallTimeoutMs(process.env.KEELSON_CROSS_RIB_CALL_TIMEOUT_MS),
+          const allowed = await ribCallAllowedByPolicy(
+            ribId,
+            "workflow_run",
+            { name, inputs: inputs ?? {}, ...(project ? { project: project.id } : {}) },
+            workingDir,
           );
-          let allowed = false;
-          try {
-            const decision = await engine.evaluateToolCall(
-              {
-                tool: "workflow_run",
-                args: { name, inputs: inputs ?? {}, ...(project ? { project: project.id } : {}) },
-              },
-              { surface: "rib", ribId, cwd: workingDir, signal: ask.signal },
-            );
-            allowed = decision.outcome === "allow" && !ask.signal.aborted;
-          } catch {
-            allowed = false;
-          } finally {
-            clearTimeout(askTimer);
-          }
           if (!allowed) {
             throw new Error(`rib '${ribId}' starting workflow '${name}' was denied by policy`);
           }
@@ -600,7 +619,15 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
           ...(run.projectId !== null ? { projectId: run.projectId } : {}),
           ...(startedByRibId !== null ? { startedByRibId } : {}),
           ...(run.status === "paused" && awaiting
-            ? { pendingApproval: { nodeId: awaiting.nodeId, prompt: awaiting.outputText ?? "" } }
+            ? {
+                pendingApproval: pendingApprovalWithArtifacts(
+                  awaiting.nodeId,
+                  awaiting.outputText ?? "",
+                  controller.pendingApprovals(runId).find((p) => p.nodeId === awaiting.nodeId)
+                    ?.pauseId,
+                  (rel) => controller.readRunArtifact(runId, rel),
+                ),
+              }
             : {}),
           checkout: {
             path,
@@ -627,6 +654,77 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
           return controller.cancelRun(runId)
             ? { ok: true }
             : { ok: false, error: `run '${runId}' is not live` };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+    : undefined;
+  // An answer here stands in for the operator's workflow_respond, so it takes a
+  // per-workflow grant, checked before policy, on a run the rib itself started.
+  const ribApprovalGrants =
+    options.ribApprovalGrants ?? resolveRibApprovalGrants(loadKeelsonConfig());
+  const respondToRunSeam = getWorkflowController
+    ? async (
+        ribId: string,
+        runId: string,
+        nodeId: string,
+        text: string,
+        pauseId?: string,
+      ): Promise<RespondToRunResult> => {
+        try {
+          // The body workflow_respond takes, so the same reply cap applies.
+          const body = resumeWorkflowRunBodySchema.safeParse({
+            nodeId,
+            text,
+            ...(pauseId !== undefined ? { pauseId } : {}),
+          });
+          if (!body.success) {
+            return { ok: false, error: `respondToRun: ${body.error.issues[0]?.message}` };
+          }
+          if (text.trim().length === 0) {
+            return { ok: false, error: "respondToRun: text must not be blank" };
+          }
+          const controller = getWorkflowController();
+          if (!controller) return { ok: false, error: "workflow controller unavailable" };
+          const run = controller.getRun(runId);
+          if (!run || controller.getRunStartedByRibId(runId) !== ribId) {
+            return { ok: false, error: `rib '${ribId}' did not start run '${runId}'` };
+          }
+          if (!isRibWorkflowGrantAllowed(ribApprovalGrants, ribId, run.workflowName)) {
+            return {
+              ok: false,
+              error: `rib '${ribId}' is not granted approvals for workflow '${run.workflowName}' (config.json ribApprovalGrants)`,
+            };
+          }
+          // Bound to the pause open now, so one that opens during the policy wait
+          // on the same node can't take this answer.
+          const pending = controller.pendingApprovals(runId).find((p) => p.nodeId === nodeId);
+          if (!pending) return { ok: false, error: `no pending approval for node '${nodeId}'` };
+          if (body.data.pauseId !== undefined && body.data.pauseId !== pending.pauseId) {
+            return {
+              ok: false,
+              error: `pauseId mismatch for node '${nodeId}': the pause has advanced`,
+            };
+          }
+          const allowed = await ribCallAllowedByPolicy(
+            ribId,
+            "workflow_respond",
+            { runId, ...body.data },
+            run.workingDir ?? refreshCwd ?? process.cwd(),
+          );
+          if (!allowed) {
+            return {
+              ok: false,
+              error: `rib '${ribId}' answering '${nodeId}' on run '${runId}' was denied by policy`,
+            };
+          }
+          const resolved = controller.resolveApproval(runId, {
+            ...body.data,
+            pauseId: pending.pauseId,
+          });
+          if (!resolved.ok) return { ok: false, error: resolved.message };
+          console.info(`[ribs] rib '${ribId}' answered approval '${nodeId}' on run ${runId}`);
+          return { ok: true };
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
@@ -842,6 +940,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(startWorkflowSeam ? { startWorkflow: startWorkflowSeam } : {}),
     ...(getRunStatusSeam ? { getRunStatus: getRunStatusSeam } : {}),
     ...(cancelRunSeam ? { cancelRun: cancelRunSeam } : {}),
+    ...(respondToRunSeam ? { respondToRun: respondToRunSeam } : {}),
     ...(getMemory ? { getMemory } : {}),
     ...(acquireWorkspaceSeam ? { acquireWorkspace: acquireWorkspaceSeam } : {}),
     ...(registerOpSeam ? { registerOp: registerOpSeam } : {}),

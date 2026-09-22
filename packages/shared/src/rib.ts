@@ -187,11 +187,24 @@ export interface RibRunEvent {
   startedByRibId?: string;
 }
 
-// The human gate a paused run is waiting on. A rib can surface it; only the
-// operator can answer it.
+// The gate a paused run is waiting on. The operator answers it, or a rib the
+// operator granted the workflow's approvals answers it through respondToRun.
+// Set on getRunStatus only: `pauseId`, this pause's token for respondToRun, and
+// `artifacts`, the run files the prompt names as `$ARTIFACTS_DIR/<path>`, such
+// as the plan the gate asks about.
 export interface RibPendingApproval {
   nodeId: string;
   prompt: string;
+  pauseId?: string;
+  artifacts?: readonly RibApprovalArtifact[];
+}
+
+// `text` when the file could be read (cut to a cap, with `truncated`), else `error`.
+export interface RibApprovalArtifact {
+  path: string;
+  text?: string;
+  truncated?: boolean;
+  error?: string;
 }
 
 export interface StartWorkflowOptions {
@@ -220,6 +233,8 @@ export interface RibRunStatus {
 }
 
 export type CancelRunResult = { ok: true } | { ok: false; error: string };
+
+export type RespondToRunResult = { ok: true } | { ok: false; error: string };
 
 export interface WorkspaceLease {
   id: string;
@@ -397,12 +412,26 @@ export interface RibContext {
     opts?: StartWorkflowOptions,
   ) => Promise<{ runId: string }>;
   // Status of a run THIS rib started or whose workflow it owns; undefined for any
-  // other run id. There is no seam that answers an approval — see RibRunStatus.
+  // other run id.
   getRunStatus?: (runId: string) => Promise<RibRunStatus | undefined>;
   // Cancel a live run THIS rib started, so a rib that owns child runs can stop them
   // when its own op is cancelled. Resolves (never throws); a run the rib did not
   // start, or one that already settled, is `ok: false`.
   cancelRun?: (runId: string) => Promise<CancelRunResult>;
+  // Answer the approval gate `nodeId` on a paused run THIS rib started, as the
+  // operator's `workflow_respond` would: `text` is "approve" or feedback, at most
+  // 16 KiB. Pass the status's `pauseId` so a late answer can't resolve a later
+  // pause of the same node. Denied by default: the operator grants each rib the
+  // workflow names whose gates it may answer (config.json `ribApprovalGrants`),
+  // checked before policy, which then evaluates it as a `workflow_respond` call.
+  // Resolves (never throws) to `ok: false` for an ungranted workflow, a run the rib
+  // did not start, a stale `pauseId`, or no open gate.
+  respondToRun?: (
+    runId: string,
+    nodeId: string,
+    text: string,
+    pauseId?: string,
+  ) => Promise<RespondToRunResult>;
   // Governed-memory handle: recall prior decisions/lessons/work-log rows and write new
   // ones back to the keelson memory ledger — the same `MemoryTools` the workflow
   // executor binds to. recall/writeback are scoped by each request's `scope` (project +
