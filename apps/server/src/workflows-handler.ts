@@ -12,7 +12,7 @@ import {
   existsSync,
   fstatSync,
   openSync,
-  readFileSync,
+  readSync,
   realpathSync,
   statSync,
 } from "node:fs";
@@ -1627,6 +1627,8 @@ function resumeRunCore(
   return { ok: true };
 }
 
+const ARTIFACT_MAX_BYTES = 1_000_000;
+
 export type RunArtifactRead =
   | { ok: true; content: string }
   | { ok: false; status: 400 | 404 | 410; error: string };
@@ -1685,11 +1687,22 @@ export function readRunArtifactFile(
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile()) return { ok: false, status: 400, error: `not a file: ${rel}` };
-    if (stat.size > 1_000_000) return { ok: false, status: 400, error: "artifact too large" };
+    if (stat.size > ARTIFACT_MAX_BYTES) {
+      return { ok: false, status: 400, error: "artifact too large" };
+    }
+    // A file still growing after the stat must not read past the cap.
+    const buffer = Buffer.alloc(ARTIFACT_MAX_BYTES + 1);
+    let length = 0;
+    for (let n = 1; n > 0 && length < buffer.length; length += n) {
+      n = readSync(fd, buffer, length, buffer.length - length, length);
+    }
+    if (length > ARTIFACT_MAX_BYTES) {
+      return { ok: false, status: 400, error: "artifact too large" };
+    }
     // Enforce the text-only contract: reject NUL bytes and any payload that
     // doesn't round-trip as UTF-8 (a lossy decode swaps invalid bytes for
     // U+FFFD, changing the byte length) rather than serving a mangled binary.
-    const bytes = readFileSync(fd);
+    const bytes = buffer.subarray(0, length);
     const content = bytes.toString("utf8");
     if (bytes.includes(0) || Buffer.byteLength(content, "utf8") !== bytes.length) {
       return { ok: false, status: 400, error: `artifact is not UTF-8 text: ${rel}` };

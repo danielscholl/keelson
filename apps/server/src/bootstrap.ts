@@ -696,6 +696,16 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
               error: `rib '${ribId}' is not granted approvals for workflow '${run.workflowName}' (config.json ribApprovalGrants)`,
             };
           }
+          // Bound to the pause open now, so one that opens during the policy wait
+          // on the same node can't take this answer.
+          const pending = controller.pendingApprovals(runId).find((p) => p.nodeId === nodeId);
+          if (!pending) return { ok: false, error: `no pending approval for node '${nodeId}'` };
+          if (body.data.pauseId !== undefined && body.data.pauseId !== pending.pauseId) {
+            return {
+              ok: false,
+              error: `pauseId mismatch for node '${nodeId}': the pause has advanced`,
+            };
+          }
           const allowed = await ribCallAllowedByPolicy(
             ribId,
             "workflow_respond",
@@ -708,7 +718,10 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
               error: `rib '${ribId}' answering '${nodeId}' on run '${runId}' was denied by policy`,
             };
           }
-          const resolved = controller.resolveApproval(runId, body.data);
+          const resolved = controller.resolveApproval(runId, {
+            ...body.data,
+            pauseId: pending.pauseId,
+          });
           if (!resolved.ok) return { ok: false, error: resolved.message };
           console.info(`[ribs] rib '${ribId}' answered approval '${nodeId}' on run ${runId}`);
           return { ok: true };
