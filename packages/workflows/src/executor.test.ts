@@ -175,6 +175,10 @@ function baseOpts(workflow: WorkflowDefinition): Omit<RunOptions, "handlers"> {
     workflow,
     runId: "run-1",
     inputs: {},
+    // A real, platform-appropriate directory — the resolve-pr target
+    // extraction tests spawn a genuine `bun` subprocess here, and a POSIX-only
+    // "/tmp" doesn't resolve on Windows (ENOENT on the cwd, misreported by
+    // the script handler as the `bun` executable itself being missing).
     cwd: tmpdir(),
   };
 }
