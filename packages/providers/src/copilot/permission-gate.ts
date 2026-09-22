@@ -68,11 +68,12 @@ export interface SessionToolFilter {
 }
 
 // The same rail as a session tool filter, so the model is never offered a
-// built-in the gate would reject. Custom (rib) tools are railed before they are
-// projected, so an allow-list admits every one that reached the session.
+// built-in the gate would reject. Custom tools are listed by name because
+// `custom:*` also matches custom-agent tools, which the gate lets through.
 export function buildSessionToolFilter(
   allowedTools: readonly string[] | undefined,
   disallowedTools: readonly string[] | undefined,
+  projectedCustomToolNames: readonly string[] = [],
 ): SessionToolFilter {
   const builtins = (names: readonly string[]): string[] =>
     [...gatedKindsOf(names)].flatMap((kind) =>
@@ -80,7 +81,10 @@ export function buildSessionToolFilter(
     );
   const filter: SessionToolFilter = {};
   if (allowedTools !== undefined) {
-    filter.availableTools = ["custom:*", ...builtins(allowedTools)];
+    filter.availableTools = [
+      ...projectedCustomToolNames.map((name) => `custom:${name}`),
+      ...builtins(allowedTools),
+    ];
   }
   if (disallowedTools !== undefined) {
     const excluded = builtins(disallowedTools);

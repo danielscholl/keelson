@@ -103,21 +103,36 @@ describe("buildPermissionGate", () => {
 });
 
 describe("buildSessionToolFilter", () => {
-  it("an allow-list advertises custom tools plus the built-ins of its kinds", () => {
-    expect(buildSessionToolFilter(["Read", "Glob", "Grep", "chat_post"], undefined)).toEqual({
-      availableTools: ["custom:*", "builtin:view", "builtin:grep", "builtin:glob", "builtin:rg"],
+  it("an allow-list advertises the projected custom tools plus the built-ins of its kinds", () => {
+    expect(buildSessionToolFilter(["Read", "Glob", "Grep"], undefined, ["chat_post"])).toEqual({
+      availableTools: [
+        "custom:chat_post",
+        "builtin:view",
+        "builtin:grep",
+        "builtin:glob",
+        "builtin:rg",
+      ],
     });
   });
 
-  it("an empty or rib-only allow-list advertises no built-ins", () => {
-    expect(buildSessionToolFilter([], undefined)).toEqual({ availableTools: ["custom:*"] });
-    expect(buildSessionToolFilter(["chat_post", "chat_done"], undefined)).toEqual({
-      availableTools: ["custom:*"],
+  it("lists one custom:<name> entry per projected tool, never the custom:* wildcard", () => {
+    expect(
+      buildSessionToolFilter(["chat_post", "chat_done"], undefined, ["chat_post", "chat_done"]),
+    ).toEqual({
+      availableTools: ["custom:chat_post", "custom:chat_done"],
     });
+    const { availableTools } = buildSessionToolFilter(["Read"], undefined, ["chat_post"]);
+    expect(availableTools).not.toContain("custom:*");
+  });
+
+  it("an empty allow-list with no projected tools advertises nothing", () => {
+    expect(buildSessionToolFilter([], undefined, [])).toEqual({ availableTools: [] });
+    // Omitting the third argument (no tools projected) behaves the same way.
+    expect(buildSessionToolFilter([], undefined)).toEqual({ availableTools: [] });
   });
 
   it("allowing Bash advertises the whole shell family", () => {
-    const { availableTools } = buildSessionToolFilter(["Bash"], undefined);
+    const { availableTools } = buildSessionToolFilter(["Bash"], undefined, []);
     for (const name of [
       "bash",
       "read_bash",

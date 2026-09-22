@@ -2177,6 +2177,10 @@ describe("CopilotProvider — per-node tool rails + hooks", () => {
     );
     // "cluster" isn't in the allowlist → no custom tools project.
     expect(sdk.lastSessionConfig()!.tools).toBeUndefined();
+    // No custom entry for a tool that never made it into the session, and
+    // never the wildcard.
+    const availableTools = sdk.lastSessionConfig()!.availableTools as string[];
+    expect(availableTools.some((t) => t.startsWith("custom:"))).toBe(false);
   });
 
   it("keeps custom tools that ARE in allowedTools", async () => {
@@ -2208,6 +2212,7 @@ describe("CopilotProvider — per-node tool rails + hooks", () => {
       makeProvider(sdk).sendQuery("hi", "/tmp", undefined, { tools: [ribTool], allowedTools: [] }),
     );
     expect(sdk.lastSessionConfig()!.tools).toBeUndefined();
+    expect(sdk.lastSessionConfig()!.availableTools).toEqual([]);
   });
 
   it("advertises only the allowed built-ins and the railed custom tools", async () => {
@@ -2220,7 +2225,7 @@ describe("CopilotProvider — per-node tool rails + hooks", () => {
     );
     const cfg = sdk.lastSessionConfig()!;
     expect(cfg.availableTools).toEqual([
-      "custom:*",
+      "custom:cluster",
       "builtin:view",
       "builtin:grep",
       "builtin:glob",
@@ -2230,10 +2235,10 @@ describe("CopilotProvider — per-node tool rails + hooks", () => {
     expect((cfg.tools as Array<{ name: string }>).map((t) => t.name)).toEqual(["cluster"]);
   });
 
-  it("allowedTools: [] advertises no built-ins", async () => {
+  it("allowedTools: [] advertises no built-ins or custom tools", async () => {
     const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
     await drain(makeProvider(sdk).sendQuery("hi", "/tmp", undefined, { allowedTools: [] }));
-    expect(sdk.lastSessionConfig()!.availableTools).toEqual(["custom:*"]);
+    expect(sdk.lastSessionConfig()!.availableTools).toEqual([]);
   });
 
   it("excludes the denied built-ins when denied_tools is set", async () => {

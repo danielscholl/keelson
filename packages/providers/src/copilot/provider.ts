@@ -964,17 +964,21 @@ function buildSessionConfig(
   // than relying on the workflow handler's prefiltering. Built-in tools are
   // filtered from the session's tool list and gated via the permission handler
   // below.
-  if (options?.tools && options.tools.length > 0) {
-    const railed = filterToolsByRail(
-      options.tools,
+  const railed =
+    options?.tools && options.tools.length > 0
+      ? filterToolsByRail(options.tools, options?.allowedTools, options?.disallowedTools)
+      : [];
+  if (railed.length > 0) {
+    config.tools = projectToolsForCopilot(railed, toolProjection);
+  }
+  Object.assign(
+    config,
+    buildSessionToolFilter(
       options?.allowedTools,
       options?.disallowedTools,
-    );
-    if (railed.length > 0) {
-      config.tools = projectToolsForCopilot(railed, toolProjection);
-    }
-  }
-  Object.assign(config, buildSessionToolFilter(options?.allowedTools, options?.disallowedTools));
+      railed.map((t) => t.name),
+    ),
+  );
   // Per-node `allowed_tools` / `denied_tools` gate the SDK's BUILT-IN tools
   // (custom/rib tools are already filtered upstream). The permission handler
   // only sees a coarse capability `kind`, so the rail is enforced there. The
