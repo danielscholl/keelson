@@ -311,7 +311,6 @@ async function runTurn(
     while (true) {
       const step = await Promise.race([iterator.next(), drainCutoff.reached]);
       if (step === DRAIN_CUTOFF || drainCutoff.passed()) {
-        // The provider is still streaming past the abort; settle without it.
         void iterator.return?.(undefined).catch(() => {});
         break;
       }
