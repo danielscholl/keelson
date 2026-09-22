@@ -1399,6 +1399,28 @@ describe("makeRibAgentTurn — usage capture", () => {
     });
   });
 
+  it("keeps the caller's abort status when the host timeout fires during the drain", async () => {
+    const { store, events } = fakeUsageStore();
+    const ac = new AbortController();
+    const provider: IAgentProvider = {
+      getType: () => "fake",
+      getCapabilities: () => ({}) as never,
+      listModels: async () => [],
+      async *sendQuery() {
+        yield { type: "text", content: "partial" } as MessageChunk;
+        ac.abort();
+        await new Promise((r) => setTimeout(r, 60));
+        yield { type: "usage", usage: { inputTokens: 5, outputTokens: 2 } } as MessageChunk;
+      },
+    };
+    const run = makeRun(provider, { getUsageStore: () => store });
+    const result = await run("chat", { prompt: "hi", abortSignal: ac.signal, timeoutMs: 20 })
+      .result;
+    expect(result.status).toBe("aborted");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ status: "aborted", inputTokens: 5, outputTokens: 2 });
+  });
+
   it("settles after the drain grace when the provider keeps streaming past the abort", async () => {
     const ac = new AbortController();
     let returned = false;

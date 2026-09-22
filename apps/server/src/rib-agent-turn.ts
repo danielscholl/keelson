@@ -240,6 +240,7 @@ async function runTurn(
   const timer =
     req.timeoutMs && req.timeoutMs > 0
       ? setTimeout(() => {
+          if (controller.signal.aborted) return;
           timedOut = true;
           controller.abort();
         }, req.timeoutMs)
