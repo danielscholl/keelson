@@ -189,11 +189,13 @@ export interface RibRunEvent {
 
 // The gate a paused run is waiting on. The operator answers it, or a rib the
 // operator granted the workflow's approvals answers it through respondToRun.
-// `artifacts` is set on getRunStatus only: the run files the prompt names as
-// `$ARTIFACTS_DIR/<path>`, such as the plan the gate asks about.
+// Set on getRunStatus only: `pauseId`, this pause's token for respondToRun, and
+// `artifacts`, the run files the prompt names as `$ARTIFACTS_DIR/<path>`, such
+// as the plan the gate asks about.
 export interface RibPendingApproval {
   nodeId: string;
   prompt: string;
+  pauseId?: string;
   artifacts?: readonly RibApprovalArtifact[];
 }
 
@@ -417,12 +419,19 @@ export interface RibContext {
   // start, or one that already settled, is `ok: false`.
   cancelRun?: (runId: string) => Promise<CancelRunResult>;
   // Answer the approval gate `nodeId` on a paused run THIS rib started, as the
-  // operator's `workflow_respond` would: `text` is "approve" or feedback. Denied by
-  // default: the operator grants each rib the workflow names whose gates it may
-  // answer (config.json `ribApprovalGrants`), checked before policy, which then
-  // evaluates it as a `workflow_respond` call. Resolves (never throws) to `ok: false`
-  // for an ungranted workflow, a run the rib did not start, or no open gate.
-  respondToRun?: (runId: string, nodeId: string, text: string) => Promise<RespondToRunResult>;
+  // operator's `workflow_respond` would: `text` is "approve" or feedback, at most
+  // 16 KiB. Pass the status's `pauseId` so a late answer can't resolve a later
+  // pause of the same node. Denied by default: the operator grants each rib the
+  // workflow names whose gates it may answer (config.json `ribApprovalGrants`),
+  // checked before policy, which then evaluates it as a `workflow_respond` call.
+  // Resolves (never throws) to `ok: false` for an ungranted workflow, a run the rib
+  // did not start, a stale `pauseId`, or no open gate.
+  respondToRun?: (
+    runId: string,
+    nodeId: string,
+    text: string,
+    pauseId?: string,
+  ) => Promise<RespondToRunResult>;
   // Governed-memory handle: recall prior decisions/lessons/work-log rows and write new
   // ones back to the keelson memory ledger — the same `MemoryTools` the workflow
   // executor binds to. recall/writeback are scoped by each request's `scope` (project +

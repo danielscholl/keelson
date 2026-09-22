@@ -62,8 +62,14 @@ export function approvalArtifacts(
 export function pendingApprovalWithArtifacts(
   nodeId: string,
   prompt: string,
+  pauseId: string | undefined,
   read: (rel: string) => RunArtifactRead,
 ): RibPendingApproval {
   const artifacts = approvalArtifacts(prompt, read);
-  return artifacts.length > 0 ? { nodeId, prompt, artifacts } : { nodeId, prompt };
+  return {
+    nodeId,
+    prompt,
+    ...(pauseId !== undefined ? { pauseId } : {}),
+    ...(artifacts.length > 0 ? { artifacts } : {}),
+  };
 }

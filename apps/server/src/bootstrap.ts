@@ -63,7 +63,11 @@ import type {
   WorkflowSource,
   WorkspaceLease,
 } from "@keelson/shared";
-import { recallRequestSchema, writebackRequestSchema } from "@keelson/shared";
+import {
+  recallRequestSchema,
+  resumeWorkflowRunBodySchema,
+  writebackRequestSchema,
+} from "@keelson/shared";
 import {
   BUILT_IN_PROVIDER_IDS,
   type CrossRibGrants,
@@ -619,6 +623,8 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
                 pendingApproval: pendingApprovalWithArtifacts(
                   awaiting.nodeId,
                   awaiting.outputText ?? "",
+                  controller.pendingApprovals(runId).find((p) => p.nodeId === awaiting.nodeId)
+                    ?.pauseId,
                   (rel) => controller.readRunArtifact(runId, rel),
                 ),
               }
@@ -663,13 +669,20 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
         runId: string,
         nodeId: string,
         text: string,
+        pauseId?: string,
       ): Promise<RespondToRunResult> => {
         try {
-          if (typeof nodeId !== "string" || nodeId.length === 0) {
-            return { ok: false, error: "respondToRun: nodeId must be a non-empty string" };
+          // The body workflow_respond takes, so the same reply cap applies.
+          const body = resumeWorkflowRunBodySchema.safeParse({
+            nodeId,
+            text,
+            ...(pauseId !== undefined ? { pauseId } : {}),
+          });
+          if (!body.success) {
+            return { ok: false, error: `respondToRun: ${body.error.issues[0]?.message}` };
           }
-          if (typeof text !== "string" || text.trim().length === 0) {
-            return { ok: false, error: "respondToRun: text must be a non-empty string" };
+          if (text.trim().length === 0) {
+            return { ok: false, error: "respondToRun: text must not be blank" };
           }
           const controller = getWorkflowController();
           if (!controller) return { ok: false, error: "workflow controller unavailable" };
@@ -695,7 +708,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
               error: `rib '${ribId}' answering '${nodeId}' on run '${runId}' was denied by policy`,
             };
           }
-          const resolved = controller.resolveApproval(runId, { nodeId, text });
+          const resolved = controller.resolveApproval(runId, body.data);
           if (!resolved.ok) return { ok: false, error: resolved.message };
           console.info(`[ribs] rib '${ribId}' answered approval '${nodeId}' on run ${runId}`);
           return { ok: true };

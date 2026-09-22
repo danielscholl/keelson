@@ -223,6 +223,7 @@ export interface ApplyRibsOptions {
     runId: string,
     nodeId: string,
     text: string,
+    pauseId?: string,
   ) => Promise<RespondToRunResult>;
   // Backs RibContext.getMemory: a MemoryTools handle the rib uses to recall/writeback
   // governed memory rows. Rib-id-scoped for parity/future per-rib policy. Optional so
@@ -442,8 +443,8 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       ...(opts.cancelRun ? { cancelRun: (runId: string) => opts.cancelRun!(rib.id, runId) } : {}),
       ...(opts.respondToRun
         ? {
-            respondToRun: (runId: string, nodeId: string, text: string) =>
-              opts.respondToRun!(rib.id, runId, nodeId, text),
+            respondToRun: (runId: string, nodeId: string, text: string, pauseId?: string) =>
+              opts.respondToRun!(rib.id, runId, nodeId, text, pauseId),
           }
         : {}),
       ...(opts.callTool

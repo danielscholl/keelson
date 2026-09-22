@@ -39,17 +39,21 @@ describe("approvalArtifactPaths", () => {
 describe("pendingApprovalWithArtifacts", () => {
   test("cuts a long file to the cap and marks it truncated", () => {
     const long = "x".repeat(APPROVAL_ARTIFACT_MAX_CHARS + 10);
-    const gate = pendingApprovalWithArtifacts("review", "$ARTIFACTS_DIR/plan.md", () => ({
+    const gate = pendingApprovalWithArtifacts("review", "$ARTIFACTS_DIR/plan.md", "p1", () => ({
       ok: true,
       content: long,
     }));
+    expect(gate.pauseId).toBe("p1");
     expect(gate.artifacts?.[0]?.text).toHaveLength(APPROVAL_ARTIFACT_MAX_CHARS);
     expect(gate.artifacts?.[0]?.truncated).toBe(true);
   });
 
   test("omits artifacts for a gate that names none", () => {
     expect(
-      pendingApprovalWithArtifacts("review", "ship it?", () => ({ ok: true, content: "" })),
+      pendingApprovalWithArtifacts("review", "ship it?", undefined, () => ({
+        ok: true,
+        content: "",
+      })),
     ).toEqual({ nodeId: "review", prompt: "ship it?" });
   });
 });

@@ -441,6 +441,7 @@ describe("rib startWorkflow / getRunStatus / cancelRun / respondToRun", () => {
       expect(eventsFor("lead").at(-1)?.pendingApproval?.artifacts).toBeUndefined();
 
       const paused = await ctx("lead").getRunStatus(runId);
+      expect(paused?.pendingApproval?.pauseId).toEqual(expect.any(String));
       expect(paused?.pendingApproval?.artifacts).toEqual([
         { path: "plan.md", text: "# Plan\nstep one\n" },
         { path: "gone.md", error: "artifact not found: gone.md" },
@@ -459,7 +460,16 @@ describe("rib startWorkflow / getRunStatus / cancelRun / respondToRun", () => {
       const { runId } = await ctx("lead").startWorkflow("gated");
       await until(() => eventsFor("lead").some((e) => e.status === "paused"));
 
-      expect(await ctx("lead").respondToRun(runId, "review", "approve")).toEqual({ ok: true });
+      const pauseId = (await ctx("lead").getRunStatus(runId))?.pendingApproval?.pauseId;
+      const stale = await ctx("lead").respondToRun(runId, "review", "approve", "an-old-pause");
+      expect(stale.ok).toBe(false);
+      expect(stale.ok ? "" : stale.error).toContain("pauseId mismatch");
+      const huge = await ctx("lead").respondToRun(runId, "review", "x".repeat(16_385), pauseId);
+      expect(huge.ok).toBe(false);
+
+      expect(await ctx("lead").respondToRun(runId, "review", "approve", pauseId)).toEqual({
+        ok: true,
+      });
       await until(() => eventsFor("lead").some((e) => e.status === "succeeded"));
       const settled = await ctx("lead").getRunStatus(runId);
       expect(settled?.nodes).toEqual([
