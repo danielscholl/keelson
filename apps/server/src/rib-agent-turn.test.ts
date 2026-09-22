@@ -98,6 +98,7 @@ function makeRun(
     ...(deps.isTurnToolGranted !== undefined ? { isTurnToolGranted: deps.isTurnToolGranted } : {}),
     ...(deps.getPolicyEngine !== undefined ? { getPolicyEngine: deps.getPolicyEngine } : {}),
     ...(deps.getUsageStore !== undefined ? { getUsageStore: deps.getUsageStore } : {}),
+    ...(deps.abortDrainGraceMs !== undefined ? { abortDrainGraceMs: deps.abortDrainGraceMs } : {}),
   });
 }
 
@@ -1364,6 +1365,66 @@ describe("makeRibAgentTurn — usage capture", () => {
     expect(result.status).toBe("error");
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ status: "error", inputTokens: 2, outputTokens: 3 });
+  });
+
+  it("records the usage a provider reports after the abort, with the aborted status", async () => {
+    const { store, events } = fakeUsageStore();
+    const ac = new AbortController();
+    const run = makeRun(
+      fakeProvider({
+        chunks: [
+          { type: "text", content: "partial" },
+          { type: "text", content: "after abort" },
+          { type: "model", model: "claude-opus-5" },
+          { type: "usage", usage: { inputTokens: 40, outputTokens: 9 } },
+          { type: "done" },
+        ],
+        duringStream: () => ac.abort(),
+      }),
+      { getUsageStore: () => store },
+    );
+    const result = await run("chat", { prompt: "hi", model: "auto", abortSignal: ac.signal })
+      .result;
+    expect(result.status).toBe("aborted");
+    expect(result.text).toBe("partial");
+    expect(result.usage).toEqual({ inputTokens: 40, outputTokens: 9 });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      source: "rib",
+      ribId: "chat",
+      status: "aborted",
+      model: "claude-opus-5",
+      inputTokens: 40,
+      outputTokens: 9,
+    });
+  });
+
+  it("settles after the drain grace when the provider keeps streaming past the abort", async () => {
+    const ac = new AbortController();
+    let returned = false;
+    const provider: IAgentProvider = {
+      getType: () => "fake",
+      getCapabilities: () => ({}) as never,
+      listModels: async () => [],
+      async *sendQuery() {
+        try {
+          yield { type: "text", content: "partial" } as MessageChunk;
+          ac.abort();
+          while (true) {
+            await new Promise((r) => setTimeout(r, 5));
+            yield { type: "text", content: "ignored" } as MessageChunk;
+          }
+        } finally {
+          returned = true;
+        }
+      },
+    };
+    const run = makeRun(provider, { abortDrainGraceMs: 30 });
+    const result = await run("chat", { prompt: "hi", abortSignal: ac.signal }).result;
+    expect(result.status).toBe("aborted");
+    expect(result.text).toBe("partial");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(returned).toBe(true);
   });
 });
 

@@ -77,6 +77,8 @@ export interface MakeRibAgentTurnDeps {
   // getPolicyEngine: the store is built by the composition root after the
   // ribs that use it activate.
   getUsageStore?: () => UsageStore | undefined;
+  // Test seam for DEFAULT_ABORT_DRAIN_GRACE_MS.
+  abortDrainGraceMs?: number;
 }
 
 interface ResolvedDeps {
@@ -90,6 +92,7 @@ interface ResolvedDeps {
   isTurnToolGranted?: (callerRibId: string, targetRibId: string, name: string) => boolean;
   getPolicyEngine?: () => PolicyEngine | undefined;
   getUsageStore?: () => UsageStore | undefined;
+  abortDrainGraceMs: number;
 }
 
 // The one resolution of the injectable deps, shared by makeRibAgentTurn and
@@ -113,6 +116,7 @@ function resolveDeps(deps: MakeRibAgentTurnDeps): ResolvedDeps {
     ...(deps.isTurnToolGranted ? { isTurnToolGranted: deps.isTurnToolGranted } : {}),
     ...(deps.getPolicyEngine ? { getPolicyEngine: deps.getPolicyEngine } : {}),
     ...(deps.getUsageStore ? { getUsageStore: deps.getUsageStore } : {}),
+    abortDrainGraceMs: deps.abortDrainGraceMs ?? DEFAULT_ABORT_DRAIN_GRACE_MS,
   };
 }
 
@@ -298,21 +302,39 @@ async function runTurn(
       ...(stopReason !== undefined ? { stopReason } : {}),
     };
   };
+  const drainCutoff = cutoffAfterAbort(controller.signal, deps.abortDrainGraceMs);
   try {
-    const stream = provider.sendQuery(req.prompt, cwd, req.resumeSessionId, options);
-    for await (const chunk of stream) {
-      if (controller.signal.aborted) break;
-      if (chunk.type === "text") assistantText += chunk.content;
-      else if (chunk.type === "error") providerError = chunk.message;
-      else if (chunk.type === "usage") {
+    const iterator = provider
+      .sendQuery(req.prompt, cwd, req.resumeSessionId, options)
+      [Symbol.asyncIterator]();
+    while (true) {
+      const step = await Promise.race([iterator.next(), drainCutoff.reached]);
+      if (step === DRAIN_CUTOFF) {
+        // The provider is still streaming past the abort; settle without it.
+        void iterator.return?.(undefined).catch(() => {});
+        break;
+      }
+      if (step.done) break;
+      const chunk = step.value;
+      // Usage and the served model are read even after an abort: providers
+      // report a turn's spend as their stream winds down, and an aborted turn
+      // still spent it.
+      if (chunk.type === "usage") {
         const coerced = coerceTokenUsage(chunk.usage);
         if (coerced !== undefined) turnUsage = coerced;
-      } else if (chunk.type === "model") {
+        continue;
+      }
+      if (chunk.type === "model") {
         // Blank reports are ignored so they can't null out a real requested model.
         if (typeof chunk.model === "string" && chunk.model.trim().length > 0) {
           resolvedModel = chunk.model.trim();
         }
-      } else if (chunk.type === "tool_use" || chunk.type === "tool_result") {
+        continue;
+      }
+      if (controller.signal.aborted) continue;
+      if (chunk.type === "text") assistantText += chunk.content;
+      else if (chunk.type === "error") providerError = chunk.message;
+      else if (chunk.type === "tool_use" || chunk.type === "tool_result") {
         // Forward tool activity to the rib-facing stream as it happens — the
         // one signal a rib cannot reconstruct from the settled result.
         onChunk?.(chunk);
@@ -332,6 +354,7 @@ async function runTurn(
       providerId,
     });
   } finally {
+    drainCutoff.cancel();
     if (timer) clearTimeout(timer);
     req.abortSignal?.removeEventListener("abort", onCallerAbort);
   }
@@ -552,6 +575,34 @@ function parseToolDenylist(raw: string | undefined): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+// How long a turn keeps draining after its signal fires, so the provider's
+// trailing usage report reaches the ledger, before it settles without it.
+const DEFAULT_ABORT_DRAIN_GRACE_MS = 5_000;
+
+const DRAIN_CUTOFF = Symbol("drain-cutoff");
+
+function cutoffAfterAbort(
+  signal: AbortSignal,
+  graceMs: number,
+): { reached: Promise<typeof DRAIN_CUTOFF>; cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let arm: (() => void) | undefined;
+  const reached = new Promise<typeof DRAIN_CUTOFF>((resolve) => {
+    arm = () => {
+      timer = setTimeout(() => resolve(DRAIN_CUTOFF), graceMs);
+    };
+    if (signal.aborted) arm();
+    else signal.addEventListener("abort", arm, { once: true });
+  });
+  return {
+    reached,
+    cancel: () => {
+      if (timer) clearTimeout(timer);
+      if (arm) signal.removeEventListener("abort", arm);
+    },
+  };
 }
 
 function isAbortError(err: unknown): boolean {
