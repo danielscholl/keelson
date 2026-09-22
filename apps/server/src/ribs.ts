@@ -35,6 +35,7 @@ import {
   type Policy,
   type Project,
   type RegisterOpRequest,
+  type RespondToRunResult,
   type Rib,
   type RibAction,
   type RibActionResult,
@@ -207,8 +208,8 @@ export interface ApplyRibsOptions {
     inputs: Record<string, string>,
     opts?: { cwd?: string },
   ) => Promise<RibWorkflowRunResult>;
-  // Back RibContext.startWorkflow / getRunStatus / cancelRun, each scoped to the
-  // calling rib. Optional so test rigs without a controller omit the seams.
+  // Back RibContext.startWorkflow / getRunStatus / cancelRun / respondToRun, each
+  // scoped to the calling rib. Optional so test rigs without a controller omit the seams.
   readonly startWorkflow?: (
     ribId: string,
     name: string,
@@ -217,6 +218,12 @@ export interface ApplyRibsOptions {
   ) => Promise<{ runId: string }>;
   readonly getRunStatus?: (ribId: string, runId: string) => Promise<RibRunStatus | undefined>;
   readonly cancelRun?: (ribId: string, runId: string) => Promise<CancelRunResult>;
+  readonly respondToRun?: (
+    ribId: string,
+    runId: string,
+    nodeId: string,
+    text: string,
+  ) => Promise<RespondToRunResult>;
   // Backs RibContext.getMemory: a MemoryTools handle the rib uses to recall/writeback
   // governed memory rows. Rib-id-scoped for parity/future per-rib policy. Optional so
   // applyRibs unit tests without a memory store stay deterministic.
@@ -433,6 +440,12 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
         ? { getRunStatus: (runId: string) => opts.getRunStatus!(rib.id, runId) }
         : {}),
       ...(opts.cancelRun ? { cancelRun: (runId: string) => opts.cancelRun!(rib.id, runId) } : {}),
+      ...(opts.respondToRun
+        ? {
+            respondToRun: (runId: string, nodeId: string, text: string) =>
+              opts.respondToRun!(rib.id, runId, nodeId, text),
+          }
+        : {}),
       ...(opts.callTool
         ? {
             callTool: (

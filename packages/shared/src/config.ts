@@ -210,6 +210,8 @@ const keelsonConfigSchema = z.object({
   // Which ribs may call which other ribs' tools. Default-deny without an entry.
   crossRibGrants: crossRibGrantsSchema.optional(),
   ribWorkflowGrants: ribWorkflowGrantsSchema.optional(),
+  // Same shape: the workflows whose approval gates a rib may answer on runs it started.
+  ribApprovalGrants: ribWorkflowGrantsSchema.optional(),
   // OpenAI-compatible gateway endpoints, each registered as a provider named
   // for the gateway. Non-secret metadata only — the API key lives in the
   // keychain (see gatewayCredentialServiceId).
@@ -530,6 +532,19 @@ export function resolveRibWorkflowGrants(
 ): RibWorkflowGrants {
   const grants = parseRibWorkflowGrants(env.KEELSON_RIB_WORKFLOW_GRANTS);
   for (const [ribId, names] of Object.entries(config.ribWorkflowGrants ?? {})) {
+    addRibWorkflowGrant(grants, ribId, names);
+  }
+  return grants;
+}
+
+// config.json's `ribApprovalGrants` unioned with KEELSON_RIB_APPROVAL_GRANTS: rib id
+// → workflows whose gates it may answer through RibContext.respondToRun.
+export function resolveRibApprovalGrants(
+  config: KeelsonConfig,
+  env: Record<string, string | undefined> = process.env,
+): RibWorkflowGrants {
+  const grants = parseRibWorkflowGrants(env.KEELSON_RIB_APPROVAL_GRANTS);
+  for (const [ribId, names] of Object.entries(config.ribApprovalGrants ?? {})) {
     addRibWorkflowGrant(grants, ribId, names);
   }
   return grants;

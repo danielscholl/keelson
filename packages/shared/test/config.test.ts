@@ -15,6 +15,7 @@ import {
   resolveDefaultProvider,
   resolveEnabledProviders,
   resolveMcpSettings,
+  resolveRibApprovalGrants,
   resolveRibWorkflowGrants,
   resolveWorkflowPreflight,
 } from "../src/config.ts";
@@ -58,6 +59,11 @@ describe("loadKeelsonConfig", () => {
       chamber: { osdu: ["*"] },
       squad: { osdu: ["osdu_release"] },
     });
+  });
+
+  test("retains ribApprovalGrants written to disk", () => {
+    writeConfig(JSON.stringify({ ribApprovalGrants: { chat: ["fix-issue"] } }));
+    expect(loadKeelsonConfig(home).ribApprovalGrants).toEqual({ chat: ["fix-issue"] });
   });
 
   test("ignores a malformed crossRibGrants rather than failing boot", () => {
@@ -399,5 +405,22 @@ describe("resolveRibWorkflowGrants", () => {
     expect(isRibWorkflowGrantAllowed(grants, "chat", "resolve-pr")).toBe(true);
     expect(isRibWorkflowGrantAllowed(grants, "squad", "anything")).toBe(true);
     expect(grants.has("malformed")).toBe(false);
+  });
+});
+
+describe("resolveRibApprovalGrants", () => {
+  test("denies a rib with no entry, even one granted the workflow's start", () => {
+    const grants = resolveRibApprovalGrants({ ribWorkflowGrants: { chat: ["fix-issue"] } }, {});
+    expect(isRibWorkflowGrantAllowed(grants, "chat", "fix-issue")).toBe(false);
+  });
+
+  test("unions the env string with the config", () => {
+    const grants = resolveRibApprovalGrants(
+      { ribApprovalGrants: { chat: ["fix-issue"] } },
+      { KEELSON_RIB_APPROVAL_GRANTS: "chat:resolve-pr" },
+    );
+    expect(isRibWorkflowGrantAllowed(grants, "chat", "fix-issue")).toBe(true);
+    expect(isRibWorkflowGrantAllowed(grants, "chat", "resolve-pr")).toBe(true);
+    expect(isRibWorkflowGrantAllowed(grants, "chat", "plan-act-evaluate")).toBe(false);
   });
 });

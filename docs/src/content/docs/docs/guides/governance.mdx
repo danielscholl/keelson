@@ -215,10 +215,16 @@ A rib starting a catalog workflow through `startWorkflow` follows the same order
 It is **default-deny**, the operator opts a rib in per workflow name under
 `ribWorkflowGrants`, and the grant is checked before the policy stack. A granted
 start is then evaluated as a `workflow_run` tool call on the `rib` surface, so a
-policy can still deny it. The rib can read and cancel the runs it started, and
-answering an approval stays with the operator. See
+policy can still deny it. The rib can read and cancel the runs it started. See
 [Configuration](../configuration/#rib-workflow-grants) for the config key and the
 env string.
+
+Answering those runs' approval gates is a second grant, `ribApprovalGrants`, in the
+same order: default-deny, opted in per workflow name, checked before the policy
+stack, then evaluated as a `workflow_respond` call on the `rib` surface. Without
+it the gate waits for you. A rib answers only on runs it started, and a paused
+run's status hands it the files the gate names, such as the plan, so it can judge
+what it approves. See [Configuration](../configuration/#rib-approval-grants).
 
 ## Related
 

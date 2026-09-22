@@ -60,6 +60,7 @@ enabled.
 | `mcp` | object | Tunes the MCP gateway, the `/api/mcp` endpoint other agents call. See [MCP gateway](#mcp-gateway). |
 | `crossRibGrants` | object of `caller: { target: [tool] }` | Which ribs may call which other ribs' tools. Default-deny without an entry. See [Cross-rib grants](#cross-rib-grants). |
 | `ribWorkflowGrants` | object of `rib: [workflow]` | Which ribs may start which catalog workflows. Default-deny without an entry. See [Rib workflow grants](#rib-workflow-grants). |
+| `ribApprovalGrants` | object of `rib: [workflow]` | Which ribs may answer the approval gates of which workflows, on runs they started. Default-deny without an entry. See [Rib approval grants](#rib-approval-grants). |
 | `gateways` | array | OpenAI-compatible endpoints registered as providers. Managed with `keelson gateway`, not by hand. See [Gateways](#gateways). |
 
 The built-in provider ids are `copilot`, `claude`, `pi`, `codex`, and `stub` (the
@@ -384,8 +385,34 @@ the project's `.keelson/workflows/` runs in place of the bundled one.
 
 `KEELSON_RIB_WORKFLOW_GRANTS` unions with this key, and the same advice applies:
 keep a standing grant in the config file. A granted rib can start a run, read the
-status of runs it started, and cancel them. It cannot answer an approval, which
-stays with the operator.
+status of runs it started, and cancel them. Answering the run's approvals takes
+the separate grant below.
+
+### Rib approval grants
+
+A run that stops at an approval gate waits for the operator. To let a rib answer
+those gates on the runs it started, grant it the workflow names under
+`ribApprovalGrants`:
+
+```json
+{
+  "ribApprovalGrants": {
+    "chat": ["fix-issue"]
+  }
+}
+```
+
+That reads as: the Chat rib may answer the approval gates of the `fix-issue` runs
+it started, which means approving a plan or sending feedback on it, as
+`workflow_respond` would. The grant is separate from the start grant, so a rib
+allowed to start a workflow still leaves its gates to you until you add this one.
+It never reaches runs the rib did not start. Like the start grant it is checked
+before the policy engine, and a granted answer still passes policy as a
+`workflow_respond` call on the `rib` surface. `KEELSON_RIB_APPROVAL_GRANTS` unions
+with this key.
+
+Grant only workflows whose gates a rib can judge from what it can read. A gate
+that guards a deploy or a publish is usually one to keep for yourself.
 
 ## MCP gateway
 
@@ -442,6 +469,7 @@ replacing it, so a grant from either source stands.
 | `KEELSON_MAX_CONCURRENT_RUNS` | `4` | Process-wide ceiling on worktree-isolated workflow runs executing at once; further runs queue. Raise on a larger host. |
 | `KEELSON_CROSS_RIB_GRANTS` | unset | `;`-separated `caller:target:tool` grant triples (the tool field takes a comma-separated list or `*`); default-deny when unset. **Unions with** (does not override) the config file's `crossRibGrants`, which is the durable place for a standing grant. See [Cross-rib grants](#cross-rib-grants). |
 | `KEELSON_RIB_WORKFLOW_GRANTS` | unset | `;`-separated `rib:workflow` grants (the workflow field takes a comma-separated list or `*`); default-deny when unset. **Unions with** the config file's `ribWorkflowGrants`, like the cross-rib variable above. See [Rib workflow grants](#rib-workflow-grants). |
+| `KEELSON_RIB_APPROVAL_GRANTS` | unset | The same grammar, for the workflows whose approval gates a rib may answer on runs it started; default-deny when unset. **Unions with** the config file's `ribApprovalGrants`. See [Rib approval grants](#rib-approval-grants). |
 | `KEELSON_CROSS_RIB_CALL_TIMEOUT_MS` | `30000` | Timeout, in milliseconds, for one cross-rib tool call. See [Governance](../governance/#cross-rib-grants). |
 | `KEELSON_COPILOT_WARM_IDLE_MS` | `600000` | How long the Copilot language-server subprocess stays warm between turns before it is evicted, in milliseconds. `0` or negative disables warmth (every turn spawns fresh). |
 | `KEELSON_RIBS` | all discovered | Comma-separated rib ids to activate. |

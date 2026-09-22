@@ -1627,6 +1627,79 @@ function resumeRunCore(
   return { ok: true };
 }
 
+export type RunArtifactRead =
+  | { ok: true; content: string }
+  | { ok: false; status: 400 | 404 | 410; error: string };
+
+// Read-only fetch of a UTF-8 file under a run's per-run artifacts dir, sandboxed
+// to that dir. `baseDir` is undefined once the run is gone: the dir is an
+// ephemeral tmpdir cleaned on terminal status.
+export function readRunArtifactFile(
+  baseDir: string | undefined,
+  runId: string,
+  rel: string,
+): RunArtifactRead {
+  // 410 (not 404): the dir only lives while the run does, so a gone/unknown
+  // run is distinct from a missing file in a live run (404). The client maps
+  // 410 → "no longer available" but surfaces a real error for a 404.
+  if (baseDir === undefined) {
+    return { ok: false, status: 410, error: `no live artifacts for run '${runId}'` };
+  }
+
+  if (isAbsolute(rel) || normalize(rel).split(sep).includes("..")) {
+    return { ok: false, status: 400, error: "invalid artifact path" };
+  }
+
+  // Resolve symlinks before validating containment — a lexical
+  // resolve()+startsWith() check alone would let a symlink *inside* the dir
+  // point outside it. realpath the base too: tmpdir() can itself be a
+  // symlink (e.g. macOS /tmp → /private/tmp). A non-existent path throws.
+  let realBase: string;
+  try {
+    realBase = realpathSync(baseDir);
+  } catch {
+    return { ok: false, status: 410, error: `no live artifacts for run '${runId}'` };
+  }
+  let realPath: string;
+  try {
+    realPath = realpathSync(resolve(baseDir, rel));
+  } catch {
+    return { ok: false, status: 404, error: `artifact not found: ${rel}` };
+  }
+  if (realPath !== realBase && !realPath.startsWith(`${realBase}${sep}`)) {
+    return { ok: false, status: 400, error: "invalid artifact path" };
+  }
+
+  // Read through a single no-follow fd so the type/size check and the read
+  // act on the same inode we validated — not a path re-resolved per call,
+  // which a concurrent symlink swap could race. O_NOFOLLOW also rejects a
+  // final-component symlink planted after the realpath check. It is
+  // POSIX-only (undefined on Windows, where symlink creation requires
+  // elevation and the realpath containment check above still holds).
+  let fd: number;
+  try {
+    fd = openSync(realPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  } catch {
+    return { ok: false, status: 404, error: `artifact not found: ${rel}` };
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) return { ok: false, status: 400, error: `not a file: ${rel}` };
+    if (stat.size > 1_000_000) return { ok: false, status: 400, error: "artifact too large" };
+    // Enforce the text-only contract: reject NUL bytes and any payload that
+    // doesn't round-trip as UTF-8 (a lossy decode swaps invalid bytes for
+    // U+FFFD, changing the byte length) rather than serving a mangled binary.
+    const bytes = readFileSync(fd);
+    const content = bytes.toString("utf8");
+    if (bytes.includes(0) || Buffer.byteLength(content, "utf8") !== bytes.length) {
+      return { ok: false, status: 400, error: `artifact is not UTF-8 text: ${rel}` };
+    }
+    return { ok: true, content };
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export type ResolveApprovalResult =
   | { ok: true }
   | {
@@ -1765,6 +1838,8 @@ export interface WorkflowController {
   // persisted snapshot (getRun) cannot carry. Empty for a run with no live
   // resolver (terminal, unknown, or paused-but-reconciled after restart).
   pendingApprovals(runId: string): Array<{ nodeId: string; pauseId: string; message: string }>;
+  // A file under a live run's artifacts dir, sandboxed like the artifact route.
+  readRunArtifact(runId: string, rel: string): RunArtifactRead;
   // Execute an in-memory workflow DEFINITION (not a catalog name) and resolve to its
   // terminal result — backs RibContext.runWorkflow. Validates the definition, assembles
   // a headless handler map (approval fails fast — there is no UI to pause on), runs the
@@ -2209,6 +2284,10 @@ export function createWorkflowController(
         pauseId: p.pauseId,
         message: p.message,
       }));
+    },
+
+    readRunArtifact(runId, rel) {
+      return readRunArtifactFile(activeRuns.get(runId)?.artifactsDir, runId, rel);
     },
   };
 }
@@ -2822,66 +2901,9 @@ export function workflowsRoutes(
     const rel = c.req.query("path");
     if (!rel) return c.json({ error: "path query is required" }, 400);
 
-    const baseDir = activeRuns.get(runId)?.artifactsDir;
-    // 410 (not 404): the dir only lives while the run does, so a gone/unknown
-    // run is distinct from a missing file in a live run (404). The client maps
-    // 410 → "no longer available" but surfaces a real error for a 404.
-    if (baseDir === undefined) {
-      return c.json({ error: `no live artifacts for run '${runId}'` }, 410);
-    }
-
-    if (isAbsolute(rel) || normalize(rel).split(sep).includes("..")) {
-      return c.json({ error: "invalid artifact path" }, 400);
-    }
-
-    // Resolve symlinks before validating containment — a lexical
-    // resolve()+startsWith() check alone would let a symlink *inside* the dir
-    // point outside it. realpath the base too: tmpdir() can itself be a
-    // symlink (e.g. macOS /tmp → /private/tmp). A non-existent path throws.
-    let realBase: string;
-    try {
-      realBase = realpathSync(baseDir);
-    } catch {
-      return c.json({ error: `no live artifacts for run '${runId}'` }, 410);
-    }
-    let realPath: string;
-    try {
-      realPath = realpathSync(resolve(baseDir, rel));
-    } catch {
-      return c.json({ error: `artifact not found: ${rel}` }, 404);
-    }
-    if (realPath !== realBase && !realPath.startsWith(`${realBase}${sep}`)) {
-      return c.json({ error: "invalid artifact path" }, 400);
-    }
-
-    // Read through a single no-follow fd so the type/size check and the read
-    // act on the same inode we validated — not a path re-resolved per call,
-    // which a concurrent symlink swap could race. O_NOFOLLOW also rejects a
-    // final-component symlink planted after the realpath check. It is
-    // POSIX-only (undefined on Windows, where symlink creation requires
-    // elevation and the realpath containment check above still holds).
-    let fd: number;
-    try {
-      fd = openSync(realPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-    } catch {
-      return c.json({ error: `artifact not found: ${rel}` }, 404);
-    }
-    try {
-      const stat = fstatSync(fd);
-      if (!stat.isFile()) return c.json({ error: `not a file: ${rel}` }, 400);
-      if (stat.size > 1_000_000) return c.json({ error: "artifact too large" }, 400);
-      // Enforce the text-only contract: reject NUL bytes and any payload that
-      // doesn't round-trip as UTF-8 (a lossy decode swaps invalid bytes for
-      // U+FFFD, changing the byte length) rather than serving a mangled binary.
-      const bytes = readFileSync(fd);
-      const content = bytes.toString("utf8");
-      if (bytes.includes(0) || Buffer.byteLength(content, "utf8") !== bytes.length) {
-        return c.json({ error: `artifact is not UTF-8 text: ${rel}` }, 400);
-      }
-      return c.json(getRunArtifactResponseSchema.parse({ path: rel, content }));
-    } finally {
-      closeSync(fd);
-    }
+    const read = readRunArtifactFile(activeRuns.get(runId)?.artifactsDir, runId, rel);
+    if (!read.ok) return c.json({ error: read.error }, read.status);
+    return c.json(getRunArtifactResponseSchema.parse({ path: rel, content: read.content }));
   });
 
   // Cancellation (default) or purge (?purge=1). Cancel: triggers the
