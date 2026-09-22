@@ -2711,6 +2711,37 @@ describe("CopilotProvider — reasoning effort (F10.6)", () => {
     expect(calls[0]!.options?.reasoningEffort).toBe("xhigh");
   });
 
+  it("calls session.setModel on resume when only a model is supplied", async () => {
+    const sdk = makeMockSdk({
+      scenario: (session) => session.emit("session.idle"),
+    });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => "real-token",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+    });
+    await drain(
+      provider.sendQuery("hi", "/tmp", "prior-session-id", { model: "mai-code-1.1-flash" }),
+    );
+    const calls = sdk.lastSession()!.setModelCalls;
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.model).toBe("mai-code-1.1-flash");
+    expect(calls[0]!.options).toBeUndefined();
+  });
+
+  it("does NOT call setModel on resume when no model is supplied", async () => {
+    const sdk = makeMockSdk({
+      scenario: (session) => session.emit("session.idle"),
+    });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => "real-token",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+    });
+    await drain(provider.sendQuery("hi", "/tmp", "prior-session-id", { reasoningEffort: "high" }));
+    expect(sdk.lastSession()!.setModelCalls).toHaveLength(0);
+  });
+
   it("does NOT call setModel on the create-session path", async () => {
     const sdk = makeMockSdk({
       scenario: (session) => session.emit("session.idle"),
