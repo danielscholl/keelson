@@ -698,6 +698,10 @@ export const ribActionSchema = z
   .strict();
 export type RibAction = z.infer<typeof ribActionSchema>;
 
+// A success whose `data.message` is a non-blank string toasts that message
+// (trimmed, cut to 200 chars) instead of the generic "<type> ✓". A client-effect
+// directive (ribClientEffectSchema) the surface handles performs its effect with
+// no toast; a surface without that handler falls through to the success toast.
 export type RibActionResult = { ok: true; data?: unknown } | { ok: false; error: string };
 
 // Result of a rib's auth-status probe. The probe is not expected to throw; a

@@ -155,7 +155,7 @@ export function useRibActionDispatch(
             toast.push({ kind: "error", message: error });
             return { ok: false, error };
           }
-          toast.push({ kind: "ok", message: `${action.type} ✓` });
+          toast.push({ kind: "ok", message: successMessage(result.data) ?? `${action.type} ✓` });
           // Isolate the callback: a throwing onSuccess must not turn a
           // successful action into a failure result.
           try {
@@ -205,6 +205,19 @@ export function useHtmlFrameAction(ribId: string | null): (action: CanvasHtmlAct
     },
     [ribId, run],
   );
+}
+
+const SUCCESS_MESSAGE_MAX = 200;
+
+function successMessage(data: unknown): string | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  const message = (data as { message?: unknown }).message;
+  if (typeof message !== "string") return undefined;
+  const trimmed = message.trim();
+  if (!trimmed) return undefined;
+  return trimmed.length > SUCCESS_MESSAGE_MAX
+    ? `${trimmed.slice(0, SUCCESS_MESSAGE_MAX - 1)}…`
+    : trimmed;
 }
 
 // Cheap pre-check so non-directive `data` (undefined, a copy-on-reveal string)

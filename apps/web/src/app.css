@@ -4030,6 +4030,30 @@ button.tab:focus-visible {
   line-height: 1.3;
   color: var(--muted);
 }
+/* In-flight marker: an animated ellipsis after the label (aria-busy on the
+   button carries the state for assistive tech). */
+.cvb-action-pending::after {
+  content: "…";
+  display: inline-block;
+  margin-left: 2px;
+  animation: cvb-action-pending 1s steps(4, end) infinite;
+  overflow: hidden;
+  vertical-align: bottom;
+  width: 1ch;
+}
+@keyframes cvb-action-pending {
+  from {
+    width: 0;
+  }
+  to {
+    width: 1ch;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cvb-action-pending::after {
+    animation: none;
+  }
+}
 .cvb-action-button {
   background: var(--bg-soft); color: var(--fg);
   border: 1px solid var(--border); border-radius: 8px;

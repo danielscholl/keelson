@@ -193,6 +193,11 @@ An `actions` section gives a board buttons. Clicking one dispatches a
 rib-defined verb to the rib that owns the board's key, resolved from the key's
 namespace, and reaches the rib's `onAction`.
 
+On success the host toasts `<type> ✓`, or the rib's own wording when `onAction`
+returns `{ ok: true, data: { message } }` with a non-blank string (trimmed, cut
+to 200 chars). While the dispatch is in flight the button is disabled and
+`aria-busy`, and shows `pendingLabel` when the item sets one.
+
 ```ts
 ActionItem = {
   type,                 // a rib-defined verb the base never enumerates
@@ -209,6 +214,7 @@ ActionItem = {
   defaultOpen?,         // in a tabs strip, open the first enabled, field-bearing item marked true on first render, except a solo model-picker, which opens as a popover rather than a form and never seeds; the operator's toggles win after (inert elsewhere and without fields)
   submitLabel?,         // the fields form's submit button text, defaulting to label (inert without fields)
   submitTone?,          // tone for the fields form's submit button only, defaulting to tone, for a neutral tab whose submit is the board's primary verb (inert without fields)
+  pendingLabel?,        // button text while the dispatch is in flight ("Sending…"); absent keeps the label with a busy mark
   payload?,             // opaque rib-defined context, dispatched verbatim
   fields?: ActionField[]   // input collected before dispatch
 }

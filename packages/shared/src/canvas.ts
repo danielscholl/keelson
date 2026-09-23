@@ -476,6 +476,10 @@ export const canvasActionItemSchema = z
     // trigger too — a neutral tab whose submit is the board's one primary verb
     // (`tone` rides both buttons). Defaults to `tone`; inert without `fields`.
     submitTone: canvasToneSchema.optional(),
+    // Button text while the dispatch is in flight ("Sending…"), on the trigger or
+    // the form's submit, whichever dispatched. Absent keeps the label and adds a
+    // busy marker.
+    pendingLabel: z.string().min(1).max(40).optional(),
     // Confirmation presentation metadata. `destructive` still marks dangerous
     // actions; this only controls whether the confirm dialog is simple or typed.
     confirm: canvasActionConfirmSchema.optional(),

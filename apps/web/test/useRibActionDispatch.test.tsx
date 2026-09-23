@@ -267,6 +267,26 @@ describe("useRibActionDispatch — run-workflow directive", () => {
   });
 });
 
+describe("useRibActionDispatch — rib success message", () => {
+  test("a success carrying data.message toasts that text instead of <type> ✓", async () => {
+    postRibActionImpl = async () => ({ ok: true, data: { message: "  Posted in #swarm-s9x3g " } });
+    const { result } = renderHook(() => useRibActionDispatch("rib:demo"), { wrapper });
+    await runAct(result.current.run, ACTION);
+    expect(toastText()).toContain("Posted in #swarm-s9x3g");
+    expect(toastText()).not.toContain("convene ✓");
+  });
+
+  test("a blank or non-string message falls back to <type> ✓", async () => {
+    for (const data of [{ message: "   " }, { message: 42 }, "copied"]) {
+      postRibActionImpl = async () => ({ ok: true, data });
+      const { result, unmount } = renderHook(() => useRibActionDispatch("rib:demo"), { wrapper });
+      await runAct(result.current.run, ACTION);
+      expect(toastText()).toContain("convene ✓");
+      unmount();
+    }
+  });
+});
+
 describe("useRibActionDispatch — open-chat regressions", () => {
   test("a valid open-chat directive still opens a chat with no success toast", async () => {
     postRibActionImpl = async () => ({ ok: true, data: { effect: "open-chat", seed: SEED } });

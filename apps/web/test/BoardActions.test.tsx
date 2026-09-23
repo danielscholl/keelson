@@ -186,6 +186,39 @@ describe("board actions", () => {
     resolve?.({ ok: true });
     await waitFor(() => expect(btn).toHaveProperty("disabled", false));
   });
+
+  test("an in-flight button is aria-busy and shows pendingLabel when set", async () => {
+    let resolve: ((r: RibActionResult) => void) | null = null;
+    const run = (_a: RibAction): Promise<RibActionResult> =>
+      new Promise((r) => {
+        resolve = r;
+      });
+    render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView
+          view={actionsBoard([
+            { type: "post", label: "Post", pendingLabel: "Sending…" },
+            { type: "ping", label: "Ping" },
+          ])}
+        />
+      </BoardActionProvider>,
+    );
+    const post = screen.getByRole("button", { name: "Post" });
+    fireEvent.click(post);
+    await waitFor(() => expect(post.getAttribute("aria-busy")).toBe("true"));
+    expect(post.textContent).toBe("Sending…");
+    resolve?.({ ok: true });
+    await waitFor(() => expect(post.textContent).toBe("Post"));
+    expect(post.hasAttribute("aria-busy")).toBe(false);
+
+    // Without pendingLabel the label stays (and stays the accessible name) with a busy mark.
+    const ping = screen.getByRole("button", { name: "Ping" });
+    fireEvent.click(ping);
+    await waitFor(() => expect(ping.querySelector(".cvb-action-pending")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Ping" })).toBe(ping);
+    resolve?.({ ok: true });
+    await waitFor(() => expect(ping.querySelector(".cvb-action-pending")).toBeNull());
+  });
 });
 
 describe("board actions with input fields", () => {
