@@ -210,17 +210,49 @@ function seedFieldValues(fields: readonly ActionField[]): Record<string, string>
 // static payload is dropped when fields/binding are present rather than nested.
 // `binding` merges LAST — it is the integrity-protected slot, so a form field
 // can never shadow a producer-stamped key the rib revalidates server-side.
+// `omit` (hidden showWhen fields) strips a key whether it came from a field or
+// a same-named static default, but never from `binding`.
 function mergePayload(
   staticPayload: unknown,
   collected?: Record<string, string>,
   binding?: Record<string, unknown>,
+  omit: readonly string[] = [],
 ): unknown {
   if (!collected && !binding) return staticPayload;
-  return {
+  const merged: Record<string, unknown> = {
     ...(isPlainObject(staticPayload) ? staticPayload : {}),
     ...(collected ?? {}),
-    ...(binding ?? {}),
   };
+  for (const key of omit) delete merged[key];
+  return { ...merged, ...(binding ?? {}) };
+}
+
+// A field whose controller is itself hidden counts as hidden, so a chain
+// collapses from the top; the depth cap stops a showWhen cycle.
+function isFieldShown(
+  field: ActionField,
+  fields: readonly ActionField[],
+  values: Record<string, string>,
+  depth = 0,
+): boolean {
+  const when = field.showWhen;
+  if (!when) return true;
+  const controller = fields.find((f) => f.name === when.field);
+  if (!controller || depth >= fields.length) return false;
+  if (!isFieldShown(controller, fields, values, depth + 1)) return false;
+  const value = values[when.field] ?? "";
+  return when.equals === undefined ? value.trim() !== "" : value === when.equals;
+}
+
+// The payload keys of hidden fields, including a hidden picker's companion.
+function hiddenFieldKeys(fields: readonly ActionField[], values: Record<string, string>): string[] {
+  const keys: string[] = [];
+  for (const f of fields) {
+    if (isFieldShown(f, fields, values)) continue;
+    keys.push(f.name);
+    if (f.modelPicker?.providerField) keys.push(f.modelPicker.providerField);
+  }
+  return keys;
 }
 
 function actionConfirmMode(item: ActionItem): ConfirmModalMode {
@@ -339,7 +371,8 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
     setPending(true);
     setError(null);
     try {
-      const payload = mergePayload(item.payload, collected, item.binding);
+      const hidden = collected ? hiddenFieldKeys(fields, collected) : [];
+      const payload = mergePayload(item.payload, collected, item.binding, hidden);
       const result = await ctx.run(
         payload !== undefined ? { type: item.type, payload } : { type: item.type },
       );
@@ -376,7 +409,9 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (sealed) return;
-    const missing = fields.find((f) => f.required && !values[f.name]?.trim());
+    const missing = fields.find(
+      (f) => f.required && isFieldShown(f, fields, values) && !values[f.name]?.trim(),
+    );
     if (missing) {
       setError(`${missing.label} is required`);
       return;
@@ -472,6 +507,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
       {hasFields && (expanded || open) && (
         <form className="cvb-action-form" onSubmit={onSubmit}>
           {fields.map((f) => {
+            if (!isFieldShown(f, fields, values)) return null;
             const id = `cvb-af-${instanceId}-${f.name}`;
             return (
               <div

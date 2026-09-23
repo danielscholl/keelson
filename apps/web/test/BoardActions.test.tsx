@@ -1863,3 +1863,107 @@ describe("create-form affordances", () => {
     await waitFor(() => expect(calls).toEqual([{ type: "scope-set", payload: { on: false } }]));
   });
 });
+
+describe("conditional action fields", () => {
+  function launchBoard(): CanvasBoardView {
+    return {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "launch",
+              label: "Launch",
+              expanded: true,
+              fields: [
+                {
+                  name: "project",
+                  label: "Project",
+                  options: [
+                    { value: "p1", label: "P1" },
+                    { value: "p2", label: "P2" },
+                  ],
+                },
+                {
+                  name: "workflow",
+                  label: "Workflow",
+                  required: true,
+                  defaultValue: "fix-issue",
+                  showWhen: { field: "project" },
+                },
+                {
+                  name: "branch",
+                  label: "Branch",
+                  required: true,
+                  showWhen: { field: "project", equals: "p2" },
+                },
+              ],
+              payload: { branch: "main", source: "board" },
+              binding: { target: "bound" },
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+  }
+
+  test("a field appears once its controller has a value, and equals gates on one value", () => {
+    render(
+      <BoardActionProvider run={async () => ({ ok: true })} reveal={okReveal}>
+        <BoardView view={launchBoard()} />
+      </BoardActionProvider>,
+    );
+    expect(screen.queryByText("Workflow")).toBeNull();
+    expect(screen.queryByText("Branch")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Project"), { target: { value: "p1" } });
+    expect(screen.getByText("Workflow")).toBeDefined();
+    expect(screen.queryByText("Branch")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Project"), { target: { value: "p2" } });
+    expect(screen.getByText("Branch")).toBeDefined();
+  });
+
+  test("a hidden field skips required and stays out of the payload", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={launchBoard()} />
+      </BoardActionProvider>,
+    );
+    fireEvent.change(screen.getByLabelText("Project"), { target: { value: "p1" } });
+    fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+    // Branch is required but hidden for p1: no validation error, and its
+    // same-named static default doesn't ride the payload either.
+    await waitFor(() =>
+      expect(calls).toEqual([
+        {
+          type: "launch",
+          payload: { source: "board", project: "p1", workflow: "fix-issue", target: "bound" },
+        },
+      ]),
+    );
+  });
+
+  test("a shown required field still blocks submit", () => {
+    const calls: RibAction[] = [];
+    const { container } = render(
+      <BoardActionProvider
+        run={async (a) => {
+          calls.push(a);
+          return { ok: true };
+        }}
+        reveal={okReveal}
+      >
+        <BoardView view={launchBoard()} />
+      </BoardActionProvider>,
+    );
+    fireEvent.change(screen.getByLabelText("Project"), { target: { value: "p2" } });
+    fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+    expect(screen.getByText("Branch is required")).toBeDefined();
+    expect(calls).toHaveLength(0);
+  });
+});
