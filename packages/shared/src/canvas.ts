@@ -234,6 +234,13 @@ const canvasPersonSchema = z
   .strict();
 export type CanvasPerson = z.infer<typeof canvasPersonSchema>;
 
+// A relative time the host renders ("4 min ago", "53 min left") and re-ticks
+// locally between frames, so a producer needn't republish just to keep it current.
+const canvasClockSchema = z
+  .object({ at: z.string().datetime({ offset: true }), mode: z.enum(["since", "until"]) })
+  .strict();
+export type CanvasClock = z.infer<typeof canvasClockSchema>;
+
 // A card field / status cell that can link out (`href`) or expose a copy button
 // (`copyable` for a value already in the payload; `copyAction` to fetch the
 // value on demand) — for portal URLs and credentials. A field carries either a
@@ -255,6 +262,7 @@ const canvasFieldSchema = z
       .strict()
       .optional(),
     people: z.array(canvasPersonSchema).min(1).optional(),
+    clock: canvasClockSchema.optional(),
   })
   .strict()
   // The two copy modes are mutually exclusive: a field with both would render
@@ -263,9 +271,18 @@ const canvasFieldSchema = z
   .refine((f) => !(f.copyable && f.copyAction), {
     message: "a field sets at most one of copyable / copyAction",
   })
-  .refine((f) => (f.value === undefined) !== (f.people === undefined), {
-    message: "a field carries exactly one of value / people",
+  .refine((f) => [f.value, f.people, f.clock].filter((x) => x !== undefined).length === 1, {
+    message: "a field carries exactly one of value / people / clock",
   })
+  // A clock's text is host-rendered and changes every tick, so there's no
+  // stable value to link or copy.
+  .refine(
+    (f) =>
+      !f.clock || (f.href === undefined && f.copyable === undefined && f.copyAction === undefined),
+    {
+      message: "a clock field carries only a label and tone",
+    },
+  )
   // The link/copy/tone affordances all act on the scalar value; on a people
   // field they would dangle off a value that doesn't exist.
   .refine(
@@ -556,7 +573,8 @@ const statsSectionSchema = z
           // `null` = unmeasured: the tile renders a muted "?" (not "—", not a
           // fabricated 0) — the same three-state vocabulary segments and bars
           // carry. A tile with nothing to say is omitted, not nulled.
-          value: canvasCellScalarSchema,
+          value: canvasCellScalarSchema.optional(),
+          clock: canvasClockSchema.optional(),
           sub: z.string().optional(),
           tone: canvasToneSchema.optional(),
           delta: canvasStatDeltaSchema.optional(),
@@ -565,7 +583,10 @@ const statsSectionSchema = z
           // delta/value must carry the reading without it.
           spark: z.array(z.number().finite()).min(2).max(60).optional(),
         })
-        .strict(),
+        .strict()
+        .refine((t) => (t.value === undefined) !== (t.clock === undefined), {
+          message: "a stat carries exactly one of value / clock",
+        }),
     ),
   })
   .strict();

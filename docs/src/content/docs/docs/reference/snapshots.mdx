@@ -147,7 +147,7 @@ one-level layout wrapper that nests leaf sections side by side.
 
 | `kind` | Shape | For |
 | --- | --- | --- |
-| `stats` | `items: [{ label, value, sub?, tone? }]` | KPI tiles. |
+| `stats` | `items: [{ label, value \| clock, sub?, tone?, delta?, spark? }]` | KPI tiles. A `clock` tile shows a relative time in place of `value` (see below). |
 | `segments` | `items: [{ label, n, tone? }]` | A summary pulse. |
 | `bars` | `inline?`, `items: [{ label, value, total, tone?, trailing?, href? }]` | Meters and offender lists. A safe `http(s)://` `href` makes the whole bar row a link; other schemes fall back to plain text. |
 | `table` | `columns`, `rows`, `caption?` | The same table shape as the view. |
@@ -162,8 +162,12 @@ one-level layout wrapper that nests leaf sections side by side.
 
 A card `field` is `{ label?, value, tone?, href?, copyable?, copyAction? }`,
 or `{ label?, people: [{ name, tone? }] }`, which renders identity-toned names
-in the value slot (a dot per name, the name itself in ink); a field carries
-exactly one of `value` / `people`. A card may also carry a
+in the value slot (a dot per name, the name itself in ink), or
+`{ label?, tone?, clock }`; a field carries exactly one of `value` / `people` /
+`clock`. A `clock` is `{ at, mode }`, where `at` is an ISO 8601 timestamp with an
+offset and `mode` is `"since"` or `"until"`: the host renders "4 min ago" or
+"53 min left" and re-ticks it locally every 30 seconds, so a producer needn't
+republish just to keep a time current. A card may also carry a
 `reason: { label?, text }` annotation line.
 
 A card or row `bar` is `{ value, total, label?, trailing? }` for a plain fill

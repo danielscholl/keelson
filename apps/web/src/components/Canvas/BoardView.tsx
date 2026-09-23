@@ -1,6 +1,7 @@
 import type {
   CanvasBoardView,
   CanvasCardAction,
+  CanvasClock,
   CanvasItemBar,
   CanvasStatDelta,
   CanvasTone,
@@ -15,6 +16,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { formatClock, useClockNow } from "../../lib/relativeClock.ts";
 import { isSafeLinkScheme } from "../../lib/safeLink.ts";
 import { ConfirmModal, type ConfirmModalMode } from "../ConfirmModal.tsx";
 import { useBoardActions } from "./BoardActionContext.tsx";
@@ -1019,6 +1021,29 @@ function CardSelectButton({
   );
 }
 
+function RelativeClock({
+  clock,
+  className,
+  tone,
+}: {
+  clock: CanvasClock;
+  className: string;
+  tone?: CanvasTone;
+}) {
+  const now = useClockNow();
+  const at = Date.parse(clock.at);
+  return (
+    <time
+      className={className}
+      data-tone={tone}
+      dateTime={clock.at}
+      title={Number.isNaN(at) ? clock.at : new Date(at).toLocaleString()}
+    >
+      {Number.isNaN(at) ? clock.at : formatClock(at, now, clock.mode)}
+    </time>
+  );
+}
+
 const DELTA_GLYPH = { up: "▲", down: "▼", flat: "→" } as const;
 
 function StatDelta({ delta }: { delta: CanvasStatDelta }) {
@@ -1077,12 +1102,16 @@ function Section({ section }: { section: BoardSection }) {
               <span className="cvb-stat-value-row">
                 {/* null = unmeasured — a muted "?", never a dash that reads as a
                     quiet nothing or a fabricated zero. */}
-                <span
-                  className={`cvb-stat-value${s.value === null ? " is-unmeasured" : ""}`}
-                  data-tone={s.value === null ? undefined : s.tone}
-                >
-                  {s.value === null ? "?" : scalarText(s.value)}
-                </span>
+                {s.clock ? (
+                  <RelativeClock clock={s.clock} className="cvb-stat-value" tone={s.tone} />
+                ) : (
+                  <span
+                    className={`cvb-stat-value${s.value === null ? " is-unmeasured" : ""}`}
+                    data-tone={s.value === null ? undefined : s.tone}
+                  >
+                    {s.value === null ? "?" : scalarText(s.value ?? null)}
+                  </span>
+                )}
                 {s.delta && <StatDelta delta={s.delta} />}
               </span>
               <span className="cvb-stat-label">{s.label}</span>
@@ -1218,6 +1247,12 @@ function Section({ section }: { section: BoardSection }) {
                               </span>
                             ))}
                           </span>
+                        ) : f.clock ? (
+                          <RelativeClock
+                            clock={f.clock}
+                            className="cvb-field-value"
+                            tone={f.tone}
+                          />
                         ) : isSafeLinkScheme(f.href) ? (
                           <a
                             className="cvb-link"
