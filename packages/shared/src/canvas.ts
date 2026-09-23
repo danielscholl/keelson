@@ -283,6 +283,13 @@ const canvasActionFieldSchema = z
     // submit dispatches nothing for this field — which a producer that reads
     // absent-as-clear (e.g. a model pin) would treat as a wipe.
     defaultValue: z.string().optional(),
+    // Show this field only once another field in the same action has a value
+    // (any non-empty value, or exactly `equals`). A hidden field is left out of
+    // the dispatched payload and skips `required`.
+    showWhen: z
+      .object({ field: z.string().min(1), equals: z.string().optional() })
+      .strict()
+      .optional(),
     // Render a multi-line textarea rather than a single-line input.
     multiline: z.boolean().optional(),
     // Half-width: adjacent `half` fields share a two-track row (Env | Profile)
@@ -450,6 +457,15 @@ export const canvasActionItemSchema = z
         {
           message: "a modelPicker providerField must not collide with any field name or companion",
         },
+      )
+      .refine(
+        (f) =>
+          f.every(
+            (x) =>
+              !x.showWhen ||
+              (x.showWhen.field !== x.name && f.some((y) => y.name === x.showWhen?.field)),
+          ),
+        { message: "a showWhen field must name another field in the same action" },
       )
       .optional(),
     // Render `fields` as an always-open form whose submit button carries the

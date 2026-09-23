@@ -184,6 +184,7 @@ Pick the section by the data's job:
 - Entities with identity and verbs → cards (grid + columns for benches; ghost seats for open capacity; boxed for copyable credentials). A card's bar carries per-entity progress: { value, total } for a plain fill, { segments } for stage composition at card scale. prose flips the fields to a scrolling document (a charter, a brief) in proportional type; stacked stays the line-oriented mono readout — a card sets one, not both.
 - Event feed or status checklist → rows (boxed flips it to label:value cards). Rows carry the cards click contract — action/selected for an overview list feeding an inspector, bar for a compact per-row meter — so choose cards vs rows on density alone, never because only one can be selected.
 - At-a-glance matrix or link strip → grid cells with toned badges.
+- A form input that depends on another → showWhen { field, equals? } on the action field holds it back until that field has a value (a workflow picker after a project); a hidden field never dispatches.
 - A sequence where order is the story → journey; a fixed-capacity identity row → seats.
 - Verbs → one actions section (tabs for a mode picker, wrap for a chip strip); destructive verbs confirm, disabled ones carry reason. iconOnly + align: "end" pins a glyph-only corner affordance whose label stays the accessible name. binding is the integrity-protected payload slot — merged after collected fields, so producer-stamped context (a fingerprint, a target identity) can never be shadowed by a form field.
 

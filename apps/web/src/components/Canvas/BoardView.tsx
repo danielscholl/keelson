@@ -176,6 +176,37 @@ function mergePayload(
   };
 }
 
+// A field whose controller is itself hidden counts as hidden, so a chain
+// collapses from the top; the depth cap stops a showWhen cycle.
+function isFieldShown(
+  field: ActionField,
+  fields: readonly ActionField[],
+  values: Record<string, string>,
+  depth = 0,
+): boolean {
+  const when = field.showWhen;
+  if (!when) return true;
+  const controller = fields.find((f) => f.name === when.field);
+  if (!controller || depth >= fields.length) return false;
+  if (!isFieldShown(controller, fields, values, depth + 1)) return false;
+  const value = values[when.field] ?? "";
+  return when.equals === undefined ? value.trim() !== "" : value === when.equals;
+}
+
+// Drops hidden fields (and a hidden picker's companion key) from the dispatch.
+function visibleValues(
+  fields: readonly ActionField[],
+  values: Record<string, string>,
+): Record<string, string> {
+  const out = { ...values };
+  for (const f of fields) {
+    if (isFieldShown(f, fields, values)) continue;
+    delete out[f.name];
+    if (f.modelPicker?.providerField) delete out[f.modelPicker.providerField];
+  }
+  return out;
+}
+
 function actionConfirmMode(item: ActionItem): ConfirmModalMode {
   if (item.confirm?.irreversible && item.confirm.subject) {
     return {
@@ -326,12 +357,14 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (sealed) return;
-    const missing = fields.find((f) => f.required && !values[f.name]?.trim());
+    const missing = fields.find(
+      (f) => f.required && isFieldShown(f, fields, values) && !values[f.name]?.trim(),
+    );
     if (missing) {
       setError(`${missing.label} is required`);
       return;
     }
-    requestDispatch(values);
+    requestDispatch(visibleValues(fields, values));
   };
 
   if (soloPicker) {
@@ -418,6 +451,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
       {hasFields && (expanded || open) && (
         <form className="cvb-action-form" onSubmit={onSubmit}>
           {fields.map((f) => {
+            if (!isFieldShown(f, fields, values)) return null;
             const id = `cvb-af-${instanceId}-${f.name}`;
             return (
               <div
