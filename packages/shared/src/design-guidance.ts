@@ -85,9 +85,10 @@ section { margin-top: 40px; padding-top: 24px; border-top: 1px solid var(--borde
 
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-top: 20px; }
 .stat { padding: 14px 16px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
-.stat:is(.good, .warn, .crit, .info) { box-shadow: inset 3px 0 0 var(--c); }
+.stat:is(.good, .warn, .crit, .info, .id-1, .id-2, .id-3, .id-4, .id-5) { box-shadow: inset 3px 0 0 var(--c); }
 .stat .v { font-family: var(--mono); font-size: 28px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--fg-strong); }
 .stat .l { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.meter-label { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 12px; margin: 16px 0 6px; font-size: 12px; color: var(--muted); }
 .meter { height: 8px; background: var(--card-2); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
 .meter > span { display: block; height: 100%; background: var(--c, var(--s1)); }
 
@@ -99,7 +100,7 @@ section { margin-top: 40px; padding-top: 24px; border-top: 1px solid var(--borde
 .tbl tr:last-child td { border-bottom: 0; }
 .tbl .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .callout { margin-top: 16px; padding: 12px 16px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; font-size: 14px; }
-.callout:is(.good, .warn, .crit, .info) { border-color: color-mix(in srgb, var(--c) 55%, var(--border)); }
+.callout:is(.good, .warn, .crit, .info, .id-1, .id-2, .id-3, .id-4, .id-5) { border-color: color-mix(in srgb, var(--c) 55%, var(--border)); }
 .callout p:last-child { margin-bottom: 0; }
 .term { margin: 16px 0 0; padding: 14px 16px; background: var(--card-2); border: 1px solid var(--border); border-radius: 10px; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; white-space: pre; overflow-x: auto; }
 .term .d { color: var(--muted); } .term .ok { color: var(--good); } .term .bad { color: var(--crit); } .term .hi { color: var(--fg-strong); font-weight: 600; }
@@ -114,7 +115,7 @@ section { margin-top: 40px; padding-top: 24px; border-top: 1px solid var(--borde
 .fig .box, .fig .diamond { fill: var(--card-2); stroke: var(--border); stroke-width: 1.2; }
 .fig :is(.box, .pill):is(.good, .warn, .crit, .info, .id-1, .id-2, .id-3, .id-4, .id-5) { fill: color-mix(in srgb, var(--c) 16%, var(--card)); stroke: var(--c); }
 .fig .box.mute { fill: none; stroke: var(--muted); stroke-dasharray: 4 3; }
-.fig .pill-t { font-size: 10.5px; font-weight: 600; fill: var(--fg-strong); }
+.fig .pill-t { font-size: 11px; font-weight: 600; fill: var(--fg-strong); }
 .fig .lane { fill: none; stroke: var(--border); stroke-dasharray: 3 4; }
 .fig .lane-label { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; fill: var(--muted); }
 .fig .edge { fill: none; stroke: var(--muted); stroke-width: 1.5; marker-end: url(#kz-ah); }
@@ -226,14 +227,15 @@ Page opening. A design explainer uses the summary box; a run report swaps it for
 </div>
 \`\`\`
 
-Stat tiles, tags, and a meter. A toned tile carries its word in a tag:
+Stat tiles, tags, and a meter. A toned tile or meter carries its word in a tag. The meter's label line carries the value and the state; the track only draws it, so it is hidden from screen readers:
 
 \`\`\`html
 <div class="stats">
   <div class="stat"><div class="v">412</div><div class="l">runs, last 7 days</div></div>
   <div class="stat crit"><div class="v">9</div><div class="l">failed <span class="tag crit">needs review</span></div></div>
 </div>
-<div class="meter warn"><span style="width: 62%"></span></div>
+<div class="meter-label"><span>Turn budget used</span><span class="mono">50 of 80 <span class="tag warn">near limit</span></span></div>
+<div class="meter warn" aria-hidden="true"><span style="width: 62%"></span></div>
 \`\`\`
 
 Table. Wrap it so a wide table scrolls inside itself, never the page:
