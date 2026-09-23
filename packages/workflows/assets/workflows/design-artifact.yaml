@@ -12,9 +12,10 @@ description: |
             dashboard — built from data or findings and published to the canvas.
   Triggers: "make a report of", "publish an artifact", "chart this as a page",
             "design a briefing", "canvas report".
-  Does: Reads the canvas design guide (page + color sections), authors a self-contained
-        token-themed HTML page in the keelson palette, and publishes it via canvas_publish,
-        which validates declared chart palettes (CVD + contrast) fail-closed.
+  Does: Reads the canvas design guide (kit, voice, and page sections, plus chart and
+        diagram sections as needed), authors a self-contained page on the keelson kit in
+        the house voice, and publishes it via canvas_publish, which validates declared
+        chart palettes (CVD + contrast) fail-closed.
   NOT for: Live operational status a rib already renders as a board (open that surface),
            plain prose answers (chat), or multi-page sites (one page per artifact).
 
@@ -42,15 +43,19 @@ nodes:
       with the markup.
 
       Work in this order:
-      1. Call canvas_design_guide with section "page", then "form" if the page
-         carries any chart, then "color" for the palette instance.
-      2. Author ONE self-contained HTML page following the guide: CSS custom
-         properties with keelson's dark values on :root and light overrides on
-         :root[data-theme="light"], system font stack, real content from the
-         request above, no external resources. Declare any categorical chart
-         palette on <body data-palette-dark="…" data-palette-light="…">.
-      3. Publish with canvas_publish. If it rejects the palette, fix the colors
-         (prefer the keelson series slots) and publish again.
+      1. Call canvas_design_guide with section "kit" (the stylesheet to start
+         from), "voice" (how the copy reads), and "page" (which page type fits
+         this request). Add "form" and "color" if the page carries any chart,
+         and "graphics" if it carries a diagram.
+      2. Author ONE self-contained HTML page following the guide: the kit's
+         stylesheet (keelson's tokens, dark on :root and light overrides on
+         :root[data-theme="light"]), real content from the request above, copy
+         in the house voice, no external resources. Declare any categorical
+         chart palette on <body data-palette-dark="…" data-palette-light="…">.
+      3. Check the draft once against canvas_design_guide "anti-patterns",
+         fix what it catches, then publish with canvas_publish. If it rejects
+         the palette, fix the colors (prefer the keelson series slots) and
+         publish again.
 
       Finish with a short report of the published artifact's title. Your LAST
       line must be one of these two, exactly, with nothing after it:

@@ -21,9 +21,10 @@ The pipeline has three parts:
   (keelson's dark values on `:root`, light overrides on
   `:root[data-theme="light"]`), system font stack, no external resources, and
   the keelson palette inlined as literal hex. The `canvas_design_guide` tool
-  serves deeper references on demand: page layout, chart-form selection, the
-  color system, mark anatomy, inline SVG diagram craft, the structured board
-  view's section catalog, and an anti-pattern catalog.
+  serves deeper references on demand: a ready class kit, the house voice for
+  page copy, page types and layout, chart-form selection, the color system,
+  mark anatomy, inline SVG diagram craft, the structured board view's section
+  catalog, and an anti-pattern catalog.
 - **Computable validation.** A page that carries categorical chart series
   declares its palette on `<body data-palette-dark="…" data-palette-light="…">`.
   Publishing validates color-vision-deficiency separation and surface contrast
@@ -84,3 +85,20 @@ sandboxed frame cannot read the app's CSS custom properties across its origin
 boundary, so inlining the values is what keeps an artifact on-palette. Rib
 authors can import the same tokens and `validateCategoricalPalette` /
 `validateOrdinalRamp` checks to build their own validated producers.
+
+## The kit and the house voice
+
+Two guide sections do most of the work of making a page look and read like
+keelson. The `kit` section is one stylesheet: the token block (which also paints
+the page background, since the frame's own ground is white) followed by ready
+classes for the masthead, summary box, legend, stat tiles, tags, tables,
+callouts, terminal output, and inline SVG diagrams. Tone classes are one
+vocabulary across all of them: `.good`, `.warn`, `.crit`, and `.info` mark
+state, and `.id-1` to `.id-5` mark who, so an actor keeps one color across every
+figure and table on the page.
+
+The `voice` section sets how the copy reads. A page leads with the state of the
+work, uses keelson's own terms (run, node, workflow, rib), points each claim at
+the run id, node, file, or command that proves it, and writes "not measured"
+instead of a zero when a check never ran. It speaks as the page, never as the
+agent that wrote it.

@@ -55,7 +55,7 @@ retry chain of them.
 
 | Node | Kind | What it does |
 | --- | --- | --- |
-| `author` | prompt | Reads `canvas_design_guide` (`page`, then `form` when the page carries a chart, then `color`), authors one self-contained token-themed HTML page from `$ARGUMENTS`, and publishes it with `canvas_publish`, retrying on a rejected palette. Capped to `canvas_publish` and `canvas_design_guide`, bounded by a 30-minute idle timeout. |
+| `author` | prompt | Reads `canvas_design_guide` (`kit`, `voice`, and `page`, plus `form` and `color` when the page carries a chart and `graphics` when it carries a diagram), authors one self-contained page on the kit from `$ARGUMENTS`, checks the draft once against `anti-patterns`, and publishes it with `canvas_publish`, retrying on a rejected palette. Capped to `canvas_publish` and `canvas_design_guide`, bounded by a 30-minute idle timeout. |
 
 ### The parts worth a second look
 
@@ -78,11 +78,10 @@ a successful result, the node fails and names the missing tool. The check skips
 an unavailable canvas catalog for headless runs; otherwise, a green run means the
 artifact was published.
 
-**One page, both themes.** The prompt requires CSS custom properties with
-keelson's dark values on `:root` and light overrides on
-`:root[data-theme="light"]`, a system font stack, and no external resources, so
-the published page re-themes with the app and renders inside the sandboxed canvas
-frame whose CSP blocks all network egress.
+**One page, both themes.** The page starts from the kit's stylesheet: keelson's
+dark values on `:root`, light overrides on `:root[data-theme="light"]`, a system
+font stack, and no external resources. It re-themes with the app and renders
+inside the sandboxed canvas frame whose CSP blocks all network egress.
 
 **The provider is deliberately open.** No `provider:`/`model:` pin, because
 artifact quality tracks the authoring model. It is the mirror image of the

@@ -230,6 +230,8 @@ describe("registerExisting", () => {
 describe("canvas_design_guide", () => {
   test("serves each section", async () => {
     for (const [section, marker] of [
+      ["kit", ".fig .edge"],
+      ["voice", "Unknown is a word, not a zero"],
       ["page", "calibrate treatment"],
       ["form", "not a chart"],
       ["color", DESIGN_TOKENS.dark.series[0]],
