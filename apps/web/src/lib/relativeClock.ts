@@ -38,6 +38,9 @@ let now = Date.now();
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   if (timer === undefined) {
+    // A clock replacing the last one subscribes in the same commit, after
+    // getNow's idle refresh has already been skipped, so refresh here.
+    now = Date.now();
     timer = setInterval(() => {
       now = Date.now();
       for (const l of listeners) l();
@@ -48,7 +51,6 @@ function subscribe(listener: () => void): () => void {
     if (listeners.size === 0 && timer !== undefined) {
       clearInterval(timer);
       timer = undefined;
-      now = 0;
     }
   };
 }
