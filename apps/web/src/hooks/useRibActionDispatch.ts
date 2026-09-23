@@ -39,6 +39,8 @@ export function useRibActionDispatch(
     // a setState that opens a drawer, not a paid/duplicable action — no await.
     onOpenCanvas?: (key: string, title?: string) => void;
     onOpenSurface?: (surfaceId: string, regionKey?: string) => void;
+    // An `open-run` directive opens that run in the host's run drawer.
+    onOpenRun?: (workflowName: string, runId: string) => void;
   },
 ): BoardActionApi {
   const toast = useToast();
@@ -47,6 +49,7 @@ export function useRibActionDispatch(
   const onLaunchWorkflow = opts?.onLaunchWorkflow;
   const onOpenCanvas = opts?.onOpenCanvas;
   const onOpenSurface = opts?.onOpenSurface;
+  const onOpenRun = opts?.onOpenRun;
 
   const run = useCallback(
     async (action: RibAction): Promise<RibActionResult> => {
@@ -137,6 +140,21 @@ export function useRibActionDispatch(
             toast.push({ kind: "error", message: error });
             return { ok: false, error };
           }
+          if (onOpenRun && isOpenRunShaped(result.data)) {
+            const parsed = ribClientEffectSchema.safeParse(result.data);
+            if (parsed.success && parsed.data.effect === "open-run") {
+              try {
+                onOpenRun(parsed.data.workflow, parsed.data.runId);
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                toast.push({ kind: "error", message: `open-run handler failed: ${message}` });
+              }
+              return result;
+            }
+            const error = `${action.type}: invalid open-run directive`;
+            toast.push({ kind: "error", message: error });
+            return { ok: false, error };
+          }
           toast.push({ kind: "ok", message: `${action.type} ✓` });
           // Isolate the callback: a throwing onSuccess must not turn a
           // successful action into a failure result.
@@ -156,7 +174,7 @@ export function useRibActionDispatch(
         return { ok: false, error: message };
       }
     },
-    [ribId, toast, onSuccess, onOpenChat, onLaunchWorkflow, onOpenCanvas, onOpenSurface],
+    [ribId, toast, onSuccess, onOpenChat, onLaunchWorkflow, onOpenCanvas, onOpenSurface, onOpenRun],
   );
 
   // Raw: no toast, no reload. The copy button shows its own flash and the
@@ -221,5 +239,13 @@ function isOpenSurfaceShaped(data: unknown): boolean {
     typeof data === "object" &&
     data !== null &&
     (data as { effect?: unknown }).effect === "open-surface"
+  );
+}
+
+function isOpenRunShaped(data: unknown): boolean {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as { effect?: unknown }).effect === "open-run"
   );
 }

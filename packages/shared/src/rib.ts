@@ -910,7 +910,8 @@ export type OpenChatSeed = z.infer<typeof openChatSeedSchema>;
 // names aren't known here; `args` maps onto the run API's `inputs`. `open-canvas`
 // opens the item's snapshot board (`key`) in the canvas drawer — the View verb an
 // index card's "Open" uses. `open-surface` switches the active rib surface tab,
-// optionally focusing one region after navigation.
+// optionally focusing one region after navigation. `open-run` opens an existing
+// run in the run drawer beside the surface, approval composer included.
 export const ribClientEffectSchema = z.discriminatedUnion("effect", [
   z.object({ effect: z.literal("open-chat"), seed: openChatSeedSchema }).strict(),
   z
@@ -936,6 +937,13 @@ export const ribClientEffectSchema = z.discriminatedUnion("effect", [
       effect: z.literal("open-surface"),
       surfaceId: z.string().min(1),
       regionKey: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      effect: z.literal("open-run"),
+      runId: z.string().min(1),
+      workflow: z.string().min(1),
     })
     .strict(),
 ]);

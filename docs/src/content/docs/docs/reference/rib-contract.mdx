@@ -310,7 +310,10 @@ coordination path.
    `open-surface` switches the active surface tab. The `open-surface` shape is
    `{ effect: "open-surface", surfaceId, regionKey? }`, where `surfaceId` is the
    browser tab id (`surface:<ribId>:<surfaceId>`) and `regionKey` optionally
-   focuses one region after the tab switch. Unknown or malformed effects are
+   focuses one region after the tab switch. `open-run` opens a run that already
+   exists in the same slide-over run drawer, approval composer included:
+   `{ effect: "open-run", runId, workflow }`, where `workflow` is the run's
+   workflow name. Unknown or malformed effects are
    rejected at the surface edge rather than treated as successful navigation.
 
    `acceptsIngest?: boolean` advertises that a rib handles the conventional

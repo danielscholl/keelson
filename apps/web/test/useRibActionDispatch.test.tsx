@@ -464,6 +464,51 @@ describe("useRibActionDispatch — open-surface directive", () => {
   });
 });
 
+describe("useRibActionDispatch — open-run directive", () => {
+  test("opens the run with its workflow, no success toast", async () => {
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "open-run", runId: "run-1", workflow: "ship" },
+    });
+    const runs: Array<{ workflow: string; runId: string }> = [];
+    const { result } = renderHook(
+      () =>
+        useRibActionDispatch("rib:demo", {
+          onOpenRun: (workflow, runId) => runs.push({ workflow, runId }),
+        }),
+      { wrapper },
+    );
+    const res = await runAct(result.current.run, ACTION);
+    expect(res.ok).toBe(true);
+    expect(runs).toEqual([{ workflow: "ship", runId: "run-1" }]);
+    expect(toastCount()).toBe(0);
+  });
+
+  test("a directive without its workflow returns an error result and toasts", async () => {
+    postRibActionImpl = async () => ({ ok: true, data: { effect: "open-run", runId: "run-1" } });
+    const runs: string[] = [];
+    const { result } = renderHook(
+      () => useRibActionDispatch("rib:demo", { onOpenRun: (_w, runId) => runs.push(runId) }),
+      { wrapper },
+    );
+    const res = await runAct(result.current.run, ACTION);
+    expect(res).toEqual({ ok: false, error: "convene: invalid open-run directive" });
+    expect(runs).toEqual([]);
+    expect(toastText()).toContain("invalid open-run directive");
+  });
+
+  test("falls through to the normal success path when onOpenRun is absent", async () => {
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "open-run", runId: "run-1", workflow: "ship" },
+    });
+    const { result } = renderHook(() => useRibActionDispatch("rib:demo"), { wrapper });
+    const res = await runAct(result.current.run, ACTION);
+    expect(res.ok).toBe(true);
+    expect(toastText()).toContain("convene ✓");
+  });
+});
+
 describe("useRibActionDispatch — non-directive and guards", () => {
   test("plain (non-directive) success data reaches neither effect handler", async () => {
     postRibActionImpl = async () => ({ ok: true, data: undefined });
