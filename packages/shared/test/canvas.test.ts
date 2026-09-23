@@ -2145,3 +2145,19 @@ describe("canvasHtmlActionSchema", () => {
     ).toBe(false);
   });
 });
+
+describe("card edge", () => {
+  it("parses an optional card edge from the tone vocabulary", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [{ kind: "cards", items: [{ title: "blocked", edge: "warn" }] }],
+    });
+    expect(v.view).toBe("board");
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "cards", items: [{ title: "x", edge: "purple" }] }],
+      }),
+    ).toThrow();
+  });
+});
