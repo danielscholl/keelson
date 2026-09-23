@@ -722,7 +722,7 @@ nodes:
         body so Copilot can act on them:
         `forge pr review <PR> --request-changes --body "<findings>"`
 
-      Use a HEREDOC for `--body` to preserve markdown.
+      Use a HEREDOC for `--body` to preserve markdown. Do not edit any files.
 
       ## Review
 
