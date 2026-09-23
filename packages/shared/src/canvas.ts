@@ -210,10 +210,16 @@ const canvasSegmentSchema = z
 // value-of-total fill or the header strip's segmented composition at item
 // scale — same proportional fills, same tone vocabulary, labels and counts
 // on hover instead of a legend.
+// `label`/`trailing` caption the meter itself (what it measures, then its
+// reading) and join its accessible name, so the reading needn't ride a field.
+const canvasItemBarCaption = {
+  label: z.string().min(1).max(120).optional(),
+  trailing: z.string().min(1).max(120).optional(),
+};
 const canvasItemBarSchema = z.union([
   // `value: null` = unmeasured, matching the bars section — hatched, never 0%.
-  z.object({ value: z.number().nullable(), total: z.number() }).strict(),
-  z.object({ segments: z.array(canvasSegmentSchema).min(1) }).strict(),
+  z.object({ value: z.number().nullable(), total: z.number(), ...canvasItemBarCaption }).strict(),
+  z.object({ segments: z.array(canvasSegmentSchema).min(1), ...canvasItemBarCaption }).strict(),
 ]);
 export type CanvasItemBar = z.infer<typeof canvasItemBarSchema>;
 const canvasPillSchema = z

@@ -137,6 +137,86 @@ describe("shared item bar on cards and rows", () => {
   });
 });
 
+describe("captioned item bar", () => {
+  test("a captioned value bar draws its caption and exposes a named meter", () => {
+    const { container } = render(
+      <BoardView
+        view={board([
+          {
+            kind: "cards",
+            items: [
+              {
+                title: "lead",
+                bar: { value: 18, total: 80, label: "Turn budget used", trailing: "18 of 80" },
+              },
+              { title: "plain", bar: { value: 1, total: 2 } },
+            ],
+          },
+        ])}
+      />,
+    );
+    const caption = container.querySelector(".cvb-item-bar-caption");
+    expect(caption?.getAttribute("aria-hidden")).toBe("true");
+    expect(caption?.textContent).toBe("Turn budget used18 of 80");
+    const meter = screen.getByRole("meter", { name: "Turn budget used" });
+    expect(meter.getAttribute("aria-valuenow")).toBe("23");
+    expect(meter.getAttribute("aria-valuemax")).toBe("100");
+    expect(meter.getAttribute("aria-valuetext")).toBe("18 of 80");
+    expect(container.querySelectorAll(".cvb-item-bar").length).toBe(1);
+    expect(container.querySelectorAll('[role="meter"]').length).toBe(1);
+  });
+
+  test("meter values stay in range and trailing is the value text whenever set", () => {
+    render(
+      <BoardView
+        view={board([
+          {
+            kind: "cards",
+            items: [
+              { title: "over", bar: { value: 2, total: 1, label: "Over" } },
+              { title: "zero", bar: { value: 3, total: 0, label: "Zero" } },
+              { title: "unlabelled", bar: { value: 1, total: 4, trailing: "1 of 4" } },
+              { title: "unknown", bar: { value: null, total: 4, label: "Unknown", trailing: "?" } },
+              { title: "unknown-bare", bar: { value: null, total: 4, label: "Bare" } },
+            ],
+          },
+        ])}
+      />,
+    );
+    const attrs = (name: string) => {
+      const m = screen.getByRole("meter", { name });
+      return [m.getAttribute("aria-valuenow"), m.getAttribute("aria-valuetext")];
+    };
+    expect(attrs("Over")).toEqual(["100", "100%"]);
+    expect(attrs("Zero")).toEqual(["0", "0%"]);
+    expect(attrs("1 of 4")).toEqual(["25", "1 of 4"]);
+    expect(attrs("Unknown")).toEqual([null, "?"]);
+    expect(attrs("Bare")).toEqual([null, "unmeasured"]);
+  });
+
+  test("a captioned segment bar folds the caption into the strip label; rows widen the meter", () => {
+    const { container } = render(
+      <BoardView
+        view={board([
+          {
+            kind: "rows",
+            items: [
+              {
+                text: "epic-4",
+                bar: { segments: [{ label: "done", n: 2 }], label: "Stages", trailing: "2 of 5" },
+              },
+            ],
+          },
+        ])}
+      />,
+    );
+    expect(container.querySelector(".cvb-row-bar--captioned")).toBeTruthy();
+    expect(container.querySelector(".cvb-strip--item")?.getAttribute("aria-label")).toBe(
+      "Stages: done 2, 2 of 5",
+    );
+  });
+});
+
 describe("rows action/selected parity", () => {
   test("a selectable row dispatches its action and wears the selection state", async () => {
     const calls: RibAction[] = [];

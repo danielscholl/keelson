@@ -166,6 +166,13 @@ in the value slot (a dot per name, the name itself in ink); a field carries
 exactly one of `value` / `people`. A card may also carry a
 `reason: { label?, text }` annotation line.
 
+A card or row `bar` is `{ value, total, label?, trailing? }` for a plain fill
+(`value: null` hatches as unmeasured) or `{ segments, label?, trailing? }` for a
+stage composition at item scale. `label` names what the meter measures and
+`trailing` carries its reading ("Turn budget used", "18 of 80"); the host draws
+both with the track and makes them the meter's accessible name and value text,
+so the reading doesn't need a separate field.
+
 ### Tones
 
 Every section primitive accepts a `tone`, a generic visual category the renderer
