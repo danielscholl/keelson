@@ -34,15 +34,26 @@ const KIND_CAP = 200;
 const TITLE_CAP = 600;
 
 const listInputSchema = z.object({});
-const statusInputSchema = z.object({ id: z.string().min(1) });
+const opIdSchema = z
+  .string()
+  .min(1)
+  .describe(
+    "Op id from run_list or from the tool that started it; workflow runs use a wf: prefix.",
+  );
+const statusInputSchema = z.object({ id: opIdSchema });
 const eventsInputSchema = z.object({
-  id: z.string().min(1),
-  cursor: z.number().int().nonnegative().optional(),
+  id: opIdSchema,
+  cursor: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe("Highest seq already read; omit or pass 0 to read from the start."),
 });
-const cancelInputSchema = z.object({ id: z.string().min(1) });
+const cancelInputSchema = z.object({ id: opIdSchema });
 const steerInputSchema = z.object({
-  id: z.string().min(1),
-  note: z.string().min(1).max(8_192),
+  id: opIdSchema,
+  note: z.string().min(1).max(8_192).describe("Steering text for the op, up to 8,192 characters."),
 });
 
 function oneLine(title: string): string {

@@ -213,7 +213,7 @@ export function createWorkflowAuthoringTools(
   const workflowValidate: ToolDefinition = {
     name: "workflow_validate",
     description:
-      "Dry-run a draft workflow YAML through the real loader without writing anything. Returns structured errors to fix, or VALID plus any non-blocking warnings. Always validate before workflow_save.",
+      "Dry-run a draft workflow YAML through the real loader without writing anything. Returns structured errors to fix, or VALID plus any non-blocking warnings. Use it to iterate on a draft; workflow_save runs the same validation and refuses invalid YAML.",
     inputSchema: validateInputSchema,
     async execute(input, ctx) {
       const parsed = validateInputSchema.safeParse(input);
@@ -262,7 +262,7 @@ export function createWorkflowAuthoringTools(
   const workflowSave: ToolDefinition = {
     name: "workflow_save",
     description:
-      'Validate and save a workflow YAML to disk. `scope: "project"` writes <project>/.keelson/workflows/ (requires the conversation to have a project); `scope: "global"` writes the shared workflows dir. The `name` must be kebab-case and equal the YAML `name:` field. Refuses to replace an existing file unless `overwrite: true`. ALWAYS show the user the final YAML and get their approval (including scope and overwrite) before calling this.',
+      'Validate and save a workflow YAML to disk. `scope: "project"` writes <project>/.keelson/workflows/ (requires the conversation to have a project); `scope: "global"` writes the shared workflows dir. The `name` must be kebab-case and equal the YAML `name:` field. Refuses to replace an existing file unless `overwrite: true`. It writes to disk, so show the user the final YAML, the scope, and whether it overwrites an existing file, and get their approval before calling it.',
     inputSchema: saveInputSchema,
     state_changing: true,
     requires_confirmation: true,

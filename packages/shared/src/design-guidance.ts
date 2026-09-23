@@ -47,7 +47,7 @@ export function designTokenCssBlock(): string {
 // contract every surface sees even without the chat guidance section.
 export const CANVAS_PUBLISH_CONTRACT = [
   "Publish a designed, self-contained HTML page to the operator's canvas.",
-  "The page renders in a sandboxed iframe with no network access: inline all CSS/JS,",
+  "The page renders in a sandboxed iframe that cannot fetch: inline all CSS/JS,",
   "no external scripts or stylesheets, system font stack only (font-family:",
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif; never webfonts).",
   "Style through CSS custom properties: define dark values in :root (keelson's default",
@@ -56,7 +56,7 @@ export const CANVAS_PUBLISH_CONTRACT = [
   'data-palette-dark="#hex,#hex,…" / data-palette-light="…"; publishing validates',
   "color-vision separation and surface contrast and REJECTS failing palettes — fix the",
   "colors and call again. Re-publishing the same `name` updates that artifact in place.",
-  "Call canvas_design_guide first for layout, chart-form, and color rules.",
+  "canvas_design_guide has the full layout, chart-form, and color rules.",
 ].join(" ");
 
 // The standing chat section, injected only when canvas_publish is active this

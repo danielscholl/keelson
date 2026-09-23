@@ -49,7 +49,7 @@ describe("buildWorkflowGuidance", () => {
   test("carries the negative steering away from the shell", () => {
     const out = buildWorkflowGuidance([SMOKE]);
     expect(out).toContain("workflow_run");
-    expect(out).toContain("Do NOT run the name as a shell command");
+    expect(out).toContain("never by typing a workflow name into a shell");
   });
 
   test("teaches the authoring flow with a hard approval gate before save", () => {
@@ -57,7 +57,7 @@ describe("buildWorkflowGuidance", () => {
     expect(out).toContain("Authoring new workflows:");
     expect(out).toContain("workflow_schema");
     expect(out).toContain("workflow_validate");
-    expect(out).toContain("ALWAYS show the user the complete final YAML");
+    expect(out).toContain("show the user the complete final YAML and get their explicit approval");
     expect(out).toContain("workflow_save");
   });
 

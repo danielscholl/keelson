@@ -37,7 +37,9 @@ const publishInputSchema = z
       .string()
       .min(1)
       .max(MAX_HTML_BYTES)
-      .describe("The page body markup (self-contained; the host supplies the document shell)."),
+      .describe(
+        "Body content plus <style>/<script>; the host supplies doctype, <html>, and <head>. To declare a chart palette, include a <body data-palette-dark=… data-palette-light=…> start tag; its attributes merge onto the real body.",
+      ),
     name: canvasArtifactSlugSchema
       .optional()
       .describe(

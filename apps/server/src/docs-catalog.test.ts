@@ -155,11 +155,11 @@ describe("KEELSON_AGENT_DOCS_SOURCE (bundled agent playbook)", () => {
     }
   });
 
-  test("stays rib-agnostic: teaches discovery via tools/list + keelson_docs, names no rib", async () => {
+  test("stays rib-agnostic: teaches discovery via the tool list + keelson_docs, names no rib", async () => {
     const res = await catalog.readSection("keelson-agent", "discovering-what-keelson-can-do");
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    expect(res.content).toContain("tools/list");
+    expect(res.content).toContain("your tool list");
     expect(res.content).toContain("keelson_docs");
     // No hardcoded capability that would go stale as ribs are installed/removed.
     expect(res.content.toLowerCase()).not.toContain("osdu");

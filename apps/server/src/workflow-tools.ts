@@ -460,7 +460,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
   const workflowRun: ToolDefinition = {
     name: "workflow_run",
     description:
-      'Start a deterministic workflow by name (discover names with workflow_list). Prefer this whenever the user asks to run a workflow — do NOT execute the name as a shell command. Names are matched leniently (case- and hyphen-insensitive), so "smoketest" resolves to "smoke-test". `arguments` is free-form text passed to the workflow as $ARGUMENTS (e.g. an issue number or a task description). `inputs` is a map of named values the workflow reads, e.g. { lens: "release-status", service: "search" } — a workflow that takes named parameters says so in its description. Use it for those rather than smuggling them through `arguments`. `arguments` is shorthand for inputs.ARGUMENTS, so pass one or the other, never both. Optional `project` targets a registered project by id or exact name. Returns when the run pauses for approval, finishes, or has run long enough to report progress. If it pauses, relay the plan to the user and resume it with workflow_respond.',
+      'Start a deterministic workflow by name (discover names with workflow_list); workflow names are not shell commands. Names are matched leniently (case- and hyphen-insensitive), so "smoketest" resolves to "smoke-test". `arguments` is free-form text passed to the workflow as $ARGUMENTS (e.g. an issue number or a task description). `inputs` is a map of named values the workflow reads, e.g. { lens: "release-status", service: "search" } — a workflow that takes named parameters says so in its description. Use it for those rather than smuggling them through `arguments`. `arguments` is shorthand for inputs.ARGUMENTS, so pass one or the other, never both. Optional `project` targets a registered project by id or exact name. Watches the run for a bounded window (about 50 seconds) and returns its state: paused for approval (relay the plan to the user, then answer with workflow_respond), finished, or still running. The run continues server-side after this returns; check it later with workflow_status.',
     inputSchema: runInputSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -668,7 +668,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
   const workflowStatus: ToolDefinition = {
     name: "workflow_status",
     description:
-      "Check workflow runs. With no runId, lists currently running and paused runs. With a runId, returns that run's per-node status, including any node awaiting approval. Set brief: true for cheap poll loops with node id/status only, the current node, and awaiting node/pauseId; full node output is the default.",
+      "Check workflow runs. With no runId, lists currently running and paused runs. With a runId, returns that run's per-node status, including any node awaiting approval. Set brief: true for cheap poll loops with node id/status only, the current node, and awaiting node/pauseId; node output is the default, cut at 2,000 characters per node. An awaiting approval prompt is returned in full.",
     inputSchema: statusInputSchema,
     async execute(input, ctx) {
       const parsed = statusInputSchema.safeParse(input);
