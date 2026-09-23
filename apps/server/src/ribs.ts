@@ -373,6 +373,9 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       for (const region of allRegions(surface.layout)) {
         assertInNamespace(rib.id, namespace, region.key, "surface region key");
       }
+      if (surface.badgeKey !== undefined) {
+        assertInNamespace(rib.id, namespace, surface.badgeKey, "surface badge key");
+      }
     }
 
     const ribCtx: RibContext = {

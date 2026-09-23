@@ -297,9 +297,18 @@ const canvasActionFieldSchema = z
     // A fixed choice set renders a <select> instead of a free-text input; the
     // dispatched value is the chosen option's `value`. A non-required select
     // offers `placeholder` as an empty "none" option, so an unset optional
-    // select dispatches "". Mutually exclusive with `multiline`.
+    // select dispatches "". Mutually exclusive with `multiline`. An option's `hint`
+    // is its hover text.
     options: z
-      .array(z.object({ value: z.string().min(1), label: z.string().min(1) }).strict())
+      .array(
+        z
+          .object({
+            value: z.string().min(1),
+            label: z.string().min(1),
+            hint: z.string().min(1).max(200).optional(),
+          })
+          .strict(),
+      )
       .min(1)
       .optional(),
     // Render the host's live provider/model catalog picker (searchable, grouped

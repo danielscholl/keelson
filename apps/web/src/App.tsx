@@ -61,7 +61,11 @@ function AppInner() {
   const surfaceTabs = useMemo<SurfaceTab[]>(
     () =>
       ribs.flatMap((rib) =>
-        rib.surfaces.map((s) => ({ id: `surface:${rib.id}:${s.id}` as const, title: s.title })),
+        rib.surfaces.map((s) => ({
+          id: `surface:${rib.id}:${s.id}` as const,
+          title: s.title,
+          ...(s.badgeKey ? { badgeKey: s.badgeKey } : {}),
+        })),
       ),
     [ribs],
   );

@@ -12,6 +12,7 @@ import {
   ribIdFromKey,
   ribIngestPayloadSchema,
   ribSummarySchema,
+  ribSurfaceBadgeSchema,
   ribSurfaceDescriptorSchema,
   ribViewDescriptorSchema,
 } from "../src/rib.ts";
@@ -196,6 +197,19 @@ describe("rib surface descriptor schema", () => {
         layout: { rows: [{ columns: [[]] }] },
       }).success,
     ).toBe(false);
+  });
+
+  it("carries a badge key, and a badge is a whole count with an optional title", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "swarms",
+      title: "Swarms",
+      badgeKey: "rib:chat:badge",
+      layout: { rows: [] },
+    });
+    expect(s.badgeKey).toBe("rib:chat:badge");
+    expect(ribSurfaceBadgeSchema.safeParse({ count: 2, title: "2 need you" }).success).toBe(true);
+    expect(ribSurfaceBadgeSchema.safeParse({ count: -1 }).success).toBe(false);
+    expect(ribSurfaceBadgeSchema.safeParse({ count: 1.5 }).success).toBe(false);
   });
 
   it("allows an empty rows array (no lanes declared yet)", () => {
