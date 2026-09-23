@@ -235,7 +235,6 @@ describe("chat memory recall", () => {
     const sp = captured!.systemPrompt!;
     expect(sp).toContain(RECALL_SECTION_HEADING);
     expect(sp).toContain(seed);
-    // Recall section appears before the seed.
     expect(sp.indexOf(seed)).toBeLessThan(sp.indexOf(RECALL_SECTION_HEADING));
   });
 
@@ -259,7 +258,7 @@ describe("chat memory recall", () => {
 
     // Not whole-prompt equality: the guidance sections ride on which tools are
     // registered this turn — ambient state this test doesn't control.
-    expect(captured?.systemPrompt?.startsWith("seed-only")).toBe(true);
+    expect(captured?.systemPrompt?.endsWith("seed-only")).toBe(true);
     expect(captured?.systemPrompt).not.toContain(RECALL_SECTION_HEADING);
   });
 
@@ -284,7 +283,7 @@ describe("chat memory recall", () => {
       abortSignal: new AbortController().signal,
     });
 
-    expect(captured?.systemPrompt?.startsWith("seed")).toBe(true);
+    expect(captured?.systemPrompt?.endsWith("seed")).toBe(true);
     expect(captured?.systemPrompt).not.toContain(RECALL_SECTION_HEADING);
     // No error frames in the stream — recall failure stays observable in logs
     // but never reaches the client.
