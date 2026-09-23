@@ -46,7 +46,7 @@ export function createNoteProjectTool(deps: CreateNoteProjectToolDeps): ToolDefi
       if (!result.ok) {
         emitResult(
           ctx,
-          "The project notebook is full; compact it (Tidy) before adding more.",
+          "The project notebook is full; tell the user entries must be removed before more can be added.",
           true,
         );
         return;

@@ -53,7 +53,7 @@ const eventsInputSchema = z.object({
 const cancelInputSchema = z.object({ id: opIdSchema });
 const steerInputSchema = z.object({
   id: opIdSchema,
-  note: z.string().min(1).max(8_192).describe("Steering text for the op, up to 8 KiB."),
+  note: z.string().min(1).max(8_192).describe("Steering text for the op, up to 8,192 characters."),
 });
 
 function oneLine(title: string): string {

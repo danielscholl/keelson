@@ -668,7 +668,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
   const workflowStatus: ToolDefinition = {
     name: "workflow_status",
     description:
-      "Check workflow runs. With no runId, lists currently running and paused runs. With a runId, returns that run's per-node status, including any node awaiting approval. Set brief: true for cheap poll loops with node id/status only, the current node, and awaiting node/pauseId; node output is the default, cut at 2,000 characters per node.",
+      "Check workflow runs. With no runId, lists currently running and paused runs. With a runId, returns that run's per-node status, including any node awaiting approval. Set brief: true for cheap poll loops with node id/status only, the current node, and awaiting node/pauseId; node output is the default, cut at 2,000 characters per node. An awaiting approval prompt is returned in full.",
     inputSchema: statusInputSchema,
     async execute(input, ctx) {
       const parsed = statusInputSchema.safeParse(input);
