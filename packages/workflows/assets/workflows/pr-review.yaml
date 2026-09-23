@@ -603,8 +603,7 @@ nodes:
       PLAUSIBLE cap sits below the keep line, so only CONFIRMED findings
       post; re-trace a PLAUSIBLE candidate to CONFIRMED or let it drop. Drop
       everything else as noise, including all LOW-severity findings and
-      pedantic nitpicks. Prefer one strong finding over several weak ones;
-      never dilute a serious issue with filler. Rank most severe first and cap the list at 10; when the cap
+      pedantic nitpicks. Rank most severe first and cap the list at 10; when the cap
       forces a cut, correctness findings outrank test-coverage and docs
       findings of equal severity. For each kept finding emit:
       - path: the file path exactly as it appears in the diff

@@ -291,7 +291,8 @@ nodes:
          `CONTRIBUTING.md`, `README.md` exist — first.
       2. Search the codebase for related code; cite `path:line` for files the
          plan will touch.
-      3. Decide the architecture in 2-3 short paragraphs.
+      3. Decide the architecture: each decision with its rationale, in the
+         template's Architecture list.
       4. Write a task list — each task atomic, independently verifiable.
 
       ## Output
@@ -1123,8 +1124,7 @@ nodes:
       `must_fix` — the PLAUSIBLE cap sits below the keep line, so only CONFIRMED
       findings reach the fixer; re-trace a PLAUSIBLE candidate to CONFIRMED or
       let it drop. Drop everything else as noise, including pedantic nitpicks.
-      Prefer one strong finding over several weak ones; never dilute a serious
-      issue with filler. Set `ship_ready` to true exactly when `must_fix` is
+      Set `ship_ready` to true exactly when `must_fix` is
       empty and the Correctness section is a findings object. `summary` is one
       sentence on the branch's health.
 
@@ -1456,8 +1456,9 @@ nodes:
         - ACTIONABLE: caused by code THIS PR changed, or a direct consequence of
           it. Add it to `actionable` with the `file` and the `fix`.
         - UNRELATED: a pre-existing failure, an infra/flake (timeouts, network),
-          or a failure in files this PR did not touch. Do NOT add it, and NEVER
-          propose editing an unrelated test to force green.
+          or a failure in files this PR did not touch. Do not add it, and never
+          propose editing an unrelated test to force green: that hides someone
+          else's failure, and a draft left for a human is the safer outcome.
       - The brief criteria are binding invariants. A candidate fix that deletes,
         skips, inverts, or stops running a criteria-named test or behavior is a
         CONFLICT, never ACTIONABLE. Set `ci_status` to "conflict", add an entry to

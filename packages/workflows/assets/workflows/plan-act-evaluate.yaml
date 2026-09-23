@@ -377,13 +377,12 @@ nodes:
 
       ## Steps
 
-      1. Read the issue plan and the project's conventions.
-      2. Confirm the branch: read `$ARTIFACTS_DIR/.default-branch`; if HEAD is that
+      1. Confirm the branch: read `$ARTIFACTS_DIR/.default-branch`; if HEAD is that
          branch, create `plan-act-evaluate/<issue>-<slug>`; otherwise stay on the
          current (worktree) branch.
-      3. For each `### Task N:` in the plan: read the target file, make the edit,
-         run the project's checks, then commit with a conventional message.
-      4. Print a short status report: tasks done, anything deferred, deviations.
+      2. For each `### Task N:` in the plan: make the edit, run the project's
+         checks, then commit with a conventional message.
+      3. Print a short status report: tasks done, anything deferred, deviations.
 
   # EVALUATE (LOCAL) — AI review-and-improve loop. The agent reviews its own
   # change (contributor-model lens) + the project's own checks and fixes until it
@@ -687,7 +686,7 @@ nodes:
       | Policy    | No secrets; license / security clean? |
       | Fallback  | Cleanly revertible? |
 
-      ## Findings (house shape, matches the pr-review workflow)
+      ## Findings
 
       - `path:line` — `severity` (CRITICAL | HIGH | MEDIUM | LOW) · `confidence` (high/med/low)
       - **What**: one sentence
@@ -709,8 +708,9 @@ nodes:
     model: balanced
     model_by_provider:
       copilot: mai-code-1.1-flash
+    denied_tools: [Write, Edit]
     prompt: |
-      Copilot wrote this PR — you may NOT edit its branch. Render your judgment as
+      Copilot wrote this PR — you may not edit its branch. Render your judgment as
       a formal GitHub PR review so Copilot can revise and a human can gate it.
 
       Read `$ARTIFACTS_DIR/.pr-number` for the PR number, then submit ONE review:
@@ -722,7 +722,7 @@ nodes:
         body so Copilot can act on them:
         `forge pr review <PR> --request-changes --body "<findings>"`
 
-      Use a HEREDOC for `--body` to preserve markdown. Do not edit any files.
+      Use a HEREDOC for `--body` to preserve markdown.
 
       ## Review
 
