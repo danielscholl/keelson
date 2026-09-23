@@ -182,6 +182,9 @@ nodes:
           #   $KEELSON_ARTIFACTS_DIR     per-run scratch dir
           #   $KEELSON_NODE_<id>_OUTPUT  an upstream node's output (dashes in the
           #                              id become underscores: my-node -> my_node)
+          #   $KEELSON_NODE_<id>_OUTPUT_FILE  the same output in full; _OUTPUT is
+          #                              capped at 16 KiB, so parse JSON from this file
+          #   $KEELSON_INPUTS_<key>      a `--inputs key=value` value
           #   $KEELSON_ARGUMENTS         the invocation arguments
           # stdout becomes this node's output.
           bash: |
@@ -227,7 +230,7 @@ nodes:
          cross-vendor spread, and a literal model id only for an install-specific
          workflow.
       4. Every node id is unique kebab-case; never use the reserved ids
-         `inputs`, `memory`, `ARGUMENTS`, or `ARTIFACTS_DIR`.
+         `inputs`, `memory`, `converge`, `ARGUMENTS`, or `ARTIFACTS_DIR`.
       5. Use `depends_on` for order. A `$<id>.output` reference is only valid
          when `<id>` is in this node's depends_on chain.
       6. In `bash` / `script` bodies use the `$KEELSON_*` env channel — never

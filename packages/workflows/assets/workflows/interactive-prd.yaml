@@ -172,8 +172,7 @@ nodes:
       11. **Implementation Phases** — a status table with parallel opportunities.
       12. **Decisions Log** — key decisions made during the conversation.
 
-      Rules: write "TBD — needs research" instead of filler; be specific; every
-      file path in Technical Approach must be verified by reading the file.
+      Rules: write "TBD — needs research" instead of filler.
 
       After writing the file, output ONLY its path — the validator checks it next.
 
