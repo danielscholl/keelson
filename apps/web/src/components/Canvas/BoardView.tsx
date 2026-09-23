@@ -152,18 +152,16 @@ function ItemBarTrack({
     );
   }
   const pct = bar.value === null ? null : barPct(bar.value, bar.total);
+  // In percent, the same clamped reading the fill draws, so an over-full or
+  // zero-total bar still states a valid range.
   const meter = captioned
     ? {
         role: "meter",
         "aria-label": bar.label ?? bar.trailing,
         "aria-valuemin": 0,
-        "aria-valuemax": bar.total,
-        ...(bar.value === null
-          ? { "aria-valuetext": "unmeasured" }
-          : {
-              "aria-valuenow": bar.value,
-              ...(bar.trailing && bar.label ? { "aria-valuetext": bar.trailing } : {}),
-            }),
+        "aria-valuemax": 100,
+        ...(pct === null ? {} : { "aria-valuenow": pct }),
+        "aria-valuetext": bar.trailing ?? (pct === null ? "unmeasured" : `${pct}%`),
       }
     : {};
   return (

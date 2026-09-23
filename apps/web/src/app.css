@@ -5761,8 +5761,8 @@ a.cvb-card-title::after {
   width: 100%;
   height: 4px;
 }
-/* A captioned meter stacks its caption over the track; in a row the caption
-   ellipsizes rather than growing the line (the full text rides `title`). */
+/* A captioned meter stacks its caption over the track; the caption ellipsizes
+   rather than growing the card or row (the full text rides `title`). */
 .cvb-item-bar {
   display: flex;
   flex-direction: column;
@@ -5778,14 +5778,20 @@ a.cvb-card-title::after {
   line-height: 1.3;
   color: var(--muted);
 }
-.cvb-item-bar-label {
+.cvb-item-bar-label,
+.cvb-item-bar-trailing {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.cvb-item-bar-label {
+  flex: 1 1 auto;
+}
+/* Auto margin keeps a trailing-only caption right-aligned. */
 .cvb-item-bar-trailing {
-  flex: none;
+  flex: 0 1 auto;
+  margin-left: auto;
   font-family: ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
 }
@@ -5794,13 +5800,6 @@ a.cvb-card-title::after {
 }
 .cvb-row-bar--captioned .cvb-item-bar-caption {
   font-size: 10px;
-}
-.cvb-row-bar--captioned .cvb-item-bar-trailing {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Selectable rows — the cards click contract at row density. The constant
