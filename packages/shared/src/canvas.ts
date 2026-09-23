@@ -270,9 +270,13 @@ const canvasFieldSchema = z
   })
   // A clock's text is host-rendered and changes every tick, so there's no
   // stable value to link or copy.
-  .refine((f) => !f.clock || (f.href === undefined && !f.copyable && !f.copyAction), {
-    message: "a clock field carries only a label and tone",
-  })
+  .refine(
+    (f) =>
+      !f.clock || (f.href === undefined && f.copyable === undefined && f.copyAction === undefined),
+    {
+      message: "a clock field carries only a label and tone",
+    },
+  )
   // The link/copy/tone affordances all act on the scalar value; on a people
   // field they would dangle off a value that doesn't exist.
   .refine(
@@ -560,7 +564,6 @@ const statsSectionSchema = z
           // fabricated 0) — the same three-state vocabulary segments and bars
           // carry. A tile with nothing to say is omitted, not nulled.
           value: canvasCellScalarSchema.optional(),
-          // Alternative to `value`: the tile shows a ticking relative time.
           clock: canvasClockSchema.optional(),
           sub: z.string().optional(),
           tone: canvasToneSchema.optional(),

@@ -26,16 +26,21 @@ describe("formatClock", () => {
 });
 
 describe("useClockNow", () => {
-  test("advances on the shared tick and stops ticking once unmounted", () => {
+  test("every mounted clock shares one interval, which stops after the last unmount", () => {
     jest.useFakeTimers();
     try {
-      const { result, unmount } = renderHook(() => useClockNow());
-      const first = result.current;
+      const a = renderHook(() => useClockNow());
+      const b = renderHook(() => useClockNow());
+      expect(jest.getTimerCount()).toBe(1);
+      const first = a.result.current;
       act(() => {
         jest.advanceTimersByTime(CLOCK_TICK_MS);
       });
-      expect(result.current).toBeGreaterThan(first);
-      unmount();
+      expect(a.result.current).toBeGreaterThan(first);
+      expect(b.result.current).toBe(a.result.current);
+      a.unmount();
+      expect(jest.getTimerCount()).toBe(1);
+      b.unmount();
       expect(jest.getTimerCount()).toBe(0);
     } finally {
       jest.useRealTimers();

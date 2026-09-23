@@ -37,6 +37,12 @@ describe("relative clock", () => {
         },
       ],
       [{ kind: "cards", items: [{ title: "c", fields: [{ clock: { at, mode: "later" } }] }] }],
+      [
+        {
+          kind: "cards",
+          items: [{ title: "c", fields: [{ clock: { at, mode: "since" }, copyable: false }] }],
+        },
+      ],
     ];
     for (const sections of bad) expect(() => parse(sections)).toThrow();
   });
