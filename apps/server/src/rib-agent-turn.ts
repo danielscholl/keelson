@@ -18,6 +18,7 @@ import {
 import {
   coerceTokenUsage,
   type MessageChunk,
+  type ModelClass,
   type RibAgentTurn,
   type RibAgentTurnRequest,
   type RibAgentTurnResult,
@@ -77,6 +78,9 @@ export interface MakeRibAgentTurnDeps {
   // getPolicyEngine: the store is built by the composition root after the
   // ribs that use it activate.
   getUsageStore?: () => UsageStore | undefined;
+  // The operator's config.json modelClasses entry for a provider, consulted before
+  // the provider's own map when a turn names a modelClass.
+  resolveModelClass?: (providerId: string, modelClass: ModelClass) => string | undefined;
   // Test seam for DEFAULT_ABORT_DRAIN_GRACE_MS.
   abortDrainGraceMs?: number;
 }
@@ -92,6 +96,7 @@ interface ResolvedDeps {
   isTurnToolGranted?: (callerRibId: string, targetRibId: string, name: string) => boolean;
   getPolicyEngine?: () => PolicyEngine | undefined;
   getUsageStore?: () => UsageStore | undefined;
+  resolveModelClass?: (providerId: string, modelClass: ModelClass) => string | undefined;
   abortDrainGraceMs: number;
 }
 
@@ -116,6 +121,7 @@ function resolveDeps(deps: MakeRibAgentTurnDeps): ResolvedDeps {
     ...(deps.isTurnToolGranted ? { isTurnToolGranted: deps.isTurnToolGranted } : {}),
     ...(deps.getPolicyEngine ? { getPolicyEngine: deps.getPolicyEngine } : {}),
     ...(deps.getUsageStore ? { getUsageStore: deps.getUsageStore } : {}),
+    ...(deps.resolveModelClass ? { resolveModelClass: deps.resolveModelClass } : {}),
     abortDrainGraceMs: deps.abortDrainGraceMs ?? DEFAULT_ABORT_DRAIN_GRACE_MS,
   };
 }
@@ -224,6 +230,8 @@ async function runTurn(
     return { status: "error", text: "", error: errMessage(err), providerId, stopReason: "error" };
   }
 
+  const model = requestedModel(req, provider, providerId, deps);
+
   // Never inherit the server's (host repo) cwd; a turn that omits `cwd`
   // runs in the neutral directory.
   const cwd = req.cwd ?? deps.neutralCwd;
@@ -251,7 +259,7 @@ async function runTurn(
   const options: SendQueryOptions = {
     abortSignal: controller.signal,
     ...(req.system ? { systemPrompt: req.system } : {}),
-    ...(req.model ? { model: req.model } : {}),
+    ...(model ? { model } : {}),
     ...(req.turnContext !== undefined ? { turnContext: req.turnContext } : {}),
     ...(req.allowedDirectories !== undefined ? { allowedDirectories: req.allowedDirectories } : {}),
     onSessionId: (id) => {
@@ -280,7 +288,7 @@ async function runTurn(
       deps.getUsageStore?.()?.record({
         source: "rib",
         provider: providerId,
-        model: resolvedModel ?? req.model ?? "unknown",
+        model: resolvedModel ?? model ?? "unknown",
         inputTokens: turnUsage.inputTokens,
         outputTokens: turnUsage.outputTokens,
         ...(turnUsage.cacheReadInputTokens !== undefined
@@ -296,8 +304,10 @@ async function runTurn(
     const publicProviderStopReason =
       reportedFinish === "end" || reportedFinish === "max_tokens" ? reportedFinish : undefined;
     const stopReason = result.status === "ok" ? publicProviderStopReason : result.status;
+    const served = resolvedModel ?? model;
     return {
       ...result,
+      ...(served !== undefined ? { model: served } : {}),
       ...(turnUsage !== undefined ? { usage: turnUsage } : {}),
       ...(capturedSessionId !== undefined ? { sessionId: capturedSessionId } : {}),
       ...(stopReason !== undefined ? { stopReason } : {}),
@@ -402,6 +412,24 @@ async function runTurn(
   }
 
   return settle({ status: "ok", text: assistantText, providerId });
+}
+
+// An explicit model wins; a class resolves through config.json, then the
+// provider's map, then its default. Empty means the SDK decides.
+function requestedModel(
+  req: RibAgentTurnRequest,
+  provider: IAgentProvider,
+  providerId: string,
+  deps: ResolvedDeps,
+): string | undefined {
+  if (req.model) return req.model;
+  if (!req.modelClass) return undefined;
+  const capabilities = provider.getCapabilities?.();
+  const resolved =
+    deps.resolveModelClass?.(providerId, req.modelClass) ??
+    capabilities?.modelClasses?.[req.modelClass] ??
+    capabilities?.defaultModel;
+  return resolved ? resolved : undefined;
 }
 
 // Map the request's tool rails onto SendQueryOptions:

@@ -99,6 +99,7 @@ function makeRun(
     ...(deps.getPolicyEngine !== undefined ? { getPolicyEngine: deps.getPolicyEngine } : {}),
     ...(deps.getUsageStore !== undefined ? { getUsageStore: deps.getUsageStore } : {}),
     ...(deps.abortDrainGraceMs !== undefined ? { abortDrainGraceMs: deps.abortDrainGraceMs } : {}),
+    ...(deps.resolveModelClass !== undefined ? { resolveModelClass: deps.resolveModelClass } : {}),
   });
 }
 
@@ -226,6 +227,76 @@ describe("makeRibAgentTurn — provider routing", () => {
     const result = await run("chamber", { prompt: "hi", provider: "nope" }).result;
     expect(result.status).toBe("error");
     expect(result.error).toContain("not registered");
+  });
+});
+
+describe("makeRibAgentTurn — model classes and the served model", () => {
+  function classed(onQuery: (call: QueryCall) => void, chunks?: MessageChunk[]): IAgentProvider {
+    return {
+      ...fakeProvider({ onQuery, ...(chunks ? { chunks } : {}) }),
+      getCapabilities: () =>
+        ({
+          defaultModel: "mid-1",
+          modelClasses: { fast: "small-1", balanced: "mid-1", deep: "big-1" },
+        }) as never,
+    };
+  }
+
+  it("resolves a class through the provider's map and reports it as the model", async () => {
+    let sent: string | undefined;
+    const run = makeRun(classed((c) => (sent = c.options?.model)));
+    const result = await run("chat", { prompt: "hi", modelClass: "deep" }).result;
+    expect(sent).toBe("big-1");
+    expect(result.model).toBe("big-1");
+  });
+
+  it("prefers the operator's config entry, per provider", async () => {
+    let sent: string | undefined;
+    const run = makeRun(
+      classed((c) => (sent = c.options?.model)),
+      {
+        resolveModelClass: (id, cls) =>
+          id === "claude" && cls === "deep" ? "pinned-9" : undefined,
+      },
+    );
+    await run("chat", { prompt: "hi", modelClass: "deep" }).result;
+    expect(sent).toBe("pinned-9");
+    await run("chat", { prompt: "hi", modelClass: "fast" }).result;
+    expect(sent).toBe("small-1");
+  });
+
+  it("lets an explicit model win over the class", async () => {
+    let sent: string | undefined;
+    const run = makeRun(classed((c) => (sent = c.options?.model)));
+    await run("chat", { prompt: "hi", model: "exact-2", modelClass: "deep" }).result;
+    expect(sent).toBe("exact-2");
+  });
+
+  it("falls back to the default model when the provider has no map", async () => {
+    let sent: string | undefined;
+    const provider: IAgentProvider = {
+      ...fakeProvider({ onQuery: (c) => (sent = c.options?.model) }),
+      getCapabilities: () => ({ defaultModel: "only-1" }) as never,
+    };
+    await makeRun(provider)("chat", { prompt: "hi", modelClass: "fast" }).result;
+    expect(sent).toBe("only-1");
+  });
+
+  it("reports the model the provider says served the turn", async () => {
+    const run = makeRun(
+      classed(() => {}, [
+        { type: "model", model: "big-1-20260901" } as MessageChunk,
+        { type: "text", content: "hello" },
+        { type: "done" },
+      ]),
+    );
+    const result = await run("chat", { prompt: "hi", modelClass: "deep" }).result;
+    expect(result.model).toBe("big-1-20260901");
+  });
+
+  it("leaves the model off when the turn named none and the provider reported none", async () => {
+    const result = await makeRun(fakeProvider())("chat", { prompt: "hi" }).result;
+    expect(result.model).toBeUndefined();
   });
 });
 

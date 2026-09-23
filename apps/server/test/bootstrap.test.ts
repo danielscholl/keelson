@@ -22,6 +22,7 @@ import type {
   RecallResponse,
   RegisterOpRequest,
   Rib,
+  RibProviderInfo,
   ToolDefinition,
   WritebackRequest,
   WritebackResponse,
@@ -860,6 +861,55 @@ describe("bootstrapRibs", () => {
       expect(accessor?.()).toEqual([
         { id: "alpha-prov", displayName: "Alpha Provider" },
         { id: "beta-prov", displayName: "Beta Provider" },
+      ]);
+    } finally {
+      clearProviderRegistry();
+    }
+  });
+
+  test("getProviders carries each provider's default model and class map", async () => {
+    delete process.env.KEELSON_RIBS;
+    clearProviderRegistry();
+    const capabilities: ProviderCapabilities = {
+      sessionResume: false,
+      streaming: true,
+      tools: false,
+      reasoningEffort: false,
+      models: [],
+      defaultModel: "mid-1",
+      modelClasses: { fast: "small-1", balanced: "mid-1", deep: "big-1" },
+    };
+    const fakeProvider: IAgentProvider = {
+      async *sendQuery(): AsyncGenerator<MessageChunk> {},
+      getType: () => "fake",
+      getCapabilities: () => capabilities,
+      listModels: async () => [],
+    };
+    try {
+      registerProvider({
+        id: "classed-prov",
+        displayName: "Classed",
+        builtIn: true,
+        capabilities,
+        factory: () => fakeProvider,
+      });
+      let seen: readonly RibProviderInfo[] | undefined;
+      const reader: Rib = {
+        id: "alpha",
+        displayName: "alpha",
+        registerTools: (ctx) => {
+          seen = ctx.getProviders?.();
+          return [];
+        },
+      };
+      await bootstrapRibs({ available: { alpha: reader } });
+      expect(seen).toEqual([
+        {
+          id: "classed-prov",
+          displayName: "Classed",
+          defaultModel: "mid-1",
+          modelClasses: { fast: "small-1", balanced: "mid-1", deep: "big-1" },
+        },
       ]);
     } finally {
       clearProviderRegistry();

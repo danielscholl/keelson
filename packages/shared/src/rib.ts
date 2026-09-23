@@ -8,7 +8,7 @@
 
 import { z } from "zod";
 import { canvasActionItemSchema, canvasKindSchema, canvasToneSchema } from "./canvas.ts";
-import type { MessageChunk, TokenUsage } from "./chat.ts";
+import type { MessageChunk, ModelClass, ModelClassMap, TokenUsage } from "./chat.ts";
 
 import type { CommandCompletion, CommandInvokeResult, RibCommandDescriptor } from "./commands.ts";
 import type { RibDocsSource } from "./docs.ts";
@@ -99,6 +99,9 @@ export interface RibAgentTurnRequest {
   // first non-stub registered provider.
   provider?: string;
   model?: string;
+  // Resolved per provider like a workflow node's class: config.json modelClasses,
+  // then the provider's own map, then its default model. An explicit `model` wins.
+  modelClass?: ModelClass;
   // Omit for a text-only turn (the room default — no Bash/Edit between turns).
   tools?: readonly { name: string; [k: string]: unknown }[];
   // Forwarded verbatim to tool executions; only the calling rib interprets it.
@@ -122,6 +125,9 @@ export interface RibAgentTurnResult {
   error?: string;
   // The provider id the turn resolved to.
   providerId?: string;
+  // The model that served the turn as the provider reported it, else the model
+  // the turn asked for. Absent when neither is known.
+  model?: string;
   // The provider's backend session id for this turn, when it reported one.
   // Pass it as the next turn's resumeSessionId to continue the same session
   // with providers whose capabilities.sessionResume is true.
@@ -299,6 +305,10 @@ export interface AcquireMutationLockRequest {
 export interface RibProviderInfo {
   readonly id: string;
   readonly displayName: string;
+  // Empty or absent means the provider's SDK picks.
+  readonly defaultModel?: string;
+  // The provider's class map with config.json modelClasses applied.
+  readonly modelClasses?: ModelClassMap;
 }
 
 // One name's verdict from RibContext.getToolReachability: "reachable" means the floor

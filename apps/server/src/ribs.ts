@@ -420,12 +420,25 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
               opts.acquireMutationLock!(rib.id, req),
           }
         : {}),
-      // Normalize to the minimal {id, displayName} shape at the boundary so a richer
+      // Normalize to the RibProviderInfo shape at the boundary so a richer
       // embedder-supplied list (e.g. live ProviderInfo) can't leak control-plane fields.
       ...(opts.getProviders
         ? {
             getProviders: () =>
-              opts.getProviders!().map(({ id, displayName }) => ({ id, displayName })),
+              opts.getProviders!().map(({ id, displayName, defaultModel, modelClasses }) => ({
+                id,
+                displayName,
+                ...(defaultModel ? { defaultModel } : {}),
+                ...(modelClasses
+                  ? {
+                      modelClasses: {
+                        fast: modelClasses.fast,
+                        balanced: modelClasses.balanced,
+                        deep: modelClasses.deep,
+                      },
+                    }
+                  : {}),
+              })),
           }
         : {}),
       ...(opts.startWorkflow
