@@ -41,7 +41,7 @@ describe("resolveWorkflowResolution", () => {
           id: "review",
           prompt: "Review.",
           model: "deep",
-          model_by_provider: { copilot: "gpt-5.6-sol" },
+          model_by_provider: { copilot: "gpt-6-sol" },
         },
       ],
       { provider: "copilot" },
@@ -58,7 +58,7 @@ describe("resolveWorkflowResolution", () => {
         nodeId: "review",
         preferredProvider: "copilot",
         effectiveProvider: "copilot",
-        model: "gpt-5.6-sol",
+        model: "gpt-6-sol",
         providerFellBack: false,
         modelFellBack: false,
       },
@@ -72,7 +72,7 @@ describe("resolveWorkflowResolution", () => {
           id: "review",
           prompt: "Review.",
           model: "deep",
-          model_by_provider: { copilot: "gpt-5.6-sol" },
+          model_by_provider: { copilot: "gpt-6-sol" },
         },
       ],
       { provider: "copilot" },
@@ -99,7 +99,7 @@ describe("resolveWorkflowResolution", () => {
         id: "logic",
         prompt: "Review logic.",
         model: "deep",
-        model_by_provider: { copilot: "gpt-5.6-sol" },
+        model_by_provider: { copilot: "gpt-6-sol" },
       },
       {
         id: "risk",
@@ -170,7 +170,7 @@ describe("resolveWorkflowResolution", () => {
           id: "command",
           command: "review",
           model: "deep",
-          model_by_provider: { copilot: "gpt-5.6-sol" },
+          model_by_provider: { copilot: "gpt-6-sol" },
         },
         {
           id: "loop",
@@ -224,7 +224,7 @@ describe("resolveWorkflowResolution", () => {
         prompt: "Copilot.",
         provider: "copilot",
         model: "deep",
-        model_by_provider: { copilot: "gpt-5.6-sol" },
+        model_by_provider: { copilot: "gpt-6-sol" },
       },
       {
         id: "first",
@@ -257,7 +257,7 @@ describe("resolveWorkflowResolution", () => {
 
   test("falls back from a foreign literal outside the effective provider catalog", () => {
     const result = resolveWorkflowResolution(
-      makeWorkflow([{ id: "draft", prompt: "Draft.", model: "gpt-5.6-sol" }], {
+      makeWorkflow([{ id: "draft", prompt: "Draft.", model: "gpt-6-sol" }], {
         provider: "copilot",
       }),
       {
@@ -275,7 +275,7 @@ describe("resolveWorkflowResolution", () => {
 
   test("does not validate a literal against its own pinned provider catalog", () => {
     const result = resolveWorkflowResolution(
-      makeWorkflow([{ id: "draft", prompt: "Draft.", model: "gpt-5.6-sol" }], {
+      makeWorkflow([{ id: "draft", prompt: "Draft.", model: "gpt-6-sol" }], {
         provider: "copilot",
       }),
       {
@@ -286,7 +286,7 @@ describe("resolveWorkflowResolution", () => {
 
     expect(result.tier).toBe("native");
     expect(result.nodes[0]).toMatchObject({
-      model: "gpt-5.6-sol",
+      model: "gpt-6-sol",
       modelFellBack: false,
     });
   });

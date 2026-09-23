@@ -18,14 +18,14 @@
 # never see each other (`context: fresh`); `verify` tries to REFUTE what they
 # claim; `decide` rules on what survives. Models are pinned across three
 # vendors so no node checks or judges its own reasoning:
-#   - CLASSIFY (`gpt-5.6-sol`, high): per-issue labelling, grounded by reading
+#   - CLASSIFY (`gpt-6-sol`, high): per-issue labelling, grounded by reading
 #     the repo rather than guessing from titles. High, not xhigh — this is wide
 #     mechanical work over many issues, not one deep problem.
 #   - ANALYZE (`claude-opus-5`, xhigh): the cross-issue lens — duplicate
 #     clusters, already-fixed, off-direction, what to do next. The judgment the
 #     run lives or dies on.
-#   - VERIFY (`gpt-5.6-terra`, xhigh): the source-grounded fact-checker; a
-#     GPT-5.6 variant distinct from the classifier whose claims it re-derives.
+#   - VERIFY (`gpt-6-luna`, xhigh): the source-grounded fact-checker; a
+#     GPT-6 variant distinct from the classifier whose claims it re-derives.
 #   - DECIDE (`claude-opus-4.8`, xhigh): presides over output that is never its
 #     own, and is the only node whose words reach the repo.
 #   - REPORT (`claude-opus-5`, high): authors the published dashboard. Rendering,
@@ -227,7 +227,7 @@ nodes:
   - id: classify
     depends_on: [context, gather]
     context: fresh
-    model: gpt-5.6-sol
+    model: gpt-6-sol
     effort: high
     idle_timeout: 900000
     allowed_tools: [Read, Glob, Grep]
@@ -367,7 +367,7 @@ nodes:
   - id: verify
     depends_on: [classify, analyze]
     context: fresh
-    model: gpt-5.6-terra
+    model: gpt-6-luna
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: [Read, Glob, Grep]

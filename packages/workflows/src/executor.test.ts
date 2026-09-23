@@ -2227,7 +2227,7 @@ nodes:
                   output: { kind: "text", text: "fix-output" },
                   error: "still red",
                   provider: "copilot",
-                  model: "gpt-5.6-terra",
+                  model: "gpt-6-luna",
                 };
               }
               if (node.id === "gate") {
@@ -2251,12 +2251,12 @@ nodes:
       state: "completed",
       output: "fix-output",
       provider: "copilot",
-      model: "gpt-5.6-terra",
+      model: "gpt-6-luna",
     });
     expect(downstreamFixOutput).toMatchObject({
       state: "completed",
       provider: "copilot",
-      model: "gpt-5.6-terra",
+      model: "gpt-6-luna",
     });
     const absorbedDone = events.find(
       (event) =>
@@ -2265,7 +2265,7 @@ nodes:
     expect(absorbedDone?.type === "node_done" ? absorbedDone.result : undefined).toMatchObject({
       status: "succeeded",
       provider: "copilot",
-      model: "gpt-5.6-terra",
+      model: "gpt-6-luna",
     });
     expect(summary.nodes.gate).toMatchObject({
       state: "completed",

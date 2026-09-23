@@ -92,9 +92,9 @@ crosses between stages is each node's output.
 | `subject-status` | bash | Publishes whether the optional subject snapshot succeeded, failed, or was not requested. |
 | `author-seat` | bash | Trims `author` and emits `seated` when it is omitted or blank, giving every model selector a defined value. |
 | `reviewer-logic` | prompt | **`model: claude-opus-5`**, **`effort: xhigh`**: attacks internal soundness (does the conclusion follow, what is assumed) with a per-claim verdict. No tools. |
-| `reviewer-evidence` | prompt | **`model: gpt-5.6-sol`**, **`effort: xhigh`**: separates what the artifact *shows* from what it *asserts*, and lists the checkable claims. No tools. |
+| `reviewer-evidence` | prompt | **`model: gpt-6-sol`**, **`effort: xhigh`**: separates what the artifact *shows* from what it *asserts*, and lists the checkable claims. No tools. |
 | `reviewer-risk` | prompt | **`model: grok-4.6`**, **`effort: high`**: assumes the artifact is adopted and finds what breaks, tracing bad inputs, retries, and partial completion through the proposal, weighted by cost of failure; where the artifact chooses an approach, it also names the strongest alternative ignored. No tools. |
-| `verify` | prompt | **`model: gpt-5.6-terra`**, **`effort: xhigh`**: re-checks the reviewers' load-bearing claims against real source with `Read`/`Glob`/`Grep`, trusting no one. Checks against the `subject` snapshot when one was taken, else the working directory (where absence of the change is `UNVERIFIABLE-HERE`, never refutation). |
+| `verify` | prompt | **`model: gpt-6-luna`**, **`effort: xhigh`**: re-checks the reviewers' load-bearing claims against real source with `Read`/`Glob`/`Grep`, trusting no one. Checks against the `subject` snapshot when one was taken, else the working directory (where absence of the change is `UNVERIFIABLE-HERE`, never refutation). |
 | `verify-gate` | bash | Requires literal `Claim:` and `Result:` records before synthesis. Leading list and bold markers are accepted. |
 | `synthesize` | prompt | **`model: claude-opus-4.8`**, **`effort: xhigh`**: weighs the lenses against the verification and issues the verdict as structured output (`verdict` / `headline` / `must_fix` / `open_questions` + full prose `report`), a terse ship/no-ship call with dissent; a comparative artifact must get a choice, not a fence-sit. No tools. |
 | `save` | bash | Runs after all five prompt lanes settle and writes their current outputs to `out`, preferring the full output spill over the capped environment value and removing stale files for lanes with no current output. |
@@ -105,7 +105,7 @@ high effort is one long think followed by text, exactly the chunk-sparse shape a
 default idle timeout kills. The pins put each lens on a different vendor,
 because lenses sharing one model share its blind spots and can wave the same
 flaw through unanimously; the verifier re-derives their claims on
-`gpt-5.6-terra` and the judge presides on `claude-opus-4.8`, models no lens uses,
+`gpt-6-luna` and the judge presides on `claude-opus-4.8`, models no lens uses,
 so no node checks or judges its own reasoning. All five ids are
 account-dependent: swap or drop any to `auto` (dropping its `effort:` tier with
 it) if your Copilot list lacks it.

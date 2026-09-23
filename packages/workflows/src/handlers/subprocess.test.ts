@@ -111,7 +111,7 @@ describe("buildSubprocessEnv", () => {
           completedAt: "2026-05-22T00:00:01Z",
           durationMs: 1000,
           provider: "copilot",
-          model: "gpt-5.6-sol",
+          model: "gpt-6-sol",
         },
       ],
     ]);
@@ -125,7 +125,7 @@ describe("buildSubprocessEnv", () => {
     expect(env.KEELSON_NODE_fetch_stats_OUTPUT).toBe("ok");
     expect(env.KEELSON_NODE_fetch_stats_STATE).toBe("completed");
     expect(env.KEELSON_NODE_fetch_stats_PROVIDER).toBe("copilot");
-    expect(env.KEELSON_NODE_fetch_stats_MODEL).toBe("gpt-5.6-sol");
+    expect(env.KEELSON_NODE_fetch_stats_MODEL).toBe("gpt-6-sol");
   });
 
   test("exposes failed output state and clears inherited provenance", () => {

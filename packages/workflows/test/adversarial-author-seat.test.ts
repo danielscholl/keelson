@@ -37,11 +37,11 @@ const SEATS = [
   },
   {
     id: "reviewer-evidence",
-    defaultModel: "gpt-5.6-sol",
+    defaultModel: "gpt-6-sol",
     alternateModel: "gpt-6-astra",
   },
   { id: "reviewer-risk", defaultModel: "grok-4.6", alternateModel: "grok-4.5" },
-  { id: "verify", defaultModel: "gpt-5.6-terra", alternateModel: "gpt-5.5" },
+  { id: "verify", defaultModel: "gpt-6-luna", alternateModel: "gpt-5.5" },
   {
     id: "synthesize",
     defaultModel: "claude-opus-4.8",

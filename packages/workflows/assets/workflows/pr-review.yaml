@@ -243,7 +243,7 @@ nodes:
     # share blind spots.
     model: deep
     model_by_provider:
-      copilot: gpt-5.6-sol
+      copilot: gpt-6-sol
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
     output_format:
