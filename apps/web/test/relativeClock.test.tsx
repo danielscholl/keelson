@@ -46,6 +46,18 @@ describe("useClockNow", () => {
       jest.useRealTimers();
     }
   });
+
+  test("a clock that replaces the only mounted clock in one commit reads real time", () => {
+    const inAnHour = Date.now() + 60 * 60_000 + 10_000;
+    function Clock() {
+      return <span>{formatClock(inAnHour, useClockNow(), "until")}</span>;
+    }
+    const { container, rerender, unmount } = render(<Clock key="running" />);
+    expect(container.textContent).toBe("1 h left");
+    rerender(<Clock key="request" />);
+    expect(container.textContent).toBe("1 h left");
+    unmount();
+  });
 });
 
 function board(sections: unknown[]): CanvasBoardView {
