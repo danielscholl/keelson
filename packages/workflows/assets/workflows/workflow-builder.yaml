@@ -283,7 +283,7 @@ nodes:
       NAME=$(printf '%s' "$INTENT" | jq -r '.workflow_name // empty' | tr -d '\r')
       TRIGGERS=$(printf '%s' "$INTENT" | jq -r '.trigger_phrases // empty' | tr -d '\r')
       # The name becomes a file path, so it must be a plain kebab-case slug.
-      if ! printf '%s' "$NAME" | grep -Eq '^[a-z0-9][a-z0-9-]*$'; then
+      if ! [[ "$NAME" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
         echo "ERROR: workflow_name '$NAME' is not kebab-case; not installing." >&2
         exit 1
       fi

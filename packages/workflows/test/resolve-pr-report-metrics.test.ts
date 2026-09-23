@@ -110,4 +110,14 @@ shimDescribe("resolve-pr report-metrics", () => {
       reply_failures: [],
     });
   });
+
+  test("a mergeability value that is valid JSON but not an object reports unknowns", () => {
+    for (const bad of ["[]", "true", '{"open_threads": {"path": "x"}}']) {
+      const metrics = run({ "mergeability.json": bad });
+      expect(metrics.rounds).toBeNull();
+      expect(metrics.ci_status).toBe("UNKNOWN");
+      expect(metrics.review_threads_clear).toBeNull();
+      expect(metrics.open_paths).toEqual([]);
+    }
+  });
 });

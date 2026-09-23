@@ -958,12 +958,22 @@ nodes:
         fi
         REPLIED=$((REPLIED + 1))
         add_outcome replied "$TID"
+        # Recorded before resolving so an exit mid-resolve can't lead a resumed run to reply twice.
+        jq --argjson e "$ENTRY" --argjson round "$ROUND" \
+          '. + [($e | {threadId, commentId, action, decision, fix_kind, commit, reply, resolve_authorized})
+                + {replied: true, resolved: false, round: $round}]' \
+          "$HANDLED" > "$HANDLED.tmp" && mv "$HANDLED.tmp" "$HANDLED"
+        done_thread "$TID"
         RES=false
         if [ "$(jq -r '.resolve_authorized' <<<"$ENTRY" | tr -d '\r')" = "true" ]; then
           if forge pr resolve-thread "$PR_NUM" --thread "$TID" >&2; then
             RES=true
             RESOLVED=$((RESOLVED + 1))
             add_outcome resolved "$TID"
+            jq --arg tid "$TID" --argjson round "$ROUND" \
+              '(to_entries | map(select(.value.threadId == $tid and .value.round == $round)) | last | .key) as $k
+               | .[$k].resolved = true' \
+              "$HANDLED" > "$HANDLED.tmp" && mv "$HANDLED.tmp" "$HANDLED"
           else
             # Recorded unresolved so resolve-retry retries the resolve without a second reply.
             record_failure "$(jq -cn --arg t "$TID" '[$t]')" "forge pr resolve-thread failed"
@@ -971,11 +981,6 @@ nodes:
           fi
         fi
         [ "$RES" = "true" ] || add_outcome left_open "$TID"
-        jq --argjson e "$ENTRY" --argjson resolved "$RES" --argjson round "$ROUND" \
-          '. + [($e | {threadId, commentId, action, decision, fix_kind, commit, reply, resolve_authorized})
-                + {replied: true, resolved: $resolved, round: $round}]' \
-          "$HANDLED" > "$HANDLED.tmp" && mv "$HANDLED.tmp" "$HANDLED"
-        done_thread "$TID"
       done
       echo "reply-resolve: $REPLIED replied, $RESOLVED resolved, $FAILED failed, $SKIPPED already replied this round."
 
@@ -1392,7 +1397,7 @@ nodes:
         --slurpfile f "$TMP/failures.json" '
         ($h[0] | if type == "array" then . else [] end | map(select(type == "object"))
           | reduce .[] as $e ({}; .[$e.threadId | tostring] = $e) | [.[]]) as $latest
-        | ($m[0] // {}) as $m
+        | ($m[0] | if type == "object" then . else {} end) as $m
         | {
             rounds: ($m.round // null),
             replied: ([$latest[] | select(.replied == true)] | length),
@@ -1405,7 +1410,8 @@ nodes:
               | .threadId],
             ci_status: ($m.ci_status // "UNKNOWN"),
             review_threads_clear: (if $m | has("review_threads_clear") then $m.review_threads_clear else null end),
-            open_paths: [($m.open_threads // [])[] | (.path // "(general)")],
+            open_paths: [($m.open_threads | if type == "array" then . else [] end)[]
+              | if type == "object" then (.path // "(general)") else "(general)" end],
             reply_failures: ($f[0] | if type == "array" then . else [] end)
           }'
 

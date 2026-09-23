@@ -48,7 +48,8 @@ function result(threadId: string, resolveAuthorized: boolean): Result {
 }
 
 // `forge` is a shell function that logs each call (with the reply body it read)
-// and fails for the thread ids named in FAIL_REPLY / FAIL_RESOLVE.
+// and fails for the thread ids named in FAIL_REPLY / FAIL_RESOLVE; CRASH_RESOLVE
+// exits the whole script mid-resolve, as a killed or timed-out node would.
 const FORGE_STUB = `forge() {
   if [ "$2" = "reply" ]; then
     printf '%s body=%s\\n' "$2 $3 $5 $7" "$(cat "$9")" >> "$KEELSON_ARTIFACTS_DIR/forge.log"
@@ -57,6 +58,7 @@ const FORGE_STUB = `forge() {
   fi
   if [ "$2" = "reply" ] && [ "$5" = "\${FAIL_REPLY:-}" ]; then return 1; fi
   if [ "$2" = "resolve-thread" ] && [ "$5" = "\${FAIL_RESOLVE:-}" ]; then return 1; fi
+  if [ "$2" = "resolve-thread" ] && [ "$5" = "\${CRASH_RESOLVE:-}" ]; then exit 9; fi
   return 0
 }
 `;
@@ -139,6 +141,29 @@ shimDescribe("resolve-pr reply-resolve", () => {
       },
     ]);
     expect(out.handled.at(-1)).toMatchObject({ threadId: "t-fix", replied: true, resolved: false });
+  });
+
+  test("an exit during resolve leaves the posted reply in the ledger, so a resume won't repeat it", () => {
+    const crashed = run([result("t-fix", true)], { CRASH_RESOLVE: "t-fix" });
+
+    expect(crashed.exitCode).toBe(9);
+    expect(crashed.handled.at(-1)).toMatchObject({
+      threadId: "t-fix",
+      replied: true,
+      resolved: false,
+      round: 2,
+    });
+    expect(crashed.failures).toEqual([
+      {
+        round: 2,
+        stage: "reply-resolve",
+        threads: [],
+        reason: "reply-resolve exited with status 9 before finishing",
+      },
+    ]);
+
+    const resumed = run([result("t-fix", true)], {}, crashed.handled);
+    expect(resumed.forgeLog).toEqual([]);
   });
 
   test("a resumed run skips threads this round already replied to", () => {
