@@ -583,6 +583,36 @@ describe("canvasViewSchema", () => {
     }
   });
 
+  it("parses an optional label/trailing caption on both item bar forms", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [
+            {
+              title: "lead",
+              bar: { value: 18, total: 80, label: "Turn budget used", trailing: "18 of 80" },
+            },
+            { title: "b", bar: { segments: [{ label: "done", n: 1 }], label: "Stages" } },
+          ],
+        },
+        { kind: "rows", items: [{ text: "r", bar: { value: null, total: 4, trailing: "?" } }] },
+      ],
+    });
+    expect(v.view).toBe("board");
+    for (const bad of [{ label: "" }, { trailing: "x".repeat(121) }]) {
+      expect(() =>
+        canvasViewSchema.parse({
+          view: "board",
+          sections: [
+            { kind: "cards", items: [{ title: "x", bar: { value: 1, total: 2, ...bad } }] },
+          ],
+        }),
+      ).toThrow();
+    }
+  });
+
   it("parses rows action/selected parity and enforces the cards rules on rows", () => {
     const v = canvasViewSchema.parse({
       view: "board",

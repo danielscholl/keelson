@@ -110,10 +110,39 @@ export function Segments({ items, strip = false }: { items: Segment[]; strip?: b
 
 // A card/row bar: the `{ value, total }` fill or the segmented composition
 // strip at item scale. The strip form has no legend, so it carries its reading
-// as an accessible label and per-fill hover titles.
+// as an accessible label and per-fill hover titles. A captioned bar draws its
+// label/trailing with the track and folds them into the track's accessible
+// name, so the visible caption is hidden from assistive tech to avoid a double read.
 function ItemBar({ bar, className }: { bar: CanvasItemBar; className?: string }) {
+  const captioned = bar.label !== undefined || bar.trailing !== undefined;
+  const track = <ItemBarTrack bar={bar} className={className} captioned={captioned} />;
+  if (!captioned) return track;
+  const caption = [bar.label, bar.trailing].filter(Boolean).join(" · ");
+  return (
+    <div className="cvb-item-bar" title={caption}>
+      <div className="cvb-item-bar-caption" aria-hidden="true">
+        {bar.label && <span className="cvb-item-bar-label">{bar.label}</span>}
+        {bar.trailing && <span className="cvb-item-bar-trailing">{bar.trailing}</span>}
+      </div>
+      {track}
+    </div>
+  );
+}
+
+function ItemBarTrack({
+  bar,
+  className,
+  captioned,
+}: {
+  bar: CanvasItemBar;
+  className?: string;
+  captioned: boolean;
+}) {
   if ("segments" in bar) {
-    const label = bar.segments.map((s) => `${s.label} ${s.n ?? "unmeasured"}`).join(", ");
+    const reading = bar.segments.map((s) => `${s.label} ${s.n ?? "unmeasured"}`).join(", ");
+    const label = [bar.label ? `${bar.label}: ${reading}` : reading, bar.trailing]
+      .filter(Boolean)
+      .join(", ");
     return (
       <Strip
         segments={bar.segments}
@@ -123,8 +152,22 @@ function ItemBar({ bar, className }: { bar: CanvasItemBar; className?: string })
     );
   }
   const pct = bar.value === null ? null : barPct(bar.value, bar.total);
+  const meter = captioned
+    ? {
+        role: "meter",
+        "aria-label": bar.label ?? bar.trailing,
+        "aria-valuemin": 0,
+        "aria-valuemax": bar.total,
+        ...(bar.value === null
+          ? { "aria-valuetext": "unmeasured" }
+          : {
+              "aria-valuenow": bar.value,
+              ...(bar.trailing && bar.label ? { "aria-valuetext": bar.trailing } : {}),
+            }),
+      }
+    : {};
   return (
-    <div className={`cvb-bar-track${className ? ` ${className}` : ""}`}>
+    <div className={`cvb-bar-track${className ? ` ${className}` : ""}`} {...meter}>
       {pct === null ? (
         <div className="cvb-bar-fill cvb-bar-fill--unmeasured" />
       ) : (
@@ -1255,7 +1298,9 @@ function Section({ section }: { section: BoardSection }) {
                   <span className="cvb-row-text">{r.text}</span>
                 )}
                 {r.bar && (
-                  <span className="cvb-row-bar">
+                  <span
+                    className={`cvb-row-bar${r.bar.label || r.bar.trailing ? " cvb-row-bar--captioned" : ""}`}
+                  >
                     <ItemBar bar={r.bar} />
                   </span>
                 )}

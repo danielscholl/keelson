@@ -5761,6 +5761,47 @@ a.cvb-card-title::after {
   width: 100%;
   height: 4px;
 }
+/* A captioned meter stacks its caption over the track; in a row the caption
+   ellipsizes rather than growing the line (the full text rides `title`). */
+.cvb-item-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  width: 100%;
+}
+.cvb-item-bar-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--muted);
+}
+.cvb-item-bar-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cvb-item-bar-trailing {
+  flex: none;
+  font-family: ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.cvb-row-bar--captioned {
+  width: 160px;
+}
+.cvb-row-bar--captioned .cvb-item-bar-caption {
+  font-size: 10px;
+}
+.cvb-row-bar--captioned .cvb-item-bar-trailing {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Selectable rows — the cards click contract at row density. The constant
    left inset reserves room for the selection bar so choosing a row never

@@ -137,6 +137,59 @@ describe("shared item bar on cards and rows", () => {
   });
 });
 
+describe("captioned item bar", () => {
+  test("a captioned value bar draws its caption and exposes a named meter", () => {
+    const { container } = render(
+      <BoardView
+        view={board([
+          {
+            kind: "cards",
+            items: [
+              {
+                title: "lead",
+                bar: { value: 18, total: 80, label: "Turn budget used", trailing: "18 of 80" },
+              },
+              { title: "plain", bar: { value: 1, total: 2 } },
+            ],
+          },
+        ])}
+      />,
+    );
+    const caption = container.querySelector(".cvb-item-bar-caption");
+    expect(caption?.getAttribute("aria-hidden")).toBe("true");
+    expect(caption?.textContent).toBe("Turn budget used18 of 80");
+    const meter = screen.getByRole("meter", { name: "Turn budget used" });
+    expect(meter.getAttribute("aria-valuenow")).toBe("18");
+    expect(meter.getAttribute("aria-valuemax")).toBe("80");
+    expect(meter.getAttribute("aria-valuetext")).toBe("18 of 80");
+    // An uncaptioned bar keeps its bare track: no wrapper, no meter role.
+    expect(container.querySelectorAll(".cvb-item-bar").length).toBe(1);
+    expect(container.querySelectorAll('[role="meter"]').length).toBe(1);
+  });
+
+  test("a captioned segment bar folds the caption into the strip label; rows widen the meter", () => {
+    const { container } = render(
+      <BoardView
+        view={board([
+          {
+            kind: "rows",
+            items: [
+              {
+                text: "epic-4",
+                bar: { segments: [{ label: "done", n: 2 }], label: "Stages", trailing: "2 of 5" },
+              },
+            ],
+          },
+        ])}
+      />,
+    );
+    expect(container.querySelector(".cvb-row-bar--captioned")).toBeTruthy();
+    expect(container.querySelector(".cvb-strip--item")?.getAttribute("aria-label")).toBe(
+      "Stages: done 2, 2 of 5",
+    );
+  });
+});
+
 describe("rows action/selected parity", () => {
   test("a selectable row dispatches its action and wears the selection state", async () => {
     const calls: RibAction[] = [];
