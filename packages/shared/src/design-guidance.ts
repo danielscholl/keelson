@@ -191,7 +191,7 @@ Unmeasured is not zero: when a collector fails, say so in the data — n: null o
 
 Hierarchy: summary before detail — stats/segments first, tables and feeds after. One board answers one operator question, and header.status answers it fastest; don't repeat one fact across three sections. columns is layout only (one level deep) for genuinely side-by-side content, not a way to cram more in.
 
-Tone discipline mirrors the four color jobs: ok/warn/error/info/caution are state; id-* are actors (assigned once, always named, never status); ramp-1…5 is ordered magnitude; brand/accent are identity chrome. A number that is not a judgment wears NO tone — an all-toned board says nothing. Direction is never color-alone: the delta glyph rides regardless of tone.
+Tone discipline mirrors the four color jobs: ok/warn/error/info/caution are state; id-* are actors (assigned once, always named, never status); ramp-1…5 is ordered magnitude; brand/accent are identity chrome. A number that is not a judgment wears NO tone — an all-toned board says nothing. Direction is never color-alone: the delta glyph rides regardless of tone. A card's edge (a tone) is a colored left rule for the one card that needs attention; the card still says why in text.
 
 Board anti-patterns: a stats item per data row (stats summarize; the data is a table); tone on every value; a chart for two points (a delta says it better); segments with one segment; cards for what is really a table; verbs scattered across sections instead of one actions strip; free-text trend arrows in sub (that is what delta is for); a spark whose story the value and delta don't already tell; a 0 (or a dropped segment) standing in for a failed read — unmeasured is null and renders hatched.`,
 

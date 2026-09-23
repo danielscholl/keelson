@@ -282,3 +282,24 @@ describe("prose card fields", () => {
     expect(container.querySelector(".cvb-card-fields--stacked")).toBeFalsy();
   });
 });
+
+describe("card edge", () => {
+  test("an edged card carries data-edge; ghost and unedged cards don't", () => {
+    const { container } = render(
+      <BoardView
+        view={board([
+          {
+            kind: "cards",
+            items: [
+              { title: "blocked", edge: "warn" },
+              { title: "idle" },
+              { title: "open seat", ghost: true, edge: "error" },
+            ],
+          },
+        ])}
+      />,
+    );
+    const cards = [...container.querySelectorAll(".cvb-card")];
+    expect(cards.map((c) => c.getAttribute("data-edge"))).toEqual(["warn", null, null]);
+  });
+});

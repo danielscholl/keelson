@@ -645,6 +645,10 @@ const cardsSectionSchema = z
           // stretching its grid row. For multi-section prose (a charter, a brief).
           prose: z.boolean().optional(),
           dot: canvasToneSchema.optional(),
+          // A toned left rule that lifts the one card needing attention out of a
+          // board of look-alikes. Decoration only: the card must still say why in
+          // text (a pill, a reason). Ignored on ghost cards.
+          edge: canvasToneSchema.optional(),
           pill: canvasPillSchema.optional(),
           href: z.string().optional(),
           // Selectable-card affordance for pick/toggle benches where the card IS

@@ -1098,6 +1098,7 @@ function Section({ section }: { section: BoardSection }) {
               <div
                 key={key(c.title)}
                 className={`cvb-card${c.ghost ? " cvb-card--ghost" : ""}${pad ? " cvb-card--pad" : ""}${cardAction ? " cvb-card--selectable" : ""}${c.selected ? " is-selected" : ""}`}
+                {...(c.edge && !c.ghost ? { "data-edge": c.edge } : {})}
                 {...(pad ? { "aria-hidden": true } : {})}
               >
                 {cardAction && (

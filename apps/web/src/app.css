@@ -4436,6 +4436,66 @@ button.cvb-action-field-model:disabled {
   background: color-mix(in srgb, var(--accent) 6%, var(--card-2));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
 }
+/* Toned left rule. Doubled attribute so it outranks the selected/hover
+   border-color rules; the padding trade keeps content from shifting. */
+.cvb-card[data-edge][data-edge] {
+  border-left: 3px solid var(--cvb-edge, var(--border));
+  padding-left: 10px;
+}
+.cvb-card[data-edge="ok"] {
+  --cvb-edge: var(--green);
+}
+.cvb-card[data-edge="warn"] {
+  --cvb-edge: var(--yellow);
+}
+.cvb-card[data-edge="error"] {
+  --cvb-edge: var(--red);
+}
+.cvb-card[data-edge="info"] {
+  --cvb-edge: var(--cyan);
+}
+.cvb-card[data-edge="caution"] {
+  --cvb-edge: var(--orange);
+}
+.cvb-card[data-edge="brand"] {
+  --cvb-edge: var(--magenta);
+}
+.cvb-card[data-edge="accent"] {
+  --cvb-edge: var(--accent);
+}
+.cvb-card[data-edge="neutral"] {
+  --cvb-edge: var(--muted);
+}
+.cvb-card[data-edge="id-blue"] {
+  --cvb-edge: var(--id-blue);
+}
+.cvb-card[data-edge="id-amber"] {
+  --cvb-edge: var(--id-amber);
+}
+.cvb-card[data-edge="id-teal"] {
+  --cvb-edge: var(--id-teal);
+}
+.cvb-card[data-edge="id-rose"] {
+  --cvb-edge: var(--id-rose);
+}
+.cvb-card[data-edge="id-olive"] {
+  --cvb-edge: var(--id-olive);
+}
+.cvb-card[data-edge="ramp-1"] {
+  --cvb-edge: var(--ramp-1);
+}
+.cvb-card[data-edge="ramp-2"] {
+  --cvb-edge: var(--ramp-2);
+}
+.cvb-card[data-edge="ramp-3"] {
+  --cvb-edge: var(--ramp-3);
+}
+.cvb-card[data-edge="ramp-4"] {
+  --cvb-edge: var(--ramp-4);
+}
+.cvb-card[data-edge="ramp-5"] {
+  --cvb-edge: var(--ramp-5);
+}
 .cvb-card--ghost {
   border-style: dashed;
   background: transparent;
