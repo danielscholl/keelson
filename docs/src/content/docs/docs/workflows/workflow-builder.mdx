@@ -37,7 +37,7 @@ and `validate-yaml` as the parse gate.
 <figure>
   <img
     src={`${import.meta.env.BASE_URL}assets/figures/workflow-builder-dag.svg`}
-    alt="The workflow-builder pipeline, left to right: scan-codebase (bash) feeds extract-intent (prompt, typed JSON), which feeds generate-yaml (prompt, with Read and Write tools), which feeds validate-yaml (bash, a YAML-parse gate that fails and skips install on a bad file), which feeds save-or-report (prompt, installs the workflow)."
+    alt="The workflow-builder pipeline, left to right: scan-codebase (bash) feeds extract-intent (prompt, typed JSON), which feeds generate-yaml (prompt, with Read and Write tools), which feeds validate-yaml (bash, a YAML-parse gate that fails and skips install on a bad file), which feeds save-or-report (bash, installs the workflow)."
   />
   <figcaption>
     Figure 1. The workflow-builder pipeline. <code>extract-intent</code> emits
@@ -55,7 +55,7 @@ and `validate-yaml` as the parse gate.
 | `extract-intent` | prompt | Typed JSON (`output_format`): a kebab-case name, a structured description, trigger phrases, proposed nodes, and an execution mode. |
 | `generate-yaml` | prompt | Writes the workflow YAML to the scratch dir with the `Write` tool, following an embedded Keelson schema reference. |
 | `validate-yaml` | bash | Structural gate: checks required fields and runs a real `Bun.YAML.parse`. Fails the node, and skips install, on a malformed file. |
-| `save-or-report` | prompt | Installs the validated file to `.keelson/workflows/` and reports how to validate and run it. |
+| `save-or-report` | bash | Installs the validated file to `.keelson/workflows/` and reports how to validate and run it. |
 
 ### The parts worth a second look
 

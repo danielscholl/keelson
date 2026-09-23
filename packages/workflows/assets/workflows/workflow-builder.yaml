@@ -276,27 +276,22 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
   - id: save-or-report
     depends_on: [validate-yaml]
-    model: balanced
-    model_by_provider:
-      copilot: mai-code-1.1-flash
-    prompt: |
-      Install the generated workflow and report to the user.
-
-      ## Details
-
-      - Name: $extract-intent.output.workflow_name
-      - Trigger phrases: $extract-intent.output.trigger_phrases
-      - Source file: `$ARTIFACTS_DIR/generated-workflow.yaml`
-
-      ## Steps
-
-      1. Read the generated workflow from `$ARTIFACTS_DIR/generated-workflow.yaml`.
-      2. Create the project workflows directory if missing: `mkdir -p .keelson/workflows`.
-      3. Write it to `.keelson/workflows/$extract-intent.output.workflow_name.yaml`
-         using the Write tool (do not alter the content).
-      4. Report, exactly:
-         - The install path.
-         - The trigger phrases.
-         - Validate it: `keelson workflow validate $extract-intent.output.workflow_name`
-         - Run it: `keelson workflow run $extract-intent.output.workflow_name --inputs ARGUMENTS="your input"`
-         - One-line reminder that they should open the file and review it before running.
+    bash: |
+      set -euo pipefail
+      INTENT="${KEELSON_NODE_extract_intent_OUTPUT_FILE:-}"
+      if [ -n "$INTENT" ]; then INTENT=$(cat "$INTENT"); else INTENT="$KEELSON_NODE_extract_intent_OUTPUT"; fi
+      NAME=$(printf '%s' "$INTENT" | jq -r '.workflow_name // empty' | tr -d '\r')
+      TRIGGERS=$(printf '%s' "$INTENT" | jq -r '.trigger_phrases // empty' | tr -d '\r')
+      # The name becomes a file path, so it must be a plain kebab-case slug.
+      if ! printf '%s' "$NAME" | grep -Eq '^[a-z0-9][a-z0-9-]*$'; then
+        echo "ERROR: workflow_name '$NAME' is not kebab-case; not installing." >&2
+        exit 1
+      fi
+      DEST=".keelson/workflows/$NAME.yaml"
+      mkdir -p .keelson/workflows
+      cp "$KEELSON_ARTIFACTS_DIR/generated-workflow.yaml" "$DEST"
+      printf 'Installed: %s\n' "$DEST"
+      printf 'Trigger phrases: %s\n' "$TRIGGERS"
+      printf 'Validate it: keelson workflow validate %s\n' "$NAME"
+      printf 'Run it: keelson workflow run %s --inputs ARGUMENTS="your input"\n' "$NAME"
+      printf 'Open %s and review it before running.\n' "$DEST"
