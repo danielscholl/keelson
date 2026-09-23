@@ -14,6 +14,7 @@
 // per-check report so the model fixes the colors and retries in-turn.
 
 import {
+  CANVAS_DESIGN_GUIDE_SECTION_NAMES,
   CANVAS_DESIGN_GUIDE_SECTIONS,
   CANVAS_PUBLISH_CONTRACT,
   canvasArtifactKey,
@@ -51,9 +52,9 @@ const publishInputSchema = z
 const guideInputSchema = z
   .object({
     section: z
-      .enum(["page", "form", "color", "marks", "graphics", "board", "anti-patterns"])
+      .enum(CANVAS_DESIGN_GUIDE_SECTION_NAMES as [string, ...string[]])
       .describe(
-        "Which reference to read: 'page' layout/typography/theming, 'form' choosing a chart, 'color' the color jobs + keelson palette instance, 'marks' mark anatomy and interaction, 'graphics' inline SVG diagrams, 'board' the structured board view's section catalog, 'anti-patterns' the catalog to check drafts against.",
+        "Which reference to read: 'kit' ready CSS classes and markup on the keelson tokens, 'voice' how a keelson page's copy reads, 'page' page types/layout/typography/theming, 'form' choosing a chart, 'color' the color jobs + keelson palette instance, 'marks' mark anatomy and interaction, 'graphics' inline SVG diagrams, 'board' the structured board view's section catalog, 'anti-patterns' the catalog to check drafts against.",
       ),
   })
   .strict();
@@ -227,7 +228,7 @@ export function createCanvasTools(deps: CreateCanvasToolsDeps): CanvasToolsHandl
   const guide: ToolDefinition = {
     name: "canvas_design_guide",
     description:
-      "Read one section of the canvas design guide before authoring: layout/typography/theming rules, chart-form selection, the color system and keelson palette instance, mark anatomy, inline SVG diagram craft, the structured board view's section catalog, or the anti-pattern catalog to check a draft against.",
+      "Read one section of the canvas design guide before authoring: the ready class kit, keelson's house voice for page copy, page types and layout/typography/theming rules, chart-form selection, the color system and keelson palette instance, mark anatomy, inline SVG diagram craft, the structured board view's section catalog, or the anti-pattern catalog to check a draft against.",
     inputSchema: guideInputSchema,
     async execute(input: unknown, ctx: ToolContext): Promise<void> {
       const parsed = guideInputSchema.safeParse(input);
