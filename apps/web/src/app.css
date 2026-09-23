@@ -4874,6 +4874,7 @@ a.cvb-card-title::after {
 .cvb-row-text {
   color: var(--fg);
   flex: 1;
+  min-width: 96px;
   overflow-wrap: anywhere;
 }
 /* Capped at half the row so a long annotation wraps instead of squeezing the
@@ -4995,6 +4996,7 @@ a.cvb-card-title::after {
   flex: 1 1 auto;
   min-width: 0;
   max-width: none;
+  overflow-wrap: normal;
   text-align: left;
   color: var(--fg);
 }
