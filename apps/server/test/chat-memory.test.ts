@@ -324,7 +324,7 @@ describe("chat memory recall", () => {
     expect(sp).toContain("seed");
     expect(sp).toContain("## Workflows");
     expect(sp).toContain("- smoke-test");
-    expect(sp).toContain("Do NOT run the name as a shell command");
+    expect(sp).toContain("never by typing a workflow name into a shell");
   });
 
   test("scopes the workflow index to the conversation's project", async () => {

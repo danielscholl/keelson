@@ -18,9 +18,19 @@ export interface CreateWorkspaceToolsDeps {
 }
 
 const leaseInputSchema = z.object({
-  project: z.string().min(1),
-  purpose: z.string().min(1),
-  branch: z.string().min(1).optional(),
+  project: z
+    .string()
+    .min(1)
+    .describe("Registered project id or exact project name; errors if unknown or ambiguous."),
+  purpose: z
+    .string()
+    .min(1)
+    .describe("Short reason for the lease; also slugged into the default branch name."),
+  branch: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Branch to check out in the worktree; omit for a fresh branch named from purpose."),
 });
 
 const releaseInputSchema = z.object({
@@ -58,7 +68,7 @@ export function createWorkspaceTools({
   const workspaceLease: ToolDefinition = {
     name: "workspace_lease",
     description:
-      "Create an isolated git worktree checkout for a registered project, with dependencies installed when applicable. Use this before mutation-heavy tool work so changes do not clobber the live project root. Release it with workspace_release when finished.",
+      "Create an isolated git worktree checkout for a registered project, with dependencies installed when applicable. Use this before mutation-heavy tool work so changes do not clobber the live project root. Release it with workspace_release when finished. Fails if the project is not a git repository. Returns the lease id, worktree path, and branch.",
     inputSchema: leaseInputSchema,
     state_changing: true,
     async execute(input, ctx) {

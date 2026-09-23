@@ -77,7 +77,7 @@ export function buildWorkflowGuidance(workflows: readonly WorkflowSummaryLike[])
     lines.join("\n"),
     "",
     "How to act on them:",
-    '- When the user asks to run, start, execute, or kick off a workflow — even with a typo, a missing hyphen, or phrased as a bare command like "run smoke-test" — call workflow_run with the closest matching name from the list above. Do NOT run the name as a shell command, and do NOT search the repo for it.',
+    '- When the user asks to run, start, execute, or kick off a workflow — even with a typo, a missing hyphen, or phrased as a bare command like "run smoke-test" — call workflow_run with the closest matching name from the list above.',
     "- Call workflow_list to read a workflow's purpose and triggers when the right match isn't obvious from the name.",
     "- When it is unclear whether the user wants a workflow, answer directly; you may suggest one by name.",
     "- Some workflows pause for plan approval. Relay the plan to the user, then call workflow_respond with the runId/nodeId/pauseId from the earlier tool result once they approve or give feedback.",
@@ -85,7 +85,7 @@ export function buildWorkflowGuidance(workflows: readonly WorkflowSummaryLike[])
     "",
     "Authoring new workflows:",
     "- When the user wants to create or change a workflow, call workflow_schema for the YAML reference and workflow_get on a similar existing workflow to copy its shape, then draft and check the YAML with workflow_validate until it is clean.",
-    '- Before calling workflow_save, ALWAYS show the user the complete final YAML and get their explicit approval — including the scope ("project" = this conversation\'s project, "global" = all projects) and whether an existing file may be overwritten.',
+    '- workflow_save writes to disk, so before calling it show the user the complete final YAML and get their explicit approval — including the scope ("project" = this conversation\'s project, "global" = all projects) and whether an existing file may be overwritten.',
     "- Every node type except `command:` is authorable inline (prompt, bash, script, approval, loop, cancel); a `command:` node references a markdown file that must already exist on disk — use a `prompt` node instead.",
   ].join("\n");
 }

@@ -33,7 +33,7 @@ export function createNoteProjectTool(deps: CreateNoteProjectToolDeps): ToolDefi
   return {
     name: "note_project",
     description:
-      'Append a durable note to the current project\'s notebook — a persistent, always-on markdown doc fed back into every future chat about this project. Call it when the user states, or you confirm, a lasting fact, convention, decision, or gotcha about THIS project that should survive across sessions. Do NOT use it for transient chatter, task status, or secrets. `entry` is one line of prose; optional `section` (default "Log") groups related notes, e.g. "Conventions" or "Gotchas".',
+      'Append a durable note to the current project\'s notebook — a persistent, always-on markdown doc fed back into every future chat about this project. Call it when the user states, or you confirm, a lasting fact, convention, decision, or gotcha about THIS project that should survive across sessions. Do NOT use it for transient chatter, task status, or secrets. `entry` is one line of prose; optional `section` (default "Log") groups related notes, e.g. "Conventions" or "Gotchas", and is created if missing. Entries are dated automatically. Fails once the notebook reaches its size limit; tell the user it is full.',
     inputSchema: noteInputSchema,
     state_changing: true,
     async execute(input, ctx) {
