@@ -226,7 +226,8 @@ is its hover text on the segment or the select option.
 `showWhen` (`{ field, equals? }`) renders the field only once the named sibling
 field has a non-empty value, or exactly `equals` when set (a workflow picker
 that appears after a project is chosen). A hidden field, and a hidden model
-picker's `providerField` companion, is left out of the dispatched payload and
+picker's `providerField` companion, is left out of the dispatched payload
+(a same-named static `payload` default too, though never a `binding` key) and
 skips `required`; a field whose controller is hidden is hidden too. The schema
 rejects a `showWhen.field` that names the field itself or a field the action
 doesn't have.

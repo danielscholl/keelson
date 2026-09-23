@@ -1859,8 +1859,15 @@ describe("conditional action fields", () => {
                   defaultValue: "fix-issue",
                   showWhen: { field: "project" },
                 },
-                { name: "branch", label: "Branch", showWhen: { field: "project", equals: "p2" } },
+                {
+                  name: "branch",
+                  label: "Branch",
+                  required: true,
+                  showWhen: { field: "project", equals: "p2" },
+                },
               ],
+              payload: { branch: "main", source: "board" },
+              binding: { target: "bound" },
             },
           ],
         },
@@ -1894,7 +1901,36 @@ describe("conditional action fields", () => {
         <BoardView view={launchBoard()} />
       </BoardActionProvider>,
     );
+    fireEvent.change(screen.getByLabelText("Project"), { target: { value: "p1" } });
     fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
-    await waitFor(() => expect(calls).toEqual([{ type: "launch", payload: {} }]));
+    // Branch is required but hidden for p1: no validation error, and its
+    // same-named static default doesn't ride the payload either.
+    await waitFor(() =>
+      expect(calls).toEqual([
+        {
+          type: "launch",
+          payload: { source: "board", project: "p1", workflow: "fix-issue", target: "bound" },
+        },
+      ]),
+    );
+  });
+
+  test("a shown required field still blocks submit", () => {
+    const calls: RibAction[] = [];
+    const { container } = render(
+      <BoardActionProvider
+        run={async (a) => {
+          calls.push(a);
+          return { ok: true };
+        }}
+        reveal={okReveal}
+      >
+        <BoardView view={launchBoard()} />
+      </BoardActionProvider>,
+    );
+    fireEvent.change(screen.getByLabelText("Project"), { target: { value: "p2" } });
+    fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+    expect(screen.getByText("Branch is required")).toBeDefined();
+    expect(calls).toHaveLength(0);
   });
 });

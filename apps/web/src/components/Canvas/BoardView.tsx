@@ -163,17 +163,21 @@ function seedFieldValues(fields: readonly ActionField[]): Record<string, string>
 // static payload is dropped when fields/binding are present rather than nested.
 // `binding` merges LAST — it is the integrity-protected slot, so a form field
 // can never shadow a producer-stamped key the rib revalidates server-side.
+// `omit` (hidden showWhen fields) strips a key whether it came from a field or
+// a same-named static default, but never from `binding`.
 function mergePayload(
   staticPayload: unknown,
   collected?: Record<string, string>,
   binding?: Record<string, unknown>,
+  omit: readonly string[] = [],
 ): unknown {
   if (!collected && !binding) return staticPayload;
-  return {
+  const merged: Record<string, unknown> = {
     ...(isPlainObject(staticPayload) ? staticPayload : {}),
     ...(collected ?? {}),
-    ...(binding ?? {}),
   };
+  for (const key of omit) delete merged[key];
+  return { ...merged, ...(binding ?? {}) };
 }
 
 // A field whose controller is itself hidden counts as hidden, so a chain
@@ -193,18 +197,15 @@ function isFieldShown(
   return when.equals === undefined ? value.trim() !== "" : value === when.equals;
 }
 
-// Drops hidden fields (and a hidden picker's companion key) from the dispatch.
-function visibleValues(
-  fields: readonly ActionField[],
-  values: Record<string, string>,
-): Record<string, string> {
-  const out = { ...values };
+// The payload keys of hidden fields, including a hidden picker's companion.
+function hiddenFieldKeys(fields: readonly ActionField[], values: Record<string, string>): string[] {
+  const keys: string[] = [];
   for (const f of fields) {
     if (isFieldShown(f, fields, values)) continue;
-    delete out[f.name];
-    if (f.modelPicker?.providerField) delete out[f.modelPicker.providerField];
+    keys.push(f.name);
+    if (f.modelPicker?.providerField) keys.push(f.modelPicker.providerField);
   }
-  return out;
+  return keys;
 }
 
 function actionConfirmMode(item: ActionItem): ConfirmModalMode {
@@ -320,7 +321,8 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
     setPending(true);
     setError(null);
     try {
-      const payload = mergePayload(item.payload, collected, item.binding);
+      const hidden = collected ? hiddenFieldKeys(fields, collected) : [];
+      const payload = mergePayload(item.payload, collected, item.binding, hidden);
       const result = await ctx.run(
         payload !== undefined ? { type: item.type, payload } : { type: item.type },
       );
@@ -364,7 +366,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
       setError(`${missing.label} is required`);
       return;
     }
-    requestDispatch(visibleValues(fields, values));
+    requestDispatch(values);
   };
 
   if (soloPicker) {
