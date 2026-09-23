@@ -211,7 +211,7 @@ An `ActionField` is `{ name, label, placeholder?, required?, multiline?, half?,
 segmented?, options?, modelPicker?, defaultValue? }`. When a button declares
 `fields`, clicking it opens a small form, and the collected `{ name: value }`
 map is merged into the dispatched payload. Field names must be unique within an
-action. `options` (an array of `{ value, label }`) renders a select instead of a
+action. `options` (an array of `{ value, label, hint? }`) renders a select instead of a
 text input: the dispatched value is the chosen option's `value`, a non-required
 select offers `placeholder` as an empty "none" option, and the option values
 must be unique. It is mutually exclusive with `multiline`. `defaultValue`
@@ -220,7 +220,8 @@ pre-fills the control; for a select it must name an option value or `""`.
 row (a lone half field keeps its own row). `segmented` renders `options` as a
 single-select segment strip instead of a select (a non-required field leads
 with a clear segment labelled by `placeholder`, dispatching `""` like the
-select's empty option) and is rejected without `options`.
+select's empty option) and is rejected without `options`. An option's `hint`
+is its hover text on the segment or the select option.
 
 `modelPicker` (`{ providerField?, providerDefault? }`) renders the host's live
 provider/model catalog as a searchable picker instead of a producer-supplied

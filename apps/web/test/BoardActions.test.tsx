@@ -1657,6 +1657,40 @@ describe("create-form affordances", () => {
     await waitFor(() => expect(calls).toEqual([{ type: "create", payload: { profile: "full" } }]));
   });
 
+  test("an option's hint is its hover text on a segment and in a select", () => {
+    const field = (segmented: boolean) => ({
+      name: segmented ? "power" : "size",
+      label: segmented ? "Power" : "Size",
+      segmented,
+      options: [
+        { value: "fast", label: "fast", hint: "the quickest model" },
+        { value: "deep", label: "deep" },
+      ],
+    });
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            { type: "start", label: "Start", expanded: true, fields: [field(true), field(false)] },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    expect(screen.getByRole("button", { name: "fast" }).getAttribute("title")).toBe(
+      "the quickest model",
+    );
+    expect(screen.getByRole("button", { name: "deep" }).hasAttribute("title")).toBe(false);
+    const option = container.querySelector('option[value="fast"]');
+    expect(option?.getAttribute("title")).toBe("the quickest model");
+  });
+
   test("half fields carry the two-up class; full-width fields do not", () => {
     const view = {
       view: "board",

@@ -608,6 +608,15 @@ const bannerRegionSchema = surfaceRegionSchema.omit({
   collapsed: true,
   hideWhenEmpty: true,
 });
+export const ribSurfaceBadgeSchema = z
+  .object({
+    count: z.number().int().nonnegative(),
+    // The pip's hover text; absent reads as the bare count.
+    title: z.string().min(1).max(200).optional(),
+  })
+  .strict();
+export type RibSurfaceBadge = z.infer<typeof ribSurfaceBadgeSchema>;
+
 export const ribSurfaceDescriptorSchema = z
   .object({
     id: z.string().min(1),
@@ -627,6 +636,9 @@ export const ribSurfaceDescriptorSchema = z
     // lift into chat) opts out of the shared chrome; board actions still flow. Absent =
     // show them (default).
     hideRegionActions: z.boolean().optional(),
+    // A snapshot key in this rib's namespace holding a RibSurfaceBadge; a count
+    // above zero shows as a pip on the surface's tab. Absent = no badge.
+    badgeKey: z.string().min(1).optional(),
     layout: z
       .object({
         header: surfaceRegionSchema.optional(),

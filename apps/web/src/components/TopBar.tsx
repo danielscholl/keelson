@@ -1,6 +1,8 @@
+import { ribSurfaceBadgeSchema } from "@keelson/shared";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import type { RegionAction, ThemePreference } from "../hooks/useSettings.ts";
+import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { ThemePicker } from "./ThemePicker.tsx";
 
 export type BuiltinTab = "chat" | "workflows" | "memory" | "usage";
@@ -13,6 +15,7 @@ export type ActiveTab = BuiltinTab | `surface:${string}`;
 export interface SurfaceTab {
   id: `surface:${string}`;
   title: string;
+  badgeKey?: string;
 }
 
 export interface TopBarProps {
@@ -102,6 +105,7 @@ export function TopBar(props: TopBarProps) {
               onClick={() => onTabChange(tab.id)}
             >
               {tab.title}
+              {tab.badgeKey && <SurfaceBadge snapshotKey={tab.badgeKey} />}
             </button>
           ))}
         </nav>
@@ -118,6 +122,23 @@ export function TopBar(props: TopBarProps) {
         />
       </div>
     </header>
+  );
+}
+
+// The rib publishes the count on its own key, so the tab updates without the surface open.
+function SurfaceBadge({ snapshotKey }: { snapshotKey: string }) {
+  const snap = useSnapshot(snapshotKey);
+  return snap.status === "live" ? <BadgePip data={snap.data} /> : null;
+}
+
+export function BadgePip({ data }: { data: unknown }) {
+  const parsed = ribSurfaceBadgeSchema.safeParse(data);
+  if (!parsed.success || parsed.data.count === 0) return null;
+  const { count, title } = parsed.data;
+  return (
+    <span className="nav-pip" role="img" aria-label={title ?? String(count)} title={title}>
+      {count}
+    </span>
   );
 }
 

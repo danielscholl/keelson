@@ -345,6 +345,22 @@ describe("rib surface activation guards", () => {
     await expect(makeRig({ available: { stray } })).rejects.toThrow(/surface region key/);
   });
 
+  test("rejects a surface badge key outside the rib's namespace", async () => {
+    const stray: Rib = {
+      id: "stray",
+      displayName: "Stray",
+      surfaces: [
+        {
+          id: "s",
+          title: "S",
+          badgeKey: "rib:other:badge",
+          layout: { rows: [{ columns: [{ key: "rib:stray:x" }] }] },
+        },
+      ],
+    };
+    await expect(makeRig({ available: { stray } })).rejects.toThrow(/surface badge key/);
+  });
+
   test("rejects two surfaces sharing an id", async () => {
     const dup: Rib = {
       id: "dup",

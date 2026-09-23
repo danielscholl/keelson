@@ -193,7 +193,9 @@ coordination path.
    chosen project id and a per-project rib need not hand-roll a picker; and
    `hideRegionActions` opts an authoring-console surface out of the host's
    per-region explore, select, and open-full chrome (board actions and
-   head-action menus still flow). Each region is `{ key, workflow?, workflowArgs?,
+   head-action menus still flow). `badgeKey` names a snapshot key in the rib's
+   namespace holding `{ count, title? }`; a count above zero shows as a pip on
+   the surface's tab, with `title` as its hover text. Each region is `{ key, workflow?, workflowArgs?,
    serverRefresh?, cadenceMs?, title?, glyph?, group?, groupTitle?, byline?, collapsible?,
    collapsed?, live?, hideWhenEmpty?, headActions? }`:
    `key` is namespaced; `workflow` is the catalog workflow a region's refresh

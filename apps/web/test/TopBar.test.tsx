@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { type ActiveTab, TopBar } from "../src/components/TopBar.tsx";
+import { type ActiveTab, BadgePip, TopBar } from "../src/components/TopBar.tsx";
 
 function renderBar(overrides: Partial<Parameters<typeof TopBar>[0]> = {}) {
   const props = {
@@ -40,6 +40,18 @@ describe("TopBar", () => {
       />,
     );
     expect(container.querySelector(".nav-divider")).not.toBeNull();
+  });
+
+  test("a surface badge shows a count above zero with its title, and nothing otherwise", () => {
+    const { container, rerender } = render(
+      <BadgePip data={{ count: 2, title: "2 swarms need you" }} />,
+    );
+    const pip = screen.getByRole("img", { name: "2 swarms need you" });
+    expect(pip.textContent).toBe("2");
+    rerender(<BadgePip data={{ count: 0 }} />);
+    expect(container.querySelector(".nav-pip")).toBeNull();
+    rerender(<BadgePip data={{ count: "2" }} />);
+    expect(container.querySelector(".nav-pip")).toBeNull();
   });
 
   test("the instruments popover navigates, closes, and returns focus to its trigger", () => {

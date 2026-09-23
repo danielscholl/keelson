@@ -487,6 +487,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                         type="button"
                         className="cvb-action-segment"
                         aria-pressed={values[f.name] === o.value}
+                        title={o.hint}
                         disabled={sealed}
                         onClick={() => setValues((v) => ({ ...v, [f.name]: o.value }))}
                       >
@@ -506,7 +507,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                       {f.placeholder ?? (f.required ? "Select…" : "—")}
                     </option>
                     {f.options.map((o) => (
-                      <option key={o.value} value={o.value}>
+                      <option key={o.value} value={o.value} title={o.hint}>
                         {o.label}
                       </option>
                     ))}
