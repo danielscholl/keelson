@@ -232,14 +232,14 @@ description: exercises the bundled asset model guard
 nodes:
   - id: review
     prompt: Review the change.
-    model: gpt-5.6-sol
+    model: gpt-6-sol
 `,
       "pinned-model.yaml",
     );
 
     expect(result.error).toBeNull();
     expect(bareConcreteModelIds(result.workflow!)).toEqual([
-      { nodeId: "review", model: "gpt-5.6-sol" },
+      { nodeId: "review", model: "gpt-6-sol" },
     ]);
   });
 });
@@ -386,7 +386,7 @@ describe("catalog resolution drift guard", () => {
       effectiveProviderId: "copilot",
       node: {
         model: "deep",
-        model_by_provider: { copilot: "gpt-5.6-sol" },
+        model_by_provider: { copilot: "gpt-6-sol" },
       },
     },
     {
@@ -397,7 +397,7 @@ describe("catalog resolution drift guard", () => {
       effectiveProviderId: "claude",
       node: {
         model: "deep",
-        model_by_provider: { copilot: "gpt-5.6-sol" },
+        model_by_provider: { copilot: "gpt-6-sol" },
       },
     },
     {

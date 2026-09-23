@@ -48,7 +48,7 @@ const catalog = [
         id: "logic",
         prompt: "Review logic.",
         model: "deep",
-        model_by_provider: { copilot: "gpt-5.6-sol" },
+        model_by_provider: { copilot: "gpt-6-sol" },
       },
       {
         id: "risk",

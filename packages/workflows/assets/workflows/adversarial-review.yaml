@@ -266,15 +266,15 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-5.6-sol
+      copilot: gpt-6-sol
     model_by:
       from: $author-seat.output
       default: seated
       cases:
         seated:
           model_by_provider:
-            copilot: gpt-5.6-sol
-        gpt-5.6-sol:
+            copilot: gpt-6-sol
+        gpt-6-sol:
           model_by_provider:
             copilot: gpt-6-astra
     effort: xhigh
@@ -388,15 +388,15 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-5.6-terra
+      copilot: gpt-6-luna
     model_by:
       from: $author-seat.output
       default: seated
       cases:
         seated:
           model_by_provider:
-            copilot: gpt-5.6-terra
-        gpt-5.6-terra:
+            copilot: gpt-6-luna
+        gpt-6-luna:
           model_by_provider:
             copilot: gpt-5.5
     effort: xhigh
@@ -610,9 +610,9 @@ nodes:
       case "$AUTHOR" in
         seated) echo "no author model set; seating unchanged" ;;
         claude-opus-5) echo "reseated reviewer-logic: claude-opus-5 -> claude-opus-4.7" ;;
-        gpt-5.6-sol) echo "reseated reviewer-evidence: gpt-5.6-sol -> gpt-6-astra" ;;
+        gpt-6-sol) echo "reseated reviewer-evidence: gpt-6-sol -> gpt-6-astra" ;;
         grok-4.6) echo "reseated reviewer-risk: grok-4.6 -> grok-4.5" ;;
-        gpt-5.6-terra) echo "reseated verify: gpt-5.6-terra -> gpt-5.5" ;;
+        gpt-6-luna) echo "reseated verify: gpt-6-luna -> gpt-5.5" ;;
         claude-opus-4.8) echo "reseated synthesize: claude-opus-4.8 -> claude-opus-4.7" ;;
         *) printf 'author %s holds no default seat; seating unchanged\n' "$AUTHOR" ;;
       esac

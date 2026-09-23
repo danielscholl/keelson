@@ -312,8 +312,8 @@ describe("CodexProvider", () => {
 
   test("listModels returns a deep copy of the curated catalog", async () => {
     const models = await new CodexProvider({ factory: fakeFactory([]) }).listModels();
-    expect(models.map((m) => m.id)).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
-    expect(models.map((m) => m.displayName)).toEqual(["Sol", "Terra", "Luna"]);
+    expect(models.map((m) => m.id)).toEqual(["gpt-6-sol", "gpt-6-luna"]);
+    expect(models.map((m) => m.displayName)).toEqual(["Sol", "Luna"]);
     expect(models.map((m) => m.id)).toEqual(CODEX_CAPABILITIES.models);
     expect(CODEX_CAPABILITIES.modelClasses).toEqual({
       fast: models.at(-1)!.id,
@@ -373,13 +373,13 @@ describe("CodexProvider", () => {
     });
     await collect(
       provider.sendQuery("question", "/repo", undefined, {
-        model: "gpt-5.6-sol",
+        model: "gpt-6-sol",
         systemPrompt: "you are helpful",
         reasoningEffort: "none",
       }),
     );
     expect(input).toBe("you are helpful\n\nquestion");
-    expect(captured?.model).toBe("gpt-5.6-sol");
+    expect(captured?.model).toBe("gpt-6-sol");
     // keelson "none" has no codex equivalent → "minimal".
     expect(captured?.reasoningEffort).toBe("minimal");
   });

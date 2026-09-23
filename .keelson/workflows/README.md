@@ -124,9 +124,9 @@ notes, and prints every node's output — you just don't get the page.
 |---|---|---|---|
 | `context` | bash | — | Reads `direction.md`, derives the label allow-list from `gh label list`, reports areas with no label |
 | `gather` | bash | — | Open issues, open PRs (with changed files), and recently closed issues as one JSON fact block |
-| `classify` | AI | `gpt-5.6-sol` · high | Per-issue area + type, grounded by grepping the repo for where the change lands |
+| `classify` | AI | `gpt-6-sol` · high | Per-issue area + type, grounded by grepping the repo for where the change lands |
 | `analyze` | AI | `claude-opus-5` · xhigh | The cross-issue view: duplicates, already-fixed, superseded, stale, off-direction, and what to do next |
-| `verify` | AI | `gpt-5.6-terra` · xhigh | Tries to **refute** those claims against source before any of them reach a public comment |
+| `verify` | AI | `gpt-6-luna` · xhigh | Tries to **refute** those claims against source before any of them reach a public comment |
 | `decide` | AI | `claude-opus-4.8` · xhigh | Rules on what survived; emits the structured decision. Holds no tools |
 | `apply` | bash | — | Labels and notes, dry-run aware, idempotent on a decision hash |
 | `report` | AI | `claude-opus-5` · high | Publishes the dashboard via `canvas_publish` |
@@ -144,7 +144,7 @@ most, `decide` holds none, and `apply` re-validates each label against the
 allow-list and strips HTML comments from notes before posting.
 
 `repo-cleanup` runs the same spine — `find` (`claude-opus-5` xhigh) →
-`refute` (`gpt-5.6-terra` xhigh) → `plan` (`claude-opus-4.8` xhigh, no tools) →
+`refute` (`gpt-6-luna` xhigh) → `plan` (`claude-opus-4.8` xhigh, no tools) →
 `render` → **`gate`** → `close`. Only `close` writes, and it runs only after the
 gate resolves.
 

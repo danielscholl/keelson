@@ -89,23 +89,23 @@ only when the pushed PR's checks pass.
 | | `coverage-check` | prompt | **`when: criteria-count > 0`**, **`model: claude-opus-4.8`**, **`effort: xhigh`**: semantic judge that maps each brief criterion to the plan step that covers it or **MISSING**. Returns typed JSON only; skipped when both extraction paths find no criteria. |
 | | `coverage-ready` | bash | Funnel (`trigger_rule: all_done`): writes the judge's output to `coverage.json` when criteria exist. Otherwise it removes the artifact and reports the skip in the run log. |
 | Approve | `approve-plan` | approval | Pauses the run. `capture_response` makes the reply, approval or change requests, available downstream. The callout includes the criteria-coverage checklist, or a visible note that the divergence check did not run. |
-| Implement | `implement` | prompt | **`model: gpt-5.6-sol`**, **`effort: xhigh`**: Writes `verify.sh` (the project's own checks), branches, implements task by task, commits each. |
+| Implement | `implement` | prompt | **`model: gpt-6-sol`**, **`effort: xhigh`**: Writes `verify.sh` (the project's own checks), branches, implements task by task, commits each. |
 | Validate | `validate` | bash | Runs `verify.sh` fail-fast. **Exits 0** and reports `VALIDATION_STATUS` so the fixer can read it. |
-| | `fix-validation` | prompt | **`model: gpt-5.6-sol`**, **`effort: high`**: if it failed, fixes only what broke and commits; if it passed, stops. |
+| | `fix-validation` | prompt | **`model: gpt-6-sol`**, **`effort: high`**: if it failed, fixes only what broke and commits; if it passed, stops. |
 | | `revalidate` | bash | **Hard gate**: re-runs the checks and **exits non-zero** on failure, skipping the PR. |
 | Draft PR | `create-pr` | prompt | Pushes the branch, opens a draft PR with `Fixes #N`, and captures the PR number and URL. It follows a single standalone `pull_request_template.md` when one exists; repositories with only named templates under `PULL_REQUEST_TEMPLATE/` use the fallback body. Its test plan records commands actually executed and their results, with `pending CI` reserved for checks that only CI can confirm. |
 | | `enforce-draft` | bash | Verifies the new PR is a draft; if it came up ready, runs `forge pr ready --undo` to force it back to draft, and fails the run if it cannot confirm the draft state. |
 | Review loop | `capture-diff` | bash | Freezes the branch diff to `$ARTIFACTS_DIR/diff.patch` / `diff-stat.txt` so the lenses can run without shell access. |
 | | `review-correctness` | prompt | **`model: gpt-6-astra`**, **`effort: xhigh`**, `allowed_tools: [Read, Glob, Grep]`: one of three **independent, parallel** reviewers over `diff.patch`. Hunts by cost of failure (trust boundaries, irreversible state, idempotency gaps), follows each changed function to every entry path that reaches it (resume, cancel, the opt-out configuration, data written before the change), checks that docs and reference tables still agree with the code, labels unverified external-API claims INFERRED, and emits a confidence per finding. |
-| | `review-conventions` | prompt | **`model: gpt-5.6-terra`**, **`effort: xhigh`**, same read-only rail: checks the diff against `CLAUDE.md` / `CONTRIBUTING.md` (comment policy, conventions), quoting the rule each finding violates. |
-| | `review-coverage` | prompt | **`model: gpt-5.6-terra`**, **`effort: xhigh`**, same read-only rail: flags new behavior left untested, and tests authored but never wired in. |
+| | `review-conventions` | prompt | **`model: gpt-6-luna`**, **`effort: xhigh`**, same read-only rail: checks the diff against `CLAUDE.md` / `CONTRIBUTING.md` (comment policy, conventions), quoting the rule each finding violates. |
+| | `review-coverage` | prompt | **`model: gpt-6-luna`**, **`effort: xhigh`**, same read-only rail: flags new behavior left untested, and tests authored but never wired in. |
 | | `triage` | prompt | **`model: claude-opus-4.8`**, **`effort: xhigh`**, `allowed_tools: [Read, Glob, Grep]`, typed JSON: de-dupes the findings, then adversarially refutes each against `diff.patch` and the source. Survivors are CONFIRMED (85-100) or PLAUSIBLE (capped at 79, below the ≥80 keep line), so only CONFIRMED CRITICAL/HIGH findings reach the fixer. |
-| | `apply-fixes` | prompt | **`model: gpt-5.6-sol`**, **`effort: high`**: applies only the triaged must-fix issues, commits, pushes. No-ops when triage is clean. |
-| | `re-review` | prompt | **`model: gpt-5.6-terra`**, **`effort: high`**: closes the loop with a model independent of the fixer: confirms each must-fix is resolved with no new defect; fixes any straggler. |
+| | `apply-fixes` | prompt | **`model: gpt-6-sol`**, **`effort: high`**: applies only the triaged must-fix issues, commits, pushes. No-ops when triage is clean. |
+| | `re-review` | prompt | **`model: gpt-6-luna`**, **`effort: high`**: closes the loop with a model independent of the fixer: confirms each must-fix is resolved with no new defect; fixes any straggler. |
 | Re-validate | `post-fix-validate` | bash | Re-runs the full checks after the review loop (exits 0) so the report shows the *real* status. |
 | CI gate | `await-ci` | bash | Watches the pushed PR's CI; reruns failed jobs **once** to shake out flakes. **Exits 0** so the run continues whether CI passed or not. |
 | | `triage-ci` | prompt | **`model: claude-opus-4.8`**, **`effort: xhigh`**, typed JSON: classifies each CI failure as *actionable* (caused by this PR) or *unrelated/flaky*. |
-| | `fix-ci` | prompt | **`model: gpt-5.6-sol`**, **`effort: high`**: fixes only the actionable failures on the PR branch and pushes. No-ops when triage finds none. |
+| | `fix-ci` | prompt | **`model: gpt-6-sol`**, **`effort: high`**: fixes only the actionable failures on the PR branch and pushes. No-ops when triage finds none. |
 | | `finalize-pr` | bash | Re-checks CI and runs `forge pr ready` to promote the draft **only when every check is green**; a red or check-less PR stays a draft. |
 | Report | `report` | prompt | The operator summary: issue, branch, PR, what changed, the validation status, and the final CI and PR state. |
 
@@ -162,9 +162,9 @@ closed.
 **Four models, four roles, on purpose.** The planning nodes (`investigate`,
 `plan`) are pinned to `gpt-6-astra`; the judge nodes (`coverage-check`,
 `triage`, `triage-ci`) to `claude-opus-4.8`; the edit nodes (`implement`,
-`fix-validation`, `apply-fixes`, `fix-ci`) to `gpt-5.6-sol`. The review panel is
+`fix-validation`, `apply-fixes`, `fix-ci`) to `gpt-6-sol`. The review panel is
 mixed: `review-correctness` runs `gpt-6-astra`, while `review-conventions`,
-`review-coverage`, and `re-review` run `gpt-5.6-terra`. The implementer never
+`review-coverage`, and `re-review` run `gpt-6-luna`. The implementer never
 reviews its own work, no review lens shares the implementer's model, and the
 judge that checks the plan and rules on the review findings is a different
 vendor from the planner, the implementer, and every reviewer. Each pin runs a chosen, deterministic
@@ -200,8 +200,8 @@ promotion itself fails.
   `apply-fixes`, `re-review`) is the run's quality tail. Collapse it to a single
   reviewer plus `apply-fixes` for a cheaper run, or drop it so `create-pr` is
   the last step. The pins come in four roles (`gpt-6-astra` for planning
-  and the correctness lens, `gpt-5.6-terra` for the other review nodes,
-  `gpt-5.6-sol` for edits, `claude-opus-4.8` for judgment); retarget any to
+  and the correctness lens, `gpt-6-luna` for the other review nodes,
+  `gpt-6-sol` for edits, `claude-opus-4.8` for judgment); retarget any to
   whatever your Copilot account exposes, keeping each role on a distinct model
   if you can. All four ids are account-dependent: swap or drop any to `auto` if it
   does not appear in your Copilot model list, and drop that node's `effort:`

@@ -200,28 +200,28 @@ describe("investigate workflow shape", () => {
       model_by_provider: {
         copilot: "gpt-6-astra",
         claude: "claude-opus-4-8",
-        codex: "gpt-5.6-sol",
+        codex: "gpt-6-sol",
       },
       effort: "high",
     });
     expect(investigate?.cases.std).toEqual({
       model: "balanced",
       model_by_provider: {
-        copilot: "gpt-5.6-terra",
+        copilot: "gpt-6-luna",
         claude: "claude-sonnet-5",
-        codex: "gpt-5.6-terra",
+        codex: "gpt-6-luna",
       },
       effort: "high",
     });
     expect(verify?.cases.claude?.model_by_provider).toEqual({
       copilot: "claude-sonnet-5",
       claude: "claude-sonnet-5",
-      codex: "gpt-5.6-terra",
+      codex: "gpt-6-luna",
     });
     expect(verify?.cases.grok?.model_by_provider).toEqual({
       copilot: "grok-4.6",
       claude: "claude-sonnet-5",
-      codex: "gpt-5.6-terra",
+      codex: "gpt-6-luna",
     });
   });
 

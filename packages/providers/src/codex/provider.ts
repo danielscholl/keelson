@@ -31,21 +31,14 @@ export const CODEX_DEFAULT_MODEL = "" as const;
 // inaccessible model.
 const CODEX_MODEL_CATALOG: readonly ModelInfo[] = [
   {
-    id: "gpt-5.6-sol",
+    id: "gpt-6-sol",
     displayName: "Sol",
     description: "Most capable Codex model for complex coding work.",
     costTier: "high",
     supports: { tools: true, reasoningEffort: true },
   },
   {
-    id: "gpt-5.6-terra",
-    displayName: "Terra",
-    description: "Balanced Codex model for general coding work.",
-    costTier: "mid",
-    supports: { tools: true, reasoningEffort: true },
-  },
-  {
-    id: "gpt-5.6-luna",
+    id: "gpt-6-luna",
     displayName: "Luna",
     description: "Fast Codex model for lightweight coding tasks.",
     costTier: "low",

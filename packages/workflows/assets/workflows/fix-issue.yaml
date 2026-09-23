@@ -548,7 +548,7 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-5.6-sol
+      copilot: gpt-6-sol
     effort: xhigh
     # Large changes run many edit+check cycles; a tight cap kills a run mid-task
     # and loses uncommitted work. Generous here; the per-task checks stay scoped
@@ -651,7 +651,7 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-5.6-sol
+      copilot: gpt-6-sol
     effort: high
     prompt: |
       Review the validation output below.
@@ -938,7 +938,7 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-5.6-terra
+      copilot: gpt-6-luna
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
     output_format:
@@ -998,7 +998,7 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-5.6-terra
+      copilot: gpt-6-luna
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
     output_format:
@@ -1133,7 +1133,7 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-5.6-sol
+      copilot: gpt-6-sol
     effort: high
     prompt: |
       Apply ONLY the confirmed must-fix issues from triage below. If the list is
@@ -1165,7 +1165,7 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-5.6-terra
+      copilot: gpt-6-luna
     effort: high
     prompt: |
       A review panel flagged the issues below as must-fix, and the previous node
@@ -1472,7 +1472,7 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-5.6-sol
+      copilot: gpt-6-sol
     effort: high
     idle_timeout: 1800000
     prompt: |

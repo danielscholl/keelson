@@ -23,8 +23,8 @@ const AGENT_IDS = [
 const MODEL_VENDORS = new Map([
   ["claude-opus-5", "anthropic"],
   ["claude-opus-4.8", "anthropic"],
-  ["gpt-5.6-sol", "openai"],
-  ["gpt-5.6-terra", "openai"],
+  ["gpt-6-sol", "openai"],
+  ["gpt-6-luna", "openai"],
   ["grok-4.6", "xai"],
 ]);
 
@@ -171,7 +171,7 @@ describe("design-converge", () => {
     const workflow = loadWorkflow();
     const proposalModels = new Map([
       ["propose-a", "claude-opus-5"],
-      ["propose-b", "gpt-5.6-sol"],
+      ["propose-b", "gpt-6-sol"],
       ["propose-c", "grok-4.6"],
     ]);
     const criticRoutes = [
@@ -184,7 +184,7 @@ describe("design-converge", () => {
       },
       {
         id: "critic-b",
-        model: "gpt-5.6-terra",
+        model: "gpt-6-luna",
         effort: "xhigh",
         omitted: "propose-b",
         inputs: ["propose-a", "propose-c"],
@@ -305,7 +305,7 @@ describe("design-converge", () => {
         expect(prompt).toContain("EVIDENCE-CONTENT");
         expect(prompt).not.toContain("_OUTPUT_FILE");
         expect(prompt).not.toContain("claude-opus");
-        expect(prompt).not.toContain("gpt-5.6");
+        expect(prompt).not.toContain("gpt-6");
         expect(prompt).not.toContain("grok-4.6");
       }
       expect(prompts.get("propose-a")).not.toContain("OUTPUT:propose-b");
@@ -399,12 +399,12 @@ describe("design-converge", () => {
     );
     const diverseRoutes = {
       "propose-a": { provider: "copilot", model: "claude-opus-5" },
-      "propose-b": { provider: "copilot", model: "gpt-5.6-sol" },
+      "propose-b": { provider: "copilot", model: "gpt-6-sol" },
       "propose-c": { provider: "copilot", model: "grok-4.6" },
       "critic-a": { provider: "copilot", model: "claude-opus-4.8" },
-      "critic-b": { provider: "copilot", model: "gpt-5.6-terra" },
+      "critic-b": { provider: "copilot", model: "gpt-6-luna" },
       "critic-c": { provider: "copilot", model: "grok-4.6" },
-      verify: { provider: "copilot", model: "gpt-5.6-terra" },
+      verify: { provider: "copilot", model: "gpt-6-luna" },
       synthesize: { provider: "copilot", model: "claude-opus-4.8" },
     };
     try {

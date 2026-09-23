@@ -189,7 +189,7 @@ nodes:
   - id: refute
     depends_on: [find]
     context: fresh
-    model: gpt-5.6-terra
+    model: gpt-6-luna
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: [Read, Glob, Grep]
