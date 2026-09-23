@@ -37,6 +37,7 @@ import type {
   CommandInvokeResult,
   MemoryTools,
   MessageChunk,
+  ModelClassMap,
   MutationLock,
   OpenChatSeed,
   OpHandle,
@@ -379,6 +380,17 @@ export {
 
 const DEFAULT_CROSS_RIB_CALL_TIMEOUT_MS = 30_000;
 
+// A partial override completes only against a provider that has its own map.
+function mergeModelClasses(
+  own: ModelClassMap | undefined,
+  override: Partial<ModelClassMap> | undefined,
+): ModelClassMap | undefined {
+  const merged = { ...own, ...override };
+  return merged.fast && merged.balanced && merged.deep
+    ? { fast: merged.fast, balanced: merged.balanced, deep: merged.deep }
+    : undefined;
+}
+
 export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise<RibBootstrap> {
   const requested = parseRibList(process.env.KEELSON_RIBS);
   const discovered =
@@ -399,7 +411,9 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   // One deps object feeds both seams below, so on the default (non-injected) turn path
   // the pre-flight answer and the gate the turn applies read identical owner/grant/
   // denylist inputs.
+  const config = loadKeelsonConfig();
   const turnDeps: MakeRibAgentTurnDeps = {
+    resolveModelClass: (id, modelClass) => readModelClassOverride(config, id)?.[modelClass],
     getToolOwner: (name) => toolIndex.get(name)?.ribId,
     isTurnToolGranted: (caller, target, name) =>
       isCrossRibGrantAllowed(crossRibGrants, caller, target, name),
@@ -806,7 +820,18 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   const getProviders =
     options.getProviders ??
     ((): readonly RibProviderInfo[] =>
-      getProviderInfoList().map((p) => ({ id: p.id, displayName: p.displayName })));
+      getProviderInfoList().map((p) => {
+        const classes = mergeModelClasses(
+          p.capabilities.modelClasses,
+          readModelClassOverride(config, p.id),
+        );
+        return {
+          id: p.id,
+          displayName: p.displayName,
+          ...(p.capabilities.defaultModel ? { defaultModel: p.capabilities.defaultModel } : {}),
+          ...(classes ? { modelClasses: classes } : {}),
+        };
+      }));
   const callTimeoutMs = parseCrossRibCallTimeoutMs(process.env.KEELSON_CROSS_RIB_CALL_TIMEOUT_MS);
   const defaultCallCwd = refreshCwd ?? process.cwd();
   const callTool = async (
