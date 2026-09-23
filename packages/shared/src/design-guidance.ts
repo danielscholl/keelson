@@ -360,7 +360,7 @@ Every color does exactly one job; palettes are validated, never eyeballed.
 1. Categorical (which series): the keelson series slots in fixed order, dark ${dark.series.join(", ")} / light ${light.series.join(", ")}. Assign in sequence, never cycle, never reorder, never invent a 7th hue (fold into "Other"). The order is part of the validated set.
 2. Sequential/ordinal (how much, which stage): one hue, monotone lightness. Build ramps from the slot-1 hue family; the palest step must still clear ~2:1 against the surface.
 3. Status (what state): --good ${dark.green}/${light.green}, --warn ${dark.yellow}/${light.yellow}, --crit ${dark.red}/${light.red}, --info ${dark.cyan}/${light.cyan} (dark/light). Reserved meaning; always paired with an icon, glyph, or word, never color alone, never reused as "series 4". When a series MEANS pass/fail it wears status tokens; when it is just identity it wears series slots. Never both in one chart.
-4. Identity (who): --id-1 to --id-5, dark ${Object.values(dark.identity).join(", ")} / light ${Object.values(light.identity).join(", ")}. They mark actors and owners in diagrams and tables: a repository, a role, a system, a provider. Give each actor one tone in a legend near the top, then use that tone for that actor on every figure and table, and for nothing else. Identity is never a chart series and never a state. It fills swatches, strokes, and tints; the text beside it stays in ink.
+4. Identity (who): --id-1 to --id-5, dark ${Object.values(dark.identity).join(", ")} / light ${Object.values(light.identity).join(", ")}. They mark actors and owners in diagrams and tables: a repository, a role, a system, a provider. Give each actor one tone in a legend near the top, then use that tone for that actor on every figure and table, and for nothing else. Identity is never a chart series and never a state. It fills swatches, strokes, and tints; the text beside it stays in ink. --id-2 (amber) sits next to --warn, so on a page that shows warnings, assign actors --id-1, --id-3, --id-4, and --id-5 before --id-2.
 5. Ink: text always wears ink tokens (--fg, --fg-strong, --muted). A value label never wears its series color; the colored mark beside it carries identity.
 
 Surfaces: charts render on --card (dark ${dark.card} / light ${light.card}); the app plane is --bg (${dark.bg} / ${light.bg}). Contrast is only meaningful against the actual surface.
@@ -442,6 +442,7 @@ Color:
 - A palette that fails validation "fixed" by removing the data-palette declaration instead of fixing the colors.
 - Status hues doing series work, or a series that means pass/fail wearing categorical hues.
 - An actor wearing different tones in different figures, or an identity tone with no legend entry.
+- An identity tone that reads as a state in the same figure (--id-2 amber beside a --warn outcome).
 - Value text tinted with its series color; identity color without an accompanying name/label.
 - A sequential ramp jumping hue families; a diverging scale without a neutral midpoint; any rainbow.
 
