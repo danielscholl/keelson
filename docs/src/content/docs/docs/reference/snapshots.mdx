@@ -208,7 +208,7 @@ ActionItem = {
 ```
 
 An `ActionField` is `{ name, label, placeholder?, required?, multiline?, half?,
-segmented?, options?, modelPicker?, defaultValue? }`. When a button declares
+segmented?, options?, modelPicker?, defaultValue?, showWhen? }`. When a button declares
 `fields`, clicking it opens a small form, and the collected `{ name: value }`
 map is merged into the dispatched payload. Field names must be unique within an
 action. `options` (an array of `{ value, label, hint? }`) renders a select instead of a
@@ -222,6 +222,14 @@ single-select segment strip instead of a select (a non-required field leads
 with a clear segment labelled by `placeholder`, dispatching `""` like the
 select's empty option) and is rejected without `options`. An option's `hint`
 is its hover text on the segment or the select option.
+
+`showWhen` (`{ field, equals? }`) renders the field only once the named sibling
+field has a non-empty value, or exactly `equals` when set (a workflow picker
+that appears after a project is chosen). A hidden field, and a hidden model
+picker's `providerField` companion, is left out of the dispatched payload and
+skips `required`; a field whose controller is hidden is hidden too. The schema
+rejects a `showWhen.field` that names the field itself or a field the action
+doesn't have.
 
 `modelPicker` (`{ providerField?, providerDefault? }`) renders the host's live
 provider/model catalog as a searchable picker instead of a producer-supplied
