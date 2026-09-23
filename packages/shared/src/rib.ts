@@ -698,6 +698,9 @@ export const ribActionSchema = z
   .strict();
 export type RibAction = z.infer<typeof ribActionSchema>;
 
+// A success whose `data` is `{ message: string }` (other keys allowed) shows that
+// message as the host's success toast instead of the generic "<type> ✓".
+// Client-effect directives (ribClientEffectSchema) never toast.
 export type RibActionResult = { ok: true; data?: unknown } | { ok: false; error: string };
 
 // Result of a rib's auth-status probe. The probe is not expected to throw; a

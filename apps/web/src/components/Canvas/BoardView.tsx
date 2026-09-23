@@ -134,6 +134,10 @@ function ItemBar({ bar, className }: { bar: CanvasItemBar; className?: string })
   );
 }
 
+function PendingMark() {
+  return <span className="cvb-action-pending" aria-hidden="true" />;
+}
+
 type ActionItem = Extract<BoardSection, { kind: "actions" }>["items"][number];
 type ActionField = NonNullable<ActionItem["fields"]>[number];
 
@@ -248,6 +252,9 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
   // so the tooltip shows, mirroring CardOverflowActions; only truly-inert states
   // (no provider ctx, a dispatch in flight) natively disable.
   const nativelyDisabled = !ctx || pending;
+  // A fields form dispatches from its submit button, so the trigger only shows
+  // busy for a direct dispatch (or an expanded form, which has no trigger).
+  const triggerPending = pending && !(hasFields && open);
   const ariaDisabled = item.disabled === true || undefined;
   const tooltip = actionTooltip(item);
   // `subtitle` only renders in the tabs layout (a controlled item), where the
@@ -349,6 +356,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
           aria-label={iconOnly ? item.label : undefined}
           popoverTarget={item.disabled === true ? undefined : instanceId}
           aria-haspopup="dialog"
+          aria-busy={pending || undefined}
           title={buttonTitle}
         >
           {item.glyph && (
@@ -356,7 +364,8 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
               {item.glyph}
             </span>
           )}
-          {!iconOnly && labelContent}
+          {!iconOnly && (pending && item.pendingLabel ? item.pendingLabel : labelContent)}
+          {pending && !item.pendingLabel && <PendingMark />}
         </button>
         <ModelCatalogPopover
           popoverId={instanceId}
@@ -404,6 +413,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
           aria-expanded={hasFields ? open : undefined}
           aria-pressed={item.selected}
           aria-label={iconOnly ? item.label : undefined}
+          aria-busy={triggerPending || undefined}
           title={buttonTitle}
           onClick={onButtonClick}
         >
@@ -412,7 +422,8 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
               {item.glyph}
             </span>
           )}
-          {!iconOnly && labelContent}
+          {!iconOnly && (triggerPending && item.pendingLabel ? item.pendingLabel : labelContent)}
+          {triggerPending && !item.pendingLabel && <PendingMark />}
         </button>
       )}
       {hasFields && (expanded || open) && (
@@ -534,6 +545,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
               data-tone={item.submitTone ?? item.tone}
               disabled={nativelyDisabled}
               aria-disabled={ariaDisabled}
+              aria-busy={pending || undefined}
               title={tooltip}
             >
               {expanded && item.glyph && (
@@ -541,7 +553,8 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                   {item.glyph}
                 </span>
               )}
-              {item.submitLabel ?? item.label}
+              {pending && item.pendingLabel ? item.pendingLabel : (item.submitLabel ?? item.label)}
+              {pending && !item.pendingLabel && <PendingMark />}
             </button>
             {!expanded && (
               <button type="button" className="cvb-action-button" onClick={() => setOpen(false)}>
