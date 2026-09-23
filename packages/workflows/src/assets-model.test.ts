@@ -161,11 +161,12 @@ describe("resolve-pr workflow contract", () => {
     const workflow = loadBundledWorkflows().find(
       ({ workflow }) => workflow.name === "resolve-pr",
     )?.workflow;
-    const replyPrompt = workflow?.nodes.find((node) => node.id === "reply-resolve")?.prompt;
+    const reply = workflow?.nodes.find((node) => node.id === "reply-resolve");
 
-    expect(replyPrompt).toContain("Fixed code and metadata");
-    expect(replyPrompt).toContain("reply-failures.json");
-    expect(replyPrompt).toContain('stage:"reply-resolve"');
+    // Behavior is covered by test/resolve-pr-reply-resolve.test.ts.
+    expect(reply?.prompt).toBeUndefined();
+    expect(reply?.bash).toContain("reply-failures.json");
+    expect(reply?.bash).toContain('stage: "reply-resolve"');
   });
 
   test("keeps owner-side resolution behind the runtime opt-in", () => {
@@ -173,12 +174,13 @@ describe("resolve-pr workflow contract", () => {
       ({ workflow }) => workflow.name === "resolve-pr",
     )?.workflow;
     const fixPrompt = workflow?.nodes.find((node) => node.id === "fix")?.prompt;
-    const replyPrompt = workflow?.nodes.find((node) => node.id === "reply-resolve")?.prompt;
+    const gate = workflow?.nodes.find((node) => node.id === "reply-gate")?.bash;
+    const reply = workflow?.nodes.find((node) => node.id === "reply-resolve")?.bash;
 
     expect(fixPrompt).toContain("resolve-mode.json");
     expect(fixPrompt).toContain("reviewed and accepted on the maintainer side.");
-    expect(replyPrompt).toContain("resolve_authorized == true");
-    expect(replyPrompt).toContain("Never resolve a `question`");
+    expect(gate).toContain('$resolve_wontfix and ($dec[.threadId]) == "wontfix"');
+    expect(reply).toContain(".resolve_authorized");
   });
 });
 

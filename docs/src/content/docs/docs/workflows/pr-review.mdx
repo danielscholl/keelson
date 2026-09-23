@@ -53,7 +53,7 @@ distills the lanes into the findings worth posting.
 <figure>
   <img
     src={`${import.meta.env.BASE_URL}assets/figures/pr-review-dag.svg`}
-    alt="The pr-review DAG, left to right. extract-pr (prompt) feeds scope (bash); scope feeds classify (prompt). classify fans out to four read-only review lanes (code-review, error-handling, test-coverage, docs-impact), all four behind a when-gate: code-review's fires for any code change (solid edge), the other three are selective (dashed edges). All four lanes converge on triage (an opus judge) under a one_success join, which feeds build-review then post-review (both bash), posting line-anchored inline comments."
+    alt="The pr-review DAG, left to right. extract-pr (bash) feeds scope (bash); scope feeds classify (prompt). classify fans out to four read-only review lanes (code-review, error-handling, test-coverage, docs-impact), all four behind a when-gate: code-review's fires for any code change (solid edge), the other three are selective (dashed edges). All four lanes converge on triage (an opus judge) under a one_success join, which feeds build-review then post-review (both bash), posting line-anchored inline comments."
   />
   <figcaption>
     Figure 1. The pr-review DAG. The classifier fans out to four read-only
@@ -70,7 +70,7 @@ distills the lanes into the findings worth posting.
 
 | Node | Kind | What it does |
 | --- | --- | --- |
-| `extract-pr` | prompt | Parses the PR number from `$ARGUMENTS`. An explicit number is required, since the run cannot infer the PR from the branch in an isolated worktree. |
+| `extract-pr` | bash | Parses the PR number from `$ARGUMENTS` (a PR/MR URL, `pr 42`, `#42`, or a bare number; two different numbers are refused rather than guessed). An explicit number is required, since the run cannot infer the PR from the branch in an isolated worktree. |
 | `scope` | bash | Checks the PR head out in the run's worktree (`forge pr checkout --detach`), then writes `pr.json`, `diff.patch`, `changed-files.txt`, and a `scope.md` brief into the run's scratch dir. |
 | `classify` | prompt | Returns typed JSON: which of the four lanes to run, a complexity bucket, and the reasoning. |
 | `code-review` | prompt | **`model: gpt-6-sol`**, **`effort: xhigh`**: the always-on finder is the recall ceiling, so it gets the strongest coding model, from a different family than the triage judge. Hunts highest-cost failures first (trust boundaries, irreversible state, idempotency gaps), labels unverified external-API claims INFERRED, and runs unless the PR is non-code. |

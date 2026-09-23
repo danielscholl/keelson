@@ -1676,8 +1676,36 @@ nodes:
   # PHASE 10: REPORT
   # ─────────────────────────────────────────────────────────────────────────
 
-  - id: report
+  # The status header and validation verdict are facts other nodes already
+  # recorded, so they're read here rather than left for the report model to infer.
+  - id: report-status
     depends_on: [finalize-pr]
+    bash: |
+      set -uo pipefail
+      A="$KEELSON_ARTIFACTS_DIR"
+      FINAL=$(cat "$A/.ci-final-status" 2>/dev/null | tr -d '[:space:]')
+      TRIAGE="${KEELSON_NODE_triage_ci_OUTPUT_FILE:-}"
+      if [ -n "$TRIAGE" ] && [ -f "$TRIAGE" ]; then TRIAGE=$(cat "$TRIAGE"); else TRIAGE="${KEELSON_NODE_triage_ci_OUTPUT:-}"; fi
+      CONFLICTS=$(printf '%s' "$TRIAGE" | jq -r '(.conflicts // []) | length' 2>/dev/null | tr -d '\r')
+      if [ -f "$A/.ci-conflict" ] || [ "${CONFLICTS:-0}" -gt 0 ] 2>/dev/null; then
+        HEADER="CI CONFLICT"
+      elif [ "$FINAL" = "FAIL" ]; then
+        HEADER="CI RED"
+      elif [ "$FINAL" = "PASS" ]; then
+        HEADER="COMPLETE"
+      else
+        HEADER="CI UNVERIFIED"
+      fi
+      VALIDATION=$(printf '%s\n' "${KEELSON_NODE_post_fix_validate_OUTPUT:-}" \
+        | sed -n 's/^VALIDATION_STATUS: *\([A-Z]*\).*/\1/p' | tail -1)
+      PR_STATE=$(printf '%s\n' "${KEELSON_NODE_finalize_pr_OUTPUT:-}" \
+        | sed -n 's/^PR_STATE: *//p' | tail -1)
+      echo "STATUS_HEADER: $HEADER"
+      echo "VALIDATION: ${VALIDATION:-UNKNOWN}"
+      echo "PR_STATE: ${PR_STATE:-UNKNOWN}"
+
+  - id: report
+    depends_on: [finalize-pr, report-status]
     model: balanced
     model_by_provider:
       copilot: mai-code-1.1-flash
@@ -1698,19 +1726,23 @@ nodes:
         `$ARTIFACTS_DIR/.pr-number` if present.
       - CI triage (including criteria count and conflicts): $triage-ci.output
       - CI + PR state (authoritative): $finalize-pr.output
+      - Computed status (print these values as given):
+
+        $report-status.output
 
       ## Output
 
-      Treat a non-empty CI-triage `conflicts` array and a red final CI state as
-      explicit failure outcomes. Do not describe either outcome as COMPLETE or
-      successful. If criteria were empty, missing, or invalid, name that UNKNOWN
-      criteria state even when the final CI checks passed.
+      The computed status header is authoritative: CI CONFLICT and CI RED are
+      failure outcomes and CI UNVERIFIED means CI was never confirmed green, so
+      describe none of them as successful. If criteria were empty, missing, or
+      invalid, name that UNKNOWN criteria state even when the final CI checks
+      passed.
 
       Print a single block in this shape:
 
       ```
       ===============================================================
-      FIX-ISSUE — {COMPLETE | CI CONFLICT | CI RED}
+      FIX-ISSUE — {the STATUS_HEADER value}
       ===============================================================
       Issue:   #{number} — {title}
       Type:    {bug | feature | ...}
@@ -1722,15 +1754,15 @@ nodes:
       {2-4 bullets}
 
       -- Validation (the project's own checks, after the review loop) --
-      {PASS or FAIL — read it from the post-fix-validate output above; do NOT assume PASS}
+      {VALIDATION from the computed status: PASS, FAIL, or UNKNOWN}
 
       -- Review loop --
       {one line per triaged must-fix finding, with "fixed" or "still-open"; or
        "clean — no must-fix findings" when triage confirmed none}
 
       -- CI & PR state --
-      {READY, DRAFT, CONFLICT, RED, or UNKNOWN — read the final state and CI
-       triage above. For CONFLICT, name every criterion and check. For RED, say
+      {PR_STATE from the computed status, then the CI triage detail.
+       For CONFLICT, name every criterion and check. For RED, say
        the final pushed SHA is red and name the failing check. For zero criteria
        or missing/invalid brief state, say criteria enforcement was UNKNOWN.
        If any review threads still need handling, suggest: resolve-pr #{number}}

@@ -107,7 +107,8 @@ only when the pushed PR's checks pass.
 | | `triage-ci` | prompt | **`model: claude-opus-4.8`**, **`effort: xhigh`**, typed JSON: classifies each CI failure as *actionable* (caused by this PR) or *unrelated/flaky*. |
 | | `fix-ci` | prompt | **`model: gpt-6-sol`**, **`effort: high`**: fixes only the actionable failures on the PR branch and pushes. No-ops when triage finds none. |
 | | `finalize-pr` | bash | Re-checks CI and runs `forge pr ready` to promote the draft **only when every check is green**; a red or check-less PR stays a draft. |
-| Report | `report` | prompt | The operator summary: issue, branch, PR, what changed, the validation status, and the final CI and PR state. |
+| Report | `report-status` | bash | Reads the status header (CI conflict, CI red, CI unverified when no final CI status was recorded, or complete), the validation verdict, and the final PR state from what earlier nodes recorded. |
+| | `report` | prompt | The operator summary: issue, branch, PR, what changed, and the review loop, printing the computed status as given. |
 
 ### The parts worth a second look
 
