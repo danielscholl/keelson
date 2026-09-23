@@ -4477,9 +4477,6 @@ button.cvb-action-field-model:disabled {
     minmax(max(240px, calc((100% - (var(--cvb-cols) - 1) * 8px) / var(--cvb-cols))), 1fr)
   );
 }
-.cvb-cards--grid[data-columns] > .cvb-card {
-  min-height: 196px;
-}
 /* Set-size seats align their controls: footers anchor to the bottom edge. */
 .cvb-cards--grid > .cvb-card > .cvb-card-actions {
   margin-top: auto;
@@ -4879,10 +4876,16 @@ a.cvb-card-title::after {
   flex: 1;
   overflow-wrap: anywhere;
 }
+/* Capped at half the row so a long annotation wraps instead of squeezing the
+   text to a few letters per line. */
 .cvb-row-trailing {
   color: var(--muted);
   font-family: ui-monospace, monospace;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 /* A row carrying `detail` renders as a native disclosure: the summary is the
@@ -4991,6 +4994,7 @@ a.cvb-card-title::after {
 .cvb-rows--boxed .cvb-row-trailing {
   flex: 1 1 auto;
   min-width: 0;
+  max-width: none;
   text-align: left;
   color: var(--fg);
 }
