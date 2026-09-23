@@ -341,7 +341,7 @@ export interface ChatDeps {
   send: (frame: ChatFrame) => void;
   store: ConversationStore;
   abortSignal: AbortSignal;
-  // When wired, a pre-turn recall against this store prepends a memory
+  // When wired, a pre-turn recall against this store adds a memory
   // section to `systemPrompt`. Undefined → recall skipped.
   memoryStore?: MemoryStore;
   // Resolves the conversation's projectId → rootPath used as the agent's cwd.
@@ -778,7 +778,7 @@ interface RunChatRecallArgs {
   projectId?: string;
 }
 
-// Returns the formatted section to prepend onto systemPrompt, or undefined
+// Returns the formatted section to add to systemPrompt, or undefined
 // when recall is disabled, returned no items, or failed. Best-effort — a
 // failure never surfaces to the caller.
 async function runChatRecall(args: RunChatRecallArgs): Promise<string | undefined> {

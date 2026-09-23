@@ -211,7 +211,7 @@ describe("chat memory recall", () => {
     expect(sp).toContain("stub provider: use KEELSON_PROVIDERS=stub");
   });
 
-  test("preserves seedSystemPrompt with the recall section prepended above it", async () => {
+  test("preserves seedSystemPrompt with the recall section after it", async () => {
     const spyId = "spy-recall-with-seed";
     let captured: SendQueryOptions | undefined;
     registerSpy(spyId, (opts) => {
@@ -235,8 +235,7 @@ describe("chat memory recall", () => {
     const sp = captured!.systemPrompt!;
     expect(sp).toContain(RECALL_SECTION_HEADING);
     expect(sp).toContain(seed);
-    // Recall section appears before the seed.
-    expect(sp.indexOf(RECALL_SECTION_HEADING)).toBeLessThan(sp.indexOf(seed));
+    expect(sp.indexOf(seed)).toBeLessThan(sp.indexOf(RECALL_SECTION_HEADING));
   });
 
   test("leaves systemPrompt untouched when recall returns no items", async () => {
@@ -259,7 +258,7 @@ describe("chat memory recall", () => {
 
     // Not whole-prompt equality: the guidance sections ride on which tools are
     // registered this turn — ambient state this test doesn't control.
-    expect(captured?.systemPrompt?.startsWith("seed-only")).toBe(true);
+    expect(captured?.systemPrompt?.endsWith("seed-only")).toBe(true);
     expect(captured?.systemPrompt).not.toContain(RECALL_SECTION_HEADING);
   });
 
@@ -284,7 +283,7 @@ describe("chat memory recall", () => {
       abortSignal: new AbortController().signal,
     });
 
-    expect(captured?.systemPrompt?.startsWith("seed")).toBe(true);
+    expect(captured?.systemPrompt?.endsWith("seed")).toBe(true);
     expect(captured?.systemPrompt).not.toContain(RECALL_SECTION_HEADING);
     // No error frames in the stream — recall failure stays observable in logs
     // but never reaches the client.

@@ -3,13 +3,10 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 // Single source of truth for a chat turn's system prompt. Composes, in order,
-// the always-on project notebook, the memory-recall section, the conversation
-// seed, and — when workflow tools
-// are active — guidance that NAMES the available workflows and steers the model
-// to run them via workflow_run rather than executing their names in a shell.
-// The catalog index is the standing anchor that lets the model match a request
-// like "run smoke-test" without a workflow_list round-trip first. The canvas
-// artifact guidance rides the same tool-conditional pattern.
+// the tool-conditional canvas, docs, and workflow guidance, the always-on project
+// notebook, the conversation seed, and the memory-recall section. The workflow
+// catalog index is the standing anchor that lets the model match a request like
+// "run smoke-test" without a workflow_list round-trip first.
 
 import { buildCanvasArtifactGuidance } from "@keelson/shared";
 
@@ -26,10 +23,10 @@ export interface BuildChatSystemPromptInput {
   // Pass only when the workflow_* tools are active this turn; an empty/omitted
   // list drops the workflow guidance entirely.
   workflows?: readonly WorkflowSummaryLike[];
-  // Pass only when canvas_publish is active this turn — appends the canvas
+  // Pass only when canvas_publish is active this turn — adds the canvas
   // artifact authoring guidance (frame contract, tokens, chart rules).
   canvasArtifacts?: boolean;
-  // Pass only when the keelson_docs tool is active this turn — appends the
+  // Pass only when the keelson_docs tool is active this turn — adds the
   // guidance that points the model at Keelson's (and installed ribs') docs
   // instead of guessing about harness behavior.
   docs?: boolean;
@@ -106,24 +103,26 @@ export function buildDocsGuidance(): string {
 }
 
 export function buildChatSystemPrompt(input: BuildChatSystemPromptInput): string | undefined {
+  // Fixed guidance first for prefix caching, per-turn recall last; the seed follows
+  // the model-writable notebook so the conversation's directive keeps the last word.
   const parts: string[] = [];
-  if (input.notebookSection !== undefined && input.notebookSection.length > 0) {
-    parts.push(input.notebookSection);
-  }
-  if (input.recallSection !== undefined && input.recallSection.length > 0) {
-    parts.push(input.recallSection);
-  }
-  if (typeof input.seedSystemPrompt === "string" && input.seedSystemPrompt.length > 0) {
-    parts.push(input.seedSystemPrompt);
-  }
-  if (input.workflows !== undefined) {
-    parts.push(buildWorkflowGuidance(input.workflows));
-  }
   if (input.canvasArtifacts === true) {
     parts.push(buildCanvasArtifactGuidance());
   }
   if (input.docs === true) {
     parts.push(buildDocsGuidance());
+  }
+  if (input.workflows !== undefined) {
+    parts.push(buildWorkflowGuidance(input.workflows));
+  }
+  if (input.notebookSection !== undefined && input.notebookSection.length > 0) {
+    parts.push(input.notebookSection);
+  }
+  if (typeof input.seedSystemPrompt === "string" && input.seedSystemPrompt.length > 0) {
+    parts.push(input.seedSystemPrompt);
+  }
+  if (input.recallSection !== undefined && input.recallSection.length > 0) {
+    parts.push(input.recallSection);
   }
   return parts.length > 0 ? parts.join("\n\n") : undefined;
 }
