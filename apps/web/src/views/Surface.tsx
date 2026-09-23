@@ -43,6 +43,7 @@ type LaunchWorkflow = (
   stay?: boolean,
 ) => void | Promise<void>;
 type OpenSurface = (surfaceId: string, regionKey?: string) => void;
+type OpenRun = (workflowName: string, runId: string) => void;
 
 // The shared contract type directly — a hand-mirrored interface here would
 // silently drop any field the schema gains next.
@@ -62,6 +63,7 @@ export function Surface({
   onExplore,
   onLaunchWorkflow,
   onOpenSurface,
+  onOpenRun,
 }: {
   descriptor: RibSurfaceDescriptor;
   // Raised when a region's "explore in chat" control fires, carrying the seed
@@ -71,6 +73,8 @@ export function Surface({
   // the run and (unless `stay`) focuses the Workflows tab.
   onLaunchWorkflow?: LaunchWorkflow;
   onOpenSurface?: OpenSurface;
+  // Raised when a board action returns an open-run directive; App opens the run drawer.
+  onOpenRun?: OpenRun;
 }) {
   const { header, banner, rows, footer } = descriptor.layout;
   const { isRegionActionHidden } = useSettings();
@@ -160,6 +164,7 @@ export function Surface({
           hiddenActions={hiddenActions}
           onLaunchWorkflow={onLaunchWorkflow}
           onOpenSurface={onOpenSurface}
+          onOpenRun={onOpenRun}
         />
       )}
       {banner && (
@@ -172,6 +177,7 @@ export function Surface({
           hiddenActions={hiddenActions}
           onLaunchWorkflow={onLaunchWorkflow}
           onOpenSurface={onOpenSurface}
+          onOpenRun={onOpenRun}
         />
       )}
       {groupRowsByZone(rows).map((zone) => (
@@ -195,6 +201,7 @@ export function Surface({
                     hiddenActions={hiddenActions}
                     onLaunchWorkflow={onLaunchWorkflow}
                     onOpenSurface={onOpenSurface}
+                    onOpenRun={onOpenRun}
                   />
                 ));
                 return regions.length === 1 ? (
@@ -219,6 +226,7 @@ export function Surface({
           hiddenActions={hiddenActions}
           onLaunchWorkflow={onLaunchWorkflow}
           onOpenSurface={onOpenSurface}
+          onOpenRun={onOpenRun}
         />
       )}
     </div>
@@ -253,6 +261,7 @@ function SurfaceRegion({
   hiddenActions,
   onLaunchWorkflow,
   onOpenSurface,
+  onOpenRun,
 }: {
   region: Region;
   onExplore?: ExploreHandler;
@@ -263,6 +272,7 @@ function SurfaceRegion({
   hiddenActions: HiddenRegionActions;
   onLaunchWorkflow?: LaunchWorkflow;
   onOpenSurface?: OpenSurface;
+  onOpenRun?: OpenRun;
 }) {
   const collapsible = region.collapsible ?? false;
   const [collapsed, setCollapsed] = useState(collapsible ? (region.collapsed ?? false) : false);
@@ -325,9 +335,10 @@ function SurfaceRegion({
           onOpenChat,
           ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
           ...(onOpenSurface ? { onOpenSurface } : {}),
+          ...(onOpenRun ? { onOpenRun } : {}),
         },
       ),
-    [openCanvas, onOpenChat, onLaunchWorkflow, onOpenSurface, resolveCanvasKind],
+    [openCanvas, onOpenChat, onLaunchWorkflow, onOpenSurface, onOpenRun, resolveCanvasKind],
   );
   // Only wire onOpenChat when onExplore exists; otherwise the dispatch would
   // intercept an open-chat directive, no-op, and swallow the normal success path.
@@ -339,6 +350,7 @@ function SurfaceRegion({
     ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
     onOpenCanvas,
     ...(onOpenSurface ? { onOpenSurface } : {}),
+    ...(onOpenRun ? { onOpenRun } : {}),
   });
   // Head verbs get a reload-only success path: a destructive head action often
   // removes the region's own backing item, and re-running the refresh workflow
@@ -350,6 +362,7 @@ function SurfaceRegion({
     ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
     onOpenCanvas,
     ...(onOpenSurface ? { onOpenSurface } : {}),
+    ...(onOpenRun ? { onOpenRun } : {}),
   });
 
   // An html region's payload is markup, not a view: it never parses as a board,
@@ -410,6 +423,7 @@ function SurfaceRegion({
         onOpenChat,
         ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
         ...(onOpenSurface ? { onOpenSurface } : {}),
+        ...(onOpenRun ? { onOpenRun } : {}),
       },
     );
   };

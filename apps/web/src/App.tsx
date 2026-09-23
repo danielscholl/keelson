@@ -118,6 +118,11 @@ function AppInner() {
     [activeProjectId, toast, handleOpenWorkflowRun],
   );
 
+  // An open-run directive shows a run the rib already has, so there is no launch to watch.
+  const handleOpenRun = useCallback((workflowName: string, runId: string) => {
+    setStayRun({ workflowName, runId });
+  }, []);
+
   const handleOpenSurface = useCallback(
     (surfaceId: string, regionKey?: string) => {
       if (!surfaceTabs.some((t) => t.id === surfaceId)) {
@@ -193,6 +198,7 @@ function AppInner() {
           onExplore={handleExplore}
           onLaunchWorkflow={handleLaunchWorkflowFromAction}
           onOpenSurface={handleOpenSurface}
+          onOpenRun={handleOpenRun}
         />
       ) : activeTab === "workflows" ? (
         <Workflows

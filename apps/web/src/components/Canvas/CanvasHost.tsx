@@ -31,6 +31,7 @@ interface CanvasOpenOptions {
     args: Record<string, string>,
     stay?: boolean,
   ) => void | Promise<void>;
+  onOpenRun?: (workflowName: string, runId: string) => void;
 }
 
 interface CanvasApi {
@@ -47,6 +48,7 @@ interface CanvasState {
     args: Record<string, string>,
     stay?: boolean,
   ) => void | Promise<void>;
+  onOpenRun?: (workflowName: string, runId: string) => void;
 }
 
 const CanvasContext = createContext<CanvasApi | null>(null);
@@ -75,6 +77,7 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
         footer: opts?.footer ?? null,
         onOpenChat: opts?.onOpenChat,
         onLaunchWorkflow: opts?.onLaunchWorkflow,
+        onOpenRun: opts?.onOpenRun,
       }),
     [],
   );
@@ -89,6 +92,7 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
           footer={state.footer}
           {...(state.onOpenChat ? { onOpenChat: state.onOpenChat } : {})}
           {...(state.onLaunchWorkflow ? { onLaunchWorkflow: state.onLaunchWorkflow } : {})}
+          {...(state.onOpenRun ? { onOpenRun: state.onOpenRun } : {})}
           onClose={close}
         />
       )}
@@ -101,6 +105,7 @@ function CanvasDrawer({
   footer,
   onOpenChat,
   onLaunchWorkflow,
+  onOpenRun,
   onClose,
 }: {
   doc: CanvasDocument;
@@ -111,6 +116,7 @@ function CanvasDrawer({
     args: Record<string, string>,
     stay?: boolean,
   ) => void | Promise<void>;
+  onOpenRun?: (workflowName: string, runId: string) => void;
   onClose: () => void;
 }) {
   const title = doc.title ?? "Canvas";
@@ -139,7 +145,12 @@ function CanvasDrawer({
           </button>
         </header>
         <div className="canvas-drawer-body">
-          <CanvasBody doc={doc} onOpenChat={onOpenChat} onLaunchWorkflow={onLaunchWorkflow} />
+          <CanvasBody
+            doc={doc}
+            onOpenChat={onOpenChat}
+            onLaunchWorkflow={onLaunchWorkflow}
+            onOpenRun={onOpenRun}
+          />
         </div>
         {footer && <footer className="canvas-drawer-footer">{footer}</footer>}
       </aside>
@@ -153,6 +164,7 @@ function CanvasBody({
   doc,
   onOpenChat,
   onLaunchWorkflow,
+  onOpenRun,
 }: {
   doc: CanvasDocument;
   onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
@@ -161,6 +173,7 @@ function CanvasBody({
     args: Record<string, string>,
     stay?: boolean,
   ) => void | Promise<void>;
+  onOpenRun?: (workflowName: string, runId: string) => void;
 }) {
   switch (doc.kind) {
     case "markdown":
@@ -173,6 +186,7 @@ function CanvasBody({
           source={doc.source}
           onOpenChat={onOpenChat}
           onLaunchWorkflow={onLaunchWorkflow}
+          onOpenRun={onOpenRun}
         />
       );
     case "html":
@@ -193,6 +207,7 @@ function ViewCanvas({
   source,
   onOpenChat,
   onLaunchWorkflow,
+  onOpenRun,
 }: {
   source: CanvasSource;
   onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
@@ -201,6 +216,7 @@ function ViewCanvas({
     args: Record<string, string>,
     stay?: boolean,
   ) => void | Promise<void>;
+  onOpenRun?: (workflowName: string, runId: string) => void;
 }) {
   const ribId = source.type === "snapshot" ? ribIdFromKey(source.key) : null;
   const { openCanvas, close } = useCanvas();
@@ -230,6 +246,15 @@ function ViewCanvas({
     },
     [onLaunchWorkflow, close],
   );
+  // The run drawer opens beside the surface, so this drawer steps aside for it.
+  const onOpenRunAndClose = useCallback(
+    (workflowName: string, runId: string) => {
+      if (!onOpenRun) return;
+      onOpenRun(workflowName, runId);
+      close();
+    },
+    [onOpenRun, close],
+  );
   // An open-canvas directive from a board rendered IN the drawer drills into
   // another snapshot by replacing this drawer's doc — openCanvas is context-
   // available here, so it's sourced locally rather than threaded from the opener
@@ -246,13 +271,15 @@ function ViewCanvas({
         {
           ...(onOpenChat ? { onOpenChat } : {}),
           ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
+          ...(onOpenRun ? { onOpenRun } : {}),
         },
       ),
-    [openCanvas, onOpenChat, onLaunchWorkflow, resolveCanvasKind],
+    [openCanvas, onOpenChat, onLaunchWorkflow, onOpenRun, resolveCanvasKind],
   );
   const actions = useRibActionDispatch(ribId, {
     ...(onOpenChat ? { onOpenChat: onOpenChatAndClose } : {}),
     ...(onLaunchWorkflow ? { onLaunchWorkflow: onLaunchWorkflowAndClose } : {}),
+    ...(onOpenRun ? { onOpenRun: onOpenRunAndClose } : {}),
     onOpenCanvas,
   });
   if (!ribId) return <ViewBody source={source} />;

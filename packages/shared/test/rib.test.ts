@@ -829,6 +829,15 @@ describe("rib client effect schema", () => {
     ).toBe(false);
   });
 
+  it("parses an open-run effect and requires its workflow", () => {
+    const effect = { effect: "open-run" as const, runId: "run-1", workflow: "ship" };
+    expect(ribClientEffectSchema.parse(effect)).toEqual(effect);
+    expect(ribClientEffectSchema.safeParse({ effect: "open-run", runId: "run-1" }).success).toBe(
+      false,
+    );
+    expect(ribClientEffectSchema.safeParse({ ...effect, extra: 1 }).success).toBe(false);
+  });
+
   it("still rejects an unknown discriminator after more effect arms were added", () => {
     expect(
       ribClientEffectSchema.safeParse({ effect: "open-url", url: "https://x.test" }).success,
