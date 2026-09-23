@@ -84,22 +84,78 @@ export const CLAUDE_CAPABILITIES: ProviderCapabilities = {
   modelClasses: deriveModelClasses(CLAUDE_MODEL_CATALOG, CLAUDE_DEFAULT_MODEL),
 };
 
-function mapEffortToThinking(
-  effort: NonNullable<SendQueryOptions["reasoningEffort"]>,
-): ClaudeThinkingConfig {
-  // Tier budgets: low 4,096; medium 8,192; high 16,384; xhigh 32,000 tokens.
-  switch (effort) {
-    case "none":
-      return { type: "disabled" };
-    case "low":
-      return { type: "enabled", budgetTokens: 4096, display: "summarized" };
-    case "medium":
-      return { type: "enabled", budgetTokens: 8192, display: "summarized" };
-    case "high":
-      return { type: "enabled", budgetTokens: 16384, display: "summarized" };
-    case "xhigh":
-      return { type: "enabled", budgetTokens: 32000, display: "summarized" };
+type ClaudeEffort = "low" | "medium" | "high" | "xhigh";
+
+interface ClaudeModelVersion {
+  family: string | undefined;
+  major: number | undefined;
+  minor: number;
+}
+
+// Reads family and version from catalog ids, dated and provider-prefixed ids
+// (`claude-sonnet-4-20250514`, `us.anthropic.claude-opus-4-1-…`, `…@20250929`,
+// `…[1m]`), legacy `claude-3-5-sonnet-…` ids, and bare CLI aliases (`haiku`).
+function claudeModelVersion(id: string): ClaudeModelVersion {
+  const lower = id.toLowerCase();
+  const legacy = /claude-(\d+)(?:-(\d)(?!\d))?-(opus|sonnet|haiku)/.exec(lower);
+  if (legacy) {
+    return { family: legacy[3], major: Number(legacy[1]), minor: Number(legacy[2] ?? 0) };
   }
+  const current = /(opus|sonnet|haiku|fable|mythos)(?:-(\d+)(?:-(\d)(?!\d))?)?/.exec(lower);
+  if (!current) return { family: undefined, major: undefined, minor: 0 };
+  return {
+    family: current[1],
+    major: current[2] === undefined ? undefined : Number(current[2]),
+    minor: Number(current[3] ?? 0),
+  };
+}
+
+// Haiku and pre-4.6 models take a fixed thinking budget; newer ones take adaptive
+// thinking plus `effort`, and reject `budgetTokens`.
+function usesFixedBudget({ family, major, minor }: ClaudeModelVersion): boolean {
+  if (family === "haiku") return major === undefined || major < 5;
+  if (major === undefined) return false;
+  return major < 4 || (major === 4 && minor < 6);
+}
+
+// These always think, so "off" becomes the lowest effort instead of `disabled`.
+function alwaysThinks({ family, major, minor }: ClaudeModelVersion): boolean {
+  if (family === "fable" || family === "mythos") return true;
+  return family === "opus" && major !== undefined && (major > 5 || (major === 5 && minor >= 5));
+}
+
+const FIXED_BUDGETS: Record<ClaudeEffort, number> = {
+  low: 4096,
+  medium: 8192,
+  high: 16384,
+  xhigh: 32000,
+};
+
+export function resolveClaudeThinking(
+  model: string | undefined,
+  reasoningEffort: SendQueryOptions["reasoningEffort"],
+  thinking: boolean | undefined,
+): { thinking?: ClaudeThinkingConfig; effort?: ClaudeEffort } {
+  const version = claudeModelVersion(model ?? CLAUDE_DEFAULT_MODEL);
+  const off = reasoningEffort === "none" || (reasoningEffort === undefined && thinking === false);
+  if (off) {
+    return alwaysThinks(version)
+      ? { thinking: { type: "adaptive", display: "summarized" }, effort: "low" }
+      : { thinking: { type: "disabled" } };
+  }
+  const level: ClaudeEffort | undefined =
+    reasoningEffort ?? (thinking === true ? "medium" : undefined);
+  if (level === undefined) return {};
+  if (usesFixedBudget(version)) {
+    return {
+      thinking: { type: "enabled", budgetTokens: FIXED_BUDGETS[level], display: "summarized" },
+    };
+  }
+  const adaptive: ClaudeThinkingConfig = { type: "adaptive", display: "summarized" };
+  if (reasoningEffort === undefined) return { thinking: adaptive };
+  // xhigh arrived with 4.7; 4.6 tops out at high.
+  const is46 = version.major === 4 && version.minor === 6;
+  return { thinking: adaptive, effort: level === "xhigh" && is46 ? "high" : level };
 }
 
 export type GetCredentialFn = (serviceId: string) => Promise<string | undefined>;
@@ -167,10 +223,11 @@ export class ClaudeProvider implements IAgentProvider {
 
     const controller = new AbortController();
     const detachAbort = forwardAbort(options?.abortSignal, controller);
-    const thinking =
-      options?.reasoningEffort !== undefined
-        ? mapEffortToThinking(options.reasoningEffort)
-        : options?.thinking;
+    const { thinking, effort } = resolveClaudeThinking(
+      options?.model,
+      options?.reasoningEffort,
+      options?.thinking,
+    );
 
     // Shared queue interleaves SDK-derived chunks (text/thinking deltas,
     // tool blocks) with chunks pushed by in-process tool handlers via
@@ -206,6 +263,7 @@ export class ClaudeProvider implements IAgentProvider {
         ...(options?.model !== undefined ? { model: options.model } : {}),
         ...(options?.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}),
         ...(thinking !== undefined ? { thinking } : {}),
+        ...(effort !== undefined ? { effort } : {}),
         ...(options?.allowedDirectories !== undefined
           ? { allowedDirectories: options.allowedDirectories }
           : {}),

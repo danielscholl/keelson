@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
 import { type ClaudeToolProjectionContext, projectToolsForClaude } from "../src/claude/factory.ts";
+import { resolveClaudeThinking } from "../src/claude/provider.ts";
 import type {
   ClaudeQueryOptions,
   ClaudeSdkMessage,
@@ -931,7 +932,7 @@ describe("ClaudeProvider — extended thinking (F10.4)", () => {
     expect(options.thinking).toEqual({ type: "disabled" });
   });
 
-  it("maps xhigh reasoning effort to a 32000-token thinking budget", async () => {
+  it("maps reasoning effort to adaptive thinking plus effort on current models", async () => {
     const sdk = makeMockSdk({ scenario: pushSuccess });
     const provider = new ClaudeProvider({
       getCredential: async () => "k",
@@ -940,27 +941,48 @@ describe("ClaudeProvider — extended thinking (F10.4)", () => {
 
     await drain(provider.sendQuery("hi", "/tmp", undefined, { reasoningEffort: "xhigh" }));
 
-    expect(sdk.lastOptions()!.thinking).toEqual({
-      type: "enabled",
-      budgetTokens: 32000,
-      display: "summarized",
-    });
+    const options = sdk.lastOptions()!;
+    expect(options.thinking).toEqual({ type: "adaptive", display: "summarized" });
+    expect(options.effort).toBe("xhigh");
   });
 
-  it("maps medium reasoning effort to an 8192-token thinking budget", async () => {
+  it("keeps a fixed thinking budget for models without adaptive thinking", async () => {
     const sdk = makeMockSdk({ scenario: pushSuccess });
     const provider = new ClaudeProvider({
       getCredential: async () => "k",
       queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
     });
 
-    await drain(provider.sendQuery("hi", "/tmp", undefined, { reasoningEffort: "medium" }));
+    await drain(
+      provider.sendQuery("hi", "/tmp", undefined, {
+        model: "claude-haiku-4-5",
+        reasoningEffort: "medium",
+      }),
+    );
 
-    expect(sdk.lastOptions()!.thinking).toEqual({
+    const options = sdk.lastOptions()!;
+    expect(options.thinking).toEqual({
       type: "enabled",
       budgetTokens: 8192,
       display: "summarized",
     });
+    expect(options.effort).toBeUndefined();
+  });
+
+  it("turns thinking off as the lowest effort on models that always think", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    await drain(
+      provider.sendQuery("hi", "/tmp", undefined, { model: "claude-fable-5", thinking: false }),
+    );
+
+    const options = sdk.lastOptions()!;
+    expect(options.thinking).toEqual({ type: "adaptive", display: "summarized" });
+    expect(options.effort).toBe("low");
   });
 
   it("maps none reasoning effort to disabled thinking", async () => {
@@ -973,6 +995,30 @@ describe("ClaudeProvider — extended thinking (F10.4)", () => {
     await drain(provider.sendQuery("hi", "/tmp", undefined, { reasoningEffort: "none" }));
 
     expect(sdk.lastOptions()!.thinking).toEqual({ type: "disabled" });
+  });
+
+  it.each([
+    ["claude-sonnet-4-20250514"],
+    ["claude-opus-4-20250514"],
+    ["us.anthropic.claude-sonnet-4-20250514-v1:0"],
+    ["claude-sonnet-4-5[1m]"],
+    ["claude-sonnet-4-5@20250929"],
+    ["claude-opus-4-1"],
+    ["claude-3-7-sonnet-latest"],
+    ["haiku"],
+  ])("keeps a fixed budget for older or Haiku id %s", (id) => {
+    expect(resolveClaudeThinking(id, "high", undefined).thinking).toMatchObject({
+      type: "enabled",
+      budgetTokens: 16384,
+    });
+  });
+
+  it("caps xhigh at high for 4.6 models, which predate xhigh", () => {
+    expect(resolveClaudeThinking("claude-sonnet-4-6-20260219", "xhigh", undefined)).toEqual({
+      thinking: { type: "adaptive", display: "summarized" },
+      effort: "high",
+    });
+    expect(resolveClaudeThinking("claude-opus-4-7", "xhigh", undefined).effort).toBe("xhigh");
   });
 
   it("omits thinking option entirely when not specified (preserves SDK default)", async () => {

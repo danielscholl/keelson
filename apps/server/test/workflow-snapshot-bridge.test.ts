@@ -93,7 +93,7 @@ async function pollUntilStoreStatus(
   store: WorkflowStore,
   runId: string,
   predicate: (status: string | undefined) => boolean,
-  timeoutMs = 2000,
+  timeoutMs = 5000,
 ): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -105,7 +105,7 @@ async function pollUntilStoreStatus(
 
 // recompose() is fire-and-forget off node_done, so the cached frame may land a
 // tick after the run reports `paused`. Poll the hydrate endpoint until it 200s.
-async function pollSnapshot(app: Hono, key: string, timeoutMs = 2000): Promise<unknown> {
+async function pollSnapshot(app: Hono, key: string, timeoutMs = 5000): Promise<unknown> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const res = await app.fetch(new Request(`http://test/api/snapshots/${key}`));

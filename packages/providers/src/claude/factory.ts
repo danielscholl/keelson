@@ -137,6 +137,7 @@ export interface ClaudeQueryOptions {
   forwardSubagentText?: boolean;
   // Per-turn override of SDK default thinking mode.
   thinking?: ClaudeThinkingConfig;
+  effort?: "low" | "medium" | "high" | "xhigh";
   // SDK accepts Record<name, McpServerConfig>; we ship a single entry
   // ("keelson") whose `instance` comes from createSdkMcpServer.
   mcpServers?: Record<string, unknown>;
@@ -222,6 +223,7 @@ export interface CreateQueryParams {
   model?: string;
   systemPrompt?: string;
   thinking?: boolean | ClaudeThinkingConfig;
+  effort?: "low" | "medium" | "high" | "xhigh";
   allowedDirectories?: readonly string[];
   tools?: ToolDefinition[];
   toolProjection?: ClaudeToolProjectionContext;
@@ -482,6 +484,7 @@ export class ClaudeQueryFactory {
     } else if (typeof params.thinking === "object") {
       options.thinking = params.thinking;
     }
+    if (params.effort !== undefined) options.effort = params.effort;
     // `allowedTools: []` is meaningful (forbids every tool), so check
     // explicitly for undefined rather than truthy.
     //
