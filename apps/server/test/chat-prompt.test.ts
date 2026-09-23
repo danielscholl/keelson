@@ -95,7 +95,7 @@ describe("buildChatSystemPrompt", () => {
     expect(out).toContain("workflow_save");
   });
 
-  test("composes recall, seed, and workflow guidance in order", () => {
+  test("puts stable guidance before per-turn recall", () => {
     const out = buildChatSystemPrompt({
       recallSection: "## Relevant prior memory\n\n- x",
       seedSystemPrompt: "seed",
@@ -104,9 +104,9 @@ describe("buildChatSystemPrompt", () => {
     const recallAt = out!.indexOf("Relevant prior memory");
     const seedAt = out!.indexOf("seed");
     const wfAt = out!.indexOf("## Workflows");
-    expect(recallAt).toBeGreaterThanOrEqual(0);
-    expect(seedAt).toBeGreaterThan(recallAt);
-    expect(wfAt).toBeGreaterThan(seedAt);
+    expect(wfAt).toBeGreaterThanOrEqual(0);
+    expect(seedAt).toBeGreaterThan(wfAt);
+    expect(recallAt).toBeGreaterThan(seedAt);
   });
 
   test("canvas artifact guidance rides only the canvasArtifacts flag", () => {

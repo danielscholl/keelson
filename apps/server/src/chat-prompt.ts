@@ -106,24 +106,26 @@ export function buildDocsGuidance(): string {
 }
 
 export function buildChatSystemPrompt(input: BuildChatSystemPromptInput): string | undefined {
+  // Fixed guidance first for prefix caching, per-turn recall last; the seed follows
+  // the model-writable notebook so the conversation's directive keeps the last word.
   const parts: string[] = [];
-  if (input.notebookSection !== undefined && input.notebookSection.length > 0) {
-    parts.push(input.notebookSection);
-  }
-  if (input.recallSection !== undefined && input.recallSection.length > 0) {
-    parts.push(input.recallSection);
-  }
-  if (typeof input.seedSystemPrompt === "string" && input.seedSystemPrompt.length > 0) {
-    parts.push(input.seedSystemPrompt);
-  }
-  if (input.workflows !== undefined) {
-    parts.push(buildWorkflowGuidance(input.workflows));
-  }
   if (input.canvasArtifacts === true) {
     parts.push(buildCanvasArtifactGuidance());
   }
   if (input.docs === true) {
     parts.push(buildDocsGuidance());
+  }
+  if (input.workflows !== undefined) {
+    parts.push(buildWorkflowGuidance(input.workflows));
+  }
+  if (input.notebookSection !== undefined && input.notebookSection.length > 0) {
+    parts.push(input.notebookSection);
+  }
+  if (typeof input.seedSystemPrompt === "string" && input.seedSystemPrompt.length > 0) {
+    parts.push(input.seedSystemPrompt);
+  }
+  if (input.recallSection !== undefined && input.recallSection.length > 0) {
+    parts.push(input.recallSection);
   }
   return parts.length > 0 ? parts.join("\n\n") : undefined;
 }
