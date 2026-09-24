@@ -261,6 +261,29 @@ describe("createWorktree", () => {
     expect(second.worktreePath).toBe(dest);
   });
 
+  test("creates concurrent tracking worktrees on one repo without a config lock race", async () => {
+    await initRepo(tmp);
+    await addOrigin(tmp);
+    await git(["config", "branch.autoSetupMerge", "true"], tmp);
+    const branches = Array.from({ length: 6 }, (_, i) => `keelson/test/concurrent-${i}`);
+    const results = await Promise.allSettled(
+      branches.map((branch) =>
+        createWorktree({
+          repoPath: tmp,
+          branch,
+          dest: join(tmp, ".wt", basename(branch)),
+          base: "origin/main",
+        }),
+      ),
+    );
+    expect(results.filter((r) => r.status === "rejected")).toEqual([]);
+    for (const branch of branches) {
+      expect(
+        (await gitText(["rev-parse", "--abbrev-ref", `${branch}@{upstream}`], tmp)).trim(),
+      ).toBe("origin/main");
+    }
+  }, 15_000);
+
   test("throws WorktreeCreationError when dest exists but is not a registered worktree", async () => {
     await initRepo(tmp);
     const dest = join(tmp, ".wt", "unrelated");

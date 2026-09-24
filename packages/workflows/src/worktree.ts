@@ -173,6 +173,30 @@ async function runBun(args: string[], cwd: string, abortSignal?: AbortSignal): P
   return { exitCode, stdout, stderr };
 }
 
+// Git rewrites .git/config under a lock file when a branch gains or loses its
+// upstream, so concurrent branch-creating commands on one repo fail outright.
+const repoLocks = new Map<string, Promise<void>>();
+
+async function withRepoLock<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
+  const commonDir = await runGit(["rev-parse", "--git-common-dir"], repoPath);
+  const dir =
+    commonDir.exitCode === 0
+      ? canonicalPath(resolve(repoPath, commonDir.stdout.trim()))
+      : resolve(repoPath);
+  const key = process.platform === "win32" ? dir.toLowerCase() : dir;
+  const run = (repoLocks.get(key) ?? Promise.resolve()).then(fn);
+  const tail = run.then(
+    () => {},
+    () => {},
+  );
+  repoLocks.set(key, tail);
+  try {
+    return await run;
+  } finally {
+    if (repoLocks.get(key) === tail) repoLocks.delete(key);
+  }
+}
+
 /** Check if `path` is inside a git work tree. Cheap; one git invocation. */
 export async function isGitRepo(path: string): Promise<boolean> {
   if (!existsSync(path)) return false;
@@ -232,6 +256,10 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Creat
   if (!(await isGitRepo(opts.repoPath))) {
     throw new NotAGitRepoError(opts.repoPath);
   }
+  return withRepoLock(opts.repoPath, () => createWorktreeLocked(opts));
+}
+
+async function createWorktreeLocked(opts: CreateWorktreeOptions): Promise<CreateWorktreeResult> {
   if (existsSync(opts.dest)) {
     const known = await listWorktrees(opts.repoPath);
     const destReal = canonicalPath(opts.dest);
@@ -574,27 +602,29 @@ export async function deleteBranch(opts: {
   repoPath: string;
   branch: string;
 }): Promise<DeleteBranchResult> {
-  const exists = await runGit(
-    ["show-ref", "--verify", "--quiet", `refs/heads/${opts.branch}`],
-    opts.repoPath,
-  );
-  if (exists.exitCode === 1) {
-    return { deleted: false, warning: null };
-  }
-  if (exists.exitCode !== 0) {
-    return {
-      deleted: false,
-      warning: `git show-ref failed (exit ${exists.exitCode}): ${exists.stderr.trim() || exists.stdout.trim()}`,
-    };
-  }
-  const result = await runGit(["branch", "-D", opts.branch], opts.repoPath);
-  if (result.exitCode !== 0) {
-    return {
-      deleted: false,
-      warning: `git branch -D ${opts.branch} failed: ${result.stderr.trim() || result.stdout.trim()}`,
-    };
-  }
-  return { deleted: true, warning: null };
+  return withRepoLock(opts.repoPath, async () => {
+    const exists = await runGit(
+      ["show-ref", "--verify", "--quiet", `refs/heads/${opts.branch}`],
+      opts.repoPath,
+    );
+    if (exists.exitCode === 1) {
+      return { deleted: false, warning: null };
+    }
+    if (exists.exitCode !== 0) {
+      return {
+        deleted: false,
+        warning: `git show-ref failed (exit ${exists.exitCode}): ${exists.stderr.trim() || exists.stdout.trim()}`,
+      };
+    }
+    const result = await runGit(["branch", "-D", opts.branch], opts.repoPath);
+    if (result.exitCode !== 0) {
+      return {
+        deleted: false,
+        warning: `git branch -D ${opts.branch} failed: ${result.stderr.trim() || result.stdout.trim()}`,
+      };
+    }
+    return { deleted: true, warning: null };
+  });
 }
 
 /**
