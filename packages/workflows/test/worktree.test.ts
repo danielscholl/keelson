@@ -264,6 +264,7 @@ describe("createWorktree", () => {
   test("creates concurrent tracking worktrees on one repo without a config lock race", async () => {
     await initRepo(tmp);
     await addOrigin(tmp);
+    await git(["config", "branch.autoSetupMerge", "true"], tmp);
     const branches = Array.from({ length: 6 }, (_, i) => `keelson/test/concurrent-${i}`);
     const results = await Promise.allSettled(
       branches.map((branch) =>
