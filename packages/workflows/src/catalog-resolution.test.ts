@@ -129,6 +129,69 @@ describe("resolveWorkflowResolution", () => {
     );
   });
 
+  test("resolves initialized Copilot classes, overrides and provider fallback consistently", async () => {
+    const capabilities = {
+      defaultModel: "auto",
+      models: ["auto", "fast-model", "balanced-model", "deep-model"],
+      modelClasses: { fast: "fast-model", balanced: "balanced-model", deep: "deep-model" },
+    };
+    const options = {
+      providers: new Map([["copilot", capabilities]]),
+      defaultProviderId: "copilot",
+    };
+    const workflow = makeWorkflow([
+      { id: "fast", prompt: "fast", model: "fast" },
+      { id: "balanced", prompt: "balanced", model: "balanced" },
+      { id: "deep", prompt: "deep", model: "deep" },
+    ]);
+    const resolved = await resolveWorkflowResolutionReady(workflow, options, async () => {});
+    expect(resolved.nodes.map(({ model }) => model)).toEqual([
+      "fast-model",
+      "balanced-model",
+      "deep-model",
+    ]);
+    const configured = await resolveWorkflowResolutionReady(
+      workflow,
+      {
+        ...options,
+        modelClassOverride: (id, cls) =>
+          id === "copilot" && cls === "deep" ? "pinned-deep" : undefined,
+      },
+      async () => {},
+    );
+    expect(configured.nodes.map(({ model }) => model)).toEqual([
+      "fast-model",
+      "balanced-model",
+      "pinned-deep",
+    ]);
+    const fallback = await resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "review", prompt: "review", model: "deep" }], {
+        provider: "missing",
+      }),
+      options,
+      async () => {},
+    );
+    expect(fallback.nodes[0]).toMatchObject({
+      effectiveProvider: "copilot",
+      model: "deep-model",
+      providerFellBack: true,
+      modelFellBack: false,
+    });
+    const runOverride = await resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "review", prompt: "review", model: "deep" }], {
+        provider: "claude",
+      }),
+      { ...options, runProviderId: "copilot" },
+      async () => {},
+    );
+    expect(runOverride.nodes[0]).toMatchObject({
+      effectiveProvider: "copilot",
+      model: "deep-model",
+      providerFellBack: true,
+      modelFellBack: false,
+    });
+  });
+
   test("keeps a registered provider pin and its provider-specific model native", () => {
     const workflow = makeWorkflow(
       [

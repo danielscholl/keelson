@@ -9,7 +9,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   CopilotClientFactory,
+  type CopilotClientLike,
   CopilotProvider,
+  type CopilotSessionLike,
+  type CreateClientResult,
   type IAgentProvider,
   type ModelInfo,
   type ProviderFinishReason,
@@ -238,6 +241,119 @@ describe("makeRibAgentTurn — provider routing", () => {
 });
 
 describe("makeRibAgentTurn — model classes and the served model", () => {
+  function sdkCopilot(catalog: ModelInfo[] | null) {
+    const opened: Array<string | undefined> = [];
+    const retargeted: string[] = [];
+    const session = (): CopilotSessionLike => {
+      const handlers = new Map<string, Set<(event: unknown) => void>>();
+      return {
+        sessionId: "mock-session",
+        on(event, handler) {
+          let listeners = handlers.get(event);
+          if (!listeners) {
+            listeners = new Set();
+            handlers.set(event, listeners);
+          }
+          listeners.add(handler);
+          return () => listeners.delete(handler);
+        },
+        async send() {
+          for (const listener of handlers.get("assistant.message") ?? []) {
+            listener({ data: { content: "hello" } });
+          }
+          for (const listener of handlers.get("session.idle") ?? []) listener({});
+        },
+        async abort() {},
+        async disconnect() {},
+        async setModel(model) {
+          retargeted.push(model);
+        },
+      };
+    };
+    const client: CopilotClientLike = {
+      async start() {},
+      async stop() {},
+      async createSession(config) {
+        opened.push((config as { model?: string } | undefined)?.model);
+        return session();
+      },
+      async resumeSession(_sessionId, config) {
+        opened.push((config as { model?: string } | undefined)?.model);
+        return session();
+      },
+      async getAuthStatus() {
+        return { isAuthenticated: true };
+      },
+      async listModels() {
+        return [];
+      },
+    };
+    class TestFactory extends CopilotClientFactory {
+      override async listModels(): Promise<ModelInfo[] | null> {
+        return catalog;
+      }
+      override async createClient(): Promise<CreateClientResult> {
+        return { client, permissionHandler: async () => ({ kind: "approved" }) };
+      }
+    }
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new TestFactory(),
+      idleMs: 0,
+    });
+    return { provider, opened, retargeted };
+  }
+
+  it("forwards derived and overridden Copilot models to new and resumed SDK sessions", async () => {
+    const { provider, opened, retargeted } = sdkCopilot([
+      { id: "auto" },
+      { id: "deep-model", costTier: "high" },
+      { id: "balanced-model", costTier: "mid" },
+      { id: "fast-model", costTier: "low" },
+    ]);
+    const run = makeRun(provider, {
+      ids: ["copilot"],
+      resolveModelClass: (id, cls) =>
+        id === "copilot" && cls === "deep" ? "pinned-deep" : undefined,
+    });
+    try {
+      for (const [cls, expected] of [
+        ["fast", "fast-model"],
+        ["balanced", "balanced-model"],
+        ["deep", "pinned-deep"],
+      ] as const) {
+        expect((await run("chat", { prompt: "hi", modelClass: cls }).result).model).toBe(expected);
+      }
+      expect(
+        (await run("chat", { prompt: "hi", model: "exact", modelClass: "deep" }).result).model,
+      ).toBe("exact");
+      expect(opened).toEqual(["fast-model", "balanced-model", "pinned-deep", "exact"]);
+      const resumed = await run("chat", {
+        prompt: "again",
+        modelClass: "deep",
+        resumeSessionId: "mock-session",
+      }).result;
+      expect(resumed.model).toBe("pinned-deep");
+      expect(retargeted).toEqual(["pinned-deep"]);
+    } finally {
+      await provider.dispose();
+    }
+  });
+
+  it("passes auto to the SDK if Copilot discovery is unavailable", async () => {
+    const { provider, opened } = sdkCopilot(null);
+    try {
+      const result = await makeRun(provider, { ids: ["copilot"] })("chat", {
+        prompt: "hi",
+        modelClass: "deep",
+      }).result;
+      expect(result.model).toBe("auto");
+      expect(opened).toEqual(["auto"]);
+    } finally {
+      await provider.dispose();
+    }
+  });
+
   function deferredCopilot() {
     const gate = Promise.withResolvers<ModelInfo[] | null>();
     let fetches = 0;

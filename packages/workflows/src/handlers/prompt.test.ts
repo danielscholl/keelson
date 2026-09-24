@@ -162,6 +162,11 @@ const COPILOT_MODEL_CLASS_CAPABILITIES = {
   models: ["auto"],
   modelClasses: { fast: "auto", balanced: "auto", deep: "auto" },
 } as const;
+const INITIALIZED_COPILOT_CAPABILITIES = {
+  defaultModel: "auto",
+  models: ["auto", "deep-model", "balanced-model", "fast-model"],
+  modelClasses: { fast: "fast-model", balanced: "balanced-model", deep: "deep-model" },
+} as const;
 
 describe("makePromptHandler", () => {
   test("returns succeeded with accumulated text from a chunk stream", async () => {
@@ -1931,6 +1936,83 @@ describe("makePromptHandler", () => {
           )
         ).model,
       ).toBe("auto");
+    });
+
+    test("uses initialized Copilot classes, inheriting the workflow model and partial overrides", async () => {
+      const spy = makeSpyProvider({
+        type: "copilot",
+        capabilities: INITIALIZED_COPILOT_CAPABILITIES,
+        chunks: [{ type: "text", content: "ok" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => spy.provider,
+        resolveProviderId: () => "copilot",
+        resolveModelClass: (id, cls) =>
+          id === "copilot" && cls === "deep" ? "pinned-deep" : undefined,
+        getRegisteredTools: () => [],
+      });
+      for (const [cls, expected] of [
+        ["fast", "fast-model"],
+        ["balanced", "balanced-model"],
+        ["deep", "pinned-deep"],
+      ] as const) {
+        const result = await handler.handle(
+          { id: "n1", prompt: "", model: cls } as unknown as DagNode,
+          buildCtx({ workflowProvider: "copilot" }),
+        );
+        expect(result.model).toBe(expected);
+      }
+      const inherited = await handler.handle(
+        stubNode,
+        buildCtx({ workflowProvider: "copilot", workflowModel: "balanced" }),
+      );
+      expect(inherited.model).toBe("balanced-model");
+      const explicit = await handler.handle(
+        { id: "n1", prompt: "", model: "exact" } as unknown as DagNode,
+        buildCtx({ workflowProvider: "copilot", workflowModel: "deep" }),
+      );
+      expect(explicit.model).toBe("exact");
+      expect(spy.calls.map((call) => call.options?.model)).toEqual([
+        "fast-model",
+        "balanced-model",
+        "pinned-deep",
+        "balanced-model",
+        "exact",
+      ]);
+    });
+
+    test("keeps derived Copilot classes across provider fallback and run override", async () => {
+      const events: NodeStreamEvent[] = [];
+      const spy = makeSpyProvider({
+        type: "copilot",
+        capabilities: INITIALIZED_COPILOT_CAPABILITIES,
+        chunks: [{ type: "text", content: "ok" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => spy.provider,
+        resolveProviderId: (id) => (id === "missing" ? "copilot" : (id ?? "copilot")),
+        getRegisteredTools: () => [],
+      });
+      const node = { id: "n1", prompt: "", model: "deep" } as unknown as DagNode;
+      const fallback = await handler.handle(
+        node,
+        buildCtx({ workflowProvider: "missing", onEvent: (event) => events.push(event) }),
+      );
+      const override = await handler.handle(
+        node,
+        buildCtx({
+          workflowProvider: "claude",
+          providerOverride: "copilot",
+          onEvent: (event) => events.push(event),
+        }),
+      );
+      expect(fallback.model).toBe("deep-model");
+      expect(override.model).toBe("deep-model");
+      expect(
+        events.some(
+          (event) => event.type === "node_warning" && event.message.includes("is not in provider"),
+        ),
+      ).toBe(false);
     });
 
     test("configured model class overrides the provider capability", async () => {
