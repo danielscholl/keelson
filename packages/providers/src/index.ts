@@ -85,6 +85,7 @@ export {
   type RegisterCopilotProviderOptions,
   type RegisterCopilotProviderResult,
   registerCopilotProvider,
+  waitForCopilotModelClasses,
 } from "./copilot/registration.ts";
 export { UnknownProviderError } from "./errors.ts";
 export { GatewayProvider, type GatewayProviderOptions } from "./gateway/provider.ts";

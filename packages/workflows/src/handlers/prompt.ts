@@ -59,6 +59,7 @@ export interface PromptHandlerProvider {
   // providers in tests can omit it; the handler treats the absence as
   // "unknown provider" and skips the warning.
   getType?(): string;
+  waitForModelClasses?(): Promise<void>;
   // Optional structural mirror of `IAgentProvider.getCapabilities()`.
   // Consulted as the final fallback in the model-resolution chain so the
   // routing decision stays visible to Keelson rather than deferring to
@@ -611,13 +612,22 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           }
           const provider = opts.getProvider(effectiveProviderId);
           providerResolved = true;
-          const capabilities = provider.getCapabilities?.();
-          effortConsumed = capabilities?.reasoningEffort === true;
-          providerProjectsTools = capabilities?.tools !== false;
           const perProviderModel =
             effectiveProviderId === undefined
               ? undefined
               : readModelByProvider(node)?.[effectiveProviderId];
+          if (
+            effectiveProviderId === "copilot" &&
+            provider.getType?.() === "copilot" &&
+            !(typeof perProviderModel === "string" && perProviderModel.length > 0) &&
+            model !== undefined &&
+            isModelClassName(model)
+          ) {
+            await provider.waitForModelClasses?.();
+          }
+          const capabilities = provider.getCapabilities?.();
+          effortConsumed = capabilities?.reasoningEffort === true;
+          providerProjectsTools = capabilities?.tools !== false;
           if (typeof perProviderModel === "string" && perProviderModel.length > 0) {
             model = perProviderModel;
           } else if (model !== undefined && isModelClassName(model)) {

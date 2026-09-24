@@ -13,6 +13,7 @@ import {
   getProviderInfoList,
   isRegisteredProvider,
   registerStubProvider,
+  waitForCopilotModelClasses,
 } from "@keelson/providers";
 import {
   loadKeelsonConfig,
@@ -47,7 +48,7 @@ import {
   removeWorktree,
   resolveBranchTemplate,
   resolveDefaultBranch,
-  resolveWorkflowResolution,
+  resolveWorkflowResolutionReady,
   runWorkflow,
   type WorkflowDefinition,
   worktreePathForRepoLocal,
@@ -208,12 +209,16 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
     );
     const modelClassOverride = (id: string, modelClass: "fast" | "balanced" | "deep") =>
       readModelClassOverride(config, id)?.[modelClass];
-    const resolution = resolveWorkflowResolution(workflow, {
-      providers,
-      defaultProviderId: providerId,
-      runProviderId: providerOverride,
-      modelClassOverride,
-    });
+    const resolution = await resolveWorkflowResolutionReady(
+      workflow,
+      {
+        providers,
+        defaultProviderId: providerId,
+        runProviderId: providerOverride,
+        modelClassOverride,
+      },
+      waitForCopilotModelClasses,
+    );
     const effectiveProviders = resolution.nodes
       .map(({ effectiveProvider }) => effectiveProvider)
       .filter((id): id is string => id !== undefined);

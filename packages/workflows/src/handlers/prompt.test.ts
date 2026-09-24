@@ -34,6 +34,7 @@ interface SpyProviderOptions {
   // string so the handler's provider-mismatch check has a value to inspect.
   // Omit to keep the structural-subset behavior used by existing tests.
   type?: string;
+  waitForModelClasses?: () => Promise<void>;
   // When set, makeSpyProvider exposes `getCapabilities()` returning this
   // shape so the model-resolution chain can fall through to a provider
   // default. Omit to keep the prior structural-subset behavior.
@@ -57,6 +58,9 @@ function makeSpyProvider(opts: SpyProviderOptions = {}): {
   const calls: SpyCall[] = [];
   const provider: PromptHandlerProvider = {
     ...(opts.type !== undefined ? { getType: () => opts.type! } : {}),
+    ...(opts.waitForModelClasses !== undefined
+      ? { waitForModelClasses: opts.waitForModelClasses }
+      : {}),
     ...(opts.capabilities !== undefined ? { getCapabilities: () => opts.capabilities! } : {}),
     async *sendQuery(prompt, cwd, _resume, options) {
       calls.push({ prompt, cwd, options });
@@ -1839,6 +1843,94 @@ describe("makePromptHandler", () => {
 
       expect(spy.calls[0]?.options?.model).toBe(expectedModel);
       expect(result.model).toBe(expectedModel);
+    });
+
+    test("waits for Copilot classes before sending but not for explicit or unclassed models", async () => {
+      const gate = Promise.withResolvers<void>();
+      const capabilities = {
+        defaultModel: "auto",
+        models: ["auto"],
+        modelClasses: { fast: "auto", balanced: "auto", deep: "auto" },
+      };
+      let waits = 0;
+      const spy = makeSpyProvider({
+        type: "copilot",
+        capabilities,
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        waitForModelClasses: async () => {
+          waits++;
+          await gate.promise;
+        },
+      });
+      const handler = makePromptHandler({
+        getProvider: () => spy.provider,
+        resolveProviderId: () => "copilot",
+        getRegisteredTools: () => [],
+      });
+      const classed = handler.handle(
+        { id: "n1", prompt: "", model: "deep" } as unknown as DagNode,
+        buildCtx({ workflowProvider: "copilot" }),
+      );
+      await Promise.resolve();
+      expect(spy.calls).toEqual([]);
+      await handler.handle(
+        { id: "n2", prompt: "", model: "explicit-model" } as unknown as DagNode,
+        buildCtx({ workflowProvider: "copilot" }),
+      );
+      await handler.handle(
+        { id: "n3", prompt: "" } as unknown as DagNode,
+        buildCtx({ workflowProvider: "copilot" }),
+      );
+      expect(waits).toBe(1);
+      expect(spy.calls.map((call) => call.options?.model)).toEqual(["explicit-model", "auto"]);
+      Object.assign(capabilities.modelClasses, { deep: "deep-model" });
+      capabilities.models.push("deep-model");
+      gate.resolve();
+      expect((await classed).model).toBe("deep-model");
+      expect(spy.calls[2]?.options?.model).toBe("deep-model");
+    });
+
+    test("uses auto after unavailable Copilot class discovery and skips overridden pins", async () => {
+      const gate = Promise.withResolvers<void>();
+      let waits = 0;
+      const spy = makeSpyProvider({
+        type: "copilot",
+        capabilities: COPILOT_MODEL_CLASS_CAPABILITIES,
+        chunks: [{ type: "text", content: "ok" }],
+        waitForModelClasses: () => {
+          waits++;
+          return gate.promise;
+        },
+      });
+      const handler = makePromptHandler({
+        getProvider: () => spy.provider,
+        resolveProviderId: () => "copilot",
+        getRegisteredTools: () => [],
+      });
+      const classed = handler.handle(
+        { id: "n1", prompt: "", model: "fast" } as unknown as DagNode,
+        buildCtx({ workflowProvider: "copilot" }),
+      );
+      await handler.handle(
+        {
+          id: "n2",
+          prompt: "",
+          model: "deep",
+          model_by_provider: { copilot: "pinned" },
+        } as unknown as DagNode,
+        buildCtx({ workflowProvider: "copilot" }),
+      );
+      expect(waits).toBe(1);
+      gate.resolve();
+      expect((await classed).model).toBe("auto");
+      expect(
+        (
+          await handler.handle(
+            { id: "n3", prompt: "", model: "deep" } as unknown as DagNode,
+            buildCtx({ workflowProvider: "copilot" }),
+          )
+        ).model,
+      ).toBe("auto");
     });
 
     test("configured model class overrides the provider capability", async () => {

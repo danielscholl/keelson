@@ -206,11 +206,14 @@ export class CopilotProvider implements IAgentProvider {
     if (classes === undefined) {
       this.modelListCache = null;
     } else {
-      this.capabilities.modelClasses = classes;
-      this.capabilities.models = [
+      if (this.capabilities.modelClasses) Object.assign(this.capabilities.modelClasses, classes);
+      else this.capabilities.modelClasses = classes;
+      this.capabilities.models.splice(
+        0,
+        this.capabilities.models.length,
         COPILOT_DEFAULT_MODEL,
         ...new Set(concrete.map((model) => model.id)),
-      ];
+      );
     }
     return live;
   }

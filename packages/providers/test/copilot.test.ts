@@ -2440,8 +2440,12 @@ describe("CopilotProvider — defaultModel + listModels", () => {
     });
     const other = new CopilotProvider({ getCredential: async () => undefined });
     const capabilities = provider.getCapabilities();
+    const models = capabilities.models;
+    const modelClasses = capabilities.modelClasses;
     await provider.waitForModelClasses();
     expect(provider.getCapabilities()).toBe(capabilities);
+    expect(capabilities.models).toBe(models);
+    expect(capabilities.modelClasses).toBe(modelClasses);
     expect(capabilities.defaultModel).toBe("auto");
     expect(capabilities.models).toEqual(["auto", "deep-model", "balanced-model", "fast-model"]);
     expect(capabilities.modelClasses).toEqual({

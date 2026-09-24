@@ -9,6 +9,7 @@ import {
   fetchLiveModelCatalog,
   getProviderInfoList,
   registerStubProvider,
+  waitForCopilotModelClasses,
 } from "@keelson/providers";
 import {
   loadKeelsonConfig,
@@ -19,7 +20,7 @@ import {
   checkWorkflowCatalog,
   type PreflightViolation,
   parseWorkflow,
-  resolveWorkflowResolution,
+  resolveWorkflowResolutionReady,
   type WorkflowDefinition,
 } from "@keelson/workflows";
 
@@ -158,14 +159,21 @@ export async function runWorkflowValidate(
     );
     const modelClassOverride = (id: string, modelClass: "fast" | "balanced" | "deep") =>
       readModelClassOverride(config, id)?.[modelClass];
-    const effectiveProviders = parsedFiles.flatMap(({ workflow }) =>
-      workflow === null
+    const resolutions = await Promise.all(
+      parsedFiles.map(({ workflow }) =>
+        workflow === null
+          ? null
+          : resolveWorkflowResolutionReady(
+              workflow,
+              { providers, defaultProviderId, modelClassOverride },
+              waitForCopilotModelClasses,
+            ),
+      ),
+    );
+    const effectiveProviders = resolutions.flatMap((resolution) =>
+      resolution === null
         ? []
-        : resolveWorkflowResolution(workflow, {
-            providers,
-            defaultProviderId,
-            modelClassOverride,
-          }).nodes.flatMap(({ effectiveProvider }) =>
+        : resolution.nodes.flatMap(({ effectiveProvider }) =>
             effectiveProvider === undefined ? [] : [effectiveProvider],
           ),
     );

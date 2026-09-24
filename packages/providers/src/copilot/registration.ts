@@ -6,7 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import { isRegisteredProvider, registerProvider } from "../registry.ts";
+import { getAgentProvider, isRegisteredProvider, registerProvider } from "../registry.ts";
 import { type CopilotAuthStatus, CopilotClientFactory } from "./factory.ts";
 import {
   COPILOT_CREDENTIAL_SERVICE_ID,
@@ -56,10 +56,16 @@ export function registerCopilotProvider(
     });
     void provider.waitForModelClasses();
   }
+
   return {
     checkAuthStatus: async (cwd) => {
       const token = await options.getCredential(COPILOT_CREDENTIAL_SERVICE_ID);
       return clientFactory.checkAuthStatus(token, cwd);
     },
   };
+}
+
+export function waitForCopilotModelClasses(): Promise<void> {
+  const provider = getAgentProvider("copilot");
+  return provider instanceof CopilotProvider ? provider.waitForModelClasses() : Promise.resolve();
 }

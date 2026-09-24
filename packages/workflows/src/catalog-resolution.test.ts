@@ -2,7 +2,11 @@
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
 
-import { resolveWorkflowCatalog, resolveWorkflowResolution } from "./catalog-resolution.ts";
+import {
+  resolveWorkflowCatalog,
+  resolveWorkflowResolution,
+  resolveWorkflowResolutionReady,
+} from "./catalog-resolution.ts";
 import { type WorkflowDefinition, workflowDefinitionSchema } from "./schema/index.ts";
 
 const COPILOT_CAPABILITIES = {
@@ -34,6 +38,97 @@ function makeWorkflow(
 }
 
 describe("resolveWorkflowResolution", () => {
+  test("awaits one in-flight Copilot catalog for concurrent class resolutions", async () => {
+    const gate = Promise.withResolvers<void>();
+    let loads = 0;
+    let loading: Promise<void> | undefined;
+    const capabilities = {
+      defaultModel: "auto",
+      models: ["auto"],
+      modelClasses: { fast: "auto", balanced: "auto", deep: "auto" },
+    };
+    const options = {
+      providers: new Map([["copilot", capabilities]]),
+      defaultProviderId: "copilot",
+    };
+    const wait = () => {
+      if (!loading) {
+        loads++;
+        loading = gate.promise.then(() => {
+          Object.assign(capabilities.modelClasses, {
+            fast: "fast-model",
+            balanced: "balanced-model",
+            deep: "deep-model",
+          });
+          capabilities.models.push("fast-model", "balanced-model", "deep-model");
+        });
+      }
+      return loading;
+    };
+    const fast = resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "fast", prompt: "fast", model: "fast" }]),
+      options,
+      wait,
+    );
+    const deep = resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "deep", prompt: "deep", model: "deep" }]),
+      options,
+      wait,
+    );
+    expect(loads).toBe(1);
+    gate.resolve();
+    expect((await fast).nodes[0]?.model).toBe("fast-model");
+    expect((await deep).nodes[0]?.model).toBe("deep-model");
+  });
+
+  test("does not wait for explicit pins, absent classes or another provider", async () => {
+    let waits = 0;
+    const options = {
+      providers: new Map<string, typeof COPILOT_CAPABILITIES | typeof CLAUDE_CAPABILITIES>([
+        ["copilot", COPILOT_CAPABILITIES],
+        ["claude", CLAUDE_CAPABILITIES],
+      ]),
+      defaultProviderId: "copilot",
+    };
+    const wait = async () => {
+      waits++;
+    };
+    const explicit = await resolveWorkflowResolutionReady(
+      makeWorkflow([
+        { id: "explicit", prompt: "go", model: "deep", model_by_provider: { copilot: "pinned" } },
+      ]),
+      options,
+      wait,
+    );
+    await resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "none", prompt: "go" }]),
+      options,
+      wait,
+    );
+    await resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "other", prompt: "go", model: "fast", provider: "claude" }]),
+      options,
+      wait,
+    );
+    expect(explicit.nodes[0]?.model).toBe("pinned");
+    expect(waits).toBe(0);
+  });
+
+  test("settles unavailable discovery then resolves later Copilot classes to auto", async () => {
+    const options = {
+      providers: new Map([["copilot", COPILOT_CAPABILITIES]]),
+      defaultProviderId: "copilot",
+    };
+    const wait = () => Promise.resolve();
+    const workflow = makeWorkflow([{ id: "deep", prompt: "go", model: "deep" }]);
+    expect((await resolveWorkflowResolutionReady(workflow, options, wait)).nodes[0]?.model).toBe(
+      "auto",
+    );
+    expect((await resolveWorkflowResolutionReady(workflow, options, wait)).nodes[0]?.model).toBe(
+      "auto",
+    );
+  });
+
   test("keeps a registered provider pin and its provider-specific model native", () => {
     const workflow = makeWorkflow(
       [
