@@ -7,7 +7,14 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { IAgentProvider, ProviderFinishReason, SendQueryOptions } from "@keelson/providers";
+import {
+  CopilotClientFactory,
+  CopilotProvider,
+  type IAgentProvider,
+  type ModelInfo,
+  type ProviderFinishReason,
+  type SendQueryOptions,
+} from "@keelson/providers";
 import type { MessageChunk, Rib, RibContext, ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
 import type { PolicyEngine } from "./policy-engine.ts";
@@ -231,6 +238,67 @@ describe("makeRibAgentTurn — provider routing", () => {
 });
 
 describe("makeRibAgentTurn — model classes and the served model", () => {
+  function deferredCopilot() {
+    const gate = Promise.withResolvers<ModelInfo[] | null>();
+    let fetches = 0;
+    class CatalogFactory extends CopilotClientFactory {
+      override async listModels(): Promise<ModelInfo[] | null> {
+        fetches++;
+        return gate.promise;
+      }
+    }
+    class RecordingCopilot extends CopilotProvider {
+      readonly sent: Array<string | undefined> = [];
+      override async *sendQuery(
+        _prompt: string,
+        _cwd: string,
+        _resume?: string,
+        options?: SendQueryOptions,
+      ) {
+        this.sent.push(options?.model);
+        yield { type: "text" as const, content: "hello" };
+        yield { type: "done" as const };
+      }
+    }
+    const provider = new RecordingCopilot({
+      getCredential: async () => undefined,
+      clientFactory: new CatalogFactory(),
+    });
+    return { provider, gate, fetches: () => fetches };
+  }
+
+  it("waits for a pending Copilot catalog before resolving concurrent class turns", async () => {
+    const { provider, gate, fetches } = deferredCopilot();
+    const run = makeRun(provider, { ids: ["copilot"] });
+    const fast = run("chat", { prompt: "fast", modelClass: "fast" }).result;
+    const deep = run("chat", { prompt: "deep", modelClass: "deep" }).result;
+    await Promise.resolve();
+    expect(provider.sent).toEqual([]);
+    expect(fetches()).toBe(1);
+    await run("chat", { prompt: "explicit", model: "pinned", modelClass: "deep" }).result;
+    await run("chat", { prompt: "unclassed" }).result;
+    expect(provider.sent).toEqual(["pinned", undefined]);
+    gate.resolve([
+      { id: "auto" },
+      { id: "deep-model", costTier: "high" },
+      { id: "balanced-model", costTier: "mid" },
+      { id: "fast-model", costTier: "low" },
+    ]);
+    expect((await fast).model).toBe("fast-model");
+    expect((await deep).model).toBe("deep-model");
+    expect(fetches()).toBe(1);
+  });
+
+  it("resolves later class turns to auto without retrying an unavailable catalog", async () => {
+    const { provider, gate, fetches } = deferredCopilot();
+    const run = makeRun(provider, { ids: ["copilot"] });
+    const first = run("chat", { prompt: "first", modelClass: "deep" }).result;
+    gate.resolve(null);
+    expect((await first).model).toBe("auto");
+    expect((await run("chat", { prompt: "later", modelClass: "fast" }).result).model).toBe("auto");
+    expect(fetches()).toBe(1);
+  });
+
   function classed(onQuery: (call: QueryCall) => void, chunks?: MessageChunk[]): IAgentProvider {
     return {
       ...fakeProvider({ onQuery, ...(chunks ? { chunks } : {}) }),

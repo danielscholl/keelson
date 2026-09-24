@@ -8,6 +8,7 @@
 
 import { tmpdir } from "node:os";
 import {
+  CopilotProvider,
   getAgentProvider,
   getProviderInfoList,
   type IAgentProvider,
@@ -230,7 +231,7 @@ async function runTurn(
     return { status: "error", text: "", error: errMessage(err), providerId, stopReason: "error" };
   }
 
-  const model = requestedModel(req, provider, providerId, deps);
+  const model = await requestedModel(req, provider, providerId, deps);
 
   // Never inherit the server's (host repo) cwd; a turn that omits `cwd`
   // runs in the neutral directory.
@@ -416,14 +417,17 @@ async function runTurn(
 
 // An explicit model wins; a class resolves through config.json, then the
 // provider's map, then its default. Empty means the SDK decides.
-function requestedModel(
+async function requestedModel(
   req: RibAgentTurnRequest,
   provider: IAgentProvider,
   providerId: string,
   deps: ResolvedDeps,
-): string | undefined {
+): Promise<string | undefined> {
   if (req.model) return req.model;
   if (!req.modelClass) return undefined;
+  if (providerId === "copilot" && provider instanceof CopilotProvider) {
+    await provider.waitForModelClasses();
+  }
   const capabilities = provider.getCapabilities?.();
   const resolved =
     deps.resolveModelClass?.(providerId, req.modelClass) ??
