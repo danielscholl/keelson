@@ -54,7 +54,7 @@ enabled.
 | `providers` | object of `id: boolean` | Turns each provider on or off. Merged over the defaults, so list only what you want to change. Claude, Codex, and pi also need `keelson provider add <id>`. |
 | `defaultProvider` | string | The provider new chats and the workflow fallback preselect, when it is enabled. Falls back when it is not. See [The default provider](#the-default-provider). |
 | `claude.auth` | `"auto"` \| `"subscription"` \| `"api-key"` | How the Claude provider picks a credential. Default `auto`. See [Claude credentials](#claude-credentials). |
-| `copilot.modelClasses`, `claude.modelClasses`, `codex.modelClasses`, `pi.modelClasses` | object | Optional `fast`, `balanced`, and `deep` model-id overrides for portable workflow tiers. |
+| `copilot.modelClasses`, `claude.modelClasses`, `codex.modelClasses`, `pi.modelClasses` | object | Optional `fast`, `balanced`, and `deep` model-id overrides for portable workflow tiers. See [Model classes](#model-classes). |
 | `codex.sandbox` | `"read-only"` \| `"workspace-write"` \| `"danger-full-access"` | How much the Codex subprocess may touch. Default `workspace-write`. See [Codex](#codex-community-provider). |
 | `codex.network` | boolean | Whether the Codex subprocess may reach the network. Default `false`. |
 | `mcp` | object | Tunes the MCP gateway, the `/api/mcp` endpoint other agents call. See [MCP gateway](#mcp-gateway). |
@@ -114,6 +114,42 @@ not error. It falls through the chain to whatever is loaded. `keelson doctor`
 prints the resolved default and where it came from, which is how you catch the
 difference between the default you asked for and the one you got.
 
+## Model classes
+
+Portable workflow models `fast`, `balanced`, and `deep` select a provider's
+model-class mapping. Copilot derives its mapping from the account's live catalog;
+other providers expose their own classes or a default. To pin a class, set a
+model id inside that provider's top-level settings object, not inside the boolean
+`providers` map:
+
+```json
+{
+  "providers": { "copilot": true, "claude": true },
+  "copilot": {
+    "modelClasses": { "deep": "a-model-available-to-your-account" }
+  },
+  "claude": {
+    "modelClasses": { "fast": "claude-haiku-4-5" }
+  }
+}
+```
+
+An explicit model on the turn, or `model_by_provider` on a workflow node, takes
+precedence. Otherwise each configured class id wins over that provider's derived
+class; omitted keys keep the derived mapping. The provider default is the final
+fallback. Copilot's default is always `auto`, including unclassed turns and
+explicit `auto` selections. With no concrete catalog available, each unpinned
+Copilot class also requests `auto`. A single-model catalog can legitimately map
+all three classes to one id.
+
+The class map stays stable during a server process. Restart the server after
+changing `config.json` or to derive classes from a newer Copilot catalog; a
+server-down CLI invocation loads the current config anew. `keelson doctor` warns
+when the three effective classes request the same id, including `auto` or a
+single-model gateway. `--strict` makes that warning a failing exit status. Set
+gateway overrides in that gateway's `modelClasses` field under
+[`gateways`](#gateways), not in a root provider block.
+
 ## Claude credentials
 
 The `claude` provider runs the Claude Agent SDK, which can authenticate with a
@@ -151,9 +187,8 @@ login` if you have a Pro/Max plan; with no subscription and no key, the turn
 surfaces an auth error.
 </Aside>
 
-`claude.modelClasses` overrides the provider's derived `fast`, `balanced`, and
-`deep` workflow tiers. Put this settings object beside `auth`, not inside the
-boolean `providers` enablement map.
+`claude.modelClasses` follows the [model-class precedence](#model-classes). Put
+it beside `auth`, not inside the boolean `providers` enablement map.
 
 ## Pi (community provider)
 

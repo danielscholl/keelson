@@ -32,9 +32,9 @@ interface IAgentProvider {
 ```
 
 `sendQuery` streams the turn as `MessageChunk`s, the same unit chat and
-workflows consume. `listModels` must never throw: on any failure it falls back
-to a bare-id projection of `capabilities.models`, so the model picker never
-empties out.
+workflows consume. `listModels` must never throw: on a failed probe it falls
+back to bare ids from `capabilities.models`, so the model picker never empties
+out.
 
 ## Capabilities
 
@@ -43,8 +43,9 @@ interface ProviderCapabilities {
   sessionResume: boolean;   // multi-turn context survives across turns
   streaming: boolean;       // emits incremental chunks, not one final blob
   tools: boolean;           // keelson projects its MCP / rib tools into the provider
-  models: string[];         // a curated baseline; the live list is a separate probe
+  models: string[];         // baseline ids, updated when Copilot discovers live models
   defaultModel: string;     // "" means "let the SDK decide" (no model on the wire)
+  modelClasses?: { fast: string; balanced: string; deep: string };
 }
 ```
 
@@ -119,15 +120,14 @@ whether each found a credential.
 
 ## Model catalogs
 
-`capabilities.models` is a curated baseline, and the catalogs below are
-hand-maintained: neither SDK exposes a programmatic `models.list()`, so the ids
-mirror what each vendor's own CLI offers. `GET /api/providers/:id/models` returns
-the live list the picker prefers.
+`capabilities.models` starts as a baseline. Claude and Codex publish known ids;
+Copilot discovers the ids available to your account. `GET
+/api/providers/:id/models` returns the live list the picker prefers.
 
 Portable workflow tiers (`fast`, `balanced`, and `deep`) resolve through provider
-model classes and defaults. The catalogs below document baseline ids where
-available. Operators can replace the derived ids with per-provider
-[`modelClasses` settings](../../guides/configuration/#claude-credentials).
+model classes and defaults. A provider without a class map can use its default
+for all three tiers. Operators can replace individual derived ids with
+[per-provider `modelClasses` settings](../../guides/configuration/#model-classes).
 
 **Claude.** The default is `claude-opus-4-8`.
 
@@ -147,12 +147,26 @@ be able to reach.
 | `gpt-6-sol` | Sol | high |
 | `gpt-6-luna` | Luna | low |
 
-**Copilot and Pi publish no static catalog**, by design. Copilot exposes only its
-default, the synthetic `auto`, which delegates routing to Copilot and is always
-valid: GitHub rotates its live catalog and retires concrete ids, so listing them
-would advertise models that no longer exist. Pi is multi-vendor and resolves its
-catalog live from the vendors your credentials authenticate, so there is no fixed
-list to publish.
+**Copilot and Pi publish no fixed concrete catalog**, by design. Copilot starts
+with the synthetic `auto`, which delegates routing to Copilot. After registration,
+it fetches the account's catalog in the background, without delaying server
+startup, rib activation, or CLI bootstrap. It derives `fast`, `balanced`, and
+`deep` from concrete models' cost tiers, excluding `auto` from the ranking; entries
+without cost metadata use catalog order. Its published models then include `auto`
+and the discovered concrete ids. A class-based Copilot turn waits for that bounded
+fetch if it is still in progress. An explicit model or an unclassed turn never
+waits for it, and the unclassed default remains `auto`.
+
+If discovery fails or returns no concrete ids, all three classes request `auto`.
+A catalog with only one concrete model also legitimately maps every class to the
+same id. Assignments stay fixed once derived for the process; restart to derive
+from a changed catalog. `keelson doctor` warns when the three effective classes
+request the same id, even with no workflows installed. With `auto`, identical
+routing requests do not prove the same backend model served each turn.
+`keelson doctor --strict` treats that warning as a failing exit status.
+
+Pi is multi-vendor and resolves its catalog from the vendors your credentials
+authenticate, so it also has no fixed list to publish.
 
 ## Gateway providers
 
