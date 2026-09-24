@@ -179,10 +179,11 @@ const repoLocks = new Map<string, Promise<void>>();
 
 async function withRepoLock<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
   const commonDir = await runGit(["rev-parse", "--git-common-dir"], repoPath);
-  const key =
+  const dir =
     commonDir.exitCode === 0
       ? canonicalPath(resolve(repoPath, commonDir.stdout.trim()))
       : resolve(repoPath);
+  const key = process.platform === "win32" ? dir.toLowerCase() : dir;
   const run = (repoLocks.get(key) ?? Promise.resolve()).then(fn);
   const tail = run.then(
     () => {},
@@ -601,29 +602,29 @@ export async function deleteBranch(opts: {
   repoPath: string;
   branch: string;
 }): Promise<DeleteBranchResult> {
-  const exists = await runGit(
-    ["show-ref", "--verify", "--quiet", `refs/heads/${opts.branch}`],
-    opts.repoPath,
-  );
-  if (exists.exitCode === 1) {
-    return { deleted: false, warning: null };
-  }
-  if (exists.exitCode !== 0) {
-    return {
-      deleted: false,
-      warning: `git show-ref failed (exit ${exists.exitCode}): ${exists.stderr.trim() || exists.stdout.trim()}`,
-    };
-  }
-  const result = await withRepoLock(opts.repoPath, () =>
-    runGit(["branch", "-D", opts.branch], opts.repoPath),
-  );
-  if (result.exitCode !== 0) {
-    return {
-      deleted: false,
-      warning: `git branch -D ${opts.branch} failed: ${result.stderr.trim() || result.stdout.trim()}`,
-    };
-  }
-  return { deleted: true, warning: null };
+  return withRepoLock(opts.repoPath, async () => {
+    const exists = await runGit(
+      ["show-ref", "--verify", "--quiet", `refs/heads/${opts.branch}`],
+      opts.repoPath,
+    );
+    if (exists.exitCode === 1) {
+      return { deleted: false, warning: null };
+    }
+    if (exists.exitCode !== 0) {
+      return {
+        deleted: false,
+        warning: `git show-ref failed (exit ${exists.exitCode}): ${exists.stderr.trim() || exists.stdout.trim()}`,
+      };
+    }
+    const result = await runGit(["branch", "-D", opts.branch], opts.repoPath);
+    if (result.exitCode !== 0) {
+      return {
+        deleted: false,
+        warning: `git branch -D ${opts.branch} failed: ${result.stderr.trim() || result.stdout.trim()}`,
+      };
+    }
+    return { deleted: true, warning: null };
+  });
 }
 
 /**
