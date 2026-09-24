@@ -156,12 +156,12 @@ export async function resolveWorkflowResolutionReady(
   waitForCopilotClasses: () => Promise<void>,
 ): Promise<WorkflowResolution> {
   const requiresCopilotClass = workflow.nodes.filter(nodeReachesProvider).some((node) => {
-    const variants = [
-      node,
-      ...Object.values(node.model_by?.cases ?? {}).map(
-        (branch) => applyModelCase(node, branch) as typeof node,
-      ),
-    ];
+    const variants =
+      node.model_by === undefined
+        ? [node]
+        : Object.values(node.model_by.cases).map(
+            (branch) => applyModelCase(node, branch) as typeof node,
+          );
     return variants.some((candidate) => {
       const effectiveProvider = resolvePrompt(workflow, candidate, options).effectiveProvider;
       const model = candidate.model ?? workflow.model;

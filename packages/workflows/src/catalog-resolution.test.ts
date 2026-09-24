@@ -110,6 +110,21 @@ describe("resolveWorkflowResolution", () => {
       options,
       wait,
     );
+    await resolveWorkflowResolutionReady(
+      makeWorkflow([
+        {
+          id: "dispatch",
+          prompt: "go",
+          model: "deep",
+          model_by: {
+            from: "$inputs.tier",
+            cases: { exact: { model: "pinned" } },
+          },
+        },
+      ]),
+      options,
+      wait,
+    );
     expect(explicit.nodes[0]?.model).toBe("pinned");
     expect(waits).toBe(0);
   });
