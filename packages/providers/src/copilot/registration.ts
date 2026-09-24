@@ -9,7 +9,6 @@
 import { isRegisteredProvider, registerProvider } from "../registry.ts";
 import { type CopilotAuthStatus, CopilotClientFactory } from "./factory.ts";
 import {
-  COPILOT_CAPABILITIES,
   COPILOT_CREDENTIAL_SERVICE_ID,
   CopilotProvider,
   type CopilotProviderOptions,
@@ -51,10 +50,11 @@ export function registerCopilotProvider(
       id: "copilot",
       displayName: "GitHub Copilot",
       factory: () => provider,
-      capabilities: COPILOT_CAPABILITIES,
+      capabilities: provider.getCapabilities(),
       builtIn: true,
       credentialServiceId: COPILOT_CREDENTIAL_SERVICE_ID,
     });
+    void provider.waitForModelClasses();
   }
   return {
     checkAuthStatus: async (cwd) => {

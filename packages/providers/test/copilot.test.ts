@@ -301,7 +301,10 @@ beforeEach(() => {
 
 describe("registerCopilotProvider", () => {
   it("registers a copilot provider with the expected identity", () => {
-    registerCopilotProvider({ getCredential: async () => undefined });
+    registerCopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(makeMockSdk()).load }),
+    });
     expect(isRegisteredProvider("copilot")).toBe(true);
     const info = getProviderInfoList().find((p) => p.id === "copilot");
     expect(info).toBeDefined();
@@ -312,9 +315,49 @@ describe("registerCopilotProvider", () => {
   });
 
   it("is idempotent — calling twice does not throw", () => {
-    const opts = { getCredential: async () => undefined };
+    const opts = {
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(makeMockSdk()).load }),
+    };
     registerCopilotProvider(opts);
     expect(() => registerCopilotProvider(opts)).not.toThrow();
+  });
+
+  it("hydrates registry capabilities in place after registration without blocking", async () => {
+    const gate = Promise.withResolvers<ModelInfo[] | null>();
+    let calls = 0;
+    class CatalogFactory extends CopilotClientFactory {
+      override async listModels(): Promise<ModelInfo[] | null> {
+        calls++;
+        return gate.promise;
+      }
+    }
+    registerCopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CatalogFactory(),
+    });
+    const provider = getAgentProvider("copilot");
+    if (!(provider instanceof CopilotProvider)) throw new Error("Expected CopilotProvider");
+    const published = getProviderInfoList()[0]!.capabilities;
+    expect(published).toBe(provider.getCapabilities());
+    expect(published.modelClasses?.deep).toBe("auto");
+    const other = new CopilotProvider({ getCredential: async () => undefined });
+    gate.resolve([
+      { id: "auto" },
+      { id: "deep-model", costTier: "high" },
+      { id: "balanced-model", costTier: "mid" },
+      { id: "fast-model", costTier: "low" },
+    ]);
+    await provider.waitForModelClasses();
+    expect(calls).toBe(1);
+    expect(getProviderInfoList()[0]!.capabilities).toBe(published);
+    expect(published.modelClasses).toEqual({
+      fast: "fast-model",
+      balanced: "balanced-model",
+      deep: "deep-model",
+    });
+    expect(other.getCapabilities()).toEqual(COPILOT_CAPABILITIES);
+    expect(COPILOT_CAPABILITIES.modelClasses?.deep).toBe("auto");
   });
 });
 
@@ -1868,7 +1911,10 @@ describe("CopilotProvider — warm client (issue #327)", () => {
 
 describe("disposeAllProviders (registry drain)", () => {
   it("returns the same singleton instance across getAgentProvider calls", () => {
-    registerCopilotProvider({ getCredential: async () => undefined });
+    registerCopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(makeMockSdk()).load }),
+    });
     expect(getAgentProvider("copilot")).toBe(getAgentProvider("copilot"));
   });
 
@@ -1931,7 +1977,10 @@ describe("buildFriendlyCopilotError", () => {
 
 describe("CopilotProvider — registered factory wiring", () => {
   it("registry-built provider passes through to a real CopilotProvider", () => {
-    registerCopilotProvider({ getCredential: async () => undefined });
+    registerCopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(makeMockSdk()).load }),
+    });
     const provider = getAgentProvider("copilot");
     expect(provider.getType()).toBe("copilot");
     expect(provider.getCapabilities()).toEqual(COPILOT_CAPABILITIES);
