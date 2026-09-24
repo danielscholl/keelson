@@ -232,6 +232,9 @@ async function runTurn(
   }
 
   const model = await requestedModel(req, provider, providerId, deps);
+  if (req.abortSignal?.aborted) {
+    return { status: "aborted", text: "", providerId, stopReason: "aborted" };
+  }
 
   // Never inherit the server's (host repo) cwd; a turn that omits `cwd`
   // runs in the neutral directory.
@@ -428,11 +431,26 @@ async function requestedModel(
   const configured = deps.resolveModelClass?.(providerId, req.modelClass);
   if (configured) return configured;
   if (providerId === "copilot" && provider instanceof CopilotProvider) {
-    await provider.waitForModelClasses();
+    await untilAborted(provider.waitForModelClasses(), req.abortSignal);
   }
   const capabilities = provider.getCapabilities?.();
   const resolved = capabilities?.modelClasses?.[req.modelClass] ?? capabilities?.defaultModel;
   return resolved ? resolved : undefined;
+}
+
+async function untilAborted(wait: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return wait;
+  if (signal.aborted) return;
+  let onAbort = (): void => {};
+  const aborted = new Promise<void>((resolve) => {
+    onAbort = () => resolve();
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    await Promise.race([wait, aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
 }
 
 // Map the request's tool rails onto SendQueryOptions:

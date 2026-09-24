@@ -405,6 +405,20 @@ describe("makeRibAgentTurn — model classes and the served model", () => {
     expect(fetches()).toBe(1);
   });
 
+  it("returns aborted when the caller aborts during a pending Copilot catalog", async () => {
+    const { provider, gate } = deferredCopilot();
+    const controller = new AbortController();
+    const pending = makeRun(provider, { ids: ["copilot"] })("chat", {
+      prompt: "deep",
+      modelClass: "deep",
+      abortSignal: controller.signal,
+    }).result;
+    controller.abort();
+    expect((await pending).status).toBe("aborted");
+    expect(provider.sent).toEqual([]);
+    gate.resolve(null);
+  });
+
   it("does not wait on a pending Copilot catalog for a class pinned in config", async () => {
     const { provider, gate } = deferredCopilot();
     const run = makeRun(provider, {
