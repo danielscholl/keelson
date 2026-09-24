@@ -4,6 +4,12 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  CopilotClientFactory,
+  clearRegistry,
+  type ModelInfo,
+  registerCopilotProvider,
+} from "@keelson/providers";
+import {
   type DiscoveryRoot,
   type WorkflowDefinition,
   workflowDefinitionSchema,
@@ -12,6 +18,11 @@ import { runWorkflowResolutionCheck } from "../src/checks/workflow-resolution.ts
 import { workflowDiscoveryRoots } from "../src/paths.ts";
 
 const COPILOT_CAPABILITIES = {
+  defaultModel: "auto",
+  models: ["auto", "fast-model", "balanced-model", "deep-model"],
+  modelClasses: { fast: "fast-model", balanced: "balanced-model", deep: "deep-model" },
+} as const;
+const COLLAPSED_COPILOT_CAPABILITIES = {
   defaultModel: "auto",
   models: ["auto"],
   modelClasses: { fast: "auto", balanced: "auto", deep: "auto" },
@@ -74,19 +85,19 @@ function discoverWorkflows() {
 }
 
 describe("workflow resolution doctor check", () => {
-  test("uses the shared discovery roots unless a directory is explicit", () => {
+  test("uses the shared discovery roots unless a directory is explicit", async () => {
     const discoveredRoots: Array<readonly DiscoveryRoot[]> = [];
     const discover = (roots: readonly DiscoveryRoot[]) => {
       discoveredRoots.push(roots);
       return { workflows: [], errors: [], warnings: [] };
     };
 
-    runWorkflowResolutionCheck({
+    await runWorkflowResolutionCheck({
       discoverWorkflows: discover,
       loadConfig: () => ({}),
       listProviders: () => [],
     });
-    runWorkflowResolutionCheck({
+    await runWorkflowResolutionCheck({
       discoverWorkflows: discover,
       workflowsDir: "/tmp/explicit-workflows",
       loadConfig: () => ({}),
@@ -99,8 +110,8 @@ describe("workflow resolution doctor check", () => {
     ]);
   });
 
-  test("reports the catalog native when Copilot is registered", () => {
-    const result = runWorkflowResolutionCheck({
+  test("reports the catalog native when Copilot is registered", async () => {
+    const result = await runWorkflowResolutionCheck({
       discoverWorkflows,
       loadConfig: () => ({}),
       listProviders: () => [{ id: "copilot", capabilities: COPILOT_CAPABILITIES }],
@@ -113,8 +124,8 @@ describe("workflow resolution doctor check", () => {
     expect(result.checks.every(({ detail }) => detail?.startsWith("native"))).toBe(true);
   });
 
-  test("names provider fallback and diversity collapse on Claude", () => {
-    const result = runWorkflowResolutionCheck({
+  test("names provider fallback and diversity collapse on Claude", async () => {
+    const result = await runWorkflowResolutionCheck({
       discoverWorkflows,
       loadConfig: () => ({}),
       listProviders: () => [{ id: "claude", capabilities: CLAUDE_CAPABILITIES }],
@@ -129,8 +140,8 @@ describe("workflow resolution doctor check", () => {
     expect(result.checks.find(({ name }) => name === "portable")?.status).toBe("ok");
   });
 
-  test("honors the workflow provider environment pin before config", () => {
-    const result = runWorkflowResolutionCheck({
+  test("honors the workflow provider environment pin before config", async () => {
+    const result = await runWorkflowResolutionCheck({
       discoverWorkflows,
       loadConfig: () => ({ defaultProvider: "copilot" }),
       listProviders: () => [
@@ -143,8 +154,8 @@ describe("workflow resolution doctor check", () => {
     expect(result.checks.find(({ name }) => name === "portable")?.detail).toContain("on claude");
   });
 
-  test("blocks unpinned prompts when the environment pin is not registered", () => {
-    const result = runWorkflowResolutionCheck({
+  test("blocks unpinned prompts when the environment pin is not registered", async () => {
+    const result = await runWorkflowResolutionCheck({
       discoverWorkflows,
       loadConfig: () => ({ defaultProvider: "copilot" }),
       listProviders: () => [{ id: "copilot", capabilities: COPILOT_CAPABILITIES }],
@@ -159,8 +170,8 @@ describe("workflow resolution doctor check", () => {
     expect(result.checks.find(({ name }) => name === "pinned-review")?.status).toBe("ok");
   });
 
-  test("blocks unpinned prompts when the environment pins the workflow provider", () => {
-    const result = runWorkflowResolutionCheck({
+  test("blocks unpinned prompts when the environment pins the workflow provider", async () => {
+    const result = await runWorkflowResolutionCheck({
       discoverWorkflows,
       loadConfig: () => ({ defaultProvider: "copilot" }),
       listProviders: () => [{ id: "copilot", capabilities: COPILOT_CAPABILITIES }],
@@ -175,8 +186,8 @@ describe("workflow resolution doctor check", () => {
     expect(result.checks.find(({ name }) => name === "pinned-review")?.status).toBe("ok");
   });
 
-  test("blocks prompt workflows when no provider is registered", () => {
-    const result = runWorkflowResolutionCheck({
+  test("blocks prompt workflows when no provider is registered", async () => {
+    const result = await runWorkflowResolutionCheck({
       discoverWorkflows,
       loadConfig: () => ({}),
       listProviders: () => [],
@@ -186,5 +197,148 @@ describe("workflow resolution doctor check", () => {
     expect(result.checks.every(({ status }) => status === "warn")).toBe(true);
     expect(result.checks.every(({ detail }) => detail?.startsWith("blocked"))).toBe(true);
     expect(result.checks.every(({ hint }) => hint?.includes("provider add"))).toBe(true);
+  });
+
+  test("awaits asynchronous provider discovery before resolving classes", async () => {
+    const gate = Promise.withResolvers<typeof COPILOT_CAPABILITIES>();
+    let settled = false;
+    const report = runWorkflowResolutionCheck({
+      discoverWorkflows,
+      loadConfig: () => ({}),
+      listProviders: async () => [{ id: "copilot", capabilities: await gate.promise }],
+      defaultProviderId: "copilot",
+    }).then((result) => {
+      settled = true;
+      return result;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    gate.resolve(COPILOT_CAPABILITIES);
+    const result = await report;
+    expect(result.checks.find(({ name }) => name === "portable")?.status).toBe("ok");
+    expect(result.checks.some(({ name }) => name === "copilot model classes")).toBe(false);
+  });
+
+  test("default discovery waits for the registered Copilot catalog even with no workflows", async () => {
+    const original = process.env.KEELSON_PROVIDERS;
+    process.env.KEELSON_PROVIDERS = "stub";
+    clearRegistry();
+    const gate = Promise.withResolvers<ModelInfo[] | null>();
+    class CatalogFactory extends CopilotClientFactory {
+      override async listModels(): Promise<ModelInfo[] | null> {
+        return gate.promise;
+      }
+    }
+    try {
+      registerCopilotProvider({
+        getCredential: async () => undefined,
+        clientFactory: new CatalogFactory(),
+      });
+      let settled = false;
+      const report = runWorkflowResolutionCheck({
+        discoverWorkflows: () => ({ workflows: [], errors: [], warnings: [] }),
+        loadConfig: () => ({}),
+      }).then((result) => {
+        settled = true;
+        return result;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      gate.resolve([
+        { id: "auto" },
+        { id: "fast-model", costTier: "low" },
+        { id: "balanced-model", costTier: "mid" },
+        { id: "deep-model", costTier: "high" },
+      ]);
+      expect((await report).checks).toEqual([]);
+    } finally {
+      if (original === undefined) delete process.env.KEELSON_PROVIDERS;
+      else process.env.KEELSON_PROVIDERS = original;
+      clearRegistry();
+    }
+  });
+
+  test("warns about collapsed Copilot routing even with no workflows", async () => {
+    const result = await runWorkflowResolutionCheck({
+      discoverWorkflows: () => ({ workflows: [], errors: [], warnings: [] }),
+      loadConfig: () => ({}),
+      listProviders: () => [{ id: "copilot", capabilities: COLLAPSED_COPILOT_CAPABILITIES }],
+    });
+    expect(result.checks).toEqual([
+      {
+        name: "copilot model classes",
+        status: "warn",
+        detail:
+          "fast, balanced, and deep all request auto routing; the served model may differ between turns",
+        hint: "set distinct copilot.modelClasses entries in config.json",
+      },
+    ]);
+  });
+
+  test("warns for a concrete collapse and for a configured gateway", async () => {
+    const result = await runWorkflowResolutionCheck({
+      discoverWorkflows: () => ({ workflows: [], errors: [], warnings: [] }),
+      loadConfig: () => ({
+        gateways: [{ name: "local", baseUrl: "http://localhost:11434/v1", protocol: "openai" }],
+      }),
+      listProviders: () => [
+        {
+          id: "copilot",
+          capabilities: {
+            defaultModel: "auto",
+            models: ["auto", "single"],
+            modelClasses: { fast: "single", balanced: "single", deep: "single" },
+          },
+        },
+        {
+          id: "local",
+          capabilities: {
+            defaultModel: "local-model",
+            models: ["local-model"],
+            modelClasses: {
+              fast: "local-model",
+              balanced: "local-model",
+              deep: "local-model",
+            },
+          },
+        },
+      ],
+    });
+    expect(result.checks.map(({ name }) => name)).toEqual([
+      "copilot model classes",
+      "local model classes",
+    ]);
+    expect(result.checks[0]?.detail).toContain("all request 'single'");
+    expect(result.checks[1]?.hint).toContain("gateways[].modelClasses");
+  });
+
+  test("merges partial overrides and reports collapse only when effective values coincide", async () => {
+    const discover = () => ({ workflows: [], errors: [], warnings: [] });
+    const repair = await runWorkflowResolutionCheck({
+      discoverWorkflows: discover,
+      loadConfig: () => ({ copilot: { modelClasses: { deep: "deep-model" } } }),
+      listProviders: () => [{ id: "copilot", capabilities: COLLAPSED_COPILOT_CAPABILITIES }],
+    });
+    expect(repair.checks).toEqual([]);
+    const collapse = await runWorkflowResolutionCheck({
+      discoverWorkflows: discover,
+      loadConfig: () => ({
+        copilot: { modelClasses: { fast: "same", balanced: "same", deep: "same" } },
+      }),
+      listProviders: () => [{ id: "copilot", capabilities: COPILOT_CAPABILITIES }],
+    });
+    expect(collapse.checks.map(({ name }) => name)).toEqual(["copilot model classes"]);
+  });
+
+  test("skips incomplete, empty, and internal provider defaults", async () => {
+    const result = await runWorkflowResolutionCheck({
+      discoverWorkflows: () => ({ workflows: [], errors: [], warnings: [] }),
+      loadConfig: () => ({}),
+      listProviders: () => [
+        { id: "missing", capabilities: { defaultModel: "", models: [] } },
+        { id: "workflow", capabilities: { defaultModel: "same", models: ["same"] } },
+      ],
+    });
+    expect(result.checks).toEqual([]);
   });
 });

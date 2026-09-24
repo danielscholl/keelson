@@ -12,7 +12,7 @@ import { type DbReader, LATEST_MIGRATION_VERSION, runDbCheck } from "../src/chec
 import { runServerCheck } from "../src/checks/server.ts";
 import { runToolchainCheck } from "../src/checks/toolchain.ts";
 import { runWorkflowsCheck } from "../src/checks/workflows.ts";
-import { buildDoctorReport, exitCodeFor } from "../src/commands/doctor.ts";
+import { buildDoctorReport, type DoctorDeps, exitCodeFor } from "../src/commands/doctor.ts";
 import { EXIT_FAIL, EXIT_OK } from "../src/exit.ts";
 import type { ServerInfo } from "../src/server-probe.ts";
 
@@ -480,6 +480,29 @@ describe("runDoctor exit-code rollup", () => {
     const loose = await buildDoctorReport(false, deps);
     expect(loose.summary.warn).toBe(1);
     expect(exitCodeFor(loose)).toBe(EXIT_OK);
+    const strict = await buildDoctorReport(true, deps);
+    expect(exitCodeFor(strict)).toBe(EXIT_FAIL);
+  });
+
+  test("collapsed provider classes warn in the JSON report and only fail strict doctor", async () => {
+    const deps: DoctorDeps = allOkDeps();
+    deps.workflowResolution = {
+      ...deps.workflowResolution,
+      listProviders: async () => [
+        {
+          id: "copilot",
+          capabilities: {
+            defaultModel: "auto",
+            models: ["auto"],
+            modelClasses: { fast: "auto", balanced: "auto", deep: "auto" },
+          },
+        },
+      ],
+    };
+    const loose = await buildDoctorReport(false, deps);
+    expect(loose.summary.warn).toBe(1);
+    expect(exitCodeFor(loose)).toBe(EXIT_OK);
+    expect(JSON.stringify(loose)).toContain("copilot model classes");
     const strict = await buildDoctorReport(true, deps);
     expect(exitCodeFor(strict)).toBe(EXIT_FAIL);
   });

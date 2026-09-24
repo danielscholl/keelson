@@ -2,7 +2,11 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { getProviderInfoList } from "@keelson/providers";
+import {
+  getProviderInfoList,
+  isRegisteredProvider,
+  waitForCopilotModelClasses,
+} from "@keelson/providers";
 import {
   loadKeelsonConfig as defaultLoadConfig,
   type KeelsonConfig,
@@ -38,13 +42,14 @@ export interface WorkflowResolutionDeps {
   discoverWorkflows?: Discoverer;
   workflowsDir?: string;
   loadConfig?: () => KeelsonConfig;
-  listProviders?: () => readonly StaticProviderInfo[];
+  listProviders?: () => readonly StaticProviderInfo[] | Promise<readonly StaticProviderInfo[]>;
   defaultProviderId?: string;
   envProviderId?: string;
 }
 
-function defaultListProviders(): readonly StaticProviderInfo[] {
+async function defaultListProviders(): Promise<readonly StaticProviderInfo[]> {
   bootstrapCliProviders();
+  if (isRegisteredProvider("copilot")) await waitForCopilotModelClasses();
   return getProviderInfoList();
 }
 
@@ -107,14 +112,16 @@ function resolutionCheck(
   };
 }
 
-export function runWorkflowResolutionCheck(deps: WorkflowResolutionDeps = {}): CategoryResult {
+export async function runWorkflowResolutionCheck(
+  deps: WorkflowResolutionDeps = {},
+): Promise<CategoryResult> {
   const discover = deps.discoverWorkflows ?? defaultDiscoverWorkflows;
   const roots: readonly DiscoveryRoot[] = deps.workflowsDir
     ? [{ dir: deps.workflowsDir, source: "global" }]
     : workflowDiscoveryRoots();
   const discovery = discover(roots);
   const config = (deps.loadConfig ?? defaultLoadConfig)();
-  const providerInfos = (deps.listProviders ?? defaultListProviders)();
+  const providerInfos = await (deps.listProviders ?? defaultListProviders)();
   const providerIds = providerInfos.map(({ id }) => id);
   const envProviderId = (deps.envProviderId ?? process.env.KEELSON_WORKFLOW_PROVIDER)?.trim();
   const defaultProviderId =
@@ -147,6 +154,27 @@ export function runWorkflowResolutionCheck(deps: WorkflowResolutionDeps = {}): C
   const checks = resolutions.map((resolution) =>
     resolutionCheck(resolution, unavailableDefaultProviderId),
   );
+
+  for (const { id, capabilities } of providerInfos) {
+    if (id === "workflow") continue;
+    const override = readModelClassOverride(config, id);
+    const classes = (["fast", "balanced", "deep"] as const).map(
+      (cls) => override?.[cls] ?? capabilities.modelClasses?.[cls] ?? capabilities.defaultModel,
+    );
+    if (classes[0] && classes.every((model) => model === classes[0])) {
+      checks.push({
+        name: `${id} model classes`,
+        status: "warn",
+        detail:
+          classes[0] === "auto"
+            ? "fast, balanced, and deep all request auto routing; the served model may differ between turns"
+            : `fast, balanced, and deep all request '${classes[0]}'`,
+        hint: config.gateways?.some(({ name }) => name === id)
+          ? `set distinct gateways[].modelClasses entries for '${id}' in config.json`
+          : `set distinct ${id}.modelClasses entries in config.json`,
+      });
+    }
+  }
 
   for (const error of discovery.errors) {
     checks.push({
