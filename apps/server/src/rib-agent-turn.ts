@@ -425,14 +425,13 @@ async function requestedModel(
 ): Promise<string | undefined> {
   if (req.model) return req.model;
   if (!req.modelClass) return undefined;
+  const configured = deps.resolveModelClass?.(providerId, req.modelClass);
+  if (configured) return configured;
   if (providerId === "copilot" && provider instanceof CopilotProvider) {
     await provider.waitForModelClasses();
   }
   const capabilities = provider.getCapabilities?.();
-  const resolved =
-    deps.resolveModelClass?.(providerId, req.modelClass) ??
-    capabilities?.modelClasses?.[req.modelClass] ??
-    capabilities?.defaultModel;
+  const resolved = capabilities?.modelClasses?.[req.modelClass] ?? capabilities?.defaultModel;
   return resolved ? resolved : undefined;
 }
 

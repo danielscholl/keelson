@@ -125,7 +125,17 @@ describe("resolveWorkflowResolution", () => {
       options,
       wait,
     );
+    const configured = await resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "configured", prompt: "go", model: "deep" }]),
+      {
+        ...options,
+        modelClassOverride: (id, cls) =>
+          id === "copilot" && cls === "deep" ? "config-deep" : undefined,
+      },
+      wait,
+    );
     expect(explicit.nodes[0]?.model).toBe("pinned");
+    expect(configured.nodes[0]?.model).toBe("config-deep");
     expect(waits).toBe(0);
   });
 

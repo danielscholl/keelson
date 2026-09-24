@@ -142,8 +142,10 @@ explicit `auto` selections. With no concrete catalog available, each unpinned
 Copilot class also requests `auto`. A single-model catalog can legitimately map
 all three classes to one id.
 
-The class map stays stable during a server process. Restart the server after
-changing `config.json` or to derive classes from a newer Copilot catalog; a
+Once Copilot derives concrete classes, the class map stays fixed for the server
+process. Until then, a later catalog fetch can still fill it in. Restart the
+server after changing `config.json` or to derive classes from a newer Copilot
+catalog; a
 server-down CLI invocation loads the current config anew. `keelson doctor` warns
 when the three effective classes request the same id, including `auto` or a
 single-model gateway. `--strict` makes that warning a failing exit status. Set

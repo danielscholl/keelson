@@ -170,7 +170,8 @@ export async function resolveWorkflowResolutionReady(
         options.providers.has("copilot") &&
         model !== undefined &&
         isModelClass(model) &&
-        !candidate.model_by_provider?.copilot
+        !candidate.model_by_provider?.copilot &&
+        !options.modelClassOverride?.("copilot", model)
       );
     });
   });

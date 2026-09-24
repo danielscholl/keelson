@@ -154,8 +154,9 @@ startup, rib activation, or CLI bootstrap. It derives `fast`, `balanced`, and
 `deep` from concrete models' cost tiers, excluding `auto` from the ranking; entries
 without cost metadata use catalog order. Its published models then include `auto`
 and the discovered concrete ids. A class-based Copilot turn waits for that bounded
-fetch if it is still in progress. An explicit model or an unclassed turn never
-waits for it, and the unclassed default remains `auto`.
+fetch if it is still in progress. An explicit model, a class pinned in
+`config.json`, or an unclassed turn never waits for it, and the unclassed default
+remains `auto`.
 
 If discovery fails or returns no concrete ids, all three classes request `auto`.
 A catalog with only one concrete model also legitimately maps every class to the

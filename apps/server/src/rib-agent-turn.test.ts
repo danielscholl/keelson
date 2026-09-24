@@ -405,6 +405,20 @@ describe("makeRibAgentTurn — model classes and the served model", () => {
     expect(fetches()).toBe(1);
   });
 
+  it("does not wait on a pending Copilot catalog for a class pinned in config", async () => {
+    const { provider, gate } = deferredCopilot();
+    const run = makeRun(provider, {
+      ids: ["copilot"],
+      resolveModelClass: (id, cls) =>
+        id === "copilot" && cls === "deep" ? "pinned-deep" : undefined,
+    });
+    expect((await run("chat", { prompt: "deep", modelClass: "deep" }).result).model).toBe(
+      "pinned-deep",
+    );
+    expect(provider.sent).toEqual(["pinned-deep"]);
+    gate.resolve(null);
+  });
+
   it("resolves later class turns to auto without retrying an unavailable catalog", async () => {
     const { provider, gate, fetches } = deferredCopilot();
     const run = makeRun(provider, { ids: ["copilot"] });

@@ -1938,6 +1938,32 @@ describe("makePromptHandler", () => {
       ).toBe("auto");
     });
 
+    test("does not wait on Copilot discovery for a class pinned in config", async () => {
+      let waits = 0;
+      const spy = makeSpyProvider({
+        type: "copilot",
+        capabilities: COPILOT_MODEL_CLASS_CAPABILITIES,
+        chunks: [{ type: "text", content: "ok" }],
+        waitForModelClasses: () => {
+          waits++;
+          return new Promise<void>(() => {});
+        },
+      });
+      const handler = makePromptHandler({
+        getProvider: () => spy.provider,
+        resolveProviderId: () => "copilot",
+        getRegisteredTools: () => [],
+        resolveModelClass: (id, cls) =>
+          id === "copilot" && cls === "deep" ? "config-deep" : undefined,
+      });
+      const result = await handler.handle(
+        { id: "n1", prompt: "", model: "deep" } as unknown as DagNode,
+        buildCtx({ workflowProvider: "copilot" }),
+      );
+      expect(waits).toBe(0);
+      expect(result.model).toBe("config-deep");
+    });
+
     test("uses initialized Copilot classes, inheriting the workflow model and partial overrides", async () => {
       const spy = makeSpyProvider({
         type: "copilot",

@@ -621,7 +621,8 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             provider.getType?.() === "copilot" &&
             !(typeof perProviderModel === "string" && perProviderModel.length > 0) &&
             model !== undefined &&
-            isModelClassName(model)
+            isModelClassName(model) &&
+            !opts.resolveModelClass?.(effectiveProviderId, model)
           ) {
             await provider.waitForModelClasses?.();
           }
