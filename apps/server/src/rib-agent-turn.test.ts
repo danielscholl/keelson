@@ -419,6 +419,18 @@ describe("makeRibAgentTurn — model classes and the served model", () => {
     gate.resolve(null);
   });
 
+  it("bounds a pending Copilot catalog wait by the turn timeout", async () => {
+    const { provider, gate } = deferredCopilot();
+    const result = await makeRun(provider, { ids: ["copilot"] })("chat", {
+      prompt: "deep",
+      modelClass: "deep",
+      timeoutMs: 5,
+    }).result;
+    expect(result.status).toBe("timeout");
+    expect(provider.sent).toEqual([]);
+    gate.resolve(null);
+  });
+
   it("does not wait on a pending Copilot catalog for a class pinned in config", async () => {
     const { provider, gate } = deferredCopilot();
     const run = makeRun(provider, {
