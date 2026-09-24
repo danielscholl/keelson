@@ -134,7 +134,8 @@ export class CopilotProvider implements IAgentProvider {
   };
   // Process-lifetime cache; CLI spawn for listModels costs ~1s.
   private modelListCache: Promise<ModelInfo[]> | null = null;
-  private modelClassInitialization: Promise<void> | null = null;
+  // Tracks the latest catalog fetch; stays settled after a failure so class waits never retry.
+  private modelClassReady: Promise<void> | null = null;
   // The single warm client reused across turns, or null when none is resident.
   private warm: WarmClient | null = null;
   // In-flight spawn, so concurrent first turns coalesce onto one subprocess
@@ -176,15 +177,17 @@ export class CopilotProvider implements IAgentProvider {
   }
 
   waitForModelClasses(): Promise<void> {
-    if (!this.modelClassInitialization) {
-      this.modelClassInitialization = this.listModels().then(() => {});
-    }
-    return this.modelClassInitialization;
+    if (!this.modelClassReady) void this.listModels();
+    return this.modelClassReady ?? Promise.resolve();
   }
 
   async listModels(): Promise<ModelInfo[]> {
     if (!this.modelListCache) {
       this.modelListCache = this.fetchModels();
+      this.modelClassReady = this.modelListCache.then(
+        () => {},
+        () => {},
+      );
     }
     return this.modelListCache;
   }

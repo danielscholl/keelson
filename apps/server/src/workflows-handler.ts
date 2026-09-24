@@ -918,6 +918,7 @@ async function resolveCatalogPreflight(
       modelClassOverride,
     },
     waitForCopilotModelClasses,
+    opts.signal,
   );
   const effectiveProviders = resolution.nodes
     .map(({ effectiveProvider }) => effectiveProvider)

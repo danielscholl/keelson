@@ -139,6 +139,18 @@ describe("resolveWorkflowResolution", () => {
     expect(waits).toBe(0);
   });
 
+  test("stops waiting for Copilot discovery when the caller aborts", async () => {
+    const controller = new AbortController();
+    const pending = resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "classed", prompt: "go", model: "deep" }]),
+      { providers: new Map([["copilot", COPILOT_CAPABILITIES]]), defaultProviderId: "copilot" },
+      () => new Promise<void>(() => {}),
+      controller.signal,
+    );
+    controller.abort();
+    expect((await pending).nodes[0]?.model).toBe("auto");
+  });
+
   test("settles unavailable discovery then resolves later Copilot classes to auto", async () => {
     const options = {
       providers: new Map([["copilot", COPILOT_CAPABILITIES]]),

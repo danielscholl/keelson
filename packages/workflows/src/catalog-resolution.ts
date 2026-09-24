@@ -154,6 +154,7 @@ export async function resolveWorkflowResolutionReady(
   workflow: WorkflowDefinition,
   options: ResolutionOptions,
   waitForCopilotClasses: () => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<WorkflowResolution> {
   const requiresCopilotClass = workflow.nodes.filter(nodeReachesProvider).some((node) => {
     const variants =
@@ -175,7 +176,18 @@ export async function resolveWorkflowResolutionReady(
       );
     });
   });
-  if (requiresCopilotClass) await waitForCopilotClasses();
+  if (requiresCopilotClass && !signal?.aborted) {
+    let onAbort = (): void => {};
+    const aborted = new Promise<void>((resolve) => {
+      onAbort = () => resolve();
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      await Promise.race([waitForCopilotClasses(), aborted]);
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
+    }
+  }
   return resolveWorkflowResolution(workflow, options);
 }
 

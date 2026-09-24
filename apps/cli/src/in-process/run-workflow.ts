@@ -218,6 +218,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
         modelClassOverride,
       },
       waitForCopilotModelClasses,
+      opts.abortSignal,
     );
     const effectiveProviders = resolution.nodes
       .map(({ effectiveProvider }) => effectiveProvider)

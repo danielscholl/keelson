@@ -2542,6 +2542,39 @@ describe("CopilotProvider — defaultModel + listModels", () => {
     expect(provider.getCapabilities().modelClasses?.deep).toBe("auto");
   });
 
+  it("makes class waits follow a later catalog retry after an unavailable start", async () => {
+    const gates = [
+      Promise.withResolvers<ModelInfo[] | null>(),
+      Promise.withResolvers<ModelInfo[] | null>(),
+    ];
+    let calls = 0;
+    class CatalogFactory extends CopilotClientFactory {
+      override async listModels(): Promise<ModelInfo[] | null> {
+        return gates[calls++]!.promise;
+      }
+    }
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CatalogFactory(),
+    });
+    gates[0]!.resolve(null);
+    await provider.waitForModelClasses();
+    await provider.waitForModelClasses();
+    expect(calls).toBe(1);
+    const retry = provider.listModels();
+    let settled = false;
+    const wait = provider.waitForModelClasses().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    gates[1]!.resolve([{ id: "auto" }, { id: "only-model" }]);
+    await retry;
+    await wait;
+    expect(provider.getCapabilities().modelClasses?.deep).toBe("only-model");
+    expect(calls).toBe(2);
+  });
+
   it("times out an unresponsive catalog and forwards cancellation", async () => {
     let signal: AbortSignal | undefined;
     class HangingFactory extends CopilotClientFactory {
