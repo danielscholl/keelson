@@ -2,7 +2,11 @@
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
 
-import { resolveWorkflowCatalog, resolveWorkflowResolution } from "./catalog-resolution.ts";
+import {
+  resolveWorkflowCatalog,
+  resolveWorkflowResolution,
+  resolveWorkflowResolutionReady,
+} from "./catalog-resolution.ts";
 import { type WorkflowDefinition, workflowDefinitionSchema } from "./schema/index.ts";
 
 const COPILOT_CAPABILITIES = {
@@ -34,6 +38,197 @@ function makeWorkflow(
 }
 
 describe("resolveWorkflowResolution", () => {
+  test("awaits one in-flight Copilot catalog for concurrent class resolutions", async () => {
+    const gate = Promise.withResolvers<void>();
+    let loads = 0;
+    let loading: Promise<void> | undefined;
+    const capabilities = {
+      defaultModel: "auto",
+      models: ["auto"],
+      modelClasses: { fast: "auto", balanced: "auto", deep: "auto" },
+    };
+    const options = {
+      providers: new Map([["copilot", capabilities]]),
+      defaultProviderId: "copilot",
+    };
+    const wait = () => {
+      if (!loading) {
+        loads++;
+        loading = gate.promise.then(() => {
+          Object.assign(capabilities.modelClasses, {
+            fast: "fast-model",
+            balanced: "balanced-model",
+            deep: "deep-model",
+          });
+          capabilities.models.push("fast-model", "balanced-model", "deep-model");
+        });
+      }
+      return loading;
+    };
+    const fast = resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "fast", prompt: "fast", model: "fast" }]),
+      options,
+      wait,
+    );
+    const deep = resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "deep", prompt: "deep", model: "deep" }]),
+      options,
+      wait,
+    );
+    expect(loads).toBe(1);
+    gate.resolve();
+    expect((await fast).nodes[0]?.model).toBe("fast-model");
+    expect((await deep).nodes[0]?.model).toBe("deep-model");
+  });
+
+  test("does not wait for explicit pins, absent classes or another provider", async () => {
+    let waits = 0;
+    const options = {
+      providers: new Map<string, typeof COPILOT_CAPABILITIES | typeof CLAUDE_CAPABILITIES>([
+        ["copilot", COPILOT_CAPABILITIES],
+        ["claude", CLAUDE_CAPABILITIES],
+      ]),
+      defaultProviderId: "copilot",
+    };
+    const wait = async () => {
+      waits++;
+    };
+    const explicit = await resolveWorkflowResolutionReady(
+      makeWorkflow([
+        { id: "explicit", prompt: "go", model: "deep", model_by_provider: { copilot: "pinned" } },
+      ]),
+      options,
+      wait,
+    );
+    await resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "none", prompt: "go" }]),
+      options,
+      wait,
+    );
+    await resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "other", prompt: "go", model: "fast", provider: "claude" }]),
+      options,
+      wait,
+    );
+    await resolveWorkflowResolutionReady(
+      makeWorkflow([
+        {
+          id: "dispatch",
+          prompt: "go",
+          model: "deep",
+          model_by: {
+            from: "$inputs.tier",
+            cases: { exact: { model: "pinned" } },
+          },
+        },
+      ]),
+      options,
+      wait,
+    );
+    const configured = await resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "configured", prompt: "go", model: "deep" }]),
+      {
+        ...options,
+        modelClassOverride: (id, cls) =>
+          id === "copilot" && cls === "deep" ? "config-deep" : undefined,
+      },
+      wait,
+    );
+    expect(explicit.nodes[0]?.model).toBe("pinned");
+    expect(configured.nodes[0]?.model).toBe("config-deep");
+    expect(waits).toBe(0);
+  });
+
+  test("stops waiting for Copilot discovery when the caller aborts", async () => {
+    const controller = new AbortController();
+    const pending = resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "classed", prompt: "go", model: "deep" }]),
+      { providers: new Map([["copilot", COPILOT_CAPABILITIES]]), defaultProviderId: "copilot" },
+      () => new Promise<void>(() => {}),
+      controller.signal,
+    );
+    controller.abort();
+    expect((await pending).nodes[0]?.model).toBe("auto");
+  });
+
+  test("settles unavailable discovery then resolves later Copilot classes to auto", async () => {
+    const options = {
+      providers: new Map([["copilot", COPILOT_CAPABILITIES]]),
+      defaultProviderId: "copilot",
+    };
+    const wait = () => Promise.resolve();
+    const workflow = makeWorkflow([{ id: "deep", prompt: "go", model: "deep" }]);
+    expect((await resolveWorkflowResolutionReady(workflow, options, wait)).nodes[0]?.model).toBe(
+      "auto",
+    );
+    expect((await resolveWorkflowResolutionReady(workflow, options, wait)).nodes[0]?.model).toBe(
+      "auto",
+    );
+  });
+
+  test("resolves initialized Copilot classes, overrides and provider fallback consistently", async () => {
+    const capabilities = {
+      defaultModel: "auto",
+      models: ["auto", "fast-model", "balanced-model", "deep-model"],
+      modelClasses: { fast: "fast-model", balanced: "balanced-model", deep: "deep-model" },
+    };
+    const options = {
+      providers: new Map([["copilot", capabilities]]),
+      defaultProviderId: "copilot",
+    };
+    const workflow = makeWorkflow([
+      { id: "fast", prompt: "fast", model: "fast" },
+      { id: "balanced", prompt: "balanced", model: "balanced" },
+      { id: "deep", prompt: "deep", model: "deep" },
+    ]);
+    const resolved = await resolveWorkflowResolutionReady(workflow, options, async () => {});
+    expect(resolved.nodes.map(({ model }) => model)).toEqual([
+      "fast-model",
+      "balanced-model",
+      "deep-model",
+    ]);
+    const configured = await resolveWorkflowResolutionReady(
+      workflow,
+      {
+        ...options,
+        modelClassOverride: (id, cls) =>
+          id === "copilot" && cls === "deep" ? "pinned-deep" : undefined,
+      },
+      async () => {},
+    );
+    expect(configured.nodes.map(({ model }) => model)).toEqual([
+      "fast-model",
+      "balanced-model",
+      "pinned-deep",
+    ]);
+    const fallback = await resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "review", prompt: "review", model: "deep" }], {
+        provider: "missing",
+      }),
+      options,
+      async () => {},
+    );
+    expect(fallback.nodes[0]).toMatchObject({
+      effectiveProvider: "copilot",
+      model: "deep-model",
+      providerFellBack: true,
+      modelFellBack: false,
+    });
+    const runOverride = await resolveWorkflowResolutionReady(
+      makeWorkflow([{ id: "review", prompt: "review", model: "deep" }], {
+        provider: "claude",
+      }),
+      { ...options, runProviderId: "copilot" },
+      async () => {},
+    );
+    expect(runOverride.nodes[0]).toMatchObject({
+      effectiveProvider: "copilot",
+      model: "deep-model",
+      providerFellBack: true,
+      modelFellBack: false,
+    });
+  });
+
   test("keeps a registered provider pin and its provider-specific model native", () => {
     const workflow = makeWorkflow(
       [

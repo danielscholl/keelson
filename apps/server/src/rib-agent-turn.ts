@@ -8,6 +8,7 @@
 
 import { tmpdir } from "node:os";
 import {
+  CopilotProvider,
   getAgentProvider,
   getProviderInfoList,
   type IAgentProvider,
@@ -230,12 +231,6 @@ async function runTurn(
     return { status: "error", text: "", error: errMessage(err), providerId, stopReason: "error" };
   }
 
-  const model = requestedModel(req, provider, providerId, deps);
-
-  // Never inherit the server's (host repo) cwd; a turn that omits `cwd`
-  // runs in the neutral directory.
-  const cwd = req.cwd ?? deps.neutralCwd;
-
   // Combine the caller's abort signal with our own timeout so a turn honors
   // both `req.abortSignal` and `req.timeoutMs`.
   const controller = new AbortController();
@@ -253,6 +248,19 @@ async function runTurn(
           controller.abort();
         }, req.timeoutMs)
       : undefined;
+
+  const model = await requestedModel(req, provider, providerId, deps, controller.signal);
+  if (controller.signal.aborted) {
+    if (timer) clearTimeout(timer);
+    req.abortSignal?.removeEventListener("abort", onCallerAbort);
+    return timedOut
+      ? { status: "timeout", text: "", providerId, stopReason: "timeout" }
+      : { status: "aborted", text: "", providerId, stopReason: "aborted" };
+  }
+
+  // Never inherit the server's (host repo) cwd; a turn that omits `cwd`
+  // runs in the neutral directory.
+  const cwd = req.cwd ?? deps.neutralCwd;
 
   let capturedSessionId: string | undefined;
   let reportedFinish: ProviderFinishReason | undefined;
@@ -416,20 +424,37 @@ async function runTurn(
 
 // An explicit model wins; a class resolves through config.json, then the
 // provider's map, then its default. Empty means the SDK decides.
-function requestedModel(
+async function requestedModel(
   req: RibAgentTurnRequest,
   provider: IAgentProvider,
   providerId: string,
   deps: ResolvedDeps,
-): string | undefined {
+  signal: AbortSignal,
+): Promise<string | undefined> {
   if (req.model) return req.model;
   if (!req.modelClass) return undefined;
+  const configured = deps.resolveModelClass?.(providerId, req.modelClass);
+  if (configured) return configured;
+  if (providerId === "copilot" && provider instanceof CopilotProvider) {
+    await untilAborted(provider.waitForModelClasses(), signal);
+  }
   const capabilities = provider.getCapabilities?.();
-  const resolved =
-    deps.resolveModelClass?.(providerId, req.modelClass) ??
-    capabilities?.modelClasses?.[req.modelClass] ??
-    capabilities?.defaultModel;
+  const resolved = capabilities?.modelClasses?.[req.modelClass] ?? capabilities?.defaultModel;
   return resolved ? resolved : undefined;
+}
+
+async function untilAborted(wait: Promise<void>, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
+  let onAbort = (): void => {};
+  const aborted = new Promise<void>((resolve) => {
+    onAbort = () => resolve();
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    await Promise.race([wait, aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
 }
 
 // Map the request's tool rails onto SendQueryOptions:

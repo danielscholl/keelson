@@ -18,6 +18,7 @@ import type {
   CopilotSdkModule,
   CopilotSessionLike,
   MessageChunk,
+  ModelInfo,
   ProviderFinishReason,
 } from "../src/index.ts";
 import {
@@ -300,7 +301,10 @@ beforeEach(() => {
 
 describe("registerCopilotProvider", () => {
   it("registers a copilot provider with the expected identity", () => {
-    registerCopilotProvider({ getCredential: async () => undefined });
+    registerCopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(makeMockSdk()).load }),
+    });
     expect(isRegisteredProvider("copilot")).toBe(true);
     const info = getProviderInfoList().find((p) => p.id === "copilot");
     expect(info).toBeDefined();
@@ -311,9 +315,49 @@ describe("registerCopilotProvider", () => {
   });
 
   it("is idempotent — calling twice does not throw", () => {
-    const opts = { getCredential: async () => undefined };
+    const opts = {
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(makeMockSdk()).load }),
+    };
     registerCopilotProvider(opts);
     expect(() => registerCopilotProvider(opts)).not.toThrow();
+  });
+
+  it("hydrates registry capabilities in place after registration without blocking", async () => {
+    const gate = Promise.withResolvers<ModelInfo[] | null>();
+    let calls = 0;
+    class CatalogFactory extends CopilotClientFactory {
+      override async listModels(): Promise<ModelInfo[] | null> {
+        calls++;
+        return gate.promise;
+      }
+    }
+    registerCopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CatalogFactory(),
+    });
+    const provider = getAgentProvider("copilot");
+    if (!(provider instanceof CopilotProvider)) throw new Error("Expected CopilotProvider");
+    const published = getProviderInfoList()[0]!.capabilities;
+    expect(published).toBe(provider.getCapabilities());
+    expect(published.modelClasses?.deep).toBe("auto");
+    const other = new CopilotProvider({ getCredential: async () => undefined });
+    gate.resolve([
+      { id: "auto" },
+      { id: "deep-model", costTier: "high" },
+      { id: "balanced-model", costTier: "mid" },
+      { id: "fast-model", costTier: "low" },
+    ]);
+    await provider.waitForModelClasses();
+    expect(calls).toBe(1);
+    expect(getProviderInfoList()[0]!.capabilities).toBe(published);
+    expect(published.modelClasses).toEqual({
+      fast: "fast-model",
+      balanced: "balanced-model",
+      deep: "deep-model",
+    });
+    expect(other.getCapabilities()).toEqual(COPILOT_CAPABILITIES);
+    expect(COPILOT_CAPABILITIES.modelClasses?.deep).toBe("auto");
   });
 });
 
@@ -1867,7 +1911,10 @@ describe("CopilotProvider — warm client (issue #327)", () => {
 
 describe("disposeAllProviders (registry drain)", () => {
   it("returns the same singleton instance across getAgentProvider calls", () => {
-    registerCopilotProvider({ getCredential: async () => undefined });
+    registerCopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(makeMockSdk()).load }),
+    });
     expect(getAgentProvider("copilot")).toBe(getAgentProvider("copilot"));
   });
 
@@ -1930,7 +1977,10 @@ describe("buildFriendlyCopilotError", () => {
 
 describe("CopilotProvider — registered factory wiring", () => {
   it("registry-built provider passes through to a real CopilotProvider", () => {
-    registerCopilotProvider({ getCredential: async () => undefined });
+    registerCopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(makeMockSdk()).load }),
+    });
     const provider = getAgentProvider("copilot");
     expect(provider.getType()).toBe("copilot");
     expect(provider.getCapabilities()).toEqual(COPILOT_CAPABILITIES);
@@ -2373,6 +2423,178 @@ describe("CopilotProvider — defaultModel + listModels", () => {
     // Default mock returns the standard trio when no `models` is set —
     // those project to bare-id ModelInfo entries.
     expect(second.map((m) => m.id)).toEqual(["auto", "gpt-5", "claude-sonnet-4.5"]);
+  });
+
+  it("derives concrete classes and model ids without changing the fallback or another instance", async () => {
+    const sdk = makeMockSdk({
+      models: [
+        { id: "auto" },
+        { id: "deep-model", billing: { multiplier: 3 } },
+        { id: "balanced-model", billing: { multiplier: 2 } },
+        { id: "fast-model", billing: { multiplier: 1 } },
+      ],
+    });
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+    const other = new CopilotProvider({ getCredential: async () => undefined });
+    const capabilities = provider.getCapabilities();
+    const models = capabilities.models;
+    const modelClasses = capabilities.modelClasses;
+    await provider.waitForModelClasses();
+    expect(provider.getCapabilities()).toBe(capabilities);
+    expect(capabilities.models).toBe(models);
+    expect(capabilities.modelClasses).toBe(modelClasses);
+    expect(capabilities.defaultModel).toBe("auto");
+    expect(capabilities.models).toEqual(["auto", "deep-model", "balanced-model", "fast-model"]);
+    expect(capabilities.modelClasses).toEqual({
+      fast: "fast-model",
+      balanced: "balanced-model",
+      deep: "deep-model",
+    });
+    expect(other.getCapabilities()).toEqual(COPILOT_CAPABILITIES);
+    expect(COPILOT_CAPABILITIES.models).toEqual(["auto"]);
+    expect(COPILOT_CAPABILITIES.modelClasses).toEqual({
+      fast: "auto",
+      balanced: "auto",
+      deep: "auto",
+    });
+  });
+
+  it("excludes auto regardless of position and handles missing and tied tiers", async () => {
+    const sdk = makeMockSdk({
+      models: [{ id: "first" }, { id: "auto" }, { id: "second" }, { id: "third" }],
+    });
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+    await provider.waitForModelClasses();
+    expect(provider.getCapabilities().modelClasses).toEqual({
+      fast: "third",
+      balanced: "second",
+      deep: "first",
+    });
+
+    const tied = makeMockSdk({
+      models: [
+        { id: "auto" },
+        { id: "one", billing: { multiplier: 1 } },
+        { id: "two", billing: { multiplier: 1 } },
+      ],
+    });
+    const tiedProvider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(tied).load }),
+    });
+    await tiedProvider.waitForModelClasses();
+    expect(tiedProvider.getCapabilities().modelClasses).toEqual({
+      fast: "one",
+      balanced: "one",
+      deep: "one",
+    });
+  });
+
+  it("retains auto for empty and auto-only catalogs and can recover on a later list", async () => {
+    let models: ModelInfo[] | null = [];
+    class CatalogFactory extends CopilotClientFactory {
+      override async listModels(): Promise<ModelInfo[] | null> {
+        return models;
+      }
+    }
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CatalogFactory(),
+    });
+    expect(await provider.listModels()).toEqual([]);
+    expect(provider.getCapabilities().modelClasses?.fast).toBe("auto");
+    models = [{ id: "auto" }];
+    expect(await provider.listModels()).toEqual([{ id: "auto" }]);
+    models = [{ id: "only-model" }];
+    expect(await provider.listModels()).toEqual([{ id: "only-model" }]);
+    expect(provider.getCapabilities().modelClasses).toEqual({
+      fast: "only-model",
+      balanced: "only-model",
+      deep: "only-model",
+    });
+  });
+
+  it("shares a bounded initialization and settles unavailable waits without retrying", async () => {
+    const gate = Promise.withResolvers<ModelInfo[] | null>();
+    let calls = 0;
+    class CatalogFactory extends CopilotClientFactory {
+      override async listModels(): Promise<ModelInfo[] | null> {
+        calls++;
+        return gate.promise;
+      }
+    }
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CatalogFactory(),
+    });
+    const first = provider.waitForModelClasses();
+    expect(provider.waitForModelClasses()).toBe(first);
+    gate.resolve(null);
+    await first;
+    await provider.waitForModelClasses();
+    expect(calls).toBe(1);
+    expect(provider.getCapabilities().modelClasses?.deep).toBe("auto");
+  });
+
+  it("makes class waits follow a later catalog retry after an unavailable start", async () => {
+    const gates = [
+      Promise.withResolvers<ModelInfo[] | null>(),
+      Promise.withResolvers<ModelInfo[] | null>(),
+    ];
+    let calls = 0;
+    class CatalogFactory extends CopilotClientFactory {
+      override async listModels(): Promise<ModelInfo[] | null> {
+        return gates[calls++]!.promise;
+      }
+    }
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CatalogFactory(),
+    });
+    gates[0]!.resolve(null);
+    await provider.waitForModelClasses();
+    await provider.waitForModelClasses();
+    expect(calls).toBe(1);
+    const retry = provider.listModels();
+    let settled = false;
+    const wait = provider.waitForModelClasses().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    gates[1]!.resolve([{ id: "auto" }, { id: "only-model" }]);
+    await retry;
+    await wait;
+    expect(provider.getCapabilities().modelClasses?.deep).toBe("only-model");
+    expect(calls).toBe(2);
+  });
+
+  it("times out an unresponsive catalog and forwards cancellation", async () => {
+    let signal: AbortSignal | undefined;
+    class HangingFactory extends CopilotClientFactory {
+      override async listModels(
+        _token: string | undefined,
+        _cwd: string,
+        abortSignal?: AbortSignal,
+      ): Promise<ModelInfo[] | null> {
+        signal = abortSignal;
+        return new Promise(() => {});
+      }
+    }
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new HangingFactory(),
+      modelCatalogTimeoutMs: 5,
+    });
+    await provider.waitForModelClasses();
+    expect(signal?.aborted).toBe(true);
+    expect(provider.getCapabilities().modelClasses?.fast).toBe("auto");
   });
 
   it("copilotCostTier maps the multiplier ranges (regression guard)", async () => {

@@ -23,6 +23,7 @@ export {
 export {
   resolveWorkflowCatalog,
   resolveWorkflowResolution,
+  resolveWorkflowResolutionReady,
   type WorkflowResolution,
 } from "./catalog-resolution.ts";
 export { evaluateCondition } from "./conditions.ts";

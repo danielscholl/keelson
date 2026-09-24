@@ -8,6 +8,7 @@
 
 import type { TokenUsage, ToolContext } from "@keelson/shared";
 import { ChunkQueue } from "../chunk-queue.ts";
+import { deriveModelClasses } from "../model-classes.ts";
 import { toTokenCount } from "../token-count.ts";
 import type {
   IAgentProvider,
@@ -34,6 +35,12 @@ export const COPILOT_CREDENTIAL_SERVICE_ID = "copilot" as const;
 // "auto" delegates model choice to Copilot; keeps the default resilient to
 // GitHub rotating the underlying model.
 export const COPILOT_DEFAULT_MODEL = "auto" as const;
+
+const COPILOT_FALLBACK_MODEL_CLASSES = {
+  fast: COPILOT_DEFAULT_MODEL,
+  balanced: COPILOT_DEFAULT_MODEL,
+  deep: COPILOT_DEFAULT_MODEL,
+};
 
 // How long a warm client may sit idle (no turns) before it's evicted and its
 // subprocess stopped. An idle language-server is ~0 CPU, so this is hygiene
@@ -67,11 +74,7 @@ export const COPILOT_CAPABILITIES: ProviderCapabilities = {
   // choice to Copilot and is always valid; the real list comes from listModels().
   models: [COPILOT_DEFAULT_MODEL],
   defaultModel: COPILOT_DEFAULT_MODEL,
-  modelClasses: {
-    fast: COPILOT_DEFAULT_MODEL,
-    balanced: COPILOT_DEFAULT_MODEL,
-    deep: COPILOT_DEFAULT_MODEL,
-  },
+  modelClasses: { ...COPILOT_FALLBACK_MODEL_CLASSES },
 };
 
 export type GetCredentialFn = (serviceId: string) => Promise<string | undefined>;
@@ -79,6 +82,7 @@ export type GetCredentialFn = (serviceId: string) => Promise<string | undefined>
 export interface CopilotProviderOptions {
   getCredential: GetCredentialFn;
   clientFactory?: CopilotClientFactory;
+  modelCatalogTimeoutMs?: number;
   // Idle-eviction window for the warm client; see COPILOT_DEFAULT_WARM_IDLE_MS.
   // Tests pass a small value (or ≤ 0 to disable warmth) to exercise eviction
   // deterministically without waiting out the 10-minute default.
@@ -121,9 +125,17 @@ class RetryableConnectionError extends Error {
 export class CopilotProvider implements IAgentProvider {
   private readonly getCredential: GetCredentialFn;
   private readonly factory: CopilotClientFactory;
+  private readonly modelCatalogTimeoutMs: number;
   private readonly idleMs: number;
+  private readonly capabilities: ProviderCapabilities = {
+    ...COPILOT_CAPABILITIES,
+    models: [...COPILOT_CAPABILITIES.models],
+    modelClasses: { ...COPILOT_FALLBACK_MODEL_CLASSES },
+  };
   // Process-lifetime cache; CLI spawn for listModels costs ~1s.
   private modelListCache: Promise<ModelInfo[]> | null = null;
+  // Tracks the latest catalog fetch; stays settled after a failure so class waits never retry.
+  private modelClassReady: Promise<void> | null = null;
   // The single warm client reused across turns, or null when none is resident.
   private warm: WarmClient | null = null;
   // In-flight spawn, so concurrent first turns coalesce onto one subprocess
@@ -150,6 +162,7 @@ export class CopilotProvider implements IAgentProvider {
   constructor(options: CopilotProviderOptions) {
     this.getCredential = options.getCredential;
     this.factory = options.clientFactory ?? new CopilotClientFactory();
+    this.modelCatalogTimeoutMs = options.modelCatalogTimeoutMs ?? 10_000;
     this.idleMs = resolveWarmIdleMs(options.idleMs);
     this.sessionReleaseWaitMs =
       options.sessionReleaseWaitMs ?? COPILOT_DEFAULT_SESSION_RELEASE_WAIT_MS;
@@ -160,23 +173,57 @@ export class CopilotProvider implements IAgentProvider {
   }
 
   getCapabilities(): ProviderCapabilities {
-    return COPILOT_CAPABILITIES;
+    return this.capabilities;
+  }
+
+  waitForModelClasses(): Promise<void> {
+    if (!this.modelClassReady) void this.listModels();
+    return this.modelClassReady ?? Promise.resolve();
   }
 
   async listModels(): Promise<ModelInfo[]> {
     if (!this.modelListCache) {
       this.modelListCache = this.fetchModels();
+      this.modelClassReady = this.modelListCache.then(
+        () => {},
+        () => {},
+      );
     }
     return this.modelListCache;
   }
 
   private async fetchModels(): Promise<ModelInfo[]> {
-    const live = await this.listModelsLive();
+    // An explicit timer, not AbortSignal.timeout: Bun on Windows never fires the latter here.
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const aborted = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        resolve(null);
+      }, this.modelCatalogTimeoutMs);
+    });
+    const live = await Promise.race([this.listModelsLive(controller.signal), aborted]).finally(() =>
+      clearTimeout(timer),
+    );
     // null = probe failed (signed out, CLI missing). Drop the cache so the
     // next request retries instead of serving the bare-id fallback forever.
     if (live === null) {
       this.modelListCache = null;
       return COPILOT_CAPABILITIES.models.map((id) => ({ id }));
+    }
+    const concrete = live.filter((model) => model.id.trim() !== "" && model.id !== "auto");
+    const classes = deriveModelClasses(concrete, COPILOT_DEFAULT_MODEL);
+    if (classes === undefined) {
+      this.modelListCache = null;
+    } else {
+      if (this.capabilities.modelClasses) Object.assign(this.capabilities.modelClasses, classes);
+      else this.capabilities.modelClasses = classes;
+      this.capabilities.models.splice(
+        0,
+        this.capabilities.models.length,
+        COPILOT_DEFAULT_MODEL,
+        ...new Set(concrete.map((model) => model.id)),
+      );
     }
     return live;
   }

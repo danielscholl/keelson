@@ -23,6 +23,7 @@ import {
   fetchLiveModelCatalog,
   getProviderInfoList,
   isRegisteredProvider,
+  waitForCopilotModelClasses,
 } from "@keelson/providers";
 import {
   bulkDeleteRunsBodySchema,
@@ -100,7 +101,7 @@ import {
   repoPathFromWorktree,
   resolveBranchTemplate,
   resolveDefaultBranch,
-  resolveWorkflowResolution,
+  resolveWorkflowResolutionReady,
   runWorkflow,
   validateWorkflowInvariants,
   type WorkflowDefinition,
@@ -908,12 +909,17 @@ async function resolveCatalogPreflight(
   );
   const modelClassOverride = (id: string, modelClass: "fast" | "balanced" | "deep") =>
     readModelClassOverride(config, id)?.[modelClass];
-  const resolution = resolveWorkflowResolution(workflow, {
-    providers,
-    defaultProviderId: opts.defaultProviderId,
-    runProviderId: opts.providerOverride,
-    modelClassOverride,
-  });
+  const resolution = await resolveWorkflowResolutionReady(
+    workflow,
+    {
+      providers,
+      defaultProviderId: opts.defaultProviderId,
+      runProviderId: opts.providerOverride,
+      modelClassOverride,
+    },
+    waitForCopilotModelClasses,
+    opts.signal,
+  );
   const effectiveProviders = resolution.nodes
     .map(({ effectiveProvider }) => effectiveProvider)
     .filter((id): id is string => id !== undefined);

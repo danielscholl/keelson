@@ -1,3 +1,4 @@
+import { applyModelCase } from "./model-by.ts";
 import { diagnoseModelDiversity } from "./model-diversity.ts";
 import { nodeReachesProvider, type WorkflowDefinition } from "./schema/index.ts";
 
@@ -147,6 +148,47 @@ export function resolveWorkflowResolution(
     fallbackNodes,
     collapses,
   };
+}
+
+export async function resolveWorkflowResolutionReady(
+  workflow: WorkflowDefinition,
+  options: ResolutionOptions,
+  waitForCopilotClasses: () => Promise<void>,
+  signal?: AbortSignal,
+): Promise<WorkflowResolution> {
+  const requiresCopilotClass = workflow.nodes.filter(nodeReachesProvider).some((node) => {
+    const variants =
+      node.model_by === undefined
+        ? [node]
+        : Object.values(node.model_by.cases).map(
+            (branch) => applyModelCase(node, branch) as typeof node,
+          );
+    return variants.some((candidate) => {
+      const effectiveProvider = resolvePrompt(workflow, candidate, options).effectiveProvider;
+      const model = candidate.model ?? workflow.model;
+      return (
+        effectiveProvider === "copilot" &&
+        options.providers.has("copilot") &&
+        model !== undefined &&
+        isModelClass(model) &&
+        !candidate.model_by_provider?.copilot &&
+        !options.modelClassOverride?.("copilot", model)
+      );
+    });
+  });
+  if (requiresCopilotClass && !signal?.aborted) {
+    let onAbort = (): void => {};
+    const aborted = new Promise<void>((resolve) => {
+      onAbort = () => resolve();
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      await Promise.race([waitForCopilotClasses(), aborted]);
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
+    }
+  }
+  return resolveWorkflowResolution(workflow, options);
 }
 
 export function resolveWorkflowCatalog(

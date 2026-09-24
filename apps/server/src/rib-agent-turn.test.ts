@@ -7,7 +7,17 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { IAgentProvider, ProviderFinishReason, SendQueryOptions } from "@keelson/providers";
+import {
+  CopilotClientFactory,
+  type CopilotClientLike,
+  CopilotProvider,
+  type CopilotSessionLike,
+  type CreateClientResult,
+  type IAgentProvider,
+  type ModelInfo,
+  type ProviderFinishReason,
+  type SendQueryOptions,
+} from "@keelson/providers";
 import type { MessageChunk, Rib, RibContext, ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
 import type { PolicyEngine } from "./policy-engine.ts";
@@ -231,6 +241,220 @@ describe("makeRibAgentTurn — provider routing", () => {
 });
 
 describe("makeRibAgentTurn — model classes and the served model", () => {
+  function sdkCopilot(catalog: ModelInfo[] | null) {
+    const opened: Array<string | undefined> = [];
+    const retargeted: string[] = [];
+    const session = (): CopilotSessionLike => {
+      const handlers = new Map<string, Set<(event: unknown) => void>>();
+      return {
+        sessionId: "mock-session",
+        on(event, handler) {
+          let listeners = handlers.get(event);
+          if (!listeners) {
+            listeners = new Set();
+            handlers.set(event, listeners);
+          }
+          listeners.add(handler);
+          return () => listeners.delete(handler);
+        },
+        async send() {
+          for (const listener of handlers.get("assistant.message") ?? []) {
+            listener({ data: { content: "hello" } });
+          }
+          for (const listener of handlers.get("session.idle") ?? []) listener({});
+        },
+        async abort() {},
+        async disconnect() {},
+        async setModel(model) {
+          retargeted.push(model);
+        },
+      };
+    };
+    const client: CopilotClientLike = {
+      async start() {},
+      async stop() {},
+      async createSession(config) {
+        opened.push((config as { model?: string } | undefined)?.model);
+        return session();
+      },
+      async resumeSession(_sessionId, config) {
+        opened.push((config as { model?: string } | undefined)?.model);
+        return session();
+      },
+      async getAuthStatus() {
+        return { isAuthenticated: true };
+      },
+      async listModels() {
+        return [];
+      },
+    };
+    class TestFactory extends CopilotClientFactory {
+      override async listModels(): Promise<ModelInfo[] | null> {
+        return catalog;
+      }
+      override async createClient(): Promise<CreateClientResult> {
+        return { client, permissionHandler: async () => ({ kind: "approved" }) };
+      }
+    }
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new TestFactory(),
+      idleMs: 0,
+    });
+    return { provider, opened, retargeted };
+  }
+
+  it("forwards derived and overridden Copilot models to new and resumed SDK sessions", async () => {
+    const { provider, opened, retargeted } = sdkCopilot([
+      { id: "auto" },
+      { id: "deep-model", costTier: "high" },
+      { id: "balanced-model", costTier: "mid" },
+      { id: "fast-model", costTier: "low" },
+    ]);
+    const run = makeRun(provider, {
+      ids: ["copilot"],
+      resolveModelClass: (id, cls) =>
+        id === "copilot" && cls === "deep" ? "pinned-deep" : undefined,
+    });
+    try {
+      for (const [cls, expected] of [
+        ["fast", "fast-model"],
+        ["balanced", "balanced-model"],
+        ["deep", "pinned-deep"],
+      ] as const) {
+        expect((await run("chat", { prompt: "hi", modelClass: cls }).result).model).toBe(expected);
+      }
+      expect(
+        (await run("chat", { prompt: "hi", model: "exact", modelClass: "deep" }).result).model,
+      ).toBe("exact");
+      expect(opened).toEqual(["fast-model", "balanced-model", "pinned-deep", "exact"]);
+      const resumed = await run("chat", {
+        prompt: "again",
+        modelClass: "deep",
+        resumeSessionId: "mock-session",
+      }).result;
+      expect(resumed.model).toBe("pinned-deep");
+      expect(retargeted).toEqual(["pinned-deep"]);
+    } finally {
+      await provider.dispose();
+    }
+  });
+
+  it("passes auto to the SDK if Copilot discovery is unavailable", async () => {
+    const { provider, opened } = sdkCopilot(null);
+    try {
+      const result = await makeRun(provider, { ids: ["copilot"] })("chat", {
+        prompt: "hi",
+        modelClass: "deep",
+      }).result;
+      expect(result.model).toBe("auto");
+      expect(opened).toEqual(["auto"]);
+    } finally {
+      await provider.dispose();
+    }
+  });
+
+  function deferredCopilot() {
+    const gate = Promise.withResolvers<ModelInfo[] | null>();
+    let fetches = 0;
+    class CatalogFactory extends CopilotClientFactory {
+      override async listModels(): Promise<ModelInfo[] | null> {
+        fetches++;
+        return gate.promise;
+      }
+    }
+    class RecordingCopilot extends CopilotProvider {
+      readonly sent: Array<string | undefined> = [];
+      override async *sendQuery(
+        _prompt: string,
+        _cwd: string,
+        _resume?: string,
+        options?: SendQueryOptions,
+      ) {
+        this.sent.push(options?.model);
+        yield { type: "text" as const, content: "hello" };
+        yield { type: "done" as const };
+      }
+    }
+    const provider = new RecordingCopilot({
+      getCredential: async () => undefined,
+      clientFactory: new CatalogFactory(),
+    });
+    return { provider, gate, fetches: () => fetches };
+  }
+
+  it("waits for a pending Copilot catalog before resolving concurrent class turns", async () => {
+    const { provider, gate, fetches } = deferredCopilot();
+    const run = makeRun(provider, { ids: ["copilot"] });
+    const fast = run("chat", { prompt: "fast", modelClass: "fast" }).result;
+    const deep = run("chat", { prompt: "deep", modelClass: "deep" }).result;
+    await Promise.resolve();
+    expect(provider.sent).toEqual([]);
+    expect(fetches()).toBe(1);
+    await run("chat", { prompt: "explicit", model: "pinned", modelClass: "deep" }).result;
+    await run("chat", { prompt: "unclassed" }).result;
+    expect(provider.sent).toEqual(["pinned", undefined]);
+    gate.resolve([
+      { id: "auto" },
+      { id: "deep-model", costTier: "high" },
+      { id: "balanced-model", costTier: "mid" },
+      { id: "fast-model", costTier: "low" },
+    ]);
+    expect((await fast).model).toBe("fast-model");
+    expect((await deep).model).toBe("deep-model");
+    expect(fetches()).toBe(1);
+  });
+
+  it("returns aborted when the caller aborts during a pending Copilot catalog", async () => {
+    const { provider, gate } = deferredCopilot();
+    const controller = new AbortController();
+    const pending = makeRun(provider, { ids: ["copilot"] })("chat", {
+      prompt: "deep",
+      modelClass: "deep",
+      abortSignal: controller.signal,
+    }).result;
+    controller.abort();
+    expect((await pending).status).toBe("aborted");
+    expect(provider.sent).toEqual([]);
+    gate.resolve(null);
+  });
+
+  it("bounds a pending Copilot catalog wait by the turn timeout", async () => {
+    const { provider, gate } = deferredCopilot();
+    const result = await makeRun(provider, { ids: ["copilot"] })("chat", {
+      prompt: "deep",
+      modelClass: "deep",
+      timeoutMs: 5,
+    }).result;
+    expect(result.status).toBe("timeout");
+    expect(provider.sent).toEqual([]);
+    gate.resolve(null);
+  });
+
+  it("does not wait on a pending Copilot catalog for a class pinned in config", async () => {
+    const { provider, gate } = deferredCopilot();
+    const run = makeRun(provider, {
+      ids: ["copilot"],
+      resolveModelClass: (id, cls) =>
+        id === "copilot" && cls === "deep" ? "pinned-deep" : undefined,
+    });
+    expect((await run("chat", { prompt: "deep", modelClass: "deep" }).result).model).toBe(
+      "pinned-deep",
+    );
+    expect(provider.sent).toEqual(["pinned-deep"]);
+    gate.resolve(null);
+  });
+
+  it("resolves later class turns to auto without retrying an unavailable catalog", async () => {
+    const { provider, gate, fetches } = deferredCopilot();
+    const run = makeRun(provider, { ids: ["copilot"] });
+    const first = run("chat", { prompt: "first", modelClass: "deep" }).result;
+    gate.resolve(null);
+    expect((await first).model).toBe("auto");
+    expect((await run("chat", { prompt: "later", modelClass: "fast" }).result).model).toBe("auto");
+    expect(fetches()).toBe(1);
+  });
+
   function classed(onQuery: (call: QueryCall) => void, chunks?: MessageChunk[]): IAgentProvider {
     return {
       ...fakeProvider({ onQuery, ...(chunks ? { chunks } : {}) }),
