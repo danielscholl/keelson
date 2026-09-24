@@ -190,11 +190,18 @@ export class CopilotProvider implements IAgentProvider {
   }
 
   private async fetchModels(): Promise<ModelInfo[]> {
-    const signal = AbortSignal.timeout(this.modelCatalogTimeoutMs);
+    // An explicit timer, not AbortSignal.timeout: Bun on Windows never fires the latter here.
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const aborted = new Promise<null>((resolve) => {
-      signal.addEventListener("abort", () => resolve(null), { once: true });
+      timer = setTimeout(() => {
+        controller.abort();
+        resolve(null);
+      }, this.modelCatalogTimeoutMs);
     });
-    const live = await Promise.race([this.listModelsLive(signal), aborted]);
+    const live = await Promise.race([this.listModelsLive(controller.signal), aborted]).finally(() =>
+      clearTimeout(timer),
+    );
     // null = probe failed (signed out, CLI missing). Drop the cache so the
     // next request retries instead of serving the bare-id fallback forever.
     if (live === null) {
