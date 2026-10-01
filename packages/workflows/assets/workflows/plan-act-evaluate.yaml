@@ -721,6 +721,8 @@ nodes:
       - **What**: one sentence
       - **Why it matters**: one sentence
       - **Suggested fix**: one or two lines, code where useful
+      - **Repro**: the exact command, test invocation, or input plus the
+        observed-versus-expected result, or `none` plus one clause saying why
 
       Lead with high-confidence, high-severity items. Do NOT edit files — the next
       node renders this as a formal PR review.
@@ -748,7 +750,8 @@ nodes:
         findings → approve:
         `forge pr review <PR> --approve --body "<one-paragraph verdict>"`
       - Otherwise → request changes, listing the CRITICAL/HIGH findings in the
-        body so Copilot can act on them:
+        body, each with its repro line unless the repro is none, so Copilot can
+        act on them:
         `forge pr review <PR> --request-changes --body "<findings>"`
 
       Use a HEREDOC for `--body` to preserve markdown. Do not edit any files.

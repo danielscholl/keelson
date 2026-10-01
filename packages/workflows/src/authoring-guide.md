@@ -259,7 +259,8 @@ must already exist on disk; from chat, use an inline `prompt` node instead.
 - `allowed_tools` / `denied_tools` — tool-name filters for prompt and command
   nodes.
   Rib-registered tools are default-off; opt in with `allowed_tools`.
-- `output_schema` — JSON-Schema subset any node output must satisfy.
+- `output_schema` — JSON-Schema subset any node output must satisfy: `type`,
+  `required`, `properties`, `items`, and `enum` on a string.
 - `output_format` — prompt/command provider structured-output request (claude).
 - `retry: { max_attempts, delay_ms, on_error }` — `max_attempts` 1–5
   (required), `delay_ms` 1000–60000 (doubled each attempt), `on_error`

@@ -96,11 +96,11 @@ only when the pushed PR's checks pass.
 | Draft PR | `create-pr` | prompt | Pushes the branch, opens a draft PR with `Fixes #N`, and captures the PR number and URL. It follows a single standalone `pull_request_template.md` when one exists; repositories with only named templates under `PULL_REQUEST_TEMPLATE/` use the fallback body. Its test plan records commands actually executed and their results, with `pending CI` reserved for checks that only CI can confirm. |
 | | `enforce-draft` | bash | Verifies the new PR is a draft; if it came up ready, runs `forge pr ready --undo` to force it back to draft, and fails the run if it cannot confirm the draft state. |
 | Review loop | `capture-diff` | bash | Freezes the branch diff to `$ARTIFACTS_DIR/diff.patch` / `diff-stat.txt` so the lenses can run without shell access. |
-| | `review-correctness` | prompt | **`model: gpt-6-astra`**, **`effort: xhigh`**, `allowed_tools: [Read, Glob, Grep]`: one of three **independent, parallel** reviewers over `diff.patch`. Hunts by cost of failure (trust boundaries, irreversible state, idempotency gaps), follows each changed function to every entry path that reaches it (resume, cancel, the opt-out configuration, data written before the change), checks that docs and reference tables still agree with the code, labels unverified external-API claims INFERRED, and emits a confidence per finding. |
+| | `review-correctness` | prompt | **`model: gpt-6-astra`**, **`effort: xhigh`**, `allowed_tools: [Read, Glob, Grep]`: one of three **independent, parallel** reviewers over `diff.patch`. Hunts by cost of failure (trust boundaries, irreversible state, idempotency gaps), follows each changed function to every entry path that reaches it (resume, cancel, the opt-out configuration, data written before the change), checks that docs and reference tables still agree with the code, labels unverified external-API claims INFERRED, and emits a confidence and a `repro` (the command, test, or input that shows the failure, or `none` plus the reason) per finding. |
 | | `review-conventions` | prompt | **`model: gpt-6-luna`**, **`effort: xhigh`**, same read-only rail: checks the diff against `CLAUDE.md` / `CONTRIBUTING.md` (comment policy, conventions), quoting the rule each finding violates. |
 | | `review-coverage` | prompt | **`model: gpt-6-luna`**, **`effort: xhigh`**, same read-only rail: flags new behavior left untested, and tests authored but never wired in. |
-| | `triage` | prompt | **`model: claude-opus-4.8`**, **`effort: xhigh`**, `allowed_tools: [Read, Glob, Grep]`, typed JSON: de-dupes the findings, then adversarially refutes each against `diff.patch` and the source. Survivors are CONFIRMED (85-100) or PLAUSIBLE (capped at 79, below the ≥80 keep line), so only CONFIRMED CRITICAL/HIGH findings reach the fixer. |
-| | `apply-fixes` | prompt | **`model: gpt-6-sol`**, **`effort: high`**: applies only the triaged must-fix issues, commits, pushes. No-ops when triage is clean. |
+| | `triage` | prompt | **`model: claude-opus-4.8`**, **`effort: xhigh`**, `allowed_tools: [Read, Glob, Grep]`, typed JSON: de-dupes the findings, then adversarially refutes each against `diff.patch` and the source, starting from its `repro`. Survivors are CONFIRMED (85-100) or PLAUSIBLE (capped at 79, below the ≥80 keep line), so only CONFIRMED CRITICAL/HIGH findings reach the fixer. |
+| | `apply-fixes` | prompt | **`model: gpt-6-sol`**, **`effort: high`**: applies only the triaged must-fix issues, running each one's `repro` before and after the change, commits, pushes. No-ops when triage is clean. |
 | | `re-review` | prompt | **`model: gpt-6-luna`**, **`effort: high`**: closes the loop with a model independent of the fixer: confirms each must-fix is resolved with no new defect; fixes any straggler. |
 | Re-validate | `post-fix-validate` | bash | Re-runs the full checks after the review loop (exits 0) so the report shows the *real* status. |
 | CI gate | `await-ci` | bash | Watches the pushed PR's CI; reruns failed jobs **once** to shake out flakes. **Exits 0** so the run continues whether CI passed or not. |
@@ -152,9 +152,14 @@ three independent reviewers (correctness, conventions, and coverage) read it in
 parallel (they share a DAG layer, so the panel costs about one review's
 wall-clock) under a read-only harness rail: `allowed_tools: [Read, Glob, Grep]`,
 the same rail [pr-review](../pr-review/) puts on its lanes, so a reviewer
-*cannot* edit or run shell no matter what its prompt says. The `triage` judge
-then holds the same tools and adversarially **refutes** each candidate against
-`diff.patch` and the source: a survivor is CONFIRMED when the failure was traced
+*cannot* edit or run shell no matter what its prompt says. Correctness and
+conventions findings carry a required `repro`: the command, test, or input
+that shows the failure, or `none` plus the reason. The coverage lens declares
+the field but leaves it optional, since it emits a test to add rather than a
+fix. The `triage` judge then holds the same tools and
+adversarially **refutes** each candidate against `diff.patch` and the source,
+starting from that repro (one that does not reproduce refutes the finding): a
+survivor is CONFIRMED when the failure was traced
 in real code (confidence 85-100) or PLAUSIBLE when it could not be refuted but
 not traced either (capped at 79, below the ≥80 keep line), so only CONFIRMED
 CRITICAL/HIGH findings reach `apply-fixes`, and `re-review` confirms the loop

@@ -25,6 +25,7 @@ import type {
 } from "./schema/index.ts";
 import { validateOutput } from "./schema/index.ts";
 import { checkTriggerRule } from "./triggers.ts";
+import { addNodeUsage } from "./usage.ts";
 
 // Wire-protocol constants. Mirror the canonical values exported from
 // `@keelson/shared/memory.ts`; intentionally duplicated rather than imported
@@ -1092,10 +1093,67 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+// Validates one attempt's output. Structured output must be JSON-serializable:
+// JSON.stringify returns undefined for top-level undefined / functions / symbols,
+// which would leave NodeOutput.output non-string and break downstream
+// substitution, so that is a handler bug that fails loudly. A declared
+// output_schema then fails closed: the wrong shape fails here rather than
+// feeding a malformed $nodeId.output downstream, validated on the same JSON
+// view a consumer reads via substitution. Rewrap sites spread `...result` so
+// handler-attached fields (usage today, anything future) survive the rewrap.
+function checkNodeOutput(
+  node: DagNode,
+  attempt: NodeResult,
+  emit: (event: RunStreamEvent) => void,
+): NodeResult {
+  let result = attempt;
+  if (result.status === "succeeded" && result.output.kind === "structured") {
+    let detail = `typeof value: ${typeof result.output.value}`;
+    let serialized: unknown;
+    try {
+      serialized = JSON.stringify(result.output.value);
+    } catch (err) {
+      // A cycle or a bigint throws rather than returning undefined.
+      detail = err instanceof Error ? err.message : String(err);
+    }
+    if (typeof serialized !== "string") {
+      const error = `handler structured output is not JSON-serializable (${detail})`;
+      emit({ type: "run_warning", nodeId: node.id, message: error });
+      result = { ...result, status: "failed", output: { kind: "text", text: "" }, error };
+    }
+  }
+  if (result.status === "succeeded") {
+    const schema = outputSchemaOf(node);
+    if (schema !== undefined) {
+      const captured = capturedValueForSchema(result.output);
+      const validation = validateOutput(captured, schema);
+      if (!validation.ok) {
+        const error = `output_schema validation failed: ${validation.error}`;
+        emit({ type: "run_warning", nodeId: node.id, message: error });
+        result = { ...result, status: "failed", output: { kind: "text", text: "" }, error };
+      } else if (
+        result.output.kind === "text" &&
+        typeof captured === "object" &&
+        captured !== null
+      ) {
+        // A node that declares output_schema and emits JSON is a structured
+        // producer: surface it as structured so $nodeId.output addressing and
+        // the snapshot publish bridge see the value, not raw text.
+        result = { ...result, output: { kind: "structured", value: captured } };
+      }
+    }
+  }
+  return result;
+}
+
 // Runs a node's handler, retrying a retryable failure per its `retry:` config.
 // Returns the final NodeResult; rethrows if the final attempt threw, so the
-// caller's writeback-on-throw path stays intact. A returned failure on the final
-// attempt flows through unchanged. Each retry emits a run_warning.
+// caller's writeback-on-throw path stays intact, unless an earlier attempt
+// spent tokens: the throw then returns as a failure carrying that usage. A
+// returned failure on the final attempt flows through unchanged. Each retry emits a run_warning. The
+// per-attempt output checks (serializable, output_schema) run inside the loop so
+// a malformed reply is a failed attempt the retry can re-ask, not a post-hoc
+// verdict on the last one.
 async function runHandlerWithRetry(
   handler: NodeHandler,
   node: DagNode,
@@ -1105,6 +1163,13 @@ async function runHandlerWithRetry(
 ): Promise<NodeResult> {
   const retry = retryConfigOf(node);
   const maxRetries = retry?.max_attempts ?? 0;
+  // A rejected attempt still spent tokens; the final result carries the total.
+  let spent: NodeTokenUsage | undefined;
+  // The usage ledger drops a node_done without provider/model, so a final
+  // attempt that reports none inherits the last usage-bearing attempt's.
+  let spentBy: Pick<NodeResult, "provider" | "model" | "effort"> = {};
+  const withSpent = (r: NodeResult): NodeResult =>
+    spent === undefined ? r : { ...spentBy, ...r, usage: spent };
   for (let attempt = 0; ; attempt++) {
     const backoff = async (reason: string): Promise<void> => {
       const delayMs = (retry?.delay_ms ?? DEFAULT_RETRY_DELAY_MS) * 2 ** attempt;
@@ -1116,7 +1181,15 @@ async function runHandlerWithRetry(
       await abortableDelay(delayMs, abortSignal);
     };
     try {
-      const result = await handler.handle(node, nodeCtx);
+      const result = checkNodeOutput(node, await handler.handle(node, nodeCtx), emit);
+      spent = addNodeUsage(spent, result.usage);
+      if (result.usage !== undefined) {
+        spentBy = {
+          ...(result.provider !== undefined ? { provider: result.provider } : {}),
+          ...(result.model !== undefined ? { model: result.model } : {}),
+          ...(result.effort !== undefined ? { effort: result.effort } : {}),
+        };
+      }
       if (
         result.status === "failed" &&
         retry !== undefined &&
@@ -1126,10 +1199,10 @@ async function runHandlerWithRetry(
         await backoff(`failure: ${result.error ?? "unknown error"}`);
         // A cancel during the backoff wait is authoritative: surface the last
         // failure rather than invoking the handler once more.
-        if (abortSignal.aborted) return result;
+        if (abortSignal.aborted) return withSpent(result);
         continue;
       }
-      return result;
+      return withSpent(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (
@@ -1138,10 +1211,10 @@ async function runHandlerWithRetry(
         shouldRetryFailure(message, retry, abortSignal)
       ) {
         await backoff(`error: ${message}`);
-        if (abortSignal.aborted) throw err;
-        continue;
+        if (!abortSignal.aborted) continue;
       }
-      throw err;
+      if (spent === undefined) throw err;
+      return withSpent(failedResult(message));
     }
   }
 }
@@ -1270,45 +1343,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
       dispatchNode = applyModelCase(node, selection.selected);
     }
 
-    let result = await runHandlerWithRetry(handler, dispatchNode, nodeCtx, abortSignal, emit);
-    // Validate structured output is JSON-serializable. JSON.stringify returns
-    // undefined for top-level undefined / functions / symbols — those would
-    // leave NodeOutput.output non-string, violating the schema and breaking
-    // downstream substitution. Treat as a handler bug: fail loudly.
-    // Rewrap sites below spread `...result` so handler-attached fields
-    // (usage today, anything future) survive the rewrap — a rebuilt literal
-    // here silently zeroed token accounting for the LLM-backed paths.
-    if (result.status === "succeeded" && result.output.kind === "structured") {
-      if (typeof JSON.stringify(result.output.value) !== "string") {
-        const error = `handler structured output is not JSON-serializable (typeof value: ${typeof result.output.value})`;
-        emit({ type: "run_warning", nodeId: node.id, message: error });
-        result = { ...result, status: "failed", output: { kind: "text", text: "" }, error };
-      }
-    }
-    // Fail-closed output_schema check: a node that declares a schema but emits
-    // the wrong shape fails here rather than feeding a malformed $nodeId.output
-    // downstream. Validates the same JSON view a consumer reads via substitution.
-    if (result.status === "succeeded") {
-      const schema = outputSchemaOf(node);
-      if (schema !== undefined) {
-        const captured = capturedValueForSchema(result.output);
-        const validation = validateOutput(captured, schema);
-        if (!validation.ok) {
-          const error = `output_schema validation failed: ${validation.error}`;
-          emit({ type: "run_warning", nodeId: node.id, message: error });
-          result = { ...result, status: "failed", output: { kind: "text", text: "" }, error };
-        } else if (
-          result.output.kind === "text" &&
-          typeof captured === "object" &&
-          captured !== null
-        ) {
-          // A node that declares output_schema and emits JSON is a structured
-          // producer: surface it as structured so $nodeId.output addressing and
-          // the snapshot publish bridge see the value, not raw text.
-          result = { ...result, output: { kind: "structured", value: captured } };
-        }
-      }
-    }
+    const result = await runHandlerWithRetry(handler, dispatchNode, nodeCtx, abortSignal, emit);
     const recordedOutput = bodyToSchemaOutput(result, startedAtMs, Date.now());
     emitVendorCollapseWarning(node, recordedOutput, nodeOutputs, emit);
     nodeResults.set(node.id, recordedOutput);

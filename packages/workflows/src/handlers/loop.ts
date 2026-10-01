@@ -29,6 +29,7 @@ import {
 } from "../executor.ts";
 import { isLoopNode, type NodeOutput } from "../schema/index.ts";
 import { bundledBinDir, forgeShimPath } from "../seed.ts";
+import { addNodeUsage } from "../usage.ts";
 import type { AwaitInteraction } from "./approval.ts";
 import {
   detectCompletionSignal,
@@ -378,27 +379,4 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
       return finalize({ status: "succeeded", output: { kind: "text", text: lastStripped } });
     },
   };
-}
-
-// Totals sum across iterations; the context pair tracks the latest iteration
-// (a gauge, not a volume).
-function addNodeUsage(
-  total: NodeTokenUsage | undefined,
-  u: NodeTokenUsage | undefined,
-): NodeTokenUsage | undefined {
-  if (u === undefined) return total;
-  if (total === undefined) return { ...u };
-  const out: NodeTokenUsage = {
-    inputTokens: total.inputTokens + u.inputTokens,
-    outputTokens: total.outputTokens + u.outputTokens,
-  };
-  const cacheRead = (total.cacheReadInputTokens ?? 0) + (u.cacheReadInputTokens ?? 0);
-  if (cacheRead > 0) out.cacheReadInputTokens = cacheRead;
-  const cacheCreation = (total.cacheCreationInputTokens ?? 0) + (u.cacheCreationInputTokens ?? 0);
-  if (cacheCreation > 0) out.cacheCreationInputTokens = cacheCreation;
-  const contextTokens = u.contextTokens ?? total.contextTokens;
-  if (contextTokens !== undefined) out.contextTokens = contextTokens;
-  const contextWindow = u.contextWindow ?? total.contextWindow;
-  if (contextWindow !== undefined) out.contextWindow = contextWindow;
-  return out;
 }

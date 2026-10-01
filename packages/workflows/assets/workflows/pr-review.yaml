@@ -235,7 +235,7 @@ nodes:
   # Each lane reads `$ARTIFACTS_DIR/diff.patch` directly so they don't
   # collide on the same prompt context.
   # Each finding must include: path:line, severity, confidence (0-100),
-  # what, why, fix — so the triage gate has all inputs it needs.
+  # what, why, fix, repro — so the triage gate has all inputs it needs.
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: code-review
@@ -259,7 +259,7 @@ nodes:
           type: array
           items:
             type: object
-            required: [path, line, severity, confidence, what, why, fix]
+            required: [path, line, severity, confidence, what, why, fix, repro]
             properties:
               path: { type: string }
               line: { type: integer }
@@ -270,6 +270,7 @@ nodes:
               what: { type: string }
               why: { type: string }
               fix: { type: string }
+              repro: { type: string }
     output_schema:
       type: object
       required: [findings]
@@ -278,7 +279,7 @@ nodes:
           type: array
           items:
             type: object
-            required: [path, line, severity, confidence, what, why, fix]
+            required: [path, line, severity, confidence, what, why, fix, repro]
             properties:
               path: { type: string }
               line: { type: integer }
@@ -287,6 +288,7 @@ nodes:
               what: { type: string }
               why: { type: string }
               fix: { type: string }
+              repro: { type: string }
     prompt: |
       You are a senior reviewer. Do a correctness-and-conventions pass on the
       PR diff at `$ARTIFACTS_DIR/diff.patch`. The working tree is checked out
@@ -326,8 +328,13 @@ nodes:
 
       Return a single-line JSON object matching the declared contract. Each
       finding must include `path`, `line`, `severity`, `confidence` (0-100),
-      `what`, `why` (the concrete failure scenario), and `fix`. Return
+      `what`, `why` (the concrete failure scenario), `fix`, and `repro`. Return
       `{"findings":[]}` when you find nothing real.
+
+      `repro` is the exact command, test invocation, or input plus the
+      observed-versus-expected result that shows the problem on this branch;
+      when you cannot produce one, write the literal `none` plus one clause
+      saying why.
 
   - id: error-handling
     depends_on: [classify]
@@ -342,7 +349,7 @@ nodes:
          type: array
          items:
            type: object
-           required: [path, line, severity, confidence, what, why, fix]
+           required: [path, line, severity, confidence, what, why, fix, repro]
            properties:
              path: { type: string }
              line: { type: integer }
@@ -353,6 +360,7 @@ nodes:
              what: { type: string }
              why: { type: string }
              fix: { type: string }
+             repro: { type: string }
     output_schema:
       type: object
       required: [findings]
@@ -361,7 +369,7 @@ nodes:
          type: array
          items:
            type: object
-           required: [path, line, severity, confidence, what, why, fix]
+           required: [path, line, severity, confidence, what, why, fix, repro]
            properties:
              path: { type: string }
              line: { type: integer }
@@ -370,6 +378,7 @@ nodes:
              what: { type: string }
              why: { type: string }
              fix: { type: string }
+             repro: { type: string }
     prompt: |
       Audit the error-handling story of the PR.
 
@@ -391,8 +400,13 @@ nodes:
 
       Return a single-line JSON object matching the declared contract. Each
       finding must include `path`, `line`, `severity`, `confidence` (0-100),
-      `what`, `why`, and `fix`. Return `{"findings":[]}` when the diff has no
-      new error paths worth flagging.
+      `what`, `why`, `fix`, and `repro`. Return `{"findings":[]}` when the diff
+      has no new error paths worth flagging.
+
+      `repro` is the exact command, test invocation, or input plus the
+      observed-versus-expected result that shows the problem on this branch;
+      when you cannot produce one, write the literal `none` plus one clause
+      saying why.
 
   - id: test-coverage
     depends_on: [classify]
@@ -407,7 +421,7 @@ nodes:
          type: array
          items:
            type: object
-           required: [path, line, severity, confidence, what, why, fix]
+           required: [path, line, severity, confidence, what, why, fix, repro]
            properties:
              path: { type: string }
              line: { type: integer }
@@ -418,6 +432,7 @@ nodes:
              what: { type: string }
              why: { type: string }
              fix: { type: string }
+             repro: { type: string }
     output_schema:
       type: object
       required: [findings]
@@ -426,7 +441,7 @@ nodes:
          type: array
          items:
            type: object
-           required: [path, line, severity, confidence, what, why, fix]
+           required: [path, line, severity, confidence, what, why, fix, repro]
            properties:
              path: { type: string }
              line: { type: integer }
@@ -435,6 +450,7 @@ nodes:
              what: { type: string }
              why: { type: string }
              fix: { type: string }
+             repro: { type: string }
     prompt: |
       Audit test coverage for the PR.
 
@@ -454,10 +470,15 @@ nodes:
 
       Return a single-line JSON object matching the declared contract. Each
       finding must include `path`, `line`, `severity`, `confidence` (0-100),
-      `what`, `why` (the concrete untested branch and exposing input), and
-      `fix` (the test to add). Tag missing tests with severity HIGH if the new
-      code can branch on bad input or external state; MEDIUM otherwise. Return
-      `{"findings":[]}` when coverage is adequate.
+      `what`, `why` (the concrete untested branch and exposing input), `fix`
+      (the test to add), and `repro`. Tag missing tests with severity HIGH if
+      the new code can branch on bad input or external state; MEDIUM otherwise.
+      Return `{"findings":[]}` when coverage is adequate.
+
+      `repro` is the exact command, test invocation, or input plus the
+      observed-versus-expected result that shows the problem on this branch;
+      when you cannot produce one, write the literal `none` plus one clause
+      saying why.
 
   - id: docs-impact
     depends_on: [classify]
@@ -473,7 +494,7 @@ nodes:
           type: array
           items:
             type: object
-            required: [path, line, severity, confidence, what, why, fix]
+            required: [path, line, severity, confidence, what, why, fix, repro]
             properties:
               path: { type: string }
               line: { type: integer }
@@ -484,6 +505,7 @@ nodes:
               what: { type: string }
               why: { type: string }
               fix: { type: string }
+              repro: { type: string }
     output_schema:
       type: object
       required: [findings]
@@ -492,7 +514,7 @@ nodes:
           type: array
           items:
             type: object
-            required: [path, line, severity, confidence, what, why, fix]
+            required: [path, line, severity, confidence, what, why, fix, repro]
             properties:
               path: { type: string }
               line: { type: integer }
@@ -501,6 +523,7 @@ nodes:
               what: { type: string }
               why: { type: string }
               fix: { type: string }
+              repro: { type: string }
     prompt: |
       Audit user-facing documentation impact for the PR.
 
@@ -519,8 +542,13 @@ nodes:
 
       Return a single-line JSON object matching the declared contract. Each
       finding must include `path`, `line`, `severity`, `confidence` (0-100),
-      `what`, `why` (the stale doc claim and who it misleads), and `fix`.
-      Return `{"findings":[]}` when documentation is current.
+      `what`, `why` (the stale doc claim and who it misleads), `fix`, and
+      `repro`. Return `{"findings":[]}` when documentation is current.
+
+      `repro` is the exact command, test invocation, or input plus the
+      observed-versus-expected result that shows the problem on this branch;
+      when you cannot produce one, write the literal `none` plus one clause
+      saying why.
 
   # ─────────────────────────────────────────────────────────────────────────
   # PHASE 4: TRIAGE
@@ -540,6 +568,9 @@ nodes:
       copilot: claude-opus-4.8
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
+    retry:
+      max_attempts: 1
+      on_error: all
     output_format:
       type: object
       required: [verdict, summary, findings]
@@ -552,7 +583,7 @@ nodes:
           type: array
           items:
             type: object
-            required: [path, line, severity, confidence, what, why, fix]
+            required: [path, line, severity, confidence, what, why, fix, repro]
             properties:
               path: { type: string }
               line: { type: integer }
@@ -563,6 +594,31 @@ nodes:
               what: { type: string }
               why: { type: string }
               fix: { type: string }
+              repro: { type: string }
+    output_schema:
+      type: object
+      required: [verdict, summary, findings]
+      properties:
+        verdict:
+          type: string
+          enum: ["READY TO MERGE", "NEEDS NITS", "NEEDS FIXES"]
+        summary: { type: string }
+        findings:
+          type: array
+          items:
+            type: object
+            required: [path, line, severity, confidence, what, why, fix, repro]
+            properties:
+              path: { type: string }
+              line: { type: integer }
+              severity:
+                type: string
+                enum: [CRITICAL, HIGH, MEDIUM]
+              confidence: { type: integer }
+              what: { type: string }
+              why: { type: string }
+              fix: { type: string }
+              repro: { type: string }
     prompt: |
       You are the PR review triage judge. Four independent lanes produced the
       sections below. An empty `findings` array means a lane ran and found
@@ -596,7 +652,11 @@ nodes:
 
       De-duplicate the candidates, then ADVERSARIALLY VERIFY each unique one:
       read `$ARTIFACTS_DIR/diff.patch` and the relevant source files — the
-      working tree is checked out at the PR head — and actively try to REFUTE it. A candidate is refuted when the code already
+      working tree is checked out at the PR head — and actively try to REFUTE it.
+      Start from the candidate's `repro`: trace the command, input, or test it
+      names through the code (you hold no shell, so trace rather than run); a
+      repro that does not reproduce refutes the finding, and `none` earns no
+      credit on its own. A candidate is also refuted when the code already
       handles the claimed case, the claim misreads the diff, the issue is
       pre-existing rather than introduced by this PR, or a
       linter/type-checker/CI gate already catches it. A survivor is CONFIRMED
@@ -623,6 +683,8 @@ nodes:
         the real change belongs in another file, spans code away from the
         anchor, or the anchored line is already correct, set fix to "" and
         name the needed change inside `why` instead.
+      - repro: the candidate's repro as you traced it, corrected where the lane
+        got it wrong, or `none` plus one clause saying why
 
       Unless the load-bearing Code review produced no verdict, set verdict from
       the highest severity in findings:
@@ -688,6 +750,14 @@ nodes:
         WHAT=$(printf '%s' "$finding" | jq -r '.what')
         WHY=$(printf '%s' "$finding" | jq -r '.why')
         FIX=$(printf '%s' "$finding" | jq -r '.fix')
+        REPRO=$(printf '%s' "$finding" | jq -r '.repro // ""')
+        case "$REPRO" in
+          none|none[^[:alnum:]]*) REPRO="" ;;
+        esac
+        DETAIL="$WHY"
+        if [ -n "$REPRO" ]; then
+          DETAIL="${WHY}"$'\n\n'"Repro: ${REPRO}"
+        fi
 
         case "$SEV" in
           CRITICAL|HIGH) PREFIX="blocking" ;;
@@ -704,9 +774,9 @@ nodes:
             "$ARTIFACTS/anchorable.txt")
           FIX_T=$(printf '%s' "$FIX" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
           if [ -n "$FIX_T" ] && [ "$FIX" != "$CURRENT" ]; then
-            BODY=$(printf '%s: %s\n\n%s\n\n```suggestion\n%s\n```' "$PREFIX" "$WHAT" "$WHY" "$FIX")
+            BODY=$(printf '%s: %s\n\n%s\n\n```suggestion\n%s\n```' "$PREFIX" "$WHAT" "$DETAIL" "$FIX")
           else
-            BODY=$(printf '%s: %s\n\n%s' "$PREFIX" "$WHAT" "$WHY")
+            BODY=$(printf '%s: %s\n\n%s' "$PREFIX" "$WHAT" "$DETAIL")
           fi
           COMMENT=$(jq -n \
             --arg p "$PATH_F" \
@@ -716,6 +786,9 @@ nodes:
           COMMENTS=$(printf '%s' "$COMMENTS" | jq ". + [$COMMENT]")
         else
           FALLBACK="${FALLBACK}"$'\n'"- ${PREFIX}: \`${PATH_F}\` — ${WHAT}"
+          if [ -n "$REPRO" ]; then
+            FALLBACK="${FALLBACK}"$'\n'"$(printf 'Repro: %s' "$REPRO" | sed 's/^/  /')"
+          fi
         fi
       done < <(jq -c '.findings[]' "$TRIAGE_JSON" 2>/dev/null || true)
 

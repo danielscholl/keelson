@@ -612,7 +612,7 @@ nodes:
           type: array
           items:
             type: object
-            required: [location, severity, confidence, what, why, fix]
+            required: [location, severity, confidence, what, why, fix, repro]
             properties:
               location: { type: string }
               severity:
@@ -622,6 +622,7 @@ nodes:
               what: { type: string }
               why: { type: string }
               fix: { type: string }
+              repro: { type: string }
     output_schema:
       type: object
       required: [findings]
@@ -630,7 +631,7 @@ nodes:
           type: array
           items:
             type: object
-            required: [location, severity, confidence, what, why, fix]
+            required: [location, severity, confidence, what, why, fix, repro]
             properties:
               location: { type: string }
               severity: { type: string }
@@ -638,6 +639,7 @@ nodes:
               what: { type: string }
               why: { type: string }
               fix: { type: string }
+              repro: { type: string }
     prompt: |
       You are the last reader before this round's fixes are pushed to a pull
       request. Another agent wrote them to answer review threads. The working
@@ -675,8 +677,13 @@ nodes:
 
       Return a single-line JSON object matching the declared contract. Each
       finding must include `location` (`path:line`), `severity`, `confidence`
-      (0-100), `what`, `why` (the concrete failure scenario), and `fix`. Return
-      `{"findings":[]}` when you find nothing real.
+      (0-100), `what`, `why` (the concrete failure scenario), `fix`, and
+      `repro`. Return `{"findings":[]}` when you find nothing real.
+
+      `repro` is the exact command, test invocation, or input plus the
+      observed-versus-expected result that shows the problem on this branch;
+      when you cannot produce one, write the literal `none` plus one clause
+      saying why.
 
   - id: apply-review-fix
     depends_on: [review-fix]
@@ -698,8 +705,10 @@ nodes:
 
       - Consider only findings with severity CRITICAL or HIGH and confidence
         >= 80. Drop the rest.
-      - Try to refute each remaining finding first: read the cited code and the
-        paths it names. Fix it only if it holds.
+      - Try to refute each remaining finding first: run its `repro` when it is
+        a command or test, otherwise read the cited code and trace the paths it
+        names. A repro that does not reproduce refutes the finding. Fix it only
+        if it holds.
       - For each fix: read the file, make the change, and run the narrowest
         check covering it. Keep the fix inside this round's scope; do not
         refactor or add features.

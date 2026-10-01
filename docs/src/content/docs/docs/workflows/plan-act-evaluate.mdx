@@ -77,7 +77,7 @@ the issue to Copilot. Both arms reconverge on one node that reads the PR's CI.
 | | `await-copilot` | bash | Polls until Copilot opens its PR (or its head SHA settles), captures the PR number. |
 | Evaluate | `ci-signals` | bash | **Reconverges both arms** (`trigger_rule: one_success`): `forge pr checks`, classified PASS / FAIL / NONE / PENDING_APPROVAL. |
 | Audit · delegate | `capture-diff` | bash | **`when: delegate`**: pulls the PR diff for review. |
-| | `self-review` | prompt | Read-only contributor-model review of Copilot's PR. |
+| | `self-review` | prompt | Read-only contributor-model review of Copilot's PR. Each finding carries a repro, or `none` plus the reason. |
 | | `pr-review` | prompt | Renders a formal PR review: `forge pr review --approve` or `--request-changes` (which feeds Copilot). |
 | Audit | `report` | bash | **Deterministic** 6-element audit trail (goal, plan, changeset, evidence, judgment, outcome) joined on `one_success`. |
 

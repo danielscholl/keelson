@@ -9,6 +9,7 @@ import {
   ExecutorValidationError,
   type MemoryTools,
   type NodeHandler,
+  type NodeTokenUsage,
   type NotebookAdapter,
   type RecallResponseLike,
   type RunOptions,
@@ -5140,5 +5141,215 @@ nodes:
     expect(gateCalls).toBe(0);
     expect(summary.nodes.gate.output).toBe("criteria all mapped");
     expect(calls[0].resolvedBody).toContain("criteria all mapped");
+  });
+});
+
+describe("runWorkflow — output_schema failure inside the retry loop", () => {
+  const wf = (retry: string): WorkflowDefinition =>
+    parseInline(
+      `name: s\ndescription: |\n  Use when: t\nnodes:\n  - id: judge\n    bash: echo hi\n    output_schema:\n      type: object\n      required: [verdict]\n      properties:\n        verdict: { type: string }\n${retry}`,
+    );
+
+  // Returns `replies` in order, one per call; the schema check must see each
+  // attempt, so a malformed first reply followed by a valid one succeeds.
+  function sequencedHandler(replies: string[]): { handler: NodeHandler; attempts: () => number } {
+    let calls = 0;
+    const handler: NodeHandler = {
+      type: "bash",
+      async handle() {
+        const text = replies[calls] ?? replies[replies.length - 1] ?? "";
+        calls++;
+        return { status: "succeeded", output: { kind: "text", text } };
+      },
+    };
+    return { handler, attempts: () => calls };
+  }
+
+  test("a malformed reply is re-asked under on_error: all and the valid retry wins", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 1\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    const { handler, attempts } = sequencedHandler([
+      '{"summary":"no verdict"}',
+      '{"verdict":"ok"}',
+    ]);
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      onEvent,
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(summary.nodes.judge.state).toBe("completed");
+    expect(summary.nodes.judge.output).toBe('{"verdict":"ok"}');
+    expect(attempts()).toBe(2);
+    expect(
+      events.some(
+        (e) =>
+          e.type === "run_warning" &&
+          /retry 1\/1 .*output_schema validation failed/.test(e.message),
+      ),
+    ).toBe(true);
+  });
+
+  test("a malformed reply on the final attempt still fails closed", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 1\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    const { handler, attempts } = sequencedHandler(['{"summary":"no verdict"}']);
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+    });
+    expect(summary.status).toBe("failed");
+    expect(summary.nodes.judge).toMatchObject({
+      state: "failed",
+      error: expect.stringContaining("output_schema validation failed"),
+    });
+    expect(attempts()).toBe(2);
+  });
+
+  function usageHandler(replies: { text: string; usage: NodeTokenUsage }[]): NodeHandler {
+    let calls = 0;
+    return {
+      type: "bash",
+      async handle() {
+        const r = replies[Math.min(calls, replies.length - 1)];
+        calls++;
+        return { status: "succeeded", output: { kind: "text", text: r.text }, usage: r.usage };
+      },
+    };
+  }
+
+  test("usage from a schema-rejected attempt is summed into the winning result", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 1\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    const handler = usageHandler([
+      {
+        text: '{"summary":"no verdict"}',
+        usage: { inputTokens: 10, outputTokens: 5, contextTokens: 100 },
+      },
+      { text: '{"verdict":"ok"}', usage: { inputTokens: 7, outputTokens: 3, contextTokens: 40 } },
+    ]);
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      onEvent,
+    });
+    expect(summary.status).toBe("succeeded");
+    const done = events.find((e) => e.type === "node_done" && e.nodeId === "judge");
+    expect(done?.type === "node_done" ? done.result.usage : undefined).toEqual({
+      inputTokens: 17,
+      outputTokens: 8,
+      contextTokens: 40,
+    });
+  });
+
+  test("a failed final attempt still carries the usage of every attempt", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 1\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    const handler = usageHandler([
+      { text: '{"summary":"a"}', usage: { inputTokens: 10, outputTokens: 5 } },
+      { text: '{"summary":"b"}', usage: { inputTokens: 7, outputTokens: 3 } },
+    ]);
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      onEvent,
+    });
+    expect(summary.nodes.judge.state).toBe("failed");
+    const done = events.find((e) => e.type === "node_done" && e.nodeId === "judge");
+    expect(done?.type === "node_done" ? done.result.usage : undefined).toEqual({
+      inputTokens: 17,
+      outputTokens: 8,
+    });
+  });
+
+  test("a throwing final attempt still carries the usage of the earlier attempts", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 1\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    let calls = 0;
+    const handler: NodeHandler = {
+      type: "bash",
+      async handle() {
+        if (calls++ > 0) throw new Error("provider exploded");
+        return {
+          status: "succeeded",
+          output: { kind: "text", text: '{"summary":"a"}' },
+          usage: { inputTokens: 10, outputTokens: 5 },
+          provider: "copilot",
+          model: "m-1",
+          effort: "high",
+        };
+      },
+    };
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      onEvent,
+    });
+    expect(summary.nodes.judge).toMatchObject({ state: "failed", error: "provider exploded" });
+    const done = events.find((e) => e.type === "node_done" && e.nodeId === "judge");
+    expect(done?.type === "node_done" ? done.result : undefined).toMatchObject({
+      status: "failed",
+      usage: { inputTokens: 10, outputTokens: 5 },
+      provider: "copilot",
+      model: "m-1",
+      effort: "high",
+    });
+  });
+
+  test("unserializable structured output is a failed attempt that keeps its usage", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 1\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    let calls = 0;
+    const handler: NodeHandler = {
+      type: "bash",
+      async handle() {
+        calls++;
+        return {
+          status: "succeeded",
+          output: { kind: "structured", value: { verdict: "ok", n: 1n } },
+          usage: { inputTokens: 4, outputTokens: 2 },
+        };
+      },
+    };
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      onEvent,
+    });
+    expect(calls).toBe(2);
+    expect(summary.nodes.judge).toMatchObject({
+      state: "failed",
+      error: expect.stringContaining("not JSON-serializable"),
+    });
+    const done = events.find((e) => e.type === "node_done" && e.nodeId === "judge");
+    expect(done?.type === "node_done" ? done.result.usage : undefined).toEqual({
+      inputTokens: 8,
+      outputTokens: 4,
+    });
+  });
+
+  test("without on_error: all a schema failure is not retried", async () => {
+    const workflow = wf("    retry:\n      max_attempts: 1\n      delay_ms: 1000\n");
+    const { handler, attempts } = sequencedHandler([
+      '{"summary":"no verdict"}',
+      '{"verdict":"ok"}',
+    ]);
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+    });
+    expect(summary.status).toBe("failed");
+    expect(attempts()).toBe(1);
   });
 });

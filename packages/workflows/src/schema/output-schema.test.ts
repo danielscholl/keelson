@@ -20,11 +20,11 @@ describe("outputSchemaSchema (declaration parsing)", () => {
     expect(outputSchemaSchema.safeParse({ type: "tuple" }).success).toBe(false);
   });
 
-  test("strict: rejects unknown/unsupported keywords (typo, enum, additionalProperties)", () => {
+  test("strict: rejects unknown/unsupported keywords (typo, additionalProperties)", () => {
     expect(
       outputSchemaSchema.safeParse({ type: "object", additionalProperties: false }).success,
     ).toBe(false);
-    expect(outputSchemaSchema.safeParse({ type: "string", enum: ["a", "b"] }).success).toBe(false);
+    expect(outputSchemaSchema.safeParse({ type: "string", enumm: ["a", "b"] }).success).toBe(false);
     // nested declarations are strict too
     expect(
       outputSchemaSchema.safeParse({
@@ -43,11 +43,18 @@ describe("outputSchemaSchema (declaration parsing)", () => {
     expect(
       outputSchemaSchema.safeParse({ type: "object", items: { type: "string" } }).success,
     ).toBe(false);
+    expect(outputSchemaSchema.safeParse({ type: "integer", enum: ["1"] }).success).toBe(false);
     // the matching pairings still parse
     expect(
       outputSchemaSchema.safeParse({ type: "array", items: { type: "object", required: ["id"] } })
         .success,
     ).toBe(true);
+    expect(outputSchemaSchema.safeParse({ type: "string", enum: ["a", "b"] }).success).toBe(true);
+  });
+
+  test("rejects an empty or non-string enum", () => {
+    expect(outputSchemaSchema.safeParse({ type: "string", enum: [] }).success).toBe(false);
+    expect(outputSchemaSchema.safeParse({ type: "string", enum: [1] }).success).toBe(false);
   });
 });
 
@@ -96,6 +103,20 @@ describe("validateOutput", () => {
     expect(validateOutput(true, { type: "boolean" }).ok).toBe(true);
     expect(validateOutput(null, { type: "null" }).ok).toBe(true);
     expect(validateOutput(Number.NaN, { type: "number" }).ok).toBe(false);
+  });
+
+  test("string enum: accepts a listed value, rejects any other (case-sensitive)", () => {
+    const schema = {
+      type: "object",
+      properties: { severity: { type: "string", enum: ["CRITICAL", "HIGH"] } },
+    } as const;
+    expect(validateOutput({ severity: "HIGH" }, schema)).toEqual({ ok: true });
+    expect(validateOutput({ severity: "high" }, schema).ok).toBe(false);
+    const bad = validateOutput({ severity: "MEDIUM" }, schema);
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) {
+      expect(bad.error).toBe("output.severity: expected one of CRITICAL, HIGH, got 'MEDIUM'");
+    }
   });
 
   test("optional declared property is only checked when present", () => {

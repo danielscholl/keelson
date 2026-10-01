@@ -884,7 +884,7 @@ nodes:
           type: array
           items:
             type: object
-            required: [location, severity, confidence, what, why, fix]
+            required: [location, severity, confidence, what, why, fix, repro]
             properties:
               location: { type: string }
               severity:
@@ -894,6 +894,7 @@ nodes:
               what: { type: string }
               why: { type: string }
               fix: { type: string }
+              repro: { type: string }
     output_schema:
       type: object
       required: [findings]
@@ -902,7 +903,7 @@ nodes:
           type: array
           items:
             type: object
-            required: [location, severity, confidence, what, why, fix]
+            required: [location, severity, confidence, what, why, fix, repro]
             properties:
               location: { type: string }
               severity: { type: string }
@@ -910,6 +911,7 @@ nodes:
               what: { type: string }
               why: { type: string }
               fix: { type: string }
+              repro: { type: string }
     prompt: |
       You are one of three INDEPENDENT reviewers of the branch this run just
       opened as a draft PR. Your lens is CORRECTNESS only. The working tree IS
@@ -965,7 +967,13 @@ nodes:
       Return a single-line JSON object matching the declared contract. Each
       finding must include `location` (`path:line`), `severity`, `confidence`
       (0-100), `what`, `why` (the concrete failure scenario that shows it
-      fails), and `fix`. Return `{"findings":[]}` when you find nothing real.
+      fails), `fix`, and `repro`. Return `{"findings":[]}` when you find
+      nothing real.
+
+      `repro` is the exact command, test invocation, or input plus the
+      observed-versus-expected result that shows the problem on this branch;
+      when you cannot produce one, write the literal `none` plus one clause
+      saying why.
 
   - id: review-conventions
     depends_on: [capture-diff]
@@ -983,7 +991,7 @@ nodes:
          type: array
          items:
            type: object
-           required: [location, severity, confidence, rule, why, fix]
+           required: [location, severity, confidence, rule, why, fix, repro]
            properties:
              location: { type: string }
              severity:
@@ -993,6 +1001,7 @@ nodes:
              rule: { type: string }
              why: { type: string }
              fix: { type: string }
+             repro: { type: string }
     output_schema:
       type: object
       required: [findings]
@@ -1001,7 +1010,7 @@ nodes:
          type: array
          items:
            type: object
-           required: [location, severity, confidence, rule, why, fix]
+           required: [location, severity, confidence, rule, why, fix, repro]
            properties:
              location: { type: string }
              severity: { type: string }
@@ -1009,6 +1018,7 @@ nodes:
              rule: { type: string }
              why: { type: string }
              fix: { type: string }
+             repro: { type: string }
     prompt: |
       You are one of three INDEPENDENT reviewers. Your lens is CONVENTIONS only.
 
@@ -1024,8 +1034,13 @@ nodes:
 
       Return a single-line JSON object matching the declared contract. Each
       finding must include `location` (`path:line`), `severity`, `confidence`
-      (0-100), `rule` (quoted), `why`, and `fix`. Return `{"findings":[]}` when
-      you find no convention issues.
+      (0-100), `rule` (quoted), `why`, `fix`, and `repro`. Return
+      `{"findings":[]}` when you find no convention issues.
+
+      `repro` is the exact command, test invocation, or input plus the
+      observed-versus-expected result that shows the problem on this branch;
+      when you cannot produce one, write the literal `none` plus one clause
+      saying why.
 
   - id: review-coverage
     depends_on: [capture-diff]
@@ -1053,6 +1068,7 @@ nodes:
              what: { type: string }
              why: { type: string }
              test: { type: string }
+             repro: { type: string }
     output_schema:
       type: object
       required: [findings]
@@ -1069,6 +1085,7 @@ nodes:
              what: { type: string }
              why: { type: string }
              test: { type: string }
+             repro: { type: string }
     prompt: |
       You are one of three INDEPENDENT reviewers. Your lens is TEST COVERAGE only.
 
@@ -1094,8 +1111,14 @@ nodes:
 
       Return a single-line JSON object matching the declared contract. Each
       finding must include `location`, `severity`, `confidence` (0-100), `what`
-      (the untested behavior), `why`, and `test` (the specific test to add).
-      Return `{"findings":[]}` when coverage is adequate.
+      (the untested behavior), `why`, `test` (the specific test to add), and
+      `repro` when you can produce one. Return `{"findings":[]}` when
+      coverage is adequate.
+
+      `repro` is the exact command, test invocation, or input plus the
+      observed-versus-expected result that shows the problem on this branch;
+      when you cannot produce one, write the literal `none` plus one clause
+      saying why.
 
   - id: triage
     depends_on: [review-correctness, review-conventions, review-coverage]
@@ -1106,6 +1129,9 @@ nodes:
       copilot: claude-opus-4.8
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
+    retry:
+      max_attempts: 1
+      on_error: all
     output_format:
       type: object
       required: [ship_ready, summary, must_fix]
@@ -1116,13 +1142,32 @@ nodes:
           type: array
           items:
             type: object
-            required: [location, severity, confidence, problem, fix]
+            required: [location, severity, confidence, problem, fix, repro]
             properties:
               location: { type: string }
               severity: { type: string, enum: [CRITICAL, HIGH] }
               confidence: { type: integer }
               problem: { type: string }
               fix: { type: string }
+              repro: { type: string }
+    output_schema:
+      type: object
+      required: [ship_ready, summary, must_fix]
+      properties:
+        ship_ready: { type: boolean }
+        summary: { type: string }
+        must_fix:
+          type: array
+          items:
+            type: object
+            required: [location, severity, confidence, problem, fix, repro]
+            properties:
+              location: { type: string }
+              severity: { type: string, enum: [CRITICAL, HIGH] }
+              confidence: { type: integer }
+              problem: { type: string }
+              fix: { type: string }
+              repro: { type: string }
     prompt: |
       You are the review triage judge. Three independent reviewers produced the
       sections below. An empty `findings` array means a reviewer ran and found
@@ -1144,19 +1189,25 @@ nodes:
 
       De-duplicate the candidates, then ADVERSARIALLY VERIFY each unique one:
       read `$ARTIFACTS_DIR/diff.patch` and the relevant source files — the
-      working tree IS the PR head branch — and actively try to REFUTE it. A
-      candidate is refuted when the code already handles the claimed case, the
-      claim misreads the diff, the issue is pre-existing rather than introduced
-      by this branch, a linter/type-checker/CI gate already catches it, or a
-      quoted convention rule does not actually say what the finding claims. A
-      survivor is CONFIRMED when you traced the failure in the actual code
-      (confidence 85-100), or PLAUSIBLE when you could not refute it but could
-      not fully trace it either (confidence capped at 79).
+      working tree IS the PR head branch — and actively try to REFUTE it. Start
+      from the candidate's `repro`: trace the command, input, or test it names
+      through the code (you hold no shell, so trace rather than run); a repro
+      that does not reproduce refutes the finding, and `none` earns no credit
+      on its own. A candidate is also refuted when the code already handles
+      the claimed case, the claim misreads the diff, the issue is pre-existing
+      rather than introduced by this branch, a linter/type-checker/CI gate
+      already catches it, or a quoted convention rule does not actually say
+      what the finding claims. A survivor is CONFIRMED when you traced the
+      failure in the actual code (confidence 85-100), or PLAUSIBLE when you
+      could not refute it but could not fully trace it either (confidence
+      capped at 79).
 
       Keep ONLY CRITICAL or HIGH severity survivors with confidence >= 80 in
       `must_fix` — the PLAUSIBLE cap sits below the keep line, so only CONFIRMED
       findings reach the fixer; re-trace a PLAUSIBLE candidate to CONFIRMED or
       let it drop. Drop everything else as noise, including pedantic nitpicks.
+      Each `must_fix` entry carries its `repro` as you traced it, corrected
+      where the reviewer got it wrong, or `none` plus one clause saying why.
       Set `ship_ready` to true exactly when `must_fix` is
       empty and the Correctness section is a findings object. `summary` is one
       sentence on the branch's health.
@@ -1177,7 +1228,8 @@ nodes:
 
       ## Rules
 
-      - For each issue: read the file, then make the change.
+      - For each issue: run or trace its `repro` first, read the file, then
+        make the change. The fix is done when the repro no longer reproduces.
       - $DIRECTIVES.verify
         The NARROWEST check that covers the change (the touched workspace's
         type-check + tests) is the right one here, not the full suite.
@@ -1214,7 +1266,9 @@ nodes:
       For each must-fix issue, inspect the current code
       (`git diff "$(cat $ARTIFACTS_DIR/.default-branch)"...HEAD` for the relevant
       files) and confirm it is genuinely resolved and the fix introduced no new
-      CRITICAL/HIGH defect. Look past the line each fix touched: the other entry
+      CRITICAL/HIGH defect. Run the issue's `repro` against the current code
+      when it is not `none`; a repro that still reproduces means the issue is
+      still open. Look past the line each fix touched: the other entry
       paths that reach the changed code (resume or retry, cancel and shutdown,
       the disabled or opt-out configuration, data written before this change)
       and the docs, version constants, or exported types that must move with it.
@@ -1794,7 +1848,8 @@ nodes:
       {VALIDATION from the computed status: PASS, FAIL, or UNKNOWN}
 
       -- Review loop --
-      {one line per triaged must-fix finding, with "fixed" or "still-open"; or
+      {one line per triaged must-fix finding, with "fixed" or "still-open",
+       followed by its repro unless the repro is none; or
        "clean — no must-fix findings" when triage confirmed none}
 
       -- CI & PR state --
