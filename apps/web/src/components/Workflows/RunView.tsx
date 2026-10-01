@@ -1,4 +1,4 @@
-import type { Project, TokenUsage, WorkflowDetail } from "@keelson/shared";
+import { type Project, runTiming, type TokenUsage, type WorkflowDetail } from "@keelson/shared";
 import { useEffect, useId, useMemo, useState } from "react";
 import { type NodeView, useWorkflowRun } from "../../hooks/useWorkflowRun.ts";
 import {
@@ -120,6 +120,20 @@ export function RunView({
     if (run.startedAt != null && isRunning) return Math.max(0, now - run.startedAt);
     return undefined;
   })();
+
+  const timing = useMemo(() => {
+    if (run.completedAt == null) return null;
+    const ids = new Set(workflow.nodes.map((n) => n.id));
+    if (Object.keys(nodes).some((id) => !ids.has(id))) return null;
+    return runTiming(
+      workflow.nodes.map((n) => ({
+        id: n.id,
+        ...(n.dependsOn !== undefined ? { dependsOn: n.dependsOn } : {}),
+        startedAt: nodes[n.id]?.startedAt ?? null,
+        completedAt: nodes[n.id]?.completedAt ?? null,
+      })),
+    );
+  }, [workflow.nodes, nodes, run.completedAt]);
 
   // Run-level rollup: sum across reporting nodes. Volume, not fill — no
   // percentage gauge here (a run total has no meaningful window to fill).
@@ -247,6 +261,17 @@ export function RunView({
             <>
               <StatusBadge status={statusBadgeStatus(run.status)} />
               {elapsed != null && <span className="duration">{formatDuration(elapsed)}</span>}
+              {timing && (
+                <span
+                  className="duration"
+                  title={`critical path ${formatDuration(timing.criticalPathMs)} of ${formatDuration(
+                    timing.wallClockMs,
+                  )} of node time: the longest dependency chain by node duration`}
+                >
+                  critical path {formatDuration(timing.criticalPathMs)} ·{" "}
+                  {Math.round(timing.criticalPathRatio * 100)}%
+                </span>
+              )}
               {runUsageBreakdown && (
                 <>
                   <button

@@ -122,6 +122,32 @@ describe("mergeNode effort", () => {
   });
 });
 
+describe("mergeNode persisted timing", () => {
+  const node = (partial: Partial<NodeView>): NodeView => ({
+    nodeId: "n1",
+    status: "succeeded",
+    contentParts: [],
+    thinkingText: "",
+    logLines: [],
+    ...partial,
+  });
+
+  test("terminal snapshot timestamps replace live browser-stamped ones when statuses match", () => {
+    const snapshot = node({ startedAt: 1_000, completedAt: 5_000, durationMs: 4_000 });
+    const live = node({ startedAt: 1_000, completedAt: 5_750, durationMs: 4_750 });
+    const merged = mergeNode(snapshot, live);
+    expect(merged.startedAt).toBe(1_000);
+    expect(merged.completedAt).toBe(5_000);
+    expect(merged.durationMs).toBe(4_000);
+  });
+
+  test("a live node still running keeps live timing semantics", () => {
+    const snapshot = node({ status: "running", startedAt: 1_000 });
+    const live = node({ status: "running", startedAt: 1_200 });
+    expect(mergeNode(snapshot, live).completedAt).toBeUndefined();
+  });
+});
+
 describe("applyFrame server start anchoring", () => {
   test("node_started anchors the view to the server's launch timestamp", () => {
     const h = harness();
