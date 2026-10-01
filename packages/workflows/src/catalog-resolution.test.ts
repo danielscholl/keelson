@@ -7,7 +7,11 @@ import {
   resolveWorkflowResolution,
   resolveWorkflowResolutionReady,
 } from "./catalog-resolution.ts";
-import { type WorkflowDefinition, workflowDefinitionSchema } from "./schema/index.ts";
+import {
+  type WorkflowDefinition,
+  withoutApprovalReviewers,
+  workflowDefinitionSchema,
+} from "./schema/index.ts";
 
 const COPILOT_CAPABILITIES = {
   defaultModel: "auto",
@@ -67,6 +71,20 @@ describe("resolveWorkflowResolution", () => {
       effectiveProvider: "copilot",
       model: "gpt-6-astra",
     });
+    // With reviewers stripped (the operator floor), the gate is no longer provider work.
+    const stripped = withoutApprovalReviewers(workflow);
+    expect(stripped).not.toBe(workflow);
+    expect(
+      resolveWorkflowResolution(stripped, {
+        providers: new Map([["copilot", COPILOT_CAPABILITIES]]),
+        defaultProviderId: "copilot",
+      }).nodes,
+    ).toEqual([]);
+    const gate = stripped.nodes.find((n) => n.id === "gate");
+    expect(gate && "approval" in gate ? gate.approval : undefined).toEqual({ message: "Approve?" });
+    // A workflow without reviewers comes back as the same object.
+    const plain = makeWorkflow([{ id: "p", prompt: "x" }]);
+    expect(withoutApprovalReviewers(plain)).toBe(plain);
   });
 
   test("awaits one in-flight Copilot catalog for concurrent class resolutions", async () => {

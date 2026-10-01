@@ -51,6 +51,7 @@ import {
   resolveWorkflowResolutionReady,
   runWorkflow,
   type WorkflowDefinition,
+  withoutApprovalReviewers,
   worktreePathForRepoLocal,
 } from "@keelson/workflows";
 
@@ -155,10 +156,16 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   const roots: DiscoveryRoot[] = opts.workflowsDir
     ? [{ dir: opts.workflowsDir, source: "global" }]
     : workflowDiscoveryRoots();
-  const workflow = loadWorkflowByName(roots, opts.name);
-  if (!workflow) {
+  const loadedWorkflow = loadWorkflowByName(roots, opts.name);
+  if (!loadedWorkflow) {
     throw new WorkflowNotFoundError(opts.name, roots.map((r) => r.dir).join(", "));
   }
+  // With the reviewer floor off, reviewers are stripped so a reviewer pin
+  // cannot fail preflight for a run whose gates all go to the human.
+  const reviewersEnabled = process.env.KEELSON_APPROVAL_REVIEWER?.trim().toLowerCase() !== "off";
+  const workflow: WorkflowDefinition = reviewersEnabled
+    ? loadedWorkflow
+    : withoutApprovalReviewers(loadedWorkflow);
 
   // Reject memory-bearing workflows up front — the headless path has no MemoryStore,
   // so let the operator see one clear error rather than per-node "missing adapter" warnings.
@@ -292,7 +299,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
     // does not approve needs the server's pause.
     reviewer: {
       promptHandler,
-      enabled: process.env.KEELSON_APPROVAL_REVIEWER?.trim().toLowerCase() !== "off",
+      enabled: reviewersEnabled,
     },
   });
   const cancelHandler = makeCancelHandler({

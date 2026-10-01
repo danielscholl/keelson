@@ -4868,6 +4868,48 @@ nodes:
     expect(review?.approval).toEqual({ answeredBy: "operator", reviewerVerdict: verdict });
   });
 
+  test("KEELSON_APPROVAL_REVIEWER=off also keeps a retired reviewer pin out of preflight", async () => {
+    writeWorkflow(
+      "gated-retired.yaml",
+      `name: gated-retired
+description: reviewer pin the floor ignores
+provider: stub
+nodes:
+  - id: review
+    approval:
+      message: please approve
+      reviewer:
+        prompt: Check the plan.
+        model: retired-model
+`,
+    );
+    const previous = process.env.KEELSON_APPROVAL_REVIEWER;
+    process.env.KEELSON_APPROVAL_REVIEWER = "off";
+    try {
+      const rig = makeRig(makeSuccessfulPromptHandler());
+      const startRes = await rig.app.fetch(
+        postRun("http://test/api/workflows/gated-retired/runs", { inputs: {} }),
+      );
+      const { runId } = (await startRes.json()) as { runId: string };
+      await pollUntilStoreStatus(rig.store, runId, (s) => s === "paused");
+      const run = rig.store.getRun(runId);
+      expect(run?.status).toBe("paused");
+      expect(run?.error).toBeNull();
+      expect(run?.nodes.find((n) => n.status === "awaiting")?.nodeId).toBe("review");
+      const cancel = await rig.app.fetch(
+        new Request(`http://test/api/workflows/runs/${runId}`, {
+          method: "DELETE",
+          headers: { origin: ORIGIN },
+        }),
+      );
+      expect(cancel.status).toBe(200);
+      await pollUntilTerminal(rig.app, runId);
+    } finally {
+      if (previous === undefined) delete process.env.KEELSON_APPROVAL_REVIEWER;
+      else process.env.KEELSON_APPROVAL_REVIEWER = previous;
+    }
+  });
+
   test("KEELSON_APPROVAL_REVIEWER=off sends the gate straight to the operator", async () => {
     writeWorkflow("gated.yaml", GATED);
     const previous = process.env.KEELSON_APPROVAL_REVIEWER;

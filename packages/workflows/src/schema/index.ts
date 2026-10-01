@@ -63,6 +63,7 @@ export {
   TRIGGER_RULES,
   thinkingConfigSchema,
   triggerRuleSchema,
+  withoutApprovalReviewers,
 } from "./dag-node.ts";
 export type { WorkflowHookEvent, WorkflowHookMatcher, WorkflowNodeHooks } from "./hooks.ts";
 // Hooks

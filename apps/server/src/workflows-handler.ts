@@ -107,6 +107,7 @@ import {
   runWorkflow,
   validateWorkflowInvariants,
   type WorkflowDefinition,
+  withoutApprovalReviewers,
   workflowDefinitionSchema,
   worktreePathForRepoLocal,
 } from "@keelson/workflows";
@@ -1954,7 +1955,10 @@ export function createWorkflowController(
       if (!parsed.success) {
         return { status: "failed", nodes: {}, error: `invalid workflow: ${parsed.error.message}` };
       }
-      const definitionObj = parsed.data as WorkflowDefinition;
+      const reviewersEnabled = approvalReviewerEnabled();
+      const definitionObj = reviewersEnabled
+        ? (parsed.data as WorkflowDefinition)
+        : withoutApprovalReviewers(parsed.data as WorkflowDefinition);
       const invariantError = validateWorkflowInvariants(definitionObj);
       if (invariantError) {
         return { status: "failed", nodes: {}, error: `invalid workflow: ${invariantError}` };
@@ -2029,7 +2033,7 @@ export function createWorkflowController(
                   `approval node '${nodeId}' cannot resolve in a rib-run workflow (message: "${message}")`,
                 );
               },
-              reviewer: { promptHandler, enabled: approvalReviewerEnabled() },
+              reviewer: { promptHandler, enabled: reviewersEnabled },
             }),
           ],
           [
@@ -3333,10 +3337,15 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     activeRuns.delete(runId);
     subscribers.closeRun(runId);
   };
+  // With the reviewer floor off, reviewers are stripped from what preflights
+  // and runs so a reviewer pin cannot fail a run whose gates go to the human.
+  // The original object stays the key for rib bindings below.
+  const reviewersEnabled = approvalReviewerEnabled();
+  const effectiveWorkflow = reviewersEnabled ? workflow : withoutApprovalReviewers(workflow);
   if (preflight) {
     // The same default the executor runs with, captured when the routes were
     // built; re-resolving here could preflight one provider and run another.
-    const result = await resolveCatalogPreflight(workflow, {
+    const result = await resolveCatalogPreflight(effectiveWorkflow, {
       defaultProviderId: defaultProvider,
       ...(providerOverride !== undefined ? { providerOverride } : {}),
       signal: abort.signal,
@@ -3900,7 +3909,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         awaitApproval,
         reviewer: {
           promptHandler,
-          enabled: approvalReviewerEnabled(),
+          enabled: reviewersEnabled,
           onAnswer: (_runId, nodeId, verdict) =>
             recordApproval(nodeId, { answeredBy: "reviewer", reviewerVerdict: verdict }),
         },
@@ -3970,7 +3979,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
 
   try {
     await runWorkflow({
-      workflow,
+      workflow: effectiveWorkflow,
       runId,
       inputs,
       handlers,

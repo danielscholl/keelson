@@ -761,6 +761,28 @@ export function nodeReachesProvider(node: DagNode): boolean {
 }
 
 /**
+ * The workflow with every approval reviewer removed: what the operator floor
+ * (`KEELSON_APPROVAL_REVIEWER=off`) runs and preflights, so a reviewer's pin
+ * cannot fail a run whose gates all go to the human. Returns the same object
+ * when nothing declares a reviewer, so identity-keyed lookups still match.
+ */
+export function withoutApprovalReviewers<T extends { nodes: readonly DagNode[] }>(workflow: T): T {
+  if (
+    !workflow.nodes.some((node) => isApprovalNode(node) && node.approval.reviewer !== undefined)
+  ) {
+    return workflow;
+  }
+  return {
+    ...workflow,
+    nodes: workflow.nodes.map((node) => {
+      if (!isApprovalNode(node) || node.approval.reviewer === undefined) return node;
+      const { reviewer: _reviewer, ...approval } = node.approval;
+      return { ...node, approval } as ApprovalNode;
+    }),
+  };
+}
+
+/**
  * The node whose model/provider fields catalog resolution and preflight should
  * read. An approval node's reviewer turn carries its own pins under
  * `approval.reviewer`, so it is projected onto a prompt-shaped view; every other
