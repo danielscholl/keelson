@@ -121,11 +121,10 @@ export function RunView({
     return undefined;
   })();
 
-  // Critical path beside the elapsed time once the run has settled: how much
-  // of the wall clock was the longest dependency chain, so the gap reads as
-  // scheduling wait rather than node work.
   const timing = useMemo(() => {
-    if (run.completedAt == null || run.startedAt == null) return null;
+    if (run.completedAt == null) return null;
+    const ids = new Set(workflow.nodes.map((n) => n.id));
+    if (Object.keys(nodes).some((id) => !ids.has(id))) return null;
     return runTiming(
       workflow.nodes.map((n) => ({
         id: n.id,
@@ -133,9 +132,8 @@ export function RunView({
         startedAt: nodes[n.id]?.startedAt ?? null,
         completedAt: nodes[n.id]?.completedAt ?? null,
       })),
-      { startedAt: run.startedAt, completedAt: run.completedAt },
     );
-  }, [workflow.nodes, nodes, run.startedAt, run.completedAt]);
+  }, [workflow.nodes, nodes, run.completedAt]);
 
   // Run-level rollup: sum across reporting nodes. Volume, not fill — no
   // percentage gauge here (a run total has no meaningful window to fill).
@@ -268,10 +266,10 @@ export function RunView({
                   className="duration"
                   title={`critical path ${formatDuration(timing.criticalPathMs)} of ${formatDuration(
                     timing.wallClockMs,
-                  )} wall clock: the longest dependency chain by node duration`}
+                  )} of node time: the longest dependency chain by node duration`}
                 >
                   critical path {formatDuration(timing.criticalPathMs)} ·{" "}
-                  {Math.round(timing.parallelism * 100)}%
+                  {Math.round(timing.criticalPathRatio * 100)}%
                 </span>
               )}
               {runUsageBreakdown && (

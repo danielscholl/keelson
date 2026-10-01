@@ -139,7 +139,7 @@ test("workflow status derives run timing from node timestamps and the workflow's
       ["a", "10:00:00.000Z", "10:00:00.100Z"],
       ["b", "10:00:00.100Z", "10:00:00.500Z"],
       ["c", "10:00:00.100Z", "10:00:00.150Z"],
-      ["d", "10:00:00.500Z", "10:00:00.550Z"],
+      ["d", "10:00:01.100Z", "10:00:01.200Z"],
     ].map(([nodeId, startedAt, completedAt]) => ({
       nodeId,
       status: "succeeded",
@@ -189,9 +189,9 @@ test("workflow status derives run timing from node timestamps and the workflow's
     const payload = JSON.parse(stdout.trim());
     expect(payload.data.run.runId).toBe("run-1");
     expect(payload.data.timing).toEqual({
-      wallClockMs: 1100,
-      criticalPathMs: 550,
-      parallelism: 0.5,
+      wallClockMs: 1200,
+      criticalPathMs: 600,
+      criticalPathRatio: 0.5,
     });
   } finally {
     server.stop(true);

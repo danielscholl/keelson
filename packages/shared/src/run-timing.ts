@@ -17,16 +17,15 @@ export interface RunTimingNode {
 }
 
 export interface RunTiming {
-  /** Elapsed time from the run's first start to its last completion. */
+  /** Span of the recorded node executions, first start to last completion. */
   readonly wallClockMs: number;
   /** Longest dependency chain, summing each node's own duration. */
   readonly criticalPathMs: number;
   /**
-   * `criticalPathMs / wallClockMs`, clamped to [0, 1]. 1 means the run took no
-   * longer than its longest chain, so no node waited on anything but its own
-   * dependencies.
+   * `criticalPathMs / wallClockMs`, clamped to [0, 1]. 1 means no node waited
+   * on anything but its own dependencies; the remainder is scheduling wait.
    */
-  readonly parallelism: number;
+  readonly criticalPathRatio: number;
 }
 
 function toMs(value: string | number | null | undefined): number | undefined {
@@ -36,15 +35,14 @@ function toMs(value: string | number | null | undefined): number | undefined {
 }
 
 /**
- * Compute wall clock, critical path, and their ratio for a run. Nodes without
- * both timestamps (skipped, pending) weigh zero on the chain. Returns `null`
- * when no node carries timing. `run` bounds the wall clock when both of its
- * timestamps are known; otherwise the node timestamps' span is used.
+ * Compute the recorded wall clock, the critical path, and their ratio for a
+ * run. Nodes without both timestamps (skipped, pending) weigh zero on the
+ * chain. Returns `null` when no node carries timing. The wall clock is the span
+ * of the node rows themselves, not the run's elapsed time, so the ratio stays
+ * consistent with the executions it is computed from: a converge run keeps only
+ * its final round per node, and the figure then describes that round.
  */
-export function runTiming(
-  nodes: readonly RunTimingNode[],
-  run?: { startedAt?: string | number | null; completedAt?: string | number | null },
-): RunTiming | null {
+export function runTiming(nodes: readonly RunTimingNode[]): RunTiming | null {
   const durations = new Map<string, number>();
   let earliest = Number.POSITIVE_INFINITY;
   let latest = Number.NEGATIVE_INFINITY;
@@ -88,13 +86,8 @@ export function runTiming(
     }
   }
 
-  const runStart = toMs(run?.startedAt);
-  const runEnd = toMs(run?.completedAt);
-  const wallClockMs = Math.max(
-    0,
-    runStart !== undefined && runEnd !== undefined ? runEnd - runStart : latest - earliest,
-  );
-  const parallelism =
+  const wallClockMs = Math.max(0, latest - earliest);
+  const criticalPathRatio =
     wallClockMs === 0 ? 1 : Math.min(1, Math.max(0, criticalPathMs / wallClockMs));
-  return { wallClockMs, criticalPathMs, parallelism };
+  return { wallClockMs, criticalPathMs, criticalPathRatio };
 }

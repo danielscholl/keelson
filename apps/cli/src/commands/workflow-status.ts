@@ -30,9 +30,9 @@ export interface WorkflowStatusOptions {
   brief?: boolean;
 }
 
-// Computed at read time from the run's node timestamps and the workflow's
-// edges; null when the DAG can no longer be fetched (workflow removed) or no
-// node has finished. Never persisted.
+// Computed at read time from the run's node rows and the catalog's edges for
+// the run's workflow; null when the workflow is gone or its node set no longer
+// matches the run (runs persist no DAG snapshot). Never persisted.
 async function timingFor(baseUrl: string, detail: WorkflowRunDetail): Promise<RunTiming | null> {
   let dag: Awaited<ReturnType<typeof getWorkflow>>;
   try {
@@ -40,14 +40,17 @@ async function timingFor(baseUrl: string, detail: WorkflowRunDetail): Promise<Ru
   } catch {
     return null;
   }
+  const ids = new Set(dag.nodes.map((node) => node.id));
+  if (detail.nodes.some((row) => !ids.has(row.nodeId))) return null;
   const rows = new Map(detail.nodes.map((row) => [row.nodeId, row]));
-  const nodes = dag.nodes.map((node) => ({
-    id: node.id,
-    ...(node.dependsOn !== undefined ? { dependsOn: node.dependsOn } : {}),
-    startedAt: rows.get(node.id)?.startedAt ?? null,
-    completedAt: rows.get(node.id)?.completedAt ?? null,
-  }));
-  return runTiming(nodes, { startedAt: detail.startedAt, completedAt: detail.completedAt });
+  return runTiming(
+    dag.nodes.map((node) => ({
+      id: node.id,
+      ...(node.dependsOn !== undefined ? { dependsOn: node.dependsOn } : {}),
+      startedAt: rows.get(node.id)?.startedAt ?? null,
+      completedAt: rows.get(node.id)?.completedAt ?? null,
+    })),
+  );
 }
 
 export async function runWorkflowStatus(

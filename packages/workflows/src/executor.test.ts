@@ -1360,60 +1360,112 @@ function timedHandler(delays: Record<string, number>): {
   return { handler, startedAt, doneAt };
 }
 
-const READY_DELAYS = { a: 5, b: 60, c: 5, d: 5, e: 40, f: 40 };
-const LAYERED_SUM_MS = 5 + 60 + 40 + 40;
+// Each node blocks until the test releases it, so dispatch order is asserted
+// against explicit barriers rather than timer races.
+function gatedHandler(): {
+  handler: NodeHandler;
+  started: Set<string>;
+  release(id: string): Promise<void>;
+} {
+  const started = new Set<string>();
+  const gates = new Map<string, () => void>();
+  const handler: NodeHandler = {
+    type: "bash",
+    async handle(node) {
+      started.add(node.id);
+      await new Promise<void>((r) => gates.set(node.id, r));
+      return { status: "succeeded", output: { kind: "text", text: node.id } };
+    },
+  };
+  const release = async (id: string): Promise<void> => {
+    await waitFor(() => gates.has(id), `${id} never started`);
+    gates.get(id)?.();
+    gates.delete(id);
+    // Let the settle → dispatch microtasks run before the test inspects state.
+    await new Promise((r) => setTimeout(r, 0));
+  };
+  return { handler, started, release };
+}
 
 describe("runWorkflow — ready-node scheduling", () => {
   test("a dependent starts when its own dependencies settle, not when the layer does", async () => {
     const workflow = parseInline(READY_DAG);
-    const { handler, startedAt, doneAt } = timedHandler(READY_DELAYS);
-    const t0 = performance.now();
-    const summary = await runWorkflow({
-      ...baseOpts(workflow),
-      handlers: new Map([["bash", handler]]),
-    });
-    const wallClock = performance.now() - t0;
-    const at = (map: Map<string, number>, id: string): number => {
-      const v = map.get(id);
-      if (v === undefined) throw new Error(`${id} never recorded`);
-      return v;
-    };
+    const { handler, started, release } = gatedHandler();
+    const run = runWorkflow({ ...baseOpts(workflow), handlers: new Map([["bash", handler]]) });
+    await release("a");
+    expect([...started].sort()).toEqual(["a", "b", "c"]);
+    await release("c");
+    // b is still held; e (depends on c) starts anyway, d (depends on b, c) waits.
+    expect(started.has("e")).toBe(true);
+    expect(started.has("d")).toBe(false);
+    await release("e");
+    expect(started.has("f")).toBe(true);
+    expect(started.has("d")).toBe(false);
+    await release("b");
+    expect(started.has("d")).toBe(true);
+    await release("f");
+    await release("d");
+    const summary = await run;
     expect(summary.status).toBe("succeeded");
-    expect(at(startedAt, "e")).toBeLessThan(at(doneAt, "b"));
-    expect(at(startedAt, "d")).toBeGreaterThanOrEqual(at(doneAt, "b"));
-    expect(at(startedAt, "d")).toBeGreaterThanOrEqual(at(doneAt, "c"));
-    expect(at(startedAt, "f")).toBeGreaterThanOrEqual(at(doneAt, "e"));
-    expect(wallClock).toBeLessThan(LAYERED_SUM_MS - 15);
+  });
+
+  test("ready dispatch finishes sooner than layered dispatch on the same graph", async () => {
+    const delays = { a: 5, b: 150, c: 5, d: 5, e: 100, f: 100 };
+    const time = async (yaml: string): Promise<number> => {
+      const { handler } = timedHandler(delays);
+      const t0 = performance.now();
+      await runWorkflow({ ...baseOpts(parseInline(yaml)), handlers: new Map([["bash", handler]]) });
+      return performance.now() - t0;
+    };
+    const ready = await time(READY_DAG);
+    const layered = await time(`${READY_DAG}scheduling: layered\n`);
+    expect(ready).toBeLessThan(layered);
   });
 
   test("scheduling: layered keeps the layer barrier", async () => {
     const workflow = parseInline(`${READY_DAG}scheduling: layered\n`);
     expect(workflow.scheduling).toBe("layered");
-    const { handler, startedAt, doneAt } = timedHandler(READY_DELAYS);
-    const summary = await runWorkflow({
-      ...baseOpts(workflow),
-      handlers: new Map([["bash", handler]]),
-    });
-    expect(summary.status).toBe("succeeded");
-    expect(startedAt.get("e")).toBeGreaterThanOrEqual(doneAt.get("b") as number);
+    const { handler, started, release } = gatedHandler();
+    const run = runWorkflow({ ...baseOpts(workflow), handlers: new Map([["bash", handler]]) });
+    await release("a");
+    await release("c");
+    expect(started.has("e")).toBe(false);
+    await release("b");
+    expect(started.has("e")).toBe(true);
+    expect(started.has("d")).toBe(true);
+    await release("e");
+    expect(started.has("f")).toBe(false);
+    await release("d");
+    expect(started.has("f")).toBe(true);
+    await release("f");
+    expect((await run).status).toBe("succeeded");
   });
 
   test("a node sees every ancestor and no concurrent sibling in upstreamOutputs", async () => {
     const workflow = parseInline(READY_DAG);
     const seen = new Map<string, string[]>();
+    const { handler: gated, release } = gatedHandler();
     const handler: NodeHandler = {
       type: "bash",
       async handle(node, ctx) {
-        await new Promise((r) => setTimeout(r, READY_DELAYS[node.id as keyof typeof READY_DELAYS]));
+        const result = await gated.handle(node, ctx);
         seen.set(node.id, [...ctx.upstreamOutputs.keys()].sort());
-        return { status: "succeeded", output: { kind: "text", text: node.id } };
+        return result;
       },
     };
-    await runWorkflow({ ...baseOpts(workflow), handlers: new Map([["bash", handler]]) });
-    expect(seen.get("d")).toEqual(expect.arrayContaining(["a", "b", "c"]));
-    expect(seen.get("f")).toEqual(expect.arrayContaining(["a", "c", "e"]));
-    // e starts while b is still running and keeps that view for its lifetime.
+    const run = runWorkflow({ ...baseOpts(workflow), handlers: new Map([["bash", handler]]) });
+    await release("a");
+    await release("c");
+    // e is dispatched while b is in flight; b settles before e is released,
+    // but e's view was snapshotted at dispatch.
+    await release("b");
+    await release("e");
+    await release("f");
+    await release("d");
+    await run;
     expect(seen.get("e")).toEqual(["a", "c"]);
+    expect(seen.get("d")).toEqual(["a", "b", "c"]);
+    expect(seen.get("f")).toEqual(expect.arrayContaining(["a", "c", "e"]));
   });
 
   test("a resumed node's dependents wait for its re-running ancestor", async () => {
@@ -1430,33 +1482,44 @@ nodes:
     bash: c
     depends_on: [b]
 `);
-    const { handler, startedAt, doneAt } = timedHandler({ a: 30 });
-    const summary = await runWorkflow({
+    const { handler, started, release } = gatedHandler();
+    const run = runWorkflow({
       ...baseOpts(workflow),
       handlers: new Map([["bash", handler]]),
       completedNodeOutputs: new Map([["b", { state: "completed", output: "seeded" }]]),
     });
-    expect(summary.status).toBe("succeeded");
-    expect(startedAt.has("b")).toBe(false);
-    expect(startedAt.get("c")).toBeGreaterThanOrEqual(doneAt.get("a") as number);
+    await waitFor(() => started.has("a"), "a never started");
+    expect(started.has("c")).toBe(false);
+    await release("a");
+    expect(started.has("b")).toBe(false);
+    expect(started.has("c")).toBe(true);
+    await release("c");
+    expect((await run).status).toBe("succeeded");
   });
 
   test("an abort stops dispatching new nodes while in-flight ones settle", async () => {
     const workflow = parseInline(READY_DAG);
     const controller = new AbortController();
-    const { handler, startedAt } = timedHandler({ a: 5, b: 60, c: 5, e: 40 });
-    setTimeout(() => controller.abort(), 25);
-    const summary = await runWorkflow({
+    const { handler, started, release } = gatedHandler();
+    const run = runWorkflow({
       ...baseOpts(workflow),
       handlers: new Map([["bash", handler]]),
       abortSignal: controller.signal,
     });
+    await release("a");
+    await release("c");
+    expect(started.has("e")).toBe(true);
+    controller.abort();
+    await release("b");
+    await release("e");
+    const summary = await run;
     expect(summary.status).toBe("cancelled");
+    expect(started.has("d")).toBe(false);
+    expect(started.has("f")).toBe(false);
     expect(summary.nodes.a.state).toBe("completed");
     expect(summary.nodes.c.state).toBe("completed");
-    expect(startedAt.has("f")).toBe(false);
-    expect(summary.nodes.f.state).toBe("skipped");
     expect(summary.nodes.d.state).toBe("skipped");
+    expect(summary.nodes.f.state).toBe("skipped");
   });
 });
 
