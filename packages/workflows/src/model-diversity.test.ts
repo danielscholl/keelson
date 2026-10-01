@@ -18,6 +18,33 @@ function makeWorkflow(
 }
 
 describe("diagnoseModelDiversity", () => {
+  test("two approval reviewers collapsing onto one model warn like prompt nodes", () => {
+    const workflow = makeWorkflow([
+      {
+        id: "gate-a",
+        approval: {
+          message: "Approve a?",
+          reviewer: { prompt: "a", model: "deep", model_by_provider: { copilot: "model-x" } },
+        },
+      },
+      {
+        id: "gate-b",
+        approval: {
+          message: "Approve b?",
+          reviewer: { prompt: "b", model: "deep", model_by_provider: { copilot: "model-y" } },
+        },
+      },
+    ]);
+    const messages = diagnoseModelDiversity(workflow, "claude");
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain("gate-a");
+    expect(messages[0]).toContain("gate-b");
+    // A reviewer-less gate contributes nothing.
+    expect(
+      diagnoseModelDiversity(makeWorkflow([{ id: "gate", approval: { message: "?" } }]), "claude"),
+    ).toEqual([]);
+  });
+
   test("does not conflate within-node provider variation with sibling diversity", () => {
     const workflow = makeWorkflow([
       {

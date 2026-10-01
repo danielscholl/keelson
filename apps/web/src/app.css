@@ -9682,6 +9682,29 @@ a.cvb-card-title::after {
   font-size: 13px;
   color: var(--fg);
 }
+/* The declared reviewer's verdict: why a gate reached the operator, or that it
+   answered the gate itself (then it sits in the trace body, not the callout). */
+.reviewer-note {
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 6px 10px;
+  margin: 0 0 8px;
+  border-left: 3px solid color-mix(in srgb, var(--magenta) 60%, transparent);
+  background: color-mix(in srgb, var(--magenta) 5%, var(--card));
+  color: var(--fg);
+  white-space: pre-wrap;
+}
+.reviewer-note .reviewer-note-head {
+  font-weight: 700;
+  color: var(--magenta);
+}
+.reviewer-note.answered {
+  border-left-color: color-mix(in srgb, var(--ok) 60%, transparent);
+  background: color-mix(in srgb, var(--ok) 5%, var(--card));
+}
+.reviewer-note.answered .reviewer-note-head {
+  color: var(--ok);
+}
 .approval-actions {
   display: flex;
   align-items: center;

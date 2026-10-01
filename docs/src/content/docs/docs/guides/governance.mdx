@@ -134,6 +134,11 @@ without opt-in, and it cannot be overridden by a node or a rib.
 KEELSON_WORKFLOW_TOOL_DENYLIST=Bash,Write keelson start
 ```
 
+`KEELSON_APPROVAL_REVIEWER=off` is its sibling for approval gates. A workflow's
+`approval` node may declare a `reviewer` that answers the gate when it approves
+with high confidence; this floor disables every such reviewer so each gate
+pauses for a human. See the [approval node reference](../../reference/workflow-nodes/#reviewer).
+
 ## Filesystem confinement
 
 The `path_confinement` builtin is always registered, alongside the operator

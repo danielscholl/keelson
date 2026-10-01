@@ -99,10 +99,30 @@ function streamProgress(ctx: ToolContext): (frame: WorkflowFrame) => void {
   };
 }
 
+// How an approval gate was answered, for the node header. Empty for every
+// other node and for an operator-answered gate with no reviewer.
+function renderApproval(node: WorkflowRunDetail["nodes"][number]): string {
+  const record = node.approval;
+  if (record === null) return "";
+  const v = record.reviewerVerdict;
+  if (record.answeredBy === "reviewer" && v !== undefined) {
+    return ` (answered by reviewer, confidence ${v.confidence}: ${v.reason})`;
+  }
+  if (v !== undefined) {
+    return ` (reviewer: ${v.decision}, confidence ${v.confidence}: ${v.reason}${
+      v.changes !== undefined ? `; changes: ${v.changes}` : ""
+    })`;
+  }
+  if (record.reviewerError !== undefined) {
+    return ` (reviewer gave no usable verdict: ${record.reviewerError})`;
+  }
+  return "";
+}
+
 function renderNodes(detail: WorkflowRunDetail): string {
   const blocks: string[] = [];
   for (const node of detail.nodes) {
-    const head = `[${node.nodeId}] ${node.status}`;
+    const head = `[${node.nodeId}] ${node.status}${renderApproval(node)}`;
     const body = node.outputText ?? "";
     if (body.trim().length === 0) {
       blocks.push(head);
@@ -183,7 +203,10 @@ function renderBriefStatus(
       lines.push(resumeInstructions(detail.runId, opts.awaitingNodeId, opts.pauseId));
     }
   }
-  lines.push("nodes:", ...detail.nodes.map((node) => `  [${node.nodeId}] ${node.status}`));
+  lines.push(
+    "nodes:",
+    ...detail.nodes.map((node) => `  [${node.nodeId}] ${node.status}${renderApproval(node)}`),
+  );
   return lines.join("\n");
 }
 
@@ -214,10 +237,13 @@ function describeState(
     case "paused": {
       const detail = controller.getRun(runId);
       const nodeView = detail ? truncate(renderNodes(detail), PAUSED_OUTPUT_CAP) : "";
+      const gate = detail?.nodes.find((node) => node.nodeId === state.nodeId);
+      const review = gate !== undefined ? renderApproval(gate).trim() : "";
       const content = [
         `Workflow run ${runId} is PAUSED awaiting approval at node "${state.nodeId}".`,
         ...(detail ? renderRunFacts(detail) : []),
         summarizeInputs(detail?.inputs),
+        ...(review !== "" ? [`Why it reached you: ${review.slice(1, -1)}`] : []),
         "",
         "Approval prompt:",
         state.message,

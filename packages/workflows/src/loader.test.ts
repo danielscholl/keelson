@@ -12,6 +12,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { discoverWorkflows, parseWorkflow, validateWorkflowInvariants } from "./loader.ts";
+import { isApprovalNode } from "./schema/index.ts";
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "pi-procedures-loader-"));
@@ -252,6 +253,127 @@ nodes:
     expect(intakeBody).toContain("SUBJECT-SNAPSHOT:");
     expect(intakeBody).toContain('$KEELSON_ARTIFACTS_DIR/subject-status"');
     expect(intakeBody).toContain("KEELSON_INPUTS_subject_required");
+  });
+
+  test("approval.reviewer parses with its defaults left to the handler", () => {
+    const result = parseWorkflow(
+      [
+        "name: gated",
+        "description: d",
+        "nodes:",
+        "  - id: gate-mode",
+        "    bash: printf true",
+        "  - id: gate",
+        "    depends_on: [gate-mode]",
+        "    approval:",
+        "      message: Approve?",
+        "      reviewer:",
+        "        when: \"$gate-mode.output == 'true'\"",
+        "        model: deep",
+        "        model_by_provider:",
+        "          copilot: gpt-6-astra",
+        "        effort: high",
+        "        allowed_tools: [Read, Grep]",
+        "        min_confidence: 90",
+        "        prompt: Check every criterion.",
+      ].join("\n"),
+      "gated.yaml",
+    );
+    expect(result.error).toBeNull();
+    const gate = result.workflow?.nodes.find((node) => node.id === "gate");
+    expect(gate !== undefined && isApprovalNode(gate) ? gate.approval.reviewer : undefined).toEqual(
+      {
+        when: "$gate-mode.output == 'true'",
+        model: "deep",
+        model_by_provider: { copilot: "gpt-6-astra" },
+        effort: "high",
+        allowed_tools: ["Read", "Grep"],
+        min_confidence: 90,
+        prompt: "Check every criterion.",
+      },
+    );
+  });
+
+  test("approval.reviewer rejects an empty prompt, an out-of-range floor, and unknown keys", () => {
+    const base = [
+      "name: gated",
+      "description: d",
+      "nodes:",
+      "  - id: gate",
+      "    approval:",
+      "      message: Approve?",
+      "      reviewer:",
+    ];
+    const cases = [
+      ["        prompt: ''"],
+      ["        prompt: ok", "        min_confidence: 101"],
+      ["        prompt: ok", "        min_confidence: 50.5"],
+      ["        prompt: ok", "        denied_tools: [Bash]"],
+    ];
+    for (const extra of cases) {
+      const result = parseWorkflow([...base, ...extra].join("\n"), "gated.yaml");
+      expect(result.error).not.toBeNull();
+    }
+  });
+
+  test("approval.reviewer.when and prompt get the same reference checks as a node's own", () => {
+    const build = (reviewer: string[]) =>
+      parseWorkflow(
+        [
+          "name: gated",
+          "description: d",
+          "nodes:",
+          "  - id: mode",
+          "    bash: printf true",
+          "  - id: other",
+          "    bash: printf x",
+          "  - id: gate",
+          "    depends_on: [mode]",
+          "    approval:",
+          "      message: Approve?",
+          "      reviewer:",
+          ...reviewer,
+        ].join("\n"),
+        "gated.yaml",
+      );
+    // Non-ancestor reference in when:
+    expect(
+      build(["        when: \"$other.output == 'x'\"", "        prompt: ok"]).error?.error,
+    ).toContain("'other' is not in its depends_on chain");
+    // Inputs are not readable by the condition evaluator.
+    expect(
+      build(["        when: \"$inputs.auto == 'true'\"", "        prompt: ok"]).error?.error,
+    ).toContain("approval.reviewer.when");
+    // Unknown node in the prompt.
+    expect(build(["        prompt: Check $missing.output"]).error?.error).toContain(
+      "unknown node '$missing.output'",
+    );
+    // Unknown directive in the prompt.
+    expect(build(["        prompt: $DIRECTIVES.not-a-directive"]).error?.error).toContain(
+      "approval.reviewer.prompt",
+    );
+    // A valid ancestor reference passes.
+    expect(
+      build(["        when: \"$mode.output == 'true'\"", "        prompt: Check $mode.output"])
+        .error,
+    ).toBeNull();
+  });
+
+  test("bundled fix-issue keys its plan-gate reviewer on the auto_approve input", () => {
+    const filePath = path.join(import.meta.dir, "../assets/workflows/fix-issue.yaml");
+    const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
+    expect(result.error).toBeNull();
+    const gate = result.workflow?.nodes.find((node) => node.id === "approve-plan");
+    expect(gate && "approval" in gate).toBe(true);
+    const reviewer =
+      gate !== undefined && isApprovalNode(gate) ? gate.approval.reviewer : undefined;
+    expect(reviewer?.when).toBe("$gate-mode.output == 'true'");
+    expect(reviewer?.min_confidence).toBe(85);
+    expect(reviewer?.allowed_tools).toEqual(["Read", "Glob", "Grep"]);
+    expect(reviewer?.model_by_provider).toEqual({ copilot: "gpt-6-astra" });
+    expect(gate?.depends_on).toContain("gate-mode");
+    const mode = result.workflow?.nodes.find((node) => node.id === "gate-mode");
+    expect(mode && "bash" in mode ? mode.bash : "").toContain("KEELSON_INPUTS_auto_approve");
   });
 
   test("bundled resolve-pr declares a valid converge gate", () => {

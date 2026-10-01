@@ -289,8 +289,15 @@ nodes:
   #   • reply "delegate" (or "assign to copilot")   → hand off to Copilot
   # ═══════════════════════════════════════════════════════════════════════════
 
+  # `when:` reads node outputs, not inputs, so the reviewer's auto_approve
+  # switch is echoed through a node. A reviewer approval implements locally;
+  # the delegate path needs a human reply.
+  - id: gate-mode
+    bash: |
+      printf '%s' "${KEELSON_INPUTS_auto_approve:-false}"
+
   - id: approve-plan
-    depends_on: [publish-plan]
+    depends_on: [publish-plan, gate-mode]
     approval:
       capture_response: true
       message: |
@@ -303,6 +310,26 @@ nodes:
         Or send requested changes to fold in before any code is written.
 
         $ARTIFACTS_DIR/plan.md
+      reviewer:
+        when: "$gate-mode.output == 'true'"
+        model: deep
+        allowed_tools: [Read, Glob, Grep]
+        min_confidence: 85
+        prompt: |
+          Review the plan at `$ARTIFACTS_DIR/plan.md` against the request it
+          answers: `$ARTIFACTS_DIR/issue.json` when the request named an issue,
+          else `$ARTIFACTS_DIR/task.md`.
+
+          Approve only when every acceptance criterion in the request maps to a
+          plan step, the plan stays within the request's scope, and nothing in
+          it contradicts the code: spot-check the plan's claims about files,
+          functions, and current behavior with Read and Grep before you decide.
+
+          Otherwise answer `changes`, naming the missing criterion, the scope
+          creep, or the contradiction and the exact fix the plan needs: the run
+          pauses for the operator, who sees your verdict beside the plan and
+          decides what to send back. Answer `escalate` when the plan shows the
+          task was misread. Never approve a plan you could not read.
 
   # ═══════════════════════════════════════════════════════════════════════════
   # ACT — choose the path from the human's reply

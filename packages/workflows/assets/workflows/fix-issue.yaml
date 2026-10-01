@@ -531,14 +531,44 @@ nodes:
   # node is instructed to apply it before writing code.
   # ─────────────────────────────────────────────────────────────────────────
 
+  # `when:` reads node outputs, not inputs, so the reviewer's auto_approve
+  # switch is echoed through a node.
+  - id: gate-mode
+    bash: |
+      printf '%s' "${KEELSON_INPUTS_auto_approve:-false}"
+
   - id: approve-plan
-    depends_on: [plan-ready, brief-ready, coverage-ready]
+    depends_on: [plan-ready, brief-ready, coverage-ready, gate-mode]
     approval:
       message: |
         Approve this plan to continue, or send requested changes before code is written.
 
         $ARTIFACTS_DIR/plan.md
       capture_response: true
+      reviewer:
+        when: "$gate-mode.output == 'true'"
+        model: deep
+        model_by_provider:
+          copilot: gpt-6-astra
+        allowed_tools: [Read, Glob, Grep]
+        min_confidence: 85
+        prompt: |
+          Review the plan at `$ARTIFACTS_DIR/plan.md` against the issue it is
+          meant to fix. The issue's acceptance criteria are in
+          `$ARTIFACTS_DIR/brief.json` (`criteria`); the issue as fetched:
+
+          $fetch-issue.output
+
+          Approve only when every acceptance criterion maps to a plan step, the
+          plan stays within the issue's scope, and nothing in it contradicts
+          the code: spot-check the plan's claims about files, functions, and
+          current behavior with Read and Grep before you decide.
+
+          Otherwise answer `changes`, naming the missing criterion, the scope
+          creep, or the contradiction and the exact fix the plan needs: the run
+          pauses for the operator, who sees your verdict beside the plan and
+          decides what to send back. Answer `escalate` when the plan shows the
+          task was misread. Never approve a plan you could not read.
 
   # ─────────────────────────────────────────────────────────────────────────
   # PHASE 4: IMPLEMENT

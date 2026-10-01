@@ -4835,3 +4835,135 @@ describe("runWorkflow — node retry", () => {
     expect(attempts()).toBe(1);
   });
 });
+
+describe("runWorkflow — resumed gate does not re-run its reviewer", () => {
+  test("a seeded (already-answered) approval node skips the handler and its reviewer entirely", async () => {
+    const wf = parseInline(`
+name: resume-reviewed-gate
+description: test
+nodes:
+  - id: plan
+    bash: "echo plan"
+  - id: gate
+    depends_on: [plan]
+    approval:
+      message: "Approve $plan.output?"
+      reviewer:
+        prompt: "Check it."
+  - id: implement
+    depends_on: [gate]
+    bash: "echo $gate.output"
+`);
+    let reviewerCalls = 0;
+    let gateCalls = 0;
+    const approval = makeApprovalHandler({
+      awaitApproval: async () => {
+        gateCalls += 1;
+        return "human";
+      },
+      reviewer: {
+        promptHandler: {
+          type: "prompt",
+          async handle() {
+            reviewerCalls += 1;
+            return {
+              status: "succeeded",
+              output: {
+                kind: "structured",
+                value: { decision: "approve", confidence: 99, reason: "again" },
+              },
+            };
+          },
+        },
+      },
+    });
+    const { handler: bash, calls } = echoHandler("bash");
+    const stamp = new Date().toISOString();
+    const completedNodeOutputs = new Map<string, NodeOutput>([
+      [
+        "plan",
+        {
+          state: "completed",
+          output: "the plan",
+          startedAt: stamp,
+          completedAt: stamp,
+          durationMs: 1,
+        },
+      ],
+      [
+        "gate",
+        {
+          state: "completed",
+          output: "reviewer said yes",
+          startedAt: stamp,
+          completedAt: stamp,
+          durationMs: 1,
+        },
+      ],
+    ]);
+    const summary = await runWorkflow({
+      ...baseOpts(wf),
+      handlers: new Map([
+        ["bash", bash],
+        ["approval", approval],
+      ]),
+      completedNodeOutputs,
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(reviewerCalls).toBe(0);
+    expect(gateCalls).toBe(0);
+    expect(summary.nodes.gate.output).toBe("reviewer said yes");
+    expect(calls.map((c) => c.nodeId)).toEqual(["implement"]);
+    expect(calls[0].resolvedBody).toContain("reviewer said yes");
+  });
+
+  test("a fresh run with a reviewer that approves never pauses and feeds the reason downstream", async () => {
+    const wf = parseInline(`
+name: reviewed-gate
+description: test
+nodes:
+  - id: gate
+    approval:
+      message: "Approve?"
+      reviewer:
+        prompt: "Check it."
+        min_confidence: 80
+  - id: implement
+    depends_on: [gate]
+    bash: "echo $gate.output"
+`);
+    let gateCalls = 0;
+    const approval = makeApprovalHandler({
+      awaitApproval: async () => {
+        gateCalls += 1;
+        return "human";
+      },
+      reviewer: {
+        promptHandler: {
+          type: "prompt",
+          async handle() {
+            return {
+              status: "succeeded",
+              output: {
+                kind: "structured",
+                value: { decision: "approve", confidence: 85, reason: "criteria all mapped" },
+              },
+            };
+          },
+        },
+      },
+    });
+    const { handler: bash, calls } = echoHandler("bash");
+    const summary = await runWorkflow({
+      ...baseOpts(wf),
+      handlers: new Map([
+        ["bash", bash],
+        ["approval", approval],
+      ]),
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(gateCalls).toBe(0);
+    expect(summary.nodes.gate.output).toBe("criteria all mapped");
+    expect(calls[0].resolvedBody).toContain("criteria all mapped");
+  });
+});

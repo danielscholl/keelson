@@ -6,7 +6,9 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import type { RibApprovalArtifact, RibPendingApproval } from "@keelson/shared";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { ApprovalRecord, RibApprovalArtifact, RibPendingApproval } from "@keelson/shared";
 import type { RunArtifactRead } from "./workflows-handler.ts";
 
 export const APPROVAL_ARTIFACTS_MAX = 4;
@@ -72,4 +74,28 @@ export function pendingApprovalWithArtifacts(
     ...(pauseId !== undefined ? { pauseId } : {}),
     ...(artifacts.length > 0 ? { artifacts } : {}),
   };
+}
+
+// Where a gate's reviewer record lands in the run's artifacts dir, so the
+// verdict can be opened from the trace and read by later nodes. The node id
+// becomes one filename component: ids are free strings, so a `/` or `..` in
+// one must not change the directory.
+export function reviewerVerdictArtifactPath(nodeId: string): string {
+  return `approvals/${encodeURIComponent(nodeId)}.reviewer.json`;
+}
+
+export function persistReviewerRecord(
+  artifactsDir: string | undefined,
+  nodeId: string,
+  record: ApprovalRecord,
+): void {
+  if (artifactsDir === undefined) return;
+  try {
+    const path = join(artifactsDir, reviewerVerdictArtifactPath(nodeId));
+    mkdirSync(join(artifactsDir, "approvals"), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[workflows] failed to persist reviewer record for ${nodeId}: ${msg}`);
+  }
 }

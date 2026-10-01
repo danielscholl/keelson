@@ -1,4 +1,4 @@
-import type { WorkflowNodeSummary } from "@keelson/shared";
+import type { ApprovalRecord, WorkflowNodeSummary } from "@keelson/shared";
 import { useEffect, useId, useRef, useState } from "react";
 import type { NodeView, RunView as RunViewState } from "../../hooks/useWorkflowRun.ts";
 import { parsePublishedArtifact, publishedCanvasResult } from "../../lib/chatCanvas.ts";
@@ -13,6 +13,47 @@ import { ThinkingBlock } from "../Chat/ThinkingBlock.tsx";
 import { ToolCallsBlock, toolCallsFromContentParts } from "../Chat/ToolCallsBlock.tsx";
 import { UsageBreakdown, UsagePopoverPanel } from "../Chat/UsagePopover.tsx";
 import { ApprovalComposer } from "./ApprovalComposer.tsx";
+
+// The declared reviewer's verdict on a gate: the reason it answered the gate
+// itself, or why the gate reached the operator instead.
+function ReviewerNote({ record }: { record: ApprovalRecord }) {
+  const v = record.reviewerVerdict;
+  if (record.answeredBy === "reviewer" && v !== undefined) {
+    return (
+      <div className="reviewer-note answered" role="status">
+        <span className="reviewer-note-head">
+          Answered by reviewer (confidence {v.confidence}):
+        </span>{" "}
+        {v.reason}
+      </div>
+    );
+  }
+  if (v !== undefined) {
+    return (
+      <div className="reviewer-note" role="status">
+        <span className="reviewer-note-head">
+          Reviewer: {v.decision} (confidence {v.confidence}).
+        </span>{" "}
+        {v.reason}
+        {v.changes !== undefined && (
+          <>
+            {"\n"}
+            <span className="reviewer-note-head">Changes:</span> {v.changes}
+          </>
+        )}
+      </div>
+    );
+  }
+  if (record.reviewerError !== undefined) {
+    return (
+      <div className="reviewer-note" role="status">
+        <span className="reviewer-note-head">Reviewer gave no usable verdict:</span>{" "}
+        {record.reviewerError}
+      </div>
+    );
+  }
+  return null;
+}
 
 // When the run has reached terminal status, downstream nodes the hook
 // never observed (no node_started, no node_done) must not stay "pending".
@@ -173,8 +214,10 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
       : textFromBlocks;
   const artifactPaths =
     isAwaiting && view.awaitingMessage ? extractArtifactPaths(view.awaitingMessage) : [];
+  const answeredByReviewer = !isAwaiting && view.approval?.answeredBy === "reviewer";
   const hasBody =
     isAwaiting ||
+    answeredByReviewer ||
     view.thinkingText.length > 0 ||
     textBlocks.length > 0 ||
     toolCalls.length > 0 ||
@@ -335,6 +378,7 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
             <div className="approval-callout" role="status">
               <div className="callout-head">◆ Approval required</div>
               <div className="callout-body">
+                {view.approval && <ReviewerNote record={view.approval} />}
                 <MarkdownContent source={stripArtifactRefs(view.awaitingMessage)} />
                 {runId !== null && artifactPaths.length > 0 && (
                   <div className="canvas-open-links">
@@ -377,6 +421,7 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
               </div>
             </div>
           )}
+          {answeredByReviewer && view.approval && <ReviewerNote record={view.approval} />}
           {view.error && <div className="trace-error">{view.error}</div>}
           {view.thinkingText.length > 0 && (
             <ThinkingBlock content={view.thinkingText} streaming={status === "running"} />

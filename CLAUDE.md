@@ -47,7 +47,7 @@ Keelson is a **local-only agent harness**, not a hosted service. The harness is 
 
 **Server lifecycle.** `keelson start` runs the server in the background (reporting its URL); `keelson start --foreground` (`-f`) runs it attached. The background path re-execs the CLI as a detached `start --foreground` child with `KEELSON_SERVE_BACKGROUND=1` (internal env, not an operator knob — the child ignores SIGHUP so it outlives its terminal). A running server records pid/URL/shutdown token in `<home>/server.json`; `keelson status`/`keelson stop` read it, and `POST /api/server/shutdown` is gated by the token. The former `keelson service`/`serve` command group still works as a hidden, deprecated alias.
 
-**Provider/tool determinism.** `KEELSON_WORKFLOW_PROVIDER` pins the provider workflows use for `prompt` nodes; `KEELSON_WORKFLOW_TOOL_DENYLIST` is an operator floor for per-node tool filtering. `KEELSON_USE_STUBS=1` is a test-only env var (CI + bun test setup) — no production code reads it.
+**Provider/tool determinism.** `KEELSON_WORKFLOW_PROVIDER` pins the provider workflows use for `prompt` nodes; `KEELSON_WORKFLOW_TOOL_DENYLIST` is an operator floor for per-node tool filtering; `KEELSON_APPROVAL_REVIEWER=off` disables every approval-node `reviewer` so all gates pause for a human. `KEELSON_USE_STUBS=1` is a test-only env var (CI + bun test setup) — no production code reads it.
 
 ## Comments
 
