@@ -89,9 +89,9 @@ jobs:
   check-windows:
     name: Typecheck and test (Windows)
     runs-on: windows-latest
-    # Bounded well above a normal (~4 min) run so a win32 test-exit stall
+    # Bounded well above a normal (~10 min) run so a win32 test-exit stall
     # cancels fast instead of running out a long silent timeout.
-    timeout-minutes: 12
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
