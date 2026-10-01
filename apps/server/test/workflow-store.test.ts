@@ -139,6 +139,8 @@ describe("SQLite WorkflowStore", () => {
     expect(run!.isolationEnabled).toBe(true);
     expect(run!.worktreeEstablished).toBe(false);
     expect(run!.definitionHash).toBe("ab".repeat(32));
+    store.setRunDefinitionHash("r1", "cd".repeat(32));
+    expect(store.getRun("r1")!.definitionHash).toBe("cd".repeat(32));
   });
 
   test("persists isolation intent, establishment, and setup errors across reopen", () => {

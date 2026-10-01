@@ -102,9 +102,11 @@ node actually ran on, all in the harness's SQLite store. That last pair makes an
 otherwise-unobservable `auto` node's resolved served model visible in the run
 detail whenever the provider reports it. The run also records a `definitionHash`,
 the sha256 of the parsed workflow definition it executed, so an evaluation score
-or a cost figure can be pinned to one exact version of the prompts. Edit the YAML
-in any way that changes a node, even whitespace inside a prompt, and the next run
-carries a different hash. The watch stream you see in the CLI and
+or a cost figure can be pinned to one exact version of that definition. Edit the
+YAML in any way that changes a node, even whitespace inside an inline prompt, and
+the next run carries a different hash; a resumed run is re-stamped with whatever
+definition the resume ran. Content a node reads at execution time, such as the
+Markdown file behind a `command` node, is outside the hash. The watch stream you see in the CLI and
 the browser is the same event feed, emitted as each node starts, streams, and
 settles. The figure shows every state a run can occupy:
 

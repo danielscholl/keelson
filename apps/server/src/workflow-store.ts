@@ -105,6 +105,9 @@ export interface WorkflowStore {
   createRun(input: CreateRunInput): void;
   updateRunStatus(input: UpdateRunStatusInput): void;
   setRunPreflightNotice(runId: string, notice: string | null): void;
+  // Resume re-executes under the catalog's current definition, so the row is
+  // re-stamped with the hash of what actually ran last.
+  setRunDefinitionHash(runId: string, hash: string | null): void;
   // Atomic compare-and-set for resume: flips a failed/cancelled run to running
   // in one UPDATE and returns whether THIS caller won the claim. Guards the
   // resume route against two concurrent starts and against resuming a
@@ -336,6 +339,9 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   const updatePreflightNotice = db.prepare(
     "UPDATE workflow_runs SET preflight_notice = ? WHERE id = ?",
   );
+  const updateDefinitionHash = db.prepare(
+    "UPDATE workflow_runs SET definition_hash = ? WHERE id = ?",
+  );
   const claimResume = db.prepare(
     "UPDATE workflow_runs SET status = 'running', completed_at = NULL, error = NULL WHERE id = ? AND status IN ('failed', 'cancelled') AND worktree_pruned = 0",
   );
@@ -464,6 +470,9 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     },
     setRunPreflightNotice(runId, notice) {
       updatePreflightNotice.run(notice, runId);
+    },
+    setRunDefinitionHash(runId, hash) {
+      updateDefinitionHash.run(hash, runId);
     },
     claimRunForResume(runId) {
       return claimResume.run(runId).changes > 0;

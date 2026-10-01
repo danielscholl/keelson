@@ -1565,6 +1565,7 @@ function resumeRunCore(
       message: `run '${runId}' is not in a resumable state (only failed or cancelled runs can be resumed)`,
     };
   }
+  store.setRunDefinitionHash(runId, workflowDefinitionHash(workflow));
 
   const abort = new AbortController();
   const pendingApprovals = new Map<string, PendingApproval>();

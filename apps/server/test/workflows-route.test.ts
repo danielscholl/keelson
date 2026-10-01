@@ -123,11 +123,18 @@ function writeWorkflow(filename: string, body: string): void {
   writeFileSync(join(wfDir, filename), body);
 }
 
-async function startAndRead(app: Hono, name: string): Promise<{ definitionHash: string | null }> {
+async function startAndRead(
+  app: Hono,
+  name: string,
+): Promise<{ runId: string; status: string; definitionHash: string | null }> {
   const res = await app.fetch(postRun(`http://test/api/workflows/${name}/runs`, { inputs: {} }));
   expect(res.status).toBe(200);
   const { runId } = (await res.json()) as { runId: string };
-  return (await pollUntilTerminal(app, runId)) as { definitionHash: string | null };
+  return (await pollUntilTerminal(app, runId)) as {
+    runId: string;
+    status: string;
+    definitionHash: string | null;
+  };
 }
 
 function makeSuccessfulPromptHandler() {
@@ -436,6 +443,38 @@ nodes:
     writeWorkflow("hashed.yaml", yaml.replace('echo "v1"', 'echo  "v1"'));
     const second = await startAndRead(app, "hashed");
     expect(second.definitionHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(second.definitionHash).not.toBe(first.definitionHash);
+  });
+
+  test("resume re-stamps the hash with the definition the resume executed", async () => {
+    const broken = `name: rehash
+description: fails until fixed
+nodes:
+  - id: step
+    bash: exit 7
+`;
+    writeWorkflow("rehash.yaml", broken);
+    const { app } = makeRig();
+    const first = await startAndRead(app, "rehash");
+    expect(first.status).toBe("failed");
+    expect(first.definitionHash).toBe(
+      workflowDefinitionHash(parseWorkflow(broken, "rehash.yaml").workflow),
+    );
+
+    const fixed = broken.replace("exit 7", "echo fixed");
+    writeWorkflow("rehash.yaml", fixed);
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${first.runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+    const second = (await pollUntilTerminal(app, first.runId)) as {
+      status: string;
+      definitionHash: string | null;
+    };
+    expect(second.status).toBe("succeeded");
+    expect(second.definitionHash).toBe(
+      workflowDefinitionHash(parseWorkflow(fixed, "rehash.yaml").workflow),
+    );
     expect(second.definitionHash).not.toBe(first.definitionHash);
   });
 
