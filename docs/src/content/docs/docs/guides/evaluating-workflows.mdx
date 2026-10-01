@@ -29,6 +29,9 @@ slips.
 - **Low variance.** A pass rate is an estimate. The summary carries a 95%
   Wilson interval for every split and prints a `NOISE` warning when that
   interval is wider than 20 points. More reps per case, or more cases, narrow it.
+- **Enough cases.** Compare counts cases, not reps: at least six cases have to
+  change before any difference can be called, so a set smaller than that prints
+  a `POWER` warning. Twenty to thirty cases is a working size.
 - **A held-out split.** Tuning a prompt against the cases you stare at makes
   those cases pass. The train/test split exists so that overfitting shows up as
   a gap: train improves, test does not, and the verdict says revert.
@@ -159,8 +162,9 @@ output (the JSON inlines the first 16 KiB). `--out <path>` relocates all three.
 | Definition hash | The workflow definition each run executed. Two hashes in one eval means the workflow changed mid-run. |
 
 The warnings line names what to fix next: `HEADROOM` when the test split passes
-above 95%, `NOISE` when an interval is wider than 20 points, `HASH` when more
-than one definition was observed, `ERRORS` when any case errored.
+above 95%, `NOISE` when an interval is wider than 20 points, `POWER` when the
+set has fewer than six cases, `HASH` when more than one definition was observed,
+`ERRORS` when any case errored.
 
 ## The compare verdict
 
@@ -168,20 +172,33 @@ than one definition was observed, `ERRORS` when any case errored.
 keelson eval compare before.json after.json
 ```
 
-For each split, compare reports the pass-rate delta and a verdict: `improved` or
-`regressed` when the two Wilson intervals do not overlap, `within-noise` when
-they do. It then applies the hillclimb rule: **keep** only when train and test
-both improved; **revert** when test is flat or either split regressed. A set
-with no train split decides on test alone and says so, which is a reason to
-declare one. The cost delta prints alongside, so an improvement that doubled the
-spend is visible in the same line.
+Both files ran the same cases, so compare pairs them: each case's pass rate
+before against its pass rate after, with reps averaged inside the case. A
+sign-flip permutation test on those per-case differences gives each split a
+verdict: `improved` or `regressed` when p is below 0.05, `within-noise`
+otherwise. Only cases that moved carry evidence, which is why six must move
+before any verdict can leave `within-noise`, and why reps steady a case without
+standing in for more cases.
+
+It then applies the hillclimb rule. **Keep** when the pooled result improved and
+the train and test splits each moved up. **Revert** when the pooled result is
+within noise, when either split regressed, or when the pooled gain came from
+train while test stayed flat: that is overfitting. A set with no train split
+decides on test alone and says so, which is a reason to declare one. The cost
+delta prints alongside, so an improvement that doubled the spend is visible in
+the same line.
+
+```
+overall  60.0% [38.7%, 78.1%] → 90.0% [69.9%, 97.2%]  +30.0 pts  improved  (6/20 cases changed, p=0.031)
+```
 
 Compare refuses two files that did not run the same cases, project, and split
 filter (the results file carries a fingerprint of the case set), and reverts
-when either side errored: an infrastructure failure is not a measurement.
-Comparing a results file with itself is always `within-noise`; two independent
-runs of an unchanged workflow usually are, and when they are not, the interval
-width is telling you the set needs more reps before it can judge a change.
+when either side errored: an infrastructure failure is not a measurement. It
+warns when both runs executed the same workflow definition, since any difference
+then came from outside the workflow or from run-to-run variation, and when the
+two runs used a different `--provider` or keelson version. Comparing a results
+file with itself is always `within-noise`.
 
 ## Related
 

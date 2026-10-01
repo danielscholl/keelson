@@ -19,6 +19,7 @@ import {
   renderComparisonText,
   renderSummaryMarkdown,
 } from "@keelson/workflows";
+import pkg from "../../package.json" with { type: "json" };
 import {
   type CaseExecutor,
   makeHttpExecutor,
@@ -273,6 +274,8 @@ export async function runEvalRun(file: string, opts: EvalRunOptions): Promise<ne
       reps,
       split,
       mode,
+      keelsonVersion: pkg.version,
+      ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
       executor,
       graderDeps: { cwd: process.cwd(), judge: opts.judge ?? makeJudge(process.cwd()) },
       outputsDir: paths.outputsDir,

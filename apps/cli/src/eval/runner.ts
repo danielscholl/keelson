@@ -28,6 +28,8 @@ export interface RunEvalOptions {
   readonly reps: number;
   readonly split: EvalSplit | "all";
   readonly mode: "http" | "in-process";
+  readonly provider?: string;
+  readonly keelsonVersion?: string;
   readonly executor: CaseExecutor;
   readonly graderDeps: GraderDeps;
   // Directory receiving one full-output file per case rep.
@@ -152,6 +154,8 @@ export async function runEval(opts: RunEvalOptions): Promise<EvalResultsFile> {
     mode: opts.mode,
     reps: opts.reps,
     splitFilter: opts.split,
+    provider: opts.provider ?? null,
+    keelsonVersion: opts.keelsonVersion ?? null,
     cases: results,
     summary: summarize(results),
   };

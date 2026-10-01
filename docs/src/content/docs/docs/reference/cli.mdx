@@ -115,7 +115,7 @@ Use `--arguments` for free-form text and reserve `--inputs` for named key-value 
 | Command | Does |
 | --- | --- |
 | `keelson eval run <file>` | Run every case in a case-set file against its workflow, grade the outputs, and write a results JSON plus Markdown summary under `<home>/evals/<name>/`. Server-up over HTTP, server-down in-process. |
-| `keelson eval compare <before.json> <after.json>` | Per-split pass-rate delta with an `improved` / `regressed` / `within-noise` verdict from the Wilson intervals, the cost delta, and the keep/revert decision. |
+| `keelson eval compare <before.json> <after.json>` | Per-split pass-rate delta with an `improved` / `regressed` / `within-noise` verdict from a paired per-case test, the cost delta, and the keep/revert decision. |
 | `keelson eval init <workflow> [--out <file>]` | Scaffold a case-set file for a workflow. Refuses to overwrite. |
 
 `eval run` options:

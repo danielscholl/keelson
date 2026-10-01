@@ -29,7 +29,7 @@ import {
   renderSummaryMarkdown,
   summarize,
 } from "./results.ts";
-import { percentile, wilsonInterval } from "./stats.ts";
+import { pairedPermutationTest, percentile, wilsonInterval } from "./stats.ts";
 
 const BASE = `
 name: demo
@@ -545,6 +545,47 @@ describe("summarize", () => {
   });
 });
 
+describe("pairedPermutationTest", () => {
+  test("no cases is null and no movement is p = 1", () => {
+    expect(pairedPermutationTest([])).toBeNull();
+    expect(pairedPermutationTest([0, 0, 0])).toEqual({
+      cases: 3,
+      changed: 0,
+      meanDelta: 0,
+      pValue: 1,
+    });
+  });
+
+  test("with one rep it is the exact McNemar test", () => {
+    // Six cases flip up, none down: two of 64 sign patterns are as extreme.
+    expect(pairedPermutationTest([1, 1, 1, 1, 1, 1, 0, 0])?.pValue).toBeCloseTo(2 / 64, 10);
+    // Five can never clear 0.05, however many reps or unmoved cases surround them.
+    expect(pairedPermutationTest([1, 1, 1, 1, 1])?.pValue).toBeCloseTo(2 / 32, 10);
+    // Eight up and two down: 2 * (1 + 10 + 45) / 1024.
+    expect(pairedPermutationTest([1, 1, 1, 1, 1, 1, 1, 1, -1, -1])?.pValue).toBeCloseTo(
+      112 / 1024,
+      10,
+    );
+  });
+
+  test("fractional differences from reps weigh by size", () => {
+    const t = pairedPermutationTest([1 / 3, 2 / 3, 1, 1 / 3, 2 / 3, 1 / 3, -1 / 3]);
+    expect(t?.changed).toBe(7);
+    expect(t?.meanDelta).toBeCloseTo(3 / 7, 10);
+    expect(t?.pValue).toBeGreaterThan(2 / 128);
+    expect(t?.pValue).toBeLessThan(0.1);
+  });
+
+  test("past the exact limit the sampled p is deterministic and close", () => {
+    const deltas = [...Array<number>(22).fill(1), ...Array<number>(8).fill(-1)];
+    const first = pairedPermutationTest(deltas);
+    expect(first).toEqual(pairedPermutationTest(deltas));
+    // Exact two-sided binomial tail for 22 of 30 is 0.0161.
+    expect(first?.pValue).toBeGreaterThan(0.012);
+    expect(first?.pValue).toBeLessThan(0.021);
+  });
+});
+
 describe("compareResults", () => {
   test("identical files are within-noise and revert", () => {
     const a = file([...batch("train", 5, 5), ...batch("test", 5, 5)]);
@@ -555,26 +596,67 @@ describe("compareResults", () => {
       "within-noise",
     ]);
     expect(cmp.decision).toBe("revert");
+    expect(cmp.reason).toBe("overall within-noise");
     expect(renderComparisonText(cmp)).toContain("decision: revert");
   });
 
-  test("keep only when train and test both improve past the intervals", () => {
-    const before = file([...batch("train", 5, 25), ...batch("test", 5, 25)]);
-    const after = file([...batch("train", 25, 5), ...batch("test", 25, 5)]);
+  test("a modest gain on a modest set is kept, which unpaired intervals would miss", () => {
+    // 60% -> 80% on ten train and ten test cases: the Wilson intervals overlap
+    // widely, but eight cases moved up and none moved down.
+    const before = file([...batch("train", 5, 5), ...batch("test", 7, 3)]);
+    const after = file([...batch("train", 9, 1), ...batch("test", 9, 1)]);
     const cmp = compareResults(before, after);
-    expect(cmp.splits.find((s) => s.split === "train")?.verdict).toBe("improved");
-    expect(cmp.splits.find((s) => s.split === "test")?.verdict).toBe("improved");
+    const overall = cmp.splits.find((s) => s.split === "overall");
+    expect(overall?.paired).toMatchObject({ cases: 20, changed: 6 });
+    expect(overall?.verdict).toBe("improved");
+    expect(cmp.splits.find((s) => s.split === "test")?.verdict).toBe("within-noise");
     expect(cmp.decision).toBe("keep");
+    expect(cmp.reason).toBe("overall improved, and train and test both moved up");
     expect(compareResults(after, before).decision).toBe("revert");
-    expect(compareResults(after, before).splits[2]?.verdict).toBe("regressed");
+    expect(compareResults(after, before).splits[0]?.verdict).toBe("regressed");
+    expect(renderComparisonText(cmp)).toContain("6/20 cases changed, p=0.031");
+  });
+
+  test("churn that nets to the same gain is within-noise", () => {
+    const flip = (id: string, status: "pass" | "fail") => result({ caseId: id, status });
+    const ids = Array.from({ length: 20 }, (_, i) => `c${i}`);
+    // Eight cases go up and four go down: +4 net, but p = 0.39.
+    const before = file(ids.map((id, i) => flip(id, i < 8 ? "fail" : "pass")));
+    const after = file(ids.map((id, i) => flip(id, i >= 8 && i < 12 ? "fail" : "pass")));
+    const cmp = compareResults(before, after);
+    expect(cmp.splits[0]?.paired).toMatchObject({ cases: 20, changed: 12 });
+    expect(cmp.splits[0]?.verdict).toBe("within-noise");
+    expect(cmp.decision).toBe("revert");
+  });
+
+  test("reps pair by case, not by trial", () => {
+    const reps = (id: string, passes: number) =>
+      [1, 2, 3].map((rep) => result({ caseId: id, rep, status: rep <= passes ? "pass" : "fail" }));
+    const before = file(["a", "b", "c"].flatMap((id) => reps(id, 0)));
+    const after = file(["a", "b", "c"].flatMap((id) => reps(id, 3)));
+    const cmp = compareResults(before, after);
+    // Nine trials all flipped, but only three cases: p = 2/8.
+    expect(cmp.splits[0]?.paired).toMatchObject({ cases: 3, changed: 3, pValue: 0.25 });
+    expect(cmp.decision).toBe("revert");
+    expect(cmp.warnings.join("\n")).toContain("only 3 case(s) changed");
   });
 
   test("train improved but test flat is revert (overfitting)", () => {
     const before = file([...batch("train", 5, 25), ...batch("test", 15, 15)]);
-    const after = file([...batch("train", 25, 5), ...batch("test", 16, 14)]);
+    const after = file([...batch("train", 25, 5), ...batch("test", 15, 15)]);
     const cmp = compareResults(before, after);
+    expect(cmp.splits[0]?.verdict).toBe("improved");
     expect(cmp.decision).toBe("revert");
-    expect(cmp.reason).toContain("test within-noise");
+    expect(cmp.reason).toContain("test split did not move");
+  });
+
+  test("a regressed split reverts even when the pooled result improved", () => {
+    const before = file([...batch("train", 0, 30), ...batch("test", 10, 0)]);
+    const after = file([...batch("train", 30, 0), ...batch("test", 0, 10)]);
+    const cmp = compareResults(before, after);
+    expect(cmp.splits[0]?.verdict).toBe("improved");
+    expect(cmp.decision).toBe("revert");
+    expect(cmp.reason).toBe("test regressed");
   });
 
   test("without a train split the test split decides and a warning says so", () => {
@@ -592,6 +674,24 @@ describe("compareResults", () => {
     expect(cmp.comparable).toBe(true);
     expect(cmp.decision).toBe("revert");
     expect(cmp.reason).toContain("errored");
+  });
+
+  test("says when both runs executed one definition, or differ in provider or version", () => {
+    const cases = (hash: string | null) =>
+      batch("test", 5, 5).map((c) => ({ ...c, definitionHash: hash }));
+    const a = file(cases("aaa"), { provider: null, keelsonVersion: "0.113.0" });
+    const same = compareResults(a, a);
+    expect(same.definitionChanged).toBe(false);
+    expect(same.warnings.join("\n")).toContain("same workflow definition");
+    const b = file(cases("bbb"), { provider: "claude", keelsonVersion: "0.114.0" });
+    const cmp = compareResults(a, b);
+    expect(cmp.definitionChanged).toBe(true);
+    expect(cmp.warnings).toContain("provider overrides differ: 'none' vs 'claude'");
+    expect(cmp.warnings).toContain("keelson versions differ: '0.113.0' vs '0.114.0'");
+    // Files written before these fields existed carry no claim either way.
+    const old = compareResults(file(cases(null)), b);
+    expect(old.definitionChanged).toBeNull();
+    expect(old.warnings.some((w) => w.includes("differ:"))).toBe(false);
   });
 
   test("different case sets or split filters are not comparable", () => {

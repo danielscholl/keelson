@@ -52,6 +52,7 @@ export {
   evalResultsFileSchema,
   HEADROOM_PASS_RATE,
   NOISE_INTERVAL_WIDTH,
+  pairedDeltas,
   pct,
   renderComparisonText,
   renderSummaryMarkdown,
@@ -62,8 +63,11 @@ export {
   summarize,
 } from "./results.ts";
 export {
-  intervalsOverlap,
   mean,
+  PAIRED_ALPHA,
+  PAIRED_MIN_CHANGED,
+  type PairedTest,
+  pairedPermutationTest,
   percentile,
   type WilsonInterval,
   wilsonInterval,
