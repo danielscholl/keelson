@@ -8,6 +8,8 @@
 
 import type { Database } from "bun:sqlite";
 import {
+  type ApprovalRecord,
+  approvalRecordSchema,
   type Brief,
   briefSchema,
   type ContentBlock,
@@ -85,6 +87,9 @@ export interface UpsertNodeOutputInput {
   // Effective reasoning tier, normalized to the provider spelling. Null when
   // the node declared none, alongside the same non-LLM/awaiting cases.
   effort: ReasoningEffortLevel | null;
+  // Approval-gate record: who answered and the reviewer's verdict when one
+  // ran. Omitted or null for every other node type.
+  approval?: ApprovalRecord | null;
 }
 
 export interface UpdateRunStatusInput {
@@ -204,6 +209,7 @@ interface NodeRow {
   provider: string | null;
   model: string | null;
   effort: string | null;
+  approval_json: string | null;
 }
 
 function rowToRunSummary(row: RunRow): WorkflowRunSummary {
@@ -266,7 +272,20 @@ function rowToNodeOutput(row: NodeRow): NodeOutputRow {
     provider: row.provider,
     model: row.model,
     effort: parsePersistedEffort(row.effort),
+    approval: parseApprovalRecord(row.approval_json),
   };
+}
+
+// Degrades to null on a malformed value so the run-detail endpoint keeps
+// serving; a null reads as operator-answered.
+function parseApprovalRecord(raw: string | null): ApprovalRecord | null {
+  if (raw === null) return null;
+  try {
+    const parsed = approvalRecordSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseBrief(raw: string | null): Brief | null {
@@ -367,8 +386,8 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     "SELECT * FROM workflow_runs WHERE status = ? ORDER BY started_at DESC, rowid DESC",
   );
   const upsertNode = db.prepare(
-    `INSERT INTO workflow_node_outputs(run_id, node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json, provider, model, effort)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO workflow_node_outputs(run_id, node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json, provider, model, effort, approval_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(run_id, node_id) DO UPDATE SET
        status = excluded.status,
        output_text = excluded.output_text,
@@ -379,13 +398,14 @@ export function createWorkflowStore(db: Database): WorkflowStore {
        usage_json = excluded.usage_json,
        provider = excluded.provider,
        model = excluded.model,
-       effort = excluded.effort`,
+       effort = excluded.effort,
+       approval_json = excluded.approval_json`,
   );
   // rowid tiebreak preserves DAG insertion order when two nodes share a
   // completed_at millisecond — the executor runs siblings in parallel and
   // commits via the per-layer write buffer, so timestamp ties are common.
   const selectNodes = db.prepare(
-    "SELECT node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json, provider, model, effort FROM workflow_node_outputs WHERE run_id = ? ORDER BY rowid ASC",
+    "SELECT node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json, provider, model, effort, approval_json FROM workflow_node_outputs WHERE run_id = ? ORDER BY rowid ASC",
   );
   // Usage rides as JSON in usage_json, so the sum is done in JS over the run's
   // node rows rather than in SQL. Selects only the JSON column.
@@ -481,6 +501,9 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         input.provider,
         input.model,
         input.effort,
+        input.approval !== undefined && input.approval !== null
+          ? JSON.stringify(input.approval)
+          : null,
       );
     },
     getRunUsageTotals(runId) {

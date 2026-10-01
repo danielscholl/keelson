@@ -7,6 +7,7 @@ import { isAbsolute, resolve } from "node:path";
 import type { WorkflowFrame } from "@keelson/shared";
 import type { RunStreamEvent } from "@keelson/workflows";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
+import { formatReviewerAnswer, formatReviewLines } from "../format-approval.ts";
 import { listProjects } from "../http/projects-client.ts";
 import {
   attachRun,
@@ -116,7 +117,8 @@ function formatWorkflowFrame(frame: WorkflowFrame): string {
     case "node_done": {
       const icon = frame.status === "succeeded" ? "✓" : frame.status === "skipped" ? "○" : "✗";
       const err = frame.error ? ` — ${frame.error}` : "";
-      return `  ${icon} ${frame.nodeId}${err}`;
+      const answered = formatReviewerAnswer(frame.nodeId, frame.approval ?? null);
+      return `  ${icon} ${frame.nodeId}${err}${answered !== undefined ? `\n    ${answered}` : ""}`;
     }
     case "node_log":
       return `    ${frame.line}`;
@@ -126,8 +128,10 @@ function formatWorkflowFrame(frame: WorkflowFrame): string {
       return `! ${frame.message}`;
     case "run_done":
       return `■ ${frame.status}`;
-    case "approval_awaiting":
-      return `⏸ ${frame.nodeId} awaiting approval — ${frame.message}`;
+    case "approval_awaiting": {
+      const review = formatReviewLines(frame.review).map((line) => `\n    ${line}`);
+      return `⏸ ${frame.nodeId} awaiting approval — ${frame.message}${review.join("")}`;
+    }
     default:
       return "";
   }

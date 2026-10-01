@@ -27,7 +27,9 @@ export const WIRE_PROTOCOL_VERSION = "1.0" as const;
 // Pre-0.6 clients strict-reject run status and history responses carrying it.
 // 0.7: durable isolation state — new `isolationEnabled` and
 // `worktreeEstablished` fields on WorkflowRunSummary.
-export const SCHEMA_VERSION = "0.7" as const;
+// 0.8: approval reviewer — `approval` on node rows and `node_done`, `review`
+// on `approval_awaiting`.
+export const SCHEMA_VERSION = "0.8" as const;
 
 // A peer (the server on /api/health + /api/config, or a client's bundle)
 // reports its SCHEMA_VERSION. Any difference from this build's value signals

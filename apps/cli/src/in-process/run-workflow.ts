@@ -288,6 +288,12 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
         `approval node '${nodeId}' cannot resolve in headless mode (message: "${message}"). Run via \`keelson start\` for interactive approval.`,
       );
     },
+    // A declared reviewer can still answer a gate headlessly; only a gate it
+    // does not approve needs the server's pause.
+    reviewer: {
+      promptHandler,
+      enabled: process.env.KEELSON_APPROVAL_REVIEWER?.trim().toLowerCase() !== "off",
+    },
   });
   const cancelHandler = makeCancelHandler({
     requestCancel: async () => {

@@ -367,6 +367,13 @@ const migrations: Migration[] = [
       db.exec("UPDATE workflow_runs SET worktree_established = 1 WHERE worktree_path IS NOT NULL;");
     },
   },
+  {
+    version: 18,
+    description: "persist who answered a workflow approval gate and the reviewer verdict",
+    up: (db) => {
+      db.exec("ALTER TABLE workflow_node_outputs ADD COLUMN approval_json TEXT;");
+    },
+  },
 ];
 
 // The lowest version this build can apply. A database stamped below it was

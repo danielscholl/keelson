@@ -4748,3 +4748,154 @@ nodes:
     expect(catalog.list().map((w) => w.name)).not.toContain("new-starter");
   });
 });
+
+describe("approval reviewer (routes)", () => {
+  // A provider whose only reply is the verdict JSON the reviewer turn is
+  // pinned to; the prompt handler's output_format path parses it.
+  function verdictPromptHandler(verdict: unknown) {
+    const provider = {
+      getCapabilities: () => ({ defaultModel: "stub-echo", models: ["stub-echo"] }),
+      async *sendQuery() {
+        yield { type: "text" as const, content: JSON.stringify(verdict) };
+        yield { type: "done" as const };
+      },
+    };
+    return makePromptHandler({ getProvider: () => provider, getRegisteredTools: () => [] });
+  }
+
+  const GATED = `name: gated
+description: reviewer
+nodes:
+  - id: review
+    approval:
+      message: please approve
+      reviewer:
+        prompt: Check the plan.
+        min_confidence: 85
+  - id: apply
+    depends_on: [review]
+    bash: echo applied
+`;
+
+  function captureFrames(rig: Rig, runId: string): Array<Record<string, unknown>> {
+    const received: Array<Record<string, unknown>> = [];
+    const fakeWs = {
+      send: (raw: string) => {
+        received.push(JSON.parse(raw));
+      },
+    } as unknown as Parameters<typeof rig.subscribers.subscribe>[1];
+    rig.subscribers.subscribe(runId, fakeWs);
+    return received;
+  }
+
+  test("a confident approve resolves the gate without pausing and records the reviewer", async () => {
+    writeWorkflow("gated.yaml", GATED);
+    const rig = makeRig(
+      verdictPromptHandler({ decision: "approve", confidence: 91, reason: "every criterion maps" }),
+    );
+    const startRes = await rig.app.fetch(
+      postRun("http://test/api/workflows/gated/runs", { inputs: {} }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    const frames = captureFrames(rig, runId);
+    const terminal = (await pollUntilTerminal(rig.app, runId)) as {
+      status: string;
+      nodes: Array<{
+        nodeId: string;
+        status: string;
+        outputText: string | null;
+        approval: unknown;
+      }>;
+    };
+    expect(terminal.status).toBe("succeeded");
+    const review = terminal.nodes.find((n) => n.nodeId === "review");
+    expect(review?.status).toBe("succeeded");
+    expect(review?.outputText).toBe("every criterion maps");
+    expect(review?.approval).toEqual({
+      answeredBy: "reviewer",
+      reviewerVerdict: { decision: "approve", confidence: 91, reason: "every criterion maps" },
+    });
+    expect(terminal.nodes.find((n) => n.nodeId === "apply")?.status).toBe("succeeded");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(frames.map((f) => f.type)).not.toContain("approval_awaiting");
+    const done = frames.find((f) => f.type === "node_done" && f.nodeId === "review");
+    expect(done?.approval).toEqual({
+      answeredBy: "reviewer",
+      reviewerVerdict: { decision: "approve", confidence: 91, reason: "every criterion maps" },
+    });
+  });
+
+  test("a changes verdict pauses for the operator with the verdict on the row and the frame", async () => {
+    writeWorkflow("gated.yaml", GATED);
+    const verdict = {
+      decision: "changes" as const,
+      confidence: 95,
+      reason: "criterion 2 has no step",
+      changes: "add a step for the migration",
+    };
+    const rig = makeRig(verdictPromptHandler(verdict));
+    const startRes = await rig.app.fetch(
+      postRun("http://test/api/workflows/gated/runs", { inputs: {} }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    const frames = captureFrames(rig, runId);
+    await pollUntilStoreStatus(rig.store, runId, (s) => s === "paused");
+    const paused = rig.store.getRun(runId);
+    expect(paused?.status).toBe("paused");
+    const awaiting = paused?.nodes.find((n) => n.status === "awaiting");
+    expect(awaiting?.nodeId).toBe("review");
+    expect(awaiting?.approval).toEqual({ answeredBy: "operator", reviewerVerdict: verdict });
+    const pauseFrame = frames.find((f) => f.type === "approval_awaiting");
+    expect(pauseFrame?.review).toEqual({ reviewerVerdict: verdict });
+    expect(rig.activeRuns.get(runId)?.pendingApprovals.get("review")?.review).toEqual({
+      reviewerVerdict: verdict,
+    });
+
+    const resumeRes = await rig.app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume`, {
+        nodeId: "review",
+        text: "approve",
+      }),
+    );
+    expect(resumeRes.status).toBe(200);
+    const terminal = (await pollUntilTerminal(rig.app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; outputText: string | null; approval: unknown }>;
+    };
+    expect(terminal.status).toBe("succeeded");
+    const review = terminal.nodes.find((n) => n.nodeId === "review");
+    expect(review?.outputText).toBe("approve");
+    expect(review?.approval).toEqual({ answeredBy: "operator", reviewerVerdict: verdict });
+  });
+
+  test("KEELSON_APPROVAL_REVIEWER=off sends the gate straight to the operator", async () => {
+    writeWorkflow("gated.yaml", GATED);
+    const previous = process.env.KEELSON_APPROVAL_REVIEWER;
+    process.env.KEELSON_APPROVAL_REVIEWER = "off";
+    try {
+      const rig = makeRig(
+        verdictPromptHandler({ decision: "approve", confidence: 100, reason: "would approve" }),
+      );
+      const startRes = await rig.app.fetch(
+        postRun("http://test/api/workflows/gated/runs", { inputs: {} }),
+      );
+      const { runId } = (await startRes.json()) as { runId: string };
+      await pollUntilStoreStatus(rig.store, runId, (s) => s === "paused");
+      const awaiting = rig.store.getRun(runId)?.nodes.find((n) => n.status === "awaiting");
+      expect(awaiting?.nodeId).toBe("review");
+      expect(awaiting?.approval).toEqual({ answeredBy: "operator" });
+      expect(rig.activeRuns.get(runId)?.pendingApprovals.get("review")?.review).toBeUndefined();
+      const cancel = await rig.app.fetch(
+        new Request(`http://test/api/workflows/runs/${runId}`, {
+          method: "DELETE",
+          headers: { origin: ORIGIN },
+        }),
+      );
+      expect(cancel.status).toBe(200);
+      await pollUntilTerminal(rig.app, runId);
+    } finally {
+      if (previous === undefined) delete process.env.KEELSON_APPROVAL_REVIEWER;
+      else process.env.KEELSON_APPROVAL_REVIEWER = previous;
+    }
+  });
+});

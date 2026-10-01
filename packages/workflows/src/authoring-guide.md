@@ -177,6 +177,27 @@ exposes the reply as the node's output; `on_reject` re-prompts on rejection:
     capture_response: true
 ```
 
+`approval.reviewer` lets one agent turn answer the gate for the operator. It
+takes `prompt` (same substitutions as a prompt node; the gate message is shown
+first), optional `model` / `model_by_provider` / `effort` / `allowed_tools`,
+`min_confidence` (integer, default 85), and `when` (node `when:` syntax; it
+reads node outputs, so echo a run input from a bash node to key on it). The turn
+must reply `{ decision: approve|changes|escalate, confidence: 0-100, reason,
+changes? }`. Only `approve` at or above `min_confidence` resolves the gate (the
+output is the reason); everything else, including a malformed reply, pauses for
+the human with the verdict attached. `KEELSON_APPROVAL_REVIEWER=off` disables
+every reviewer.
+
+```yaml
+- id: gate
+  approval:
+    message: "Approve this plan? $ARTIFACTS_DIR/plan.md"
+    reviewer:
+      when: "$gate-mode.output == 'true'"
+      allowed_tools: [Read, Glob, Grep]
+      prompt: Approve only when every criterion maps to a plan step.
+```
+
 Before an approval gate, a workflow may attach a run brief by writing
 `$ARTIFACTS_DIR/brief.json` as `{ sourceUrl?, title?, criteria: string[] }`.
 When the brief has criteria, a preceding reasoning node can write

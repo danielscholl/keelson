@@ -51,10 +51,16 @@ export {
   validateDagShape,
 } from "./graph.ts";
 export {
+  APPROVAL_REVIEWER_OUTPUT_FORMAT,
+  APPROVAL_REVIEWER_OUTPUT_SCHEMA,
+  type ApprovalReview,
+  type ApprovalReviewerOptions,
+  type ApprovalReviewerVerdict,
   type AwaitApproval,
   type AwaitInteraction,
   type MakeApprovalHandlerOptions,
   makeApprovalHandler,
+  parseReviewerVerdict,
 } from "./handlers/approval.ts";
 export { bashHandler, type MakeBashHandlerOptions, makeBashHandler } from "./handlers/bash.ts";
 export {

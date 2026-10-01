@@ -254,6 +254,81 @@ nodes:
     expect(intakeBody).toContain("KEELSON_INPUTS_subject_required");
   });
 
+  test("approval.reviewer parses with its defaults left to the handler", () => {
+    const result = parseWorkflow(
+      [
+        "name: gated",
+        "description: d",
+        "nodes:",
+        "  - id: gate-mode",
+        "    bash: printf true",
+        "  - id: gate",
+        "    depends_on: [gate-mode]",
+        "    approval:",
+        "      message: Approve?",
+        "      reviewer:",
+        "        when: \"$gate-mode.output == 'true'\"",
+        "        model: deep",
+        "        model_by_provider:",
+        "          copilot: gpt-6-astra",
+        "        effort: high",
+        "        allowed_tools: [Read, Grep]",
+        "        min_confidence: 90",
+        "        prompt: Check every criterion.",
+      ].join("\n"),
+      "gated.yaml",
+    );
+    expect(result.error).toBeNull();
+    const gate = result.workflow?.nodes.find((node) => node.id === "gate");
+    expect(gate && "approval" in gate ? gate.approval.reviewer : undefined).toEqual({
+      when: "$gate-mode.output == 'true'",
+      model: "deep",
+      model_by_provider: { copilot: "gpt-6-astra" },
+      effort: "high",
+      allowed_tools: ["Read", "Grep"],
+      min_confidence: 90,
+      prompt: "Check every criterion.",
+    });
+  });
+
+  test("approval.reviewer rejects an empty prompt, an out-of-range floor, and unknown keys", () => {
+    const base = [
+      "name: gated",
+      "description: d",
+      "nodes:",
+      "  - id: gate",
+      "    approval:",
+      "      message: Approve?",
+      "      reviewer:",
+    ];
+    const cases = [
+      ["        prompt: ''"],
+      ["        prompt: ok", "        min_confidence: 101"],
+      ["        prompt: ok", "        min_confidence: 50.5"],
+      ["        prompt: ok", "        denied_tools: [Bash]"],
+    ];
+    for (const extra of cases) {
+      const result = parseWorkflow([...base, ...extra].join("\n"), "gated.yaml");
+      expect(result.error).not.toBeNull();
+    }
+  });
+
+  test("bundled fix-issue keys its plan-gate reviewer on the auto_approve input", () => {
+    const filePath = path.join(import.meta.dir, "../assets/workflows/fix-issue.yaml");
+    const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
+    expect(result.error).toBeNull();
+    const gate = result.workflow?.nodes.find((node) => node.id === "approve-plan");
+    expect(gate && "approval" in gate).toBe(true);
+    const reviewer = gate && "approval" in gate ? gate.approval.reviewer : undefined;
+    expect(reviewer?.when).toBe("$gate-mode.output == 'true'");
+    expect(reviewer?.min_confidence).toBe(85);
+    expect(reviewer?.allowed_tools).toEqual(["Read", "Glob", "Grep"]);
+    expect(reviewer?.model_by_provider).toEqual({ copilot: "gpt-6-astra" });
+    expect(gate?.depends_on).toContain("gate-mode");
+    const mode = result.workflow?.nodes.find((node) => node.id === "gate-mode");
+    expect(mode && "bash" in mode ? mode.bash : "").toContain("KEELSON_INPUTS_auto_approve");
+  });
+
   test("bundled resolve-pr declares a valid converge gate", () => {
     const filePath = path.join(import.meta.dir, "../assets/workflows/resolve-pr.yaml");
     const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);

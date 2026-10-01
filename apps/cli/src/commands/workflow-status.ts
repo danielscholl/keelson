@@ -4,6 +4,7 @@
 
 import { workflowRunDetailSchema } from "@keelson/shared";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
+import { formatReviewerAnswer, formatReviewLines } from "../format-approval.ts";
 import {
   getRun,
   HttpError,
@@ -70,10 +71,24 @@ export async function runWorkflowStatus(
               worktreePath: detail.worktreePath,
               isolationEnabled: detail.isolationEnabled,
               worktreeEstablished: detail.worktreeEstablished,
-              nodes: detail.nodes.map((node) => ({ id: node.nodeId, status: node.status })),
+              nodes: detail.nodes.map((node) => ({
+                id: node.nodeId,
+                status: node.status,
+                ...(node.approval !== null ? { answeredBy: node.approval.answeredBy } : {}),
+              })),
+              gates: detail.nodes
+                .map((node) => formatReviewerAnswer(node.nodeId, node.approval))
+                .filter((line): line is string => line !== undefined),
               current: awaitingNode?.nodeId ?? null,
               awaiting:
-                detail.status === "paused" && awaitingNode ? { nodeId: awaitingNode.nodeId } : null,
+                detail.status === "paused" && awaitingNode
+                  ? {
+                      nodeId: awaitingNode.nodeId,
+                      ...(awaitingNode.approval !== null
+                        ? { review: formatReviewLines(awaitingNode.approval) }
+                        : {}),
+                    }
+                  : null,
             },
           },
           { json: opts.json },

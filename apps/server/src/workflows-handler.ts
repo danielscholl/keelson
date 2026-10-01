@@ -26,6 +26,8 @@ import {
   waitForCopilotModelClasses,
 } from "@keelson/providers";
 import {
+  type ApprovalRecord,
+  type ApprovalReview,
   bulkDeleteRunsBodySchema,
   bulkDeleteRunsResponseSchema,
   type ContentBlock,
@@ -111,7 +113,7 @@ import {
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { Hono } from "hono";
 import { z } from "zod";
-
+import { persistReviewerRecord } from "./approval-artifacts.ts";
 import {
   type RibWorkflowBinding,
   resolveWorkflowDefaultProviderId,
@@ -377,6 +379,9 @@ export interface PendingApproval {
   // store (and so the replay carries the right pauseId; SQLite never sees
   // the token).
   message: string;
+  // The declared reviewer's verdict (or why none could be read) when one ran
+  // before the gate reached the operator; replayed with the pause frame.
+  review?: ApprovalReview;
   resolve: (text: string) => void;
   reject: (err: Error) => void;
 }
@@ -2024,6 +2029,7 @@ export function createWorkflowController(
                   `approval node '${nodeId}' cannot resolve in a rib-run workflow (message: "${message}")`,
                 );
               },
+              reviewer: { promptHandler, enabled: approvalReviewerEnabled() },
             }),
           ],
           [
@@ -3134,6 +3140,7 @@ export function workflowRunWebSocketHandlers(deps: {
               nodeId: pending.nodeId,
               message: pending.message,
               pauseId: pending.pauseId,
+              ...(pending.review !== undefined ? { review: pending.review } : {}),
             };
             try {
               ws.send(JSON.stringify(frame));
@@ -3185,6 +3192,13 @@ interface IsolationConfig {
   base: string | undefined;
   /** Source repo root; worktrees land at `<projectRootPath>/.worktrees/<branch>/`. */
   projectRootPath: string;
+}
+
+// Operator floor for approval reviewers: `off` sends every gate to the human
+// regardless of what a workflow declares. Read per run so a restart is not
+// needed to flip it.
+export function approvalReviewerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.KEELSON_APPROVAL_REVIEWER?.trim().toLowerCase() !== "off";
 }
 
 interface ExecuteRunArgs {
@@ -3600,14 +3614,22 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
   // reference is a normal lexical capture, not a TDZ-dependent hoist.
   const nodeStart = new Map<string, string>();
   const nodeAccumulators = new Map<string, ReturnType<typeof createContentPartsAccumulator>>();
+  const approvalRecords = new Map<string, ApprovalRecord>();
+  const recordApproval = (nodeId: string, record: ApprovalRecord): void => {
+    approvalRecords.set(nodeId, record);
+    if (record.reviewerVerdict !== undefined || record.reviewerError !== undefined) {
+      persistReviewerRecord(activeRuns.get(runId)?.artifactsDir, nodeId, record);
+    }
+  };
 
   // Pause-and-await callback for the approval handler. Writes the 'paused'
   // run status + 'awaiting' node row so a page-reload mid-pause rehydrates
   // the approval callout from the snapshot, broadcasts the approval_awaiting
   // WS frame for live clients, and returns a Promise the route's POST /resume
   // (or DELETE / abortAll) settles.
-  const awaitApproval: AwaitApproval = async (nodeRunId, nodeId, message, signal) => {
+  const awaitApproval: AwaitApproval = async (nodeRunId, nodeId, message, signal, review) => {
     const artifactsDir = activeRuns.get(nodeRunId)?.artifactsDir;
+    recordApproval(nodeId, { answeredBy: "operator", ...review });
     const { brief, checklist } = await loadBriefAndCoverage({ artifactsDir });
     if (brief !== null) {
       try {
@@ -3677,6 +3699,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         nodeId,
         pauseId,
         message: augmentedMessage,
+        ...(review !== undefined ? { review } : {}),
         resolve: settle.resolve,
         reject: settle.reject,
       });
@@ -3704,6 +3727,9 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
           provider: null,
           model: null,
           effort: null,
+          // The reviewer's verdict rides the awaiting row so a reload mid-pause
+          // can still say why the gate reached the operator.
+          approval: approvalRecords.get(nodeId) ?? null,
         });
       } catch (err) {
         console.warn(
@@ -3717,6 +3743,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         nodeId,
         message: augmentedMessage,
         pauseId,
+        ...(review !== undefined ? { review } : {}),
       });
     });
   };
@@ -3867,7 +3894,18 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
   const handlers = new Map<string, NodeHandler>([
     ["bash", bashHandler],
     ["prompt", promptHandler],
-    ["approval", makeApprovalHandler({ awaitApproval })],
+    [
+      "approval",
+      makeApprovalHandler({
+        awaitApproval,
+        reviewer: {
+          promptHandler,
+          enabled: approvalReviewerEnabled(),
+          onAnswer: (_runId, nodeId, verdict) =>
+            recordApproval(nodeId, { answeredBy: "reviewer", reviewerVerdict: verdict }),
+        },
+      }),
+    ],
     ["cancel", makeCancelHandler({ requestCancel })],
     ["command", makeCommandHandler({ promptHandler })],
     [
@@ -3960,6 +3998,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
           nodeStart,
           nodeAccumulators,
           currentNodes,
+          approvalRecords,
           workflowName: workflow.name,
           ...(publishRun !== undefined ? { publishStructured: publishRun } : {}),
           ...(usageStore !== undefined ? { usageStore } : {}),
@@ -4126,6 +4165,9 @@ interface DispatchArgs {
   nodeStart: Map<string, string>;
   nodeAccumulators: Map<string, ReturnType<typeof createContentPartsAccumulator>>;
   currentNodes?: Map<string, string>;
+  // Approval-gate records keyed by nodeId, written by the pause callback and
+  // the reviewer's answer hook; node_done persists and drops the entry.
+  approvalRecords?: Map<string, ApprovalRecord>;
   // Snapshot bridge: when set, a node's structured output is
   // republished under the run-scoped snapshot key. Undefined → no publish.
   publishStructured?: (value: unknown) => void;
@@ -4149,6 +4191,7 @@ function dispatchRunEvent(args: DispatchArgs): void {
     nodeStart,
     nodeAccumulators,
     currentNodes,
+    approvalRecords,
     publishStructured,
     workflowName,
     usageStore,
@@ -4232,6 +4275,8 @@ function dispatchRunEvent(args: DispatchArgs): void {
       const provider = sanitizeProvenanceField(event.result.provider);
       const model = sanitizeProvenanceField(event.result.model);
       const effort = sanitizeEffort(event.result.effort);
+      const approval = approvalRecords?.get(event.nodeId) ?? null;
+      approvalRecords?.delete(event.nodeId);
       store.upsertNodeOutput({
         runId,
         nodeId: event.nodeId,
@@ -4245,6 +4290,7 @@ function dispatchRunEvent(args: DispatchArgs): void {
         provider,
         model,
         effort,
+        approval,
       });
       subscribers.broadcast(runId, {
         type: "node_done",
@@ -4256,6 +4302,7 @@ function dispatchRunEvent(args: DispatchArgs): void {
         ...(provider !== null ? { provider } : {}),
         ...(model !== null ? { model } : {}),
         ...(effort !== null ? { effort } : {}),
+        ...(approval !== null ? { approval } : {}),
       });
       // Snapshot bridge: a structured node output becomes the latest frame
       // on the run-scoped snapshot key.

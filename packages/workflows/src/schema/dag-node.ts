@@ -333,16 +333,40 @@ export const approvalOnRejectSchema = z.object({
 
 export type ApprovalOnReject = z.infer<typeof approvalOnRejectSchema>;
 
+export const APPROVAL_REVIEWER_DEFAULT_MIN_CONFIDENCE = 85;
+
+/**
+ * Schema for the `reviewer` sub-object on approval nodes: one agent turn that
+ * may answer the gate for the operator. Strict so a misspelled key cannot
+ * silently widen what the reviewer is allowed to do.
+ */
+export const approvalReviewerSchema = z
+  .object({
+    prompt: z.string().min(1, "'reviewer.prompt' must be a non-empty string"),
+    model: z.string().min(1).optional(),
+    model_by_provider: z.record(z.string(), z.string().min(1)).optional(),
+    effort: effortLevelSchema.optional(),
+    allowed_tools: z.array(z.string()).optional(),
+    min_confidence: z.number().int().min(0).max(100).optional(),
+    when: z.string().min(1).optional(),
+  })
+  .strict();
+
+export type ApprovalReviewer = z.infer<typeof approvalReviewerSchema>;
+
+const approvalBlockSchema = z.object({
+  message: z.string().min(1, "'approval.message' must not be empty"),
+  capture_response: z.boolean().optional(),
+  on_reject: approvalOnRejectSchema.optional(),
+  reviewer: approvalReviewerSchema.optional(),
+});
+
 /**
  * Approval node schema — pauses the workflow for human review.
  * Extends full base for type compatibility; AI-specific fields are ignored at runtime.
  */
 export const approvalNodeSchema = dagNodeBaseSchema.extend({
-  approval: z.object({
-    message: z.string().min(1, "'approval.message' must not be empty"),
-    capture_response: z.boolean().optional(),
-    on_reject: approvalOnRejectSchema.optional(),
-  }),
+  approval: approvalBlockSchema,
 });
 
 /** DAG node that pauses workflow execution for human approval */
@@ -451,13 +475,7 @@ export const dagNodeSchema = dagNodeBaseSchema
     prompt: z.string().optional(),
     bash: z.string().optional(),
     loop: loopNodeConfigSchema.optional(),
-    approval: z
-      .object({
-        message: z.string().min(1, "'approval.message' must not be empty"),
-        capture_response: z.boolean().optional(),
-        on_reject: approvalOnRejectSchema.optional(),
-      })
-      .optional(),
+    approval: approvalBlockSchema.optional(),
     cancel: z.string().optional(),
     // Script-only
     script: z.string().optional(),

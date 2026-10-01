@@ -14,6 +14,7 @@ export type {
   AgentDefinition,
   ApprovalNode,
   ApprovalOnReject,
+  ApprovalReviewer,
   BashNode,
   CancelNode,
   CommandNode,
@@ -31,9 +32,11 @@ export type {
 } from "./dag-node.ts";
 // DAG node types
 export {
+  APPROVAL_REVIEWER_DEFAULT_MIN_CONFIDENCE,
   agentDefinitionSchema,
   approvalNodeSchema,
   approvalOnRejectSchema,
+  approvalReviewerSchema,
   BASH_NODE_AI_FIELDS,
   bashNodeSchema,
   cancelNodeSchema,

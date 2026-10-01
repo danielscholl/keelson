@@ -233,6 +233,55 @@ Pauses the run for a human decision. The pause needs a running server
 downstream node can branch on approval versus requested changes. `on_reject`
 (`{ prompt, max_attempts }`) re-prompts on rejection instead of failing the run.
 
+#### `reviewer`
+
+An approval node may declare a `reviewer`: one agent turn that answers the gate
+for the operator when it approves with high confidence. Anything else falls
+through to the human gate exactly as before, with the reviewer's verdict shown
+in the approval callout so the operator sees why it escalated.
+
+```yaml
+- id: gate
+  approval:
+    message: "Approve this plan? $ARTIFACTS_DIR/plan.md"
+    capture_response: true
+    reviewer:
+      when: "$gate-mode.output == 'true'"
+      model: deep
+      allowed_tools: [Read, Glob, Grep]
+      min_confidence: 85
+      prompt: |
+        Approve only when every acceptance criterion maps to a plan step and
+        nothing in the plan contradicts the code; spot-check with Read and Grep.
+  depends_on: [plan, gate-mode]
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `prompt` | yes | The rubric. Takes the same substitutions as a `prompt` node (`$nodeId.output`, `$inputs.<key>`, `$ARGUMENTS`, `$ARTIFACTS_DIR`). The turn sees the gate's message first, then this. |
+| `model`, `model_by_provider`, `effort` | no | Model selection, as on a `prompt` node. Unset falls back to the workflow default. |
+| `allowed_tools` | no | Tool allowlist for the turn. Keep reviewers read-only. |
+| `min_confidence` | no | Integer 0 to 100, default `85`. An `approve` below it still pauses for the operator. |
+| `when` | no | Same condition syntax as a node's `when:`. False skips the reviewer and the gate pauses as usual. The evaluator reads node outputs, not inputs, so a workflow that keys the reviewer on a run input echoes it from a small `bash` node first. |
+
+The reviewer's reply is pinned to a fixed verdict shape and validated fail-closed:
+
+```json
+{ "decision": "approve | changes | escalate", "confidence": 0, "reason": "...", "changes": "..." }
+```
+
+`decision: approve` with `confidence` at or above `min_confidence` resolves the
+gate: the node's output is the `reason`, and the run's node record carries
+`answeredBy: "reviewer"` with the verdict. A `changes` or `escalate` decision, a
+low confidence, a failed turn, or a reply that is not this shape pauses for the
+human with the verdict (or the parse error) attached; an empty or malformed
+reply never reads as an approval. The verdict is also written to
+`$ARTIFACTS_DIR/approvals/<nodeId>.reviewer.json`.
+
+`KEELSON_APPROVAL_REVIEWER=off` is the operator floor: it disables every
+reviewer, so all gates go to the human regardless of what a workflow declares.
+A resumed run does not re-run the reviewer for a gate that was already answered.
+
 ### `cancel`
 
 Terminates the run with a recorded reason. Pair it with `when:` as a guard that
