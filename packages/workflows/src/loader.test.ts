@@ -640,6 +640,18 @@ nodes:
     );
   });
 
+  test("a hyphenated tail on a known name is rejected as unknown, not partially matched", () => {
+    const yaml = `
+name: directives-hyphen
+description: hyphen typo
+nodes:
+  - id: a
+    prompt: "$DIRECTIVES.verify-extra"
+`;
+    const result = parseWorkflow(yaml, "directives-hyphen.yaml");
+    expect(result.error?.error).toMatch(/unknown directive '\$DIRECTIVES\.verify-extra'/);
+  });
+
   test("an unknown directive inside loop.prompt is rejected too", () => {
     const yaml = `
 name: directives-loop

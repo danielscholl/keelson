@@ -304,7 +304,7 @@ function nodeBodyOf(node: DagNode): string {
 // must exclude all of those — falling through to the node-output alt
 // where the full id is captured (subject to the loader's reserved-id check).
 const SUB_PATTERN =
-  /(\\)?\$(?:(ARGUMENTS)(?![a-zA-Z0-9_-])|(ARTIFACTS_DIR)(?![a-zA-Z0-9_-])|(converge\.round)(?![a-zA-Z0-9_-])|memory\.recall\.(items|trace)(?![a-zA-Z0-9_-])|DIRECTIVES\.([a-zA-Z_][a-zA-Z0-9_]*)|inputs\.([a-zA-Z_][a-zA-Z0-9_]*)|([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?)?/g;
+  /(\\)?\$(?:(ARGUMENTS)(?![a-zA-Z0-9_-])|(ARTIFACTS_DIR)(?![a-zA-Z0-9_-])|(converge\.round)(?![a-zA-Z0-9_-])|memory\.recall\.(items|trace)(?![a-zA-Z0-9_-])|DIRECTIVES\.([a-zA-Z_][a-zA-Z0-9_-]*)|inputs\.([a-zA-Z_][a-zA-Z0-9_]*)|([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?)?/g;
 const CONVERGE_ROUND_PATTERN = /(\\)?\$(converge\.round)(?![a-zA-Z0-9_-])/g;
 
 /**

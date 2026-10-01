@@ -198,6 +198,7 @@ describe("substituteDirectiveRefs", () => {
 
   test("a longer identifier is not a prefix match of a known name", () => {
     expect(substituteDirectiveRefs("$DIRECTIVES.verifying")).toBe("$DIRECTIVES.verifying");
+    expect(substituteDirectiveRefs("$DIRECTIVES.verify-extra")).toBe("$DIRECTIVES.verify-extra");
   });
 });
 
@@ -208,6 +209,10 @@ describe("findUnknownDirectiveRefs", () => {
         "$DIRECTIVES.verify $DIRECTIVES.nope \\$DIRECTIVES.bogus $DIRECTIVES.zz",
       ),
     ).toEqual(["nope", "zz"]);
+  });
+
+  test("a hyphenated tail makes the whole candidate unknown", () => {
+    expect(findUnknownDirectiveRefs("$DIRECTIVES.verify-extra")).toEqual(["verify-extra"]);
   });
 
   test("returns an empty list when every ref is known", () => {

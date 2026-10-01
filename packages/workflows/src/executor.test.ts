@@ -1259,6 +1259,7 @@ describe("resolveBody — $DIRECTIVES", () => {
   test("resolves each known name and leaves an unknown one literal", () => {
     expect(resolveBody("$DIRECTIVES.confirm", {}, new Map())).toBe(DIRECTIVES.confirm);
     expect(resolveBody("$DIRECTIVES.nope", {}, new Map())).toBe("$DIRECTIVES.nope");
+    expect(resolveBody("$DIRECTIVES.verify-extra", {}, new Map())).toBe("$DIRECTIVES.verify-extra");
   });
 
   test("a node named DIRECTIVES cannot shadow the namespace", () => {

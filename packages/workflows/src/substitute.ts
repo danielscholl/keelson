@@ -109,7 +109,9 @@ export function substituteNodeOutputRefs(
   );
 }
 
-const DIRECTIVE_REF_PATTERN = /(\\)?\$DIRECTIVES\.([a-zA-Z_][a-zA-Z0-9_]*)/g;
+// Consumes hyphens like node ids do, so `verify-extra` is an unknown name
+// rather than `verify` with a literal tail.
+const DIRECTIVE_REF_PATTERN = /(\\)?\$DIRECTIVES\.([a-zA-Z_][a-zA-Z0-9_-]*)/g;
 
 /**
  * Substitute `$DIRECTIVES.<name>` with the named directive's text.
