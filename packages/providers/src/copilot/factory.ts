@@ -239,6 +239,19 @@ function readPackageVersion(packageJsonPath: string | undefined): string | undef
   return undefined;
 }
 
+function readPackageBinPaths(packageJsonPath: string): string[] {
+  try {
+    const manifest: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+    if (typeof manifest !== "object" || manifest === null || !("bin" in manifest)) return [];
+    const bin = manifest.bin;
+    if (typeof bin === "string") return [bin];
+    if (typeof bin !== "object" || bin === null) return [];
+    return Object.values(bin).filter((path): path is string => typeof path === "string");
+  } catch {
+    return [];
+  }
+}
+
 export interface ResolveBundledCopilotCliOptions {
   /** Module path to anchor resolution at; defaults to the installed @github/copilot-sdk entry. */
   sdkEntry?: string;
@@ -263,8 +276,12 @@ function inspectBundledCopilotCli(
   for (const packageName of packageNames) {
     const packageJsonPath = resolveFromSdk(requireFromSdk, `${packageName}/package.json`);
     if (!packageJsonPath) continue;
-    const cliPath = join(dirname(packageJsonPath), "index.js");
-    if (!existsSync(cliPath)) continue;
+    const packageRoot = dirname(packageJsonPath);
+    const cliPath = [
+      join(packageRoot, "index.js"),
+      ...readPackageBinPaths(packageJsonPath).map((path) => join(packageRoot, path)),
+    ].find(existsSync);
+    if (!cliPath) continue;
     return {
       cliPath,
       version: readPackageVersion(packageJsonPath) ?? installedVersion,
