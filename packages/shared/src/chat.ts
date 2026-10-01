@@ -103,6 +103,19 @@ export function coerceTokenUsage(u: unknown): TokenUsage | undefined {
   return out;
 }
 
+// The capture seams' "did this turn spend anything" test. Cache reads and
+// writes are billed, so a turn that served its whole prompt from cache still
+// counts; a context-only report (zero totals, no cache fields) does not.
+export function tokenUsageHasSpend(u: TokenUsage): boolean {
+  return (
+    u.inputTokens +
+      u.outputTokens +
+      (u.cacheReadInputTokens ?? 0) +
+      (u.cacheCreationInputTokens ?? 0) >
+    0
+  );
+}
+
 // Hydrates a persisted usage_json column; degrades to undefined on malformed
 // rows so a bad write can't break conversation/run loads.
 export function parsePersistedTokenUsage(raw: string | null): TokenUsage | undefined {

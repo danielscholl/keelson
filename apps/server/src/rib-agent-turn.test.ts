@@ -1670,6 +1670,22 @@ describe("makeRibAgentTurn — usage capture", () => {
     expect(events).toHaveLength(0);
   });
 
+  it("records a cache-only usage report, since cache reads are billed", async () => {
+    const { store, events } = fakeUsageStore();
+    const run = makeRun(
+      fakeProvider({
+        chunks: [
+          { type: "usage", usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 500 } },
+          { type: "done" },
+        ],
+      }),
+      { getUsageStore: () => store },
+    );
+    await run("chamber", { prompt: "hi" }).result;
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 500 });
+  });
+
   it("does not record a zero-total usage report", async () => {
     const { store, events } = fakeUsageStore();
     const run = makeRun(

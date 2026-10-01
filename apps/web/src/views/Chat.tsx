@@ -9,6 +9,7 @@ import {
   type ReasoningEffortLevel,
   type RegisteredToolInfo,
   type TokenUsage,
+  tokenUsageHasSpend,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
 import type { KeyboardEvent } from "react";
@@ -2034,10 +2035,17 @@ export function Chat({
   // model swap or a resolved alias would otherwise reprice history). The row
   // is written before the done frame, so a fetch once streaming ends sees it.
   const [ledgerCost, setLedgerCost] = useState<ConversationLedgerCost | null>(null);
-  const spendTurns = usageSummary.totals.turns;
+  // Billable turns, not the ↑/↓ render gate: a cache-only turn shows no
+  // in/out row but still has a ledger row to price.
+  const billableTurns = useMemo(
+    () =>
+      messages.filter((m) => m.role === "assistant" && m.usage && tokenUsageHasSpend(m.usage))
+        .length,
+    [messages],
+  );
   useEffect(() => {
     setLedgerCost(null);
-    if (conversationId === null || streaming || spendTurns === 0) return;
+    if (conversationId === null || streaming || billableTurns === 0) return;
     let cancelled = false;
     void Promise.all([
       getUsageSummary({ conversationId }),
@@ -2057,7 +2065,7 @@ export function Chat({
     return () => {
       cancelled = true;
     };
-  }, [conversationId, streaming, spendTurns]);
+  }, [conversationId, streaming, billableTurns]);
 
   const sidebarCollapsed = settings.sidebarCollapsed ?? false;
 

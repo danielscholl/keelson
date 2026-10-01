@@ -27,6 +27,14 @@ import { formatProviderModel } from "../lib/formatProvenance.ts";
 import { formatCacheHit, formatCostUsd, formatTokens } from "../lib/formatTokens.ts";
 
 const WINDOWS: UsageWindow[] = ["24h", "7d", "30d"];
+
+// A null aggregate cost is unexplained on its own; the count of rows that
+// kept it unpriced is what tells an operator which price to add.
+function formatAggregateCost(costUsd: number | null, unpricedEvents: number): string {
+  return costUsd === null && unpricedEvents > 0
+    ? `unpriced (${unpricedEvents.toLocaleString()})`
+    : formatCostUsd(costUsd);
+}
 const WINDOW_LABEL: Record<UsageWindow, string> = { "24h": "24h", "7d": "7d", "30d": "30d" };
 type UsageSubView = "overview" | "models" | "jobs" | "ledger";
 const USAGE_SUBVIEWS: Array<{ id: UsageSubView; label: string }> = [
@@ -639,6 +647,7 @@ interface RosterRow {
   outputTokens: number;
   cacheHitRatio: number | null;
   costUsd: number | null;
+  unpricedEvents: number;
   avgPerTurn: number;
   share: number;
   color: string;
@@ -690,6 +699,7 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
           outputTokens: g.outputTokens,
           cacheHitRatio: g.cacheHitRatio,
           costUsd: g.costUsd,
+          unpricedEvents: g.unpricedEvents,
           avgPerTurn: g.events > 0 ? tokens / g.events : 0,
           share: grandTotal > 0 ? Math.round((tokens / grandTotal) * 100) : 0,
           color: `var(--s${((colorIndex.get(g.key) ?? 0) % SERIES_COLOR_COUNT) + 1})`,
@@ -747,7 +757,7 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                     <td>↑ {formatTokens(r.inputTokens)}</td>
                     <td>↓ {formatTokens(r.outputTokens)}</td>
                     <td>{formatCacheHit(r.cacheHitRatio)}</td>
-                    <td>{formatCostUsd(r.costUsd)}</td>
+                    <td>{formatAggregateCost(r.costUsd, r.unpricedEvents)}</td>
                     <td>{formatTokens(r.avgPerTurn)}</td>
                     <td>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -1004,8 +1014,8 @@ function JobsSection({ range }: { range: UsageWindow }) {
                       <td>{formatTokens(job.avgTokensPerRun)}</td>
                       <td>{formatTokens(job.p95TokensPerRun)}</td>
                       <td>{formatTokens(job.totalTokens)}</td>
-                      <td>{formatCostUsd(job.costUsdPerRun)}</td>
-                      <td>{formatCostUsd(job.totalCostUsd)}</td>
+                      <td>{formatAggregateCost(job.costUsdPerRun, job.unpricedEvents)}</td>
+                      <td>{formatAggregateCost(job.totalCostUsd, job.unpricedEvents)}</td>
                       <td>{formatCacheHit(job.cacheHitRatio)}</td>
                     </tr>
                   ))}

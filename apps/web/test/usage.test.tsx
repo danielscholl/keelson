@@ -389,6 +389,31 @@ describe("Usage page", () => {
     getUsageJobsImpl = async () => [];
   });
 
+  test("a job with unpriced runs says how many rows kept its cost null", async () => {
+    getUsageJobsImpl = async () => [
+      {
+        key: "mixed-job",
+        runs: 3,
+        totalTokens: 900,
+        avgTokensPerRun: 300,
+        p95TokensPerRun: 400,
+        totalCostUsd: null,
+        costUsdPerRun: null,
+        unpricedEvents: 2,
+        cacheHitRatio: null,
+      },
+    ];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    fireEvent.click(screen.getByLabelText("Jobs"));
+    await waitFor(() => expect(screen.getAllByText("mixed-job").length).toBeGreaterThan(0));
+    expect(screen.getAllByText("unpriced (2)")).toHaveLength(2);
+    getUsageJobsImpl = async () => [];
+  });
+
   test("leads the overview with a recommendation strip for a right-size finding", async () => {
     getUsageSummaryImpl = async () => ({
       totals: {

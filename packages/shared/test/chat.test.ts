@@ -16,6 +16,7 @@ import {
   parsePersistedTokenUsage,
   providerCapabilitiesSchema,
   SCHEMA_VERSION,
+  tokenUsageHasSpend,
   tokenUsageSchema,
   WIRE_PROTOCOL_VERSION,
 } from "../src/chat.ts";
@@ -687,6 +688,24 @@ describe("modelInfoSchema", () => {
 
   it("rejects unknown defaultReasoningEffort values (F10.6)", () => {
     expect(() => modelInfoSchema.parse({ id: "x", defaultReasoningEffort: "ultra" })).toThrow();
+  });
+});
+
+describe("tokenUsageHasSpend", () => {
+  it("counts cache reads and writes as spend; a context-only report is not spend", () => {
+    expect(tokenUsageHasSpend({ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 5 })).toBe(
+      true,
+    );
+    expect(
+      tokenUsageHasSpend({ inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 5 }),
+    ).toBe(true);
+    expect(tokenUsageHasSpend({ inputTokens: 1, outputTokens: 0 })).toBe(true);
+    expect(
+      tokenUsageHasSpend({ inputTokens: 0, outputTokens: 0, contextTokens: 900, contextWindow: 1 }),
+    ).toBe(false);
+    expect(tokenUsageHasSpend({ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 })).toBe(
+      false,
+    );
   });
 });
 

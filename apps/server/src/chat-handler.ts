@@ -26,6 +26,7 @@ import {
   renameConversationBodySchema,
   type TokenUsage,
   type ToolDefinition,
+  tokenUsageHasSpend,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
 import { getRegisteredTools } from "@keelson/skills";
@@ -702,7 +703,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     const hasPersistable =
       assistantContent.length > 0 ||
       contentParts.length > 0 ||
-      (turnUsage !== undefined && turnUsage.inputTokens + turnUsage.outputTokens > 0);
+      (turnUsage !== undefined && tokenUsageHasSpend(turnUsage));
     if (hasPersistable) {
       const truncated = deps.abortSignal.aborted || streamFailed;
       // Provider/model provenance on the row: the session-resolved model when
@@ -728,7 +729,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       // Usage ledger: only when the turn carried real spend — a context-only
       // zero-total report or a content-only turn with no usage chunk adds
       // nothing to any rollup, so it isn't worth an event row.
-      if (turnUsage !== undefined && turnUsage.inputTokens + turnUsage.outputTokens > 0) {
+      if (turnUsage !== undefined && tokenUsageHasSpend(turnUsage)) {
         const durationMs = Date.now() - turnStart;
         deps.usageStore?.record({
           source: "chat",
