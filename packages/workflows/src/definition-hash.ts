@@ -14,7 +14,9 @@ import { sha256 } from "./managed.ts";
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value !== null && typeof value === "object") {
-    const out: Record<string, unknown> = {};
+    // Null prototype so a literal `__proto__` key lands as an own property
+    // instead of silently rewriting the accumulator's prototype.
+    const out: Record<string, unknown> = Object.create(null);
     for (const key of Object.keys(value as Record<string, unknown>).sort()) {
       const v = (value as Record<string, unknown>)[key];
       if (v === undefined) continue;

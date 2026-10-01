@@ -50,6 +50,15 @@ describe("workflowDefinitionHash", () => {
     expect(workflowDefinitionHash(parsed(commented))).toBe(workflowDefinitionHash(parsed(YAML)));
   });
 
+  test("a literal __proto__ key is part of the definition, not dropped", () => {
+    const plain = { name: "x", description: "d", nodes: [{ id: "n", output_format: { a: 1 } }] };
+    const withProto = JSON.parse(
+      '{"name":"x","description":"d","nodes":[{"id":"n","output_format":{"a":1,"__proto__":{"b":2}}}]}',
+    );
+    expect(canonicalWorkflowJson(withProto)).toContain("__proto__");
+    expect(workflowDefinitionHash(withProto)).not.toBe(workflowDefinitionHash(plain));
+  });
+
   test("node order is part of the definition", () => {
     const a = { name: "x", description: "d", nodes: [{ id: "a" }, { id: "b" }] };
     const b = { name: "x", description: "d", nodes: [{ id: "b" }, { id: "a" }] };

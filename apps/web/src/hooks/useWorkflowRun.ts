@@ -381,7 +381,11 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
   // pauseId. Stays null until the WS effect installs one for the active
   // runId (then nulled again on unmount / runId change).
   const hydrateRef = useRef<((gen: number) => Promise<void>) | null>(null);
+  // Bumped after a successful resume-run so the stream effect tears down the
+  // socket `run_done` parked and opens a fresh one against the re-running row.
+  const [streamGen, setStreamGen] = useState(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: streamGen is a reopen trigger the effect never reads
   useEffect(() => {
     if (!runId) {
       setStatus("loading");
@@ -509,20 +513,23 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
       hydrateRef.current = null;
       handle.close();
     };
-  }, [runId]);
+  }, [runId, streamGen]);
 
   const cancel = useCallback(async () => {
     if (!runId) return;
     await cancelWorkflowRun(runId);
   }, [runId]);
 
-  // Resume a terminal (failed/cancelled) run from its last completed node. Like
-  // `resume` above, no optimistic update: the server flips status back to
-  // running and the next snapshot/frame is the source of truth. Errors propagate
-  // so the caller can surface a non-resumable run.
+  // Resume a terminal (failed/cancelled) run from its last completed node. No
+  // optimistic update: the server flips status back to running and the fresh
+  // stream's open-time hydrate is the source of truth. The reopen is required
+  // because `run_done` stopped reconnection, so without it nothing after the
+  // POST would reach this view. Errors propagate so the caller can surface a
+  // non-resumable run.
   const resumeRun = useCallback(async () => {
     if (!runId) return;
     await resumeWorkflowRun(runId);
+    setStreamGen((gen) => gen + 1);
   }, [runId]);
 
   // Resume the paused approval node. The server flips run status back to
