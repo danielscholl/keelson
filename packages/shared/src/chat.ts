@@ -29,7 +29,10 @@ export const WIRE_PROTOCOL_VERSION = "1.0" as const;
 // `worktreeEstablished` fields on WorkflowRunSummary.
 // 0.8: approval reviewer — `approval` on node rows and `node_done`, `review`
 // on `approval_awaiting`.
-export const SCHEMA_VERSION = "0.8" as const;
+// 0.9: usage cost — new `costUsd`, `cacheHitRatio`, and `unpricedEvents` on
+// usage totals/group/series/breakdown rows; `totalCostUsd`, `costUsdPerRun`,
+// `cacheHitRatio`, and `unpricedEvents` on jobs rows; `costUsd` on event rows.
+export const SCHEMA_VERSION = "0.9" as const;
 
 // A peer (the server on /api/health + /api/config, or a client's bundle)
 // reports its SCHEMA_VERSION. Any difference from this build's value signals
@@ -98,6 +101,19 @@ export function coerceTokenUsage(u: unknown): TokenUsage | undefined {
   const contextWindow = count(rec.contextWindow);
   if (contextWindow !== undefined && contextWindow > 0) out.contextWindow = contextWindow;
   return out;
+}
+
+// The capture seams' "did this turn spend anything" test. Cache reads and
+// writes are billed, so a turn that served its whole prompt from cache still
+// counts; a context-only report (zero totals, no cache fields) does not.
+export function tokenUsageHasSpend(u: TokenUsage): boolean {
+  return (
+    u.inputTokens +
+      u.outputTokens +
+      (u.cacheReadInputTokens ?? 0) +
+      (u.cacheCreationInputTokens ?? 0) >
+    0
+  );
 }
 
 // Hydrates a persisted usage_json column; degrades to undefined on malformed

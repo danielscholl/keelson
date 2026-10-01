@@ -62,6 +62,7 @@ enabled.
 | `ribWorkflowGrants` | object of `rib: [workflow]` | Which ribs may start which catalog workflows. Default-deny without an entry. See [Rib workflow grants](#rib-workflow-grants). |
 | `ribApprovalGrants` | object of `rib: [workflow]` | Which ribs may answer the approval gates of which workflows, on runs they started. Default-deny without an entry. See [Rib approval grants](#rib-approval-grants). |
 | `gateways` | array | OpenAI-compatible endpoints registered as providers. Managed with `keelson gateway`, not by hand. See [Gateways](#gateways). |
+| `modelPrices` | object of `model: { rates }` | USD-per-million-token rates the Usage ledger prices turns with, consulted before the bundled Anthropic table. See [Model prices](#model-prices). |
 
 The built-in provider ids are `copilot`, `claude`, `pi`, `codex`, and `stub` (the
 offline echo provider). Out of the box, **only copilot loads; stub, claude, pi,
@@ -335,6 +336,41 @@ into them (`tools: false`) and they do not resume a session, so each turn is
 fresh and tool-less. Each gateway entry may set its own `modelClasses` map. See
 the [provider reference](../../reference/providers/#gateway-providers) for where
 gateways sit in the matrix.
+
+## Model prices
+
+The [Usage](../../concepts/usage/) tab prices each turn from a per-model rate
+table. Keelson bundles the Anthropic list prices for the Claude models its Claude
+provider offers and recognizes them under the Copilot catalog's dotted ids too.
+Every other model is unpriced until you add it under `modelPrices`, keyed by the
+model id the ledger records (the served model, so the id a provider reports, not
+a class alias), with all four rates in US dollars per million tokens:
+
+```json
+{
+  "modelPrices": {
+    "my-gateway-model": {
+      "inputPerMTok": 1,
+      "outputPerMTok": 4,
+      "cacheReadPerMTok": 0.1,
+      "cacheWritePerMTok": 0
+    },
+    "claude-opus-4-8": {
+      "inputPerMTok": 4.5,
+      "outputPerMTok": 22.5,
+      "cacheReadPerMTok": 0.45,
+      "cacheWritePerMTok": 5.6
+    }
+  }
+}
+```
+
+An entry for a bundled model overrides its bundled rate, and the id matches
+whether you write it dotted or hyphenated. All four rates are required: an entry
+missing one fails the config read rather than pricing that dimension at zero.
+Cost is computed when a Usage view is read, so an edit here reprices history on
+the next load with no restart. A model with no entry shows as `unpriced`, never
+as a zero cost.
 
 ## Governance
 

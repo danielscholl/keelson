@@ -7,14 +7,20 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import type { Database } from "bun:sqlite";
-import type {
-  UsageBreakdownRowWire,
-  UsageEventRowWire,
-  UsageJobsRowWire,
-  UsagePulseMinuteWire,
-  UsagePulseSnapshotWire,
-  UsageSeriesRowWire,
-  UsageSummaryResponseWire,
+import {
+  cacheHitRatio,
+  estimateCostUsd,
+  type ModelPrice,
+  type ModelPrices,
+  resolveModelPrice,
+  type UsageBreakdownRowWire,
+  type UsageEventRowWire,
+  type UsageJobsRowWire,
+  type UsagePricedTotalsWire,
+  type UsagePulseMinuteWire,
+  type UsagePulseSnapshotWire,
+  type UsageSeriesRowWire,
+  type UsageSummaryResponseWire,
 } from "@keelson/shared";
 
 export type UsageEventSource = "chat" | "workflow" | "rib";
@@ -84,6 +90,7 @@ export type UsageSeriesBucket = "hour" | "day";
 export interface UsageSummaryArgs {
   sinceIso?: string;
   groupBy: UsageGroupBy;
+  conversationId?: string;
 }
 
 export interface UsageSeriesArgs {
@@ -105,10 +112,17 @@ export interface UsageEventsFilter {
   status?: string;
   runId?: string;
   sinceIso?: string;
+  conversationId?: string;
 }
 
 export interface UsageJobsArgs {
   sinceIso?: string;
+}
+
+export interface UsageStoreOptions {
+  // Read once per query so an edited config.json reprices history without a
+  // restart; cost is never persisted.
+  priceOverrides?: () => ModelPrices | undefined;
 }
 
 export interface UsageStore {
@@ -202,6 +216,15 @@ const TOTALS_SELECT = `
   COALESCE(SUM(cache_write_tokens), 0) AS cacheWriteTokens
 `;
 
+// Aggregates carry `model` so each slice can be priced, and count the rows
+// that reported cache reads at all: a SUM over all-null cache columns is 0,
+// which must read as "unreported", never as a 0% hit rate.
+const MODEL_TOTALS_SELECT = `
+  model,
+  ${TOTALS_SELECT},
+  COUNT(cache_read_tokens) AS cacheReadReported
+`;
+
 interface TotalsRow {
   events: number;
   inputTokens: number;
@@ -210,28 +233,107 @@ interface TotalsRow {
   cacheWriteTokens: number;
 }
 
-interface GroupRow extends TotalsRow {
+interface ModelTotalsRow extends TotalsRow {
+  model: string;
+  cacheReadReported: number;
+}
+
+interface GroupRow extends ModelTotalsRow {
   key: string;
 }
 
-interface SeriesRow extends TotalsRow {
+interface SeriesRow extends ModelTotalsRow {
   bucketIso: string;
   key: string;
 }
 
-interface BreakdownRow extends TotalsRow {
+interface BreakdownRow extends ModelTotalsRow {
   key: string;
   split: string;
 }
 
-interface JobRunTokensRow {
+interface JobRunRow extends ModelTotalsRow {
   key: string;
   runId: string;
-  totalTokens: number;
 }
 
 interface MinuteRow extends Omit<TotalsRow, "events"> {
   minuteIso: string;
+}
+
+type Pricer = (model: string) => ModelPrice | undefined;
+
+function createPricer(overrides: ModelPrices | undefined): Pricer {
+  const cache = new Map<string, ModelPrice | undefined>();
+  return (model) => {
+    if (!cache.has(model)) cache.set(model, resolveModelPrice(model, overrides));
+    return cache.get(model);
+  };
+}
+
+interface PricedAccumulator extends TotalsRow {
+  cacheReadReported: number;
+  costUsd: number;
+  unpricedEvents: number;
+}
+
+function emptyAccumulator(): PricedAccumulator {
+  return {
+    events: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    cacheReadReported: 0,
+    costUsd: 0,
+    unpricedEvents: 0,
+  };
+}
+
+function accumulate(acc: PricedAccumulator, row: ModelTotalsRow, pricer: Pricer): void {
+  acc.events += row.events;
+  acc.inputTokens += row.inputTokens;
+  acc.outputTokens += row.outputTokens;
+  acc.cacheReadTokens += row.cacheReadTokens;
+  acc.cacheWriteTokens += row.cacheWriteTokens;
+  acc.cacheReadReported += row.cacheReadReported;
+  const price = pricer(row.model);
+  if (price) acc.costUsd += estimateCostUsd(row, price);
+  else acc.unpricedEvents += row.events;
+}
+
+function finishAccumulator(acc: PricedAccumulator): UsagePricedTotalsWire {
+  return {
+    events: acc.events,
+    inputTokens: acc.inputTokens,
+    outputTokens: acc.outputTokens,
+    cacheReadTokens: acc.cacheReadTokens,
+    cacheWriteTokens: acc.cacheWriteTokens,
+    costUsd: acc.unpricedEvents > 0 ? null : acc.costUsd,
+    unpricedEvents: acc.unpricedEvents,
+    cacheHitRatio:
+      acc.cacheReadReported > 0 ? cacheHitRatio(acc.inputTokens, acc.cacheReadTokens) : null,
+  };
+}
+
+// Folds per-model aggregate rows into one priced total per `keyOf` value,
+// keeping first-seen order (the queries already ORDER BY the output key).
+function foldByKey<R extends ModelTotalsRow>(
+  rows: R[],
+  keyOf: (row: R) => string,
+  pricer: Pricer,
+): Map<string, PricedAccumulator> {
+  const byKey = new Map<string, PricedAccumulator>();
+  for (const row of rows) {
+    const key = keyOf(row);
+    let acc = byKey.get(key);
+    if (!acc) {
+      acc = emptyAccumulator();
+      byKey.set(key, acc);
+    }
+    accumulate(acc, row, pricer);
+  }
+  return byKey;
 }
 
 // Floors `d` to the start of its UTC minute, matching the strftime bucket
@@ -254,7 +356,8 @@ function percentile(sorted: number[], pct: number): number {
   return sorted[Math.max(0, Math.min(sorted.length - 1, idx))] ?? 0;
 }
 
-export function createUsageStore(db: Database): UsageStore {
+export function createUsageStore(db: Database, options: UsageStoreOptions = {}): UsageStore {
+  const pricerForQuery = () => createPricer(options.priceOverrides?.());
   const insertEvent = db.prepare(
     `INSERT INTO usage_events(
        ts, source, provider, model, input_tokens, output_tokens,
@@ -327,19 +430,27 @@ export function createUsageStore(db: Database): UsageStore {
         clauses.push("ts >= ?");
         params.push(args.sinceIso);
       }
+      if (args.conversationId !== undefined) {
+        clauses.push("conversation_id = ?");
+        params.push(args.conversationId);
+      }
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-      const totalsRow = db
-        .query(`SELECT ${TOTALS_SELECT} FROM usage_events ${where}`)
-        .get(...params) as TotalsRow;
+      const pricer = pricerForQuery();
       const groupRows = db
         .query(
-          `SELECT COALESCE(${column}, '${UNGROUPED_KEY}') AS key, ${TOTALS_SELECT}
+          `SELECT COALESCE(${column}, '${UNGROUPED_KEY}') AS key, ${MODEL_TOTALS_SELECT}
              FROM usage_events ${where}
-             GROUP BY key
+             GROUP BY key, model
              ORDER BY key ASC`,
         )
         .all(...params) as GroupRow[];
-      return { totals: totalsRow, groups: groupRows };
+      const totals = emptyAccumulator();
+      for (const row of groupRows) accumulate(totals, row, pricer);
+      const groups = [...foldByKey(groupRows, (row) => row.key, pricer)].map(([key, acc]) => ({
+        key,
+        ...finishAccumulator(acc),
+      }));
+      return { totals: finishAccumulator(totals), groups };
     },
     series(args) {
       const column = GROUP_BY_COLUMN[args.groupBy];
@@ -352,16 +463,23 @@ export function createUsageStore(db: Database): UsageStore {
         params.push(args.sinceIso);
       }
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      const pricer = pricerForQuery();
       const rows = db
         .query(
           `SELECT strftime('${strftimeFormat}', ts) AS bucketIso,
-                  COALESCE(${column}, '${UNGROUPED_KEY}') AS key, ${TOTALS_SELECT}
+                  COALESCE(${column}, '${UNGROUPED_KEY}') AS key, ${MODEL_TOTALS_SELECT}
              FROM usage_events ${where}
-             GROUP BY bucketIso, key
+             GROUP BY bucketIso, key, model
              ORDER BY bucketIso ASC, key ASC`,
         )
         .all(...params) as SeriesRow[];
-      return rows;
+      const labels = new Map(rows.map((row) => [`${row.bucketIso}\u0000${row.key}`, row]));
+      return [...foldByKey(rows, (row) => `${row.bucketIso}\u0000${row.key}`, pricer)].map(
+        ([fold, acc]) => {
+          const label = labels.get(fold) as SeriesRow;
+          return { bucketIso: label.bucketIso, key: label.key, ...finishAccumulator(acc) };
+        },
+      );
     },
     breakdown(args = {}) {
       const groupColumn = GROUP_BY_COLUMN[args.groupBy ?? "source"];
@@ -373,17 +491,24 @@ export function createUsageStore(db: Database): UsageStore {
         params.push(args.sinceIso);
       }
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      const pricer = pricerForQuery();
       const rows = db
         .query(
           `SELECT COALESCE(${groupColumn}, '${UNGROUPED_KEY}') AS key,
                  COALESCE(${splitColumn}, '${UNGROUPED_KEY}') AS split,
-                 ${TOTALS_SELECT}
+                 ${MODEL_TOTALS_SELECT}
              FROM usage_events ${where}
-             GROUP BY key, split
+             GROUP BY key, split, model
              ORDER BY key ASC, split ASC`,
         )
         .all(...params) as BreakdownRow[];
-      return rows as UsageBreakdownRowWire[];
+      const labels = new Map(rows.map((row) => [`${row.key}\u0000${row.split}`, row]));
+      return [...foldByKey(rows, (row) => `${row.key}\u0000${row.split}`, pricer)].map(
+        ([fold, acc]) => {
+          const label = labels.get(fold) as BreakdownRow;
+          return { key: label.key, split: label.split, ...finishAccumulator(acc) };
+        },
+      );
     },
     jobs(args = {}) {
       const clauses = ["source IN ('workflow', 'rib')"];
@@ -392,38 +517,57 @@ export function createUsageStore(db: Database): UsageStore {
         clauses.push("ts >= ?");
         params.push(args.sinceIso);
       }
+      const pricer = pricerForQuery();
       const rows = db
         .query(
-          // Job burn uses fresh input + output; cache columns stay separately
-          // queryable through summary/series/events rather than being folded in.
           `SELECT COALESCE(workflow_name, rib_id, source) AS key,
                  COALESCE(run_id, printf('event:%d', id)) AS runId,
-                  COALESCE(SUM(input_tokens + output_tokens), 0) AS totalTokens
+                 ${MODEL_TOTALS_SELECT}
              FROM usage_events
             WHERE ${clauses.join(" AND ")}
-            GROUP BY key, runId
-            ORDER BY key ASC, totalTokens ASC`,
+            GROUP BY key, runId, model
+            ORDER BY key ASC`,
         )
-        .all(...params) as JobRunTokensRow[];
+        .all(...params) as JobRunRow[];
 
-      const byJob = new Map<string, number[]>();
-      for (const row of rows) {
-        const totals = byJob.get(row.key) ?? [];
-        totals.push(row.totalTokens);
-        byJob.set(row.key, totals);
+      // Job burn is fresh input + output per run; cache columns feed the cost
+      // and hit ratio but stay out of the token figures.
+      const runsByJob = new Map<string, PricedAccumulator[]>();
+      for (const [fold, acc] of foldByKey(rows, (row) => `${row.key}\u0000${row.runId}`, pricer)) {
+        const key = fold.slice(0, fold.indexOf("\u0000"));
+        const runs = runsByJob.get(key) ?? [];
+        runs.push(acc);
+        runsByJob.set(key, runs);
       }
 
-      return [...byJob.entries()]
-        .map(([key, totals]) => {
+      return [...runsByJob.entries()]
+        .map(([key, runAccs]) => {
+          const totals = runAccs.map((acc) => acc.inputTokens + acc.outputTokens);
           const sorted = [...totals].sort((a, b) => a - b);
           const totalTokens = totals.reduce((sum, value) => sum + value, 0);
           const runs = totals.length;
+          const job = emptyAccumulator();
+          for (const acc of runAccs) {
+            job.events += acc.events;
+            job.inputTokens += acc.inputTokens;
+            job.outputTokens += acc.outputTokens;
+            job.cacheReadTokens += acc.cacheReadTokens;
+            job.cacheWriteTokens += acc.cacheWriteTokens;
+            job.cacheReadReported += acc.cacheReadReported;
+            job.costUsd += acc.costUsd;
+            job.unpricedEvents += acc.unpricedEvents;
+          }
+          const priced = finishAccumulator(job);
           return {
             key,
             runs,
             totalTokens,
             avgTokensPerRun: runs > 0 ? totalTokens / runs : 0,
             p95TokensPerRun: percentile(sorted, 95),
+            totalCostUsd: priced.costUsd,
+            costUsdPerRun: priced.costUsd === null || runs === 0 ? null : priced.costUsd / runs,
+            unpricedEvents: priced.unpricedEvents,
+            cacheHitRatio: priced.cacheHitRatio,
           };
         })
         .sort((a, b) => a.key.localeCompare(b.key));
@@ -451,14 +595,23 @@ export function createUsageStore(db: Database): UsageStore {
         clauses.push("ts >= ?");
         params.push(filter.sinceIso);
       }
+      if (filter.conversationId !== undefined) {
+        clauses.push("conversation_id = ?");
+        params.push(filter.conversationId);
+      }
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       const limit =
         filter.limit !== undefined && filter.limit >= 0 ? Math.floor(filter.limit) : 100;
       params.push(limit);
+      const pricer = pricerForQuery();
       const rows = db
         .query(`SELECT * FROM usage_events ${where} ORDER BY ts DESC, id DESC LIMIT ?`)
         .all(...params) as UsageEventRow[];
-      return rows.map(rowToEvent) as UsageEventRowWire[];
+      return rows.map((row): UsageEventRowWire => {
+        const event = rowToEvent(row);
+        const price = pricer(event.model);
+        return { ...event, costUsd: price ? estimateCostUsd(event, price) : null };
+      });
     },
     pulse(now = new Date()) {
       const composedTotals = pulseTotalsSince.get(startOfLocalDayIso(now)) as TotalsRow;

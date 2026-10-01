@@ -43,9 +43,28 @@ export const usageTotalsSchema = z
   .strict();
 export type UsageTotalsWire = z.infer<typeof usageTotalsSchema>;
 
+// Derived at read time from token counts and the price table, never stored, so
+// a price correction reprices history. `costUsd` is null when any contributing
+// event's model has no price (`unpricedEvents` says how many); `cacheHitRatio`
+// is cacheRead / (input + cacheRead), null when no event reported cache reads
+// or the denominator is zero. Neither ever degrades to a fabricated zero.
+export const usageCostFieldsSchema = z
+  .object({
+    costUsd: z.number().nonnegative().nullable(),
+    unpricedEvents: z.number().int().nonnegative(),
+    cacheHitRatio: z.number().min(0).max(1).nullable(),
+  })
+  .strict();
+export type UsageCostFieldsWire = z.infer<typeof usageCostFieldsSchema>;
+
+export const usagePricedTotalsSchema = usageTotalsSchema
+  .extend(usageCostFieldsSchema.shape)
+  .strict();
+export type UsagePricedTotalsWire = z.infer<typeof usagePricedTotalsSchema>;
+
 // (a) GET /api/usage/summary — overall totals plus a per-group (source,
 // provider, model, etc. — grouping is a query param) breakdown.
-export const usageGroupRowSchema = usageTotalsSchema
+export const usageGroupRowSchema = usagePricedTotalsSchema
   .extend({
     key: z.string(),
   })
@@ -54,14 +73,14 @@ export type UsageGroupRowWire = z.infer<typeof usageGroupRowSchema>;
 
 export const usageSummaryResponseSchema = z
   .object({
-    totals: usageTotalsSchema,
+    totals: usagePricedTotalsSchema,
     groups: z.array(usageGroupRowSchema),
   })
   .strict();
 export type UsageSummaryResponseWire = z.infer<typeof usageSummaryResponseSchema>;
 
 // (b) GET /api/usage/series — time-bucketed totals per group, for charting.
-export const usageSeriesRowSchema = usageTotalsSchema
+export const usageSeriesRowSchema = usagePricedTotalsSchema
   .extend({
     bucketIso: z.string(),
     key: z.string(),
@@ -73,7 +92,7 @@ export const usageSeriesResponseSchema = z.array(usageSeriesRowSchema);
 export type UsageSeriesResponseWire = z.infer<typeof usageSeriesResponseSchema>;
 
 // (c) GET /api/usage/breakdown — a groupBy x splitBy matrix; defaults to source x model.
-export const usageBreakdownRowSchema = usageTotalsSchema
+export const usageBreakdownRowSchema = usagePricedTotalsSchema
   .extend({
     key: z.string(),
     split: z.string(),
@@ -92,6 +111,12 @@ export const usageJobsRowSchema = z
     totalTokens: z.number().int().nonnegative(),
     avgTokensPerRun: z.number().nonnegative(),
     p95TokensPerRun: z.number().nonnegative(),
+    // Same null rules as usageCostFieldsSchema; a job with one unpriced run
+    // has no honest total, so both cost fields go null together.
+    totalCostUsd: z.number().nonnegative().nullable(),
+    costUsdPerRun: z.number().nonnegative().nullable(),
+    unpricedEvents: z.number().int().nonnegative(),
+    cacheHitRatio: z.number().min(0).max(1).nullable(),
   })
   .strict();
 export type UsageJobsRowWire = z.infer<typeof usageJobsRowSchema>;
@@ -114,6 +139,8 @@ export const usageEventRowSchema = z
     outputTokens: z.number().int().nonnegative(),
     cacheReadTokens: z.number().int().nonnegative().nullable(),
     cacheWriteTokens: z.number().int().nonnegative().nullable(),
+    // Priced at read time from this row's counts; null when the model has no price.
+    costUsd: z.number().nonnegative().nullable(),
     durationMs: z.number().int().nonnegative().nullable(),
     // Read-side stays open: the ledger is append-only history, so rows written
     // by another writer version must render, not 500 the whole tail. The

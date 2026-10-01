@@ -2,12 +2,14 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import type { TokenUsage } from "@keelson/shared";
+import { cacheHitRatio, type TokenUsage } from "@keelson/shared";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef } from "react";
 import {
   contextFillLevel,
   contextPercent,
+  formatCacheHit,
+  formatCostUsd,
   formatTokens,
   hasSpend,
 } from "../../lib/formatTokens.ts";
@@ -18,6 +20,15 @@ interface UsagePopoverProps {
   // Required: mounted only once a turn has reported (same gate as UsageChip).
   latest: TokenUsage;
   totals: SessionUsageTotals;
+  // Read from the usage ledger for this conversation, which prices each turn
+  // at its served model. Omitted until the ledger has answered.
+  ledger?: ConversationLedgerCost;
+}
+
+export interface ConversationLedgerCost {
+  lastTurnCostUsd: number | null;
+  sessionCostUsd: number | null;
+  cacheHitRatio: number | null;
 }
 
 interface UsagePopoverPanelProps {
@@ -29,6 +40,8 @@ interface UsagePopoverPanelProps {
 interface UsageBreakdownProps {
   usage: TokenUsage;
   spendTitle?: string;
+  // Omitted → no cost row (callers without a priced model); null → "unpriced".
+  costUsd?: number | null;
 }
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -40,7 +53,7 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function UsageBreakdown({ usage, spendTitle = "Last turn" }: UsageBreakdownProps) {
+export function UsageBreakdown({ usage, spendTitle = "Last turn", costUsd }: UsageBreakdownProps) {
   const pct = contextPercent(usage.contextTokens, usage.contextWindow);
   const hasTurnSpend = hasSpend(usage);
   const hasCacheRead = usage.cacheReadInputTokens !== undefined;
@@ -48,7 +61,13 @@ export function UsageBreakdown({ usage, spendTitle = "Last turn" }: UsageBreakdo
   const spendRows = hasTurnSpend || hasCacheRead || hasCacheWrite;
   const cacheReadRow =
     usage.cacheReadInputTokens !== undefined ? (
-      <Row label="Cache read" value={formatTokens(usage.cacheReadInputTokens)} />
+      <>
+        <Row label="Cache read" value={formatTokens(usage.cacheReadInputTokens)} />
+        <Row
+          label="Cache hit"
+          value={formatCacheHit(cacheHitRatio(usage.inputTokens, usage.cacheReadInputTokens))}
+        />
+      </>
     ) : null;
   const cacheWriteRow =
     usage.cacheCreationInputTokens !== undefined ? (
@@ -82,6 +101,7 @@ export function UsageBreakdown({ usage, spendTitle = "Last turn" }: UsageBreakdo
           )}
           {cacheReadRow}
           {cacheWriteRow}
+          {costUsd !== undefined && <Row label="Cost" value={formatCostUsd(costUsd)} />}
         </section>
       )}
     </>
@@ -177,16 +197,28 @@ export function UsagePopoverPanel({
   );
 }
 
-export function UsagePopover({ popoverId, latest, totals }: UsagePopoverProps) {
+export function UsagePopover({ popoverId, latest, totals, ledger }: UsagePopoverProps) {
   return (
     <UsagePopoverPanel popoverId={popoverId}>
-      <UsageBreakdown usage={latest} />
+      <UsageBreakdown usage={latest} costUsd={ledger?.lastTurnCostUsd} />
       {totals.turns > 0 && (
         <section className="usage-popover-section">
           <div className="usage-popover-section-title">Session</div>
           <Row label="↑ Input" value={formatTokens(totals.inputTokens)} />
           <Row label="↓ Output" value={formatTokens(totals.outputTokens)} />
+          {totals.cacheReadTokens > 0 && (
+            <Row label="Cache read" value={formatTokens(totals.cacheReadTokens)} />
+          )}
+          {totals.cacheWriteTokens > 0 && (
+            <Row label="Cache write" value={formatTokens(totals.cacheWriteTokens)} />
+          )}
           <Row label="Turns" value={String(totals.turns)} />
+          {ledger && (
+            <>
+              <Row label="Cache hit" value={formatCacheHit(ledger.cacheHitRatio)} />
+              <Row label="Cost" value={formatCostUsd(ledger.sessionCostUsd)} />
+            </>
+          )}
         </section>
       )}
     </UsagePopoverPanel>

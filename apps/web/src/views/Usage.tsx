@@ -24,9 +24,17 @@ import {
 } from "../api.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { formatProviderModel } from "../lib/formatProvenance.ts";
-import { formatTokens } from "../lib/formatTokens.ts";
+import { formatCacheHit, formatCostUsd, formatTokens } from "../lib/formatTokens.ts";
 
 const WINDOWS: UsageWindow[] = ["24h", "7d", "30d"];
+
+// A null aggregate cost is unexplained on its own; the count of rows that
+// kept it unpriced is what tells an operator which price to add.
+function formatAggregateCost(costUsd: number | null, unpricedEvents: number): string {
+  return costUsd === null && unpricedEvents > 0
+    ? `unpriced (${unpricedEvents.toLocaleString()})`
+    : formatCostUsd(costUsd);
+}
 const WINDOW_LABEL: Record<UsageWindow, string> = { "24h": "24h", "7d": "7d", "30d": "30d" };
 type UsageSubView = "overview" | "models" | "jobs" | "ledger";
 const USAGE_SUBVIEWS: Array<{ id: UsageSubView; label: string }> = [
@@ -78,11 +86,6 @@ const FAILURE_EVENTS_LIMIT = 200;
 // enough to judge (runs) and stay under the per-run token bar (avg).
 const RIGHT_SIZE_MIN_RUNS = 3;
 const RIGHT_SIZE_MAX_AVG_TOKENS = 500;
-
-function cacheReadRate(inputTokens: number, cacheReadTokens: number) {
-  const totalInputTokens = inputTokens + cacheReadTokens;
-  return totalInputTokens > 0 ? Math.round((cacheReadTokens / totalInputTokens) * 100) : 0;
-}
 
 export function Usage() {
   const [range, setRange] = useState<UsageWindow>("7d");
@@ -285,7 +288,6 @@ function PulseStats({
   const { totals } = summary;
   const totalTokens = totals.inputTokens + totals.outputTokens;
   const totalInputTokens = totals.inputTokens + totals.cacheReadTokens;
-  const cacheReadRatePct = cacheReadRate(totals.inputTokens, totals.cacheReadTokens);
 
   return (
     <div className="usage-stats">
@@ -297,17 +299,33 @@ function PulseStats({
         </div>
       </div>
       <div className="usage-stat">
+        <div className="usage-stat-value">{formatCostUsd(totals.costUsd)}</div>
+        <div className="usage-stat-label">Cost</div>
+        <div className="usage-stat-sub">
+          {totals.unpricedEvents > 0
+            ? `${totals.unpricedEvents.toLocaleString()} unpriced ${
+                totals.unpricedEvents === 1 ? "turn" : "turns"
+              }`
+            : "list price · priced at read time"}
+        </div>
+      </div>
+      <div className="usage-stat">
         <div className="usage-stat-value">{totals.events.toLocaleString()}</div>
         <div className="usage-stat-label">Agent turns</div>
         <div className="usage-stat-sub">chat · workflows · ribs</div>
       </div>
       <div className="usage-stat">
-        <div className="usage-stat-value" data-tone="ok">
-          {cacheReadRatePct}%
+        <div
+          className="usage-stat-value"
+          data-tone={totals.cacheHitRatio !== null ? "ok" : undefined}
+        >
+          {formatCacheHit(totals.cacheHitRatio)}
         </div>
-        <div className="usage-stat-label">Cache read rate</div>
+        <div className="usage-stat-label">Cache hit</div>
         <div className="usage-stat-sub usage-mono">
-          {formatTokens(totals.cacheReadTokens)} of {formatTokens(totalInputTokens)} input
+          {totals.cacheHitRatio !== null
+            ? `${formatTokens(totals.cacheReadTokens)} of ${formatTokens(totalInputTokens)} input`
+            : "no cache reads reported"}
         </div>
       </div>
       <div className="usage-stat">
@@ -627,7 +645,9 @@ interface RosterRow {
   turns: number;
   inputTokens: number;
   outputTokens: number;
-  cachePct: number;
+  cacheHitRatio: number | null;
+  costUsd: number | null;
+  unpricedEvents: number;
   avgPerTurn: number;
   share: number;
   color: string;
@@ -677,7 +697,9 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
           turns: g.events,
           inputTokens: g.inputTokens,
           outputTokens: g.outputTokens,
-          cachePct: cacheReadRate(g.inputTokens, g.cacheReadTokens),
+          cacheHitRatio: g.cacheHitRatio,
+          costUsd: g.costUsd,
+          unpricedEvents: g.unpricedEvents,
           avgPerTurn: g.events > 0 ? tokens / g.events : 0,
           share: grandTotal > 0 ? Math.round((tokens / grandTotal) * 100) : 0,
           color: `var(--s${((colorIndex.get(g.key) ?? 0) % SERIES_COLOR_COUNT) + 1})`,
@@ -716,7 +738,8 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                   <th>Turns</th>
                   <th>↑ In</th>
                   <th>↓ Out</th>
-                  <th>Cache</th>
+                  <th>Cache hit</th>
+                  <th>Cost</th>
                   <th>Avg / turn</th>
                   <th>Share</th>
                 </tr>
@@ -733,7 +756,8 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                     <td>{r.turns.toLocaleString()}</td>
                     <td>↑ {formatTokens(r.inputTokens)}</td>
                     <td>↓ {formatTokens(r.outputTokens)}</td>
-                    <td>{r.cachePct}%</td>
+                    <td>{formatCacheHit(r.cacheHitRatio)}</td>
+                    <td>{formatAggregateCost(r.costUsd, r.unpricedEvents)}</td>
                     <td>{formatTokens(r.avgPerTurn)}</td>
                     <td>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -919,13 +943,7 @@ function FlowChart({
 }
 
 function JobsSection({ range }: { range: UsageWindow }) {
-  const [jobs, setJobs] = useState<Array<{
-    key: string;
-    runs: number;
-    totalTokens: number;
-    avgTokensPerRun: number;
-    p95TokensPerRun: number;
-  }> | null>(null);
+  const [jobs, setJobs] = useState<UsageJobsRowWire[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -983,6 +1001,9 @@ function JobsSection({ range }: { range: UsageWindow }) {
                     <th>Avg tokens/run</th>
                     <th>p95</th>
                     <th>Window total</th>
+                    <th>Cost/run</th>
+                    <th>Window cost</th>
+                    <th>Cache hit</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -993,6 +1014,9 @@ function JobsSection({ range }: { range: UsageWindow }) {
                       <td>{formatTokens(job.avgTokensPerRun)}</td>
                       <td>{formatTokens(job.p95TokensPerRun)}</td>
                       <td>{formatTokens(job.totalTokens)}</td>
+                      <td>{formatAggregateCost(job.costUsdPerRun, job.unpricedEvents)}</td>
+                      <td>{formatAggregateCost(job.totalCostUsd, job.unpricedEvents)}</td>
+                      <td>{formatCacheHit(job.cacheHitRatio)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1264,6 +1288,7 @@ function LedgerSection({ range }: { range: UsageWindow }) {
                   <th>↑ In</th>
                   <th>↓ Out</th>
                   <th>Cache</th>
+                  <th>Cost</th>
                   <th>Dur</th>
                   <th>Status</th>
                 </tr>
@@ -1284,6 +1309,7 @@ function LedgerSection({ range }: { range: UsageWindow }) {
                     <td>↑ {formatTokens(ev.inputTokens)}</td>
                     <td>↓ {formatTokens(ev.outputTokens)}</td>
                     <td>{ev.cacheReadTokens != null ? formatTokens(ev.cacheReadTokens) : "—"}</td>
+                    <td>{formatCostUsd(ev.costUsd)}</td>
                     <td>{ev.durationMs != null ? formatEventDuration(ev.durationMs) : "—"}</td>
                     <td>
                       <span className={`status-dot ${statusDotClass(ev.status)}`} />

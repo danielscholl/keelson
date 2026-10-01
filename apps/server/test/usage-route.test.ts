@@ -100,6 +100,29 @@ describe("GET /api/usage/summary", () => {
     expect(parsed.totals.events).toBe(2);
   });
 
+  test("conversationId scopes the summary and ignores the window", async () => {
+    store.record({
+      ts: new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString(),
+      source: "chat",
+      provider: "claude",
+      model: "claude-sonnet-5",
+      conversationId: "conv-old",
+      inputTokens: 1000,
+      outputTokens: 1000,
+    });
+    const res = await app.fetch(
+      new Request("http://test/api/usage/summary?window=24h&conversationId=conv-old"),
+    );
+    expect(res.status).toBe(200);
+    const parsed = usageSummaryResponseSchema.parse(await res.json());
+    expect(parsed.totals.events).toBe(1);
+    expect(parsed.totals.costUsd).toBeCloseTo(0.012, 6);
+    const events = await app.fetch(
+      new Request("http://test/api/usage/events?conversationId=conv-old&limit=1"),
+    );
+    expect(usageEventsResponseSchema.parse(await events.json())).toHaveLength(1);
+  });
+
   test("400 on a bad window", async () => {
     const res = await app.fetch(new Request("http://test/api/usage/summary?window=bogus"));
     expect(res.status).toBe(400);
