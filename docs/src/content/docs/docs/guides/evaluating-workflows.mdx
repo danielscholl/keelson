@@ -202,6 +202,12 @@ two runs used a different `--provider` or, for in-process runs, a different
 keelson version. Comparing a results
 file with itself is always `within-noise`.
 
+## Next
+
+The [hillclimb](../../workflows/hillclimb/) workflow runs this loop for you:
+one root-cause prompt change per round from the train split, the eval re-run,
+and the compare verdict deciding keep or revert.
+
 ## Related
 
 - [Authoring workflows](../authoring-workflows/): the loop the eval closes.

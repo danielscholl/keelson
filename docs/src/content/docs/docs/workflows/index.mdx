@@ -8,7 +8,7 @@ sidebar:
 import { Aside } from "@astrojs/starlight/components";
 import WorkflowCards from "../../../../components/WorkflowCards.astro";
 
-The bundled catalog contains ten workflows. They are real, runnable, and the
+The bundled catalog contains twelve workflows. They are real, runnable, and the
 [authoring recipes](../guides/authoring-workflows/) show up composed: a
 three-line approval-gate recipe is one thing, the same gate sitting inside a
 thirty-node investigate-and-implement pipeline is where the shape clicks. This
@@ -20,7 +20,7 @@ documentation.
 
 ## Where these come from
 
-All ten are **bundled** starters: they ship with the package and seed into
+All twelve are **bundled** starters: they ship with the package and seed into
 your home (`<home>/workflows/`) on first run, so `keelson workflow list` shows
 them as `global` once seeded. Copy and edit one freely; the bundled original
 stays as a clean fallback. See [scopes](../reference/workflow-nodes/#scopes) for
@@ -59,9 +59,12 @@ stress-test any artifact (a claim, design, or plan) to a consensus verdict.
 
 <WorkflowCards names={["interactive-prd", "design-converge", "adversarial-review", "investigate"]} />
 
-## Author workflows
+## Author and tune workflows
 
-<WorkflowCards names={["workflow-builder"]} />
+Write a workflow from a description, or improve an existing one's prompts
+against an eval case set by measurement.
+
+<WorkflowCards names={["workflow-builder", "hillclimb"]} />
 
 ## Produce artifacts
 

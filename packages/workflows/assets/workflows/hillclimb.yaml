@@ -1,0 +1,744 @@
+# The rounds are unrolled (propose-N -> round-N) because a `loop` node is one
+# agent prompt, not a sub-DAG, and keep/revert must run outside the agent; the
+# round bodies share a YAML anchor and read their round number from a counter.
+# `mutates_checkout: false` although the run edits the target file: a held
+# project lock would 409 every nested `keelson eval run` the rounds depend on.
+
+name: hillclimb
+model: balanced
+mutates_checkout: false
+description: |
+  Use when: A workflow has an eval case set and you want its prompts improved
+            by measurement instead of by hand: each round proposes one
+            root-cause change, re-runs the eval, and keeps the change only
+            when the paired compare says keep.
+  Triggers: "hillclimb <workflow>", "improve the prompts against the eval",
+            "tune this workflow's prompts", "run the eval loop".
+  Does: Baselines the case set, then up to three rounds of propose (one
+        root-cause prompt change, train split only) -> validate -> evaluate ->
+        keep or revert by `keelson eval compare`, committing kept changes on a
+        `keelson/hillclimb/<name>-<stamp>` branch. Stops after two flat rounds,
+        buckets the remaining failures by root cause, and reports before/after
+        per split with a merge recommendation.
+  NOT for: writing the case set (keelson eval init), grading one run
+           (keelson eval run), changing a workflow's structure, or chasing
+           noise: a NOISE warning calls for more reps or cases, not more rounds.
+
+nodes:
+  - id: preflight
+    timeout: 120000
+    output_schema:
+      type: object
+      required: [case_file, workflow, target, rounds, branch]
+      properties:
+        case_file: { type: string }
+        workflow: { type: string }
+        target: { type: string }
+        repo: { type: string }
+        branch: { type: string }
+        rounds: { type: integer }
+    bash: |
+      set -euo pipefail
+      A="$ARTIFACTS_DIR"
+      CASE_FILE="${KEELSON_ARGUMENTS:-}"
+      ROUNDS="${KEELSON_INPUTS_rounds:-3}"
+      REPS="${KEELSON_INPUTS_reps:-}"
+      TARGET="${KEELSON_INPUTS_target:-}"
+
+      if [ -z "$CASE_FILE" ]; then
+        echo "ARGUMENTS must be the path to an eval case file (keelson eval init <workflow> writes one)" >&2
+        exit 1
+      fi
+      if [ ! -f "$CASE_FILE" ]; then
+        echo "case file not found: $CASE_FILE" >&2
+        exit 1
+      fi
+      CASE_FILE="$(cd "$(dirname "$CASE_FILE")" && pwd -P)/$(basename "$CASE_FILE")"
+      case "$ROUNDS" in
+        1|2|3) ;;
+        *) echo "rounds must be 1, 2, or 3: this workflow unrolls three rounds (got '$ROUNDS')" >&2; exit 1 ;;
+      esac
+      if [ -n "$REPS" ]; then
+        case "$REPS" in
+          ''|*[!0-9]*|0) echo "reps must be a positive integer (got '$REPS')" >&2; exit 1 ;;
+        esac
+      fi
+      command -v jq >/dev/null 2>&1 || { echo "jq is required on PATH" >&2; exit 1; }
+      command -v bun >/dev/null 2>&1 || { echo "bun is required on PATH" >&2; exit 1; }
+
+      BIN="$A/bin"
+      mkdir -p "$BIN"
+      if command -v keelson >/dev/null 2>&1; then
+        printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$(command -v keelson)" > "$BIN/keelson"
+      else
+        DIR="$PWD"
+        CLI=""
+        while :; do
+          if [ -f "$DIR/apps/cli/bin/keelson.ts" ] && [ -f "$DIR/package.json" ]; then
+            CLI="$DIR/apps/cli/bin/keelson.ts"
+            break
+          fi
+          [ "$DIR" = "/" ] && break
+          DIR=$(dirname "$DIR")
+        done
+        if [ -z "$CLI" ]; then
+          echo "keelson is not on PATH; install it or run from a keelson checkout" >&2
+          exit 1
+        fi
+        printf '#!/usr/bin/env bash\nexec bun %q "$@"\n' "$CLI" > "$BIN/keelson"
+      fi
+      chmod +x "$BIN/keelson"
+      KEELSON="$BIN/keelson"
+
+      META=$(HC_CASE_FILE="$CASE_FILE" bun -e '
+        const fs = require("fs");
+        const doc = Bun.YAML.parse(fs.readFileSync(process.env.HC_CASE_FILE, "utf8"));
+        if (!doc || typeof doc !== "object" || typeof doc.workflow !== "string" || !doc.workflow) {
+          console.error("case file has no top-level workflow: name");
+          process.exit(1);
+        }
+        if (!Array.isArray(doc.cases) || doc.cases.length === 0) {
+          console.error("case file has no cases");
+          process.exit(1);
+        }
+        const split = doc.split && typeof doc.split === "object" ? doc.split : {};
+        const train = Array.isArray(split.train)
+          ? split.train.length
+          : typeof split.train_fraction === "number"
+            ? Math.round(doc.cases.length * split.train_fraction)
+            : 0;
+        if (train === 0 || train >= doc.cases.length) {
+          console.error("case file needs cases in both split.train and split.test: the proposer reads only train rows and the held-out test rows check the change");
+          process.exit(1);
+        }
+        console.log(JSON.stringify({
+          workflow: doc.workflow,
+          name: typeof doc.name === "string" ? doc.name : doc.workflow,
+          project: typeof doc.project === "string" ? doc.project : null,
+        }));
+      ')
+      WORKFLOW=$(jq -r .workflow <<<"$META")
+      PROJECT=$(jq -r '.project // empty' <<<"$META")
+
+      name_matches() {
+        grep -qxF -e "name: $2" -e "name: \"$2\"" -e "name: '$2'" "$1"
+      }
+      find_in_dir() {
+        local f
+        [ -d "$1" ] || return 1
+        for f in "$1"/*.yaml "$1"/*.yml; do
+          [ -f "$f" ] || continue
+          if name_matches "$f" "$2"; then printf '%s' "$f"; return 0; fi
+        done
+        return 1
+      }
+      if [ -z "$TARGET" ]; then
+        if [ -n "$PROJECT" ]; then
+          echo "the case file names project '$PROJECT'; pass target=<path to that project's .keelson/workflows/$WORKFLOW.yaml>" >&2
+          exit 1
+        fi
+        DIR="$PWD"
+        while :; do
+          if [ -d "$DIR/.keelson/workflows" ]; then
+            TARGET=$(find_in_dir "$DIR/.keelson/workflows" "$WORKFLOW" || true)
+            break
+          fi
+          [ "$DIR" = "/" ] && break
+          DIR=$(dirname "$DIR")
+        done
+        if [ -z "$TARGET" ]; then
+          HOME_DIR="${KEELSON_HOME:-$HOME/.keelson}"
+          TARGET=$(find_in_dir "$HOME_DIR/workflows" "$WORKFLOW" || true)
+        fi
+        if [ -z "$TARGET" ]; then
+          echo "no editable copy of workflow '$WORKFLOW' under a .keelson/workflows/ directory or the keelson home; bundled assets are read-only. Copy the file into <project>/.keelson/workflows/ (keelson workflow list --json prints its path) or pass target=<path>." >&2
+          exit 1
+        fi
+      fi
+      if [ ! -f "$TARGET" ]; then
+        echo "target not found: $TARGET" >&2
+        exit 1
+      fi
+      TARGET="$(cd "$(dirname "$TARGET")" && pwd -P)/$(basename "$TARGET")"
+      if ! name_matches "$TARGET" "$WORKFLOW"; then
+        echo "target $TARGET does not declare 'name: $WORKFLOW' (the case file's workflow)" >&2
+        exit 1
+      fi
+      if ! "$KEELSON" --json workflow validate --dir "$(dirname "$TARGET")" "$WORKFLOW" > "$A/preflight-validate.json" 2>&1; then
+        echo "target does not validate before any change; fix it first: $(jq -r '.data.results[0].error // .error // "see preflight-validate.json"' "$A/preflight-validate.json" 2>/dev/null)" >&2
+        exit 1
+      fi
+
+      REPO=""
+      BRANCH=""
+      ORIG_REF=""
+      TDIR=$(dirname "$TARGET")
+      if git -C "$TDIR" rev-parse --show-toplevel >/dev/null 2>&1 && ! git -C "$TDIR" check-ignore -q "$TARGET"; then
+        REPO=$(cd "$(git -C "$TDIR" rev-parse --show-toplevel)" && pwd -P)
+        if [ -n "$(git -C "$REPO" status --porcelain -- "$TARGET")" ]; then
+          echo "target has uncommitted changes; commit or stash them so a kept round is a clean commit: $TARGET" >&2
+          exit 1
+        fi
+        ORIG_REF=$(git -C "$REPO" symbolic-ref --quiet --short HEAD || git -C "$REPO" rev-parse HEAD)
+        BRANCH="keelson/hillclimb/$WORKFLOW-$(date -u +%Y%m%dT%H%M%SZ)"
+        git -C "$REPO" checkout -q -b "$BRANCH"
+        git -C "$REPO" status --porcelain > "$A/status.before"
+      fi
+
+      cp "$TARGET" "$A/target.orig.yaml"
+      cp "$TARGET" "$A/target.kept.yaml"
+      echo 0 > "$A/round"
+      echo 0 > "$A/streak"
+
+      cat > "$BIN/hc-eval" <<'EOF'
+      #!/usr/bin/env bash
+      # hc-eval <label>: run the case set, copy its results beside the run, print one JSON line.
+      set -uo pipefail
+      A="$ARTIFACTS_DIR"
+      LABEL="$1"
+      CASE_FILE=$(jq -r .case_file "$A/state.json")
+      REPS=$(jq -r '.reps // empty' "$A/state.json")
+      set -- eval run "$CASE_FILE"
+      [ -n "$REPS" ] && set -- "$@" --reps "$REPS"
+      OUT=$("$A/bin/keelson" --json "$@" 2> "$A/$LABEL.stderr")
+      RC=$?
+      RESULTS=$(jq -r '.data.resultsPath // empty' <<<"$OUT" 2>/dev/null)
+      if [ -z "$RESULTS" ] || [ ! -f "$RESULTS" ]; then
+        MSG=$(jq -r '.error // empty' <<<"$OUT" 2>/dev/null)
+        [ -n "$MSG" ] || MSG=$(tail -n 5 "$A/$LABEL.stderr" | tr '\n' ' ')
+        jq -n --arg label "$LABEL" --arg msg "eval run exited $RC without results: $MSG" \
+          '{label: $label, ok: false, errors: -1, error: $msg}'
+        exit 0
+      fi
+      STEM="${RESULTS%.json}"
+      cp "$RESULTS" "$A/$LABEL.json"
+      [ -f "$STEM.md" ] && cp "$STEM.md" "$A/$LABEL.md"
+      rm -rf "$A/${LABEL}.outputs"
+      [ -d "${STEM}.outputs" ] && cp -R "${STEM}.outputs" "$A/${LABEL}.outputs"
+      jq -c --arg label "$LABEL" --arg home "$RESULTS" --arg copy "$A/$LABEL.json" '{
+        label: $label,
+        ok: (.summary.errors == 0),
+        results: $copy,
+        home_results: $home,
+        errors: .summary.errors,
+        warnings: .summary.warnings,
+        train: .summary.splits.train | {passRate, interval},
+        test: .summary.splits.test | {passRate, interval},
+        costUsd: .summary.cost.totalUsd
+      }' "$A/$LABEL.json"
+      EOF
+      chmod +x "$BIN/hc-eval"
+
+      cat > "$BIN/hc-view" <<'EOF'
+      #!/usr/bin/env bash
+      # hc-view <results.json> <dest> <train|all>: result rows, output files, and
+      # case expectations for one split, so a reader sees only that split.
+      set -euo pipefail
+      HC_RESULTS="$1" HC_DEST="$2" HC_SPLIT="$3" HC_CASE_FILE=$(jq -r .case_file "$ARTIFACTS_DIR/state.json") \
+      bun -e '
+        const fs = require("fs");
+        const path = require("path");
+        const { HC_RESULTS, HC_DEST, HC_SPLIT, HC_CASE_FILE } = process.env;
+        const results = JSON.parse(fs.readFileSync(HC_RESULTS, "utf8"));
+        const doc = Bun.YAML.parse(fs.readFileSync(HC_CASE_FILE, "utf8"));
+        const keep = (c) => HC_SPLIT === "all" || c.split === HC_SPLIT;
+        const ids = new Set(results.cases.filter(keep).map((c) => c.caseId));
+        fs.rmSync(HC_DEST, { recursive: true, force: true });
+        fs.mkdirSync(path.join(HC_DEST, "outputs"), { recursive: true });
+        const rows = results.cases.filter(keep).map((c) => {
+          let outputFile = null;
+          if (c.output.path && fs.existsSync(c.output.path)) {
+            outputFile = path.join(HC_DEST, "outputs", path.basename(c.output.path));
+            fs.copyFileSync(c.output.path, outputFile);
+          }
+          return { caseId: c.caseId, split: c.split, rep: c.rep, status: c.status, grader: c.grader, outputFile, error: c.error };
+        });
+        const summary = HC_SPLIT === "all" ? results.summary.overall : results.summary.splits[HC_SPLIT];
+        fs.writeFileSync(path.join(HC_DEST, "results.json"), JSON.stringify({ workflow: results.workflow, split: HC_SPLIT, summary, rows }, null, 2));
+        const cases = (Array.isArray(doc.cases) ? doc.cases : []).filter((c) => ids.has(String(c.id)));
+        fs.writeFileSync(path.join(HC_DEST, "cases.json"), JSON.stringify({ grader: doc.grader ?? null, cases }, null, 2));
+      '
+      EOF
+      chmod +x "$BIN/hc-view"
+
+      jq -n \
+        --arg case_file "$CASE_FILE" --arg workflow "$WORKFLOW" --arg target "$TARGET" \
+        --arg repo "$REPO" --arg branch "$BRANCH" --arg orig_ref "$ORIG_REF" \
+        --argjson rounds "$ROUNDS" --arg reps "$REPS" \
+        '{case_file: $case_file, workflow: $workflow, target: $target, repo: $repo, branch: $branch,
+          orig_ref: $orig_ref, rounds: $rounds, reps: (if $reps == "" then null else ($reps | tonumber) end)}' \
+        | tee "$A/state.json"
+
+  - id: baseline
+    depends_on: [preflight]
+    timeout: 10800000
+    output_schema:
+      type: object
+      required: [results, errors, warnings]
+      properties:
+        results: { type: string }
+        errors: { type: integer }
+        warnings: { type: array, items: { type: string } }
+    bash: |
+      set -euo pipefail
+      A="$ARTIFACTS_DIR"
+      RUN=$("$A/bin/hc-eval" baseline)
+      ERRORS=$(jq -r .errors <<<"$RUN")
+      if [ "$ERRORS" != "0" ]; then
+        echo "baseline eval failed: $(jq -r 'if .errors < 0 then .error else "\(.errors) case run(s) errored (see baseline.md)" end' <<<"$RUN")" >&2
+        exit 1
+      fi
+      if [ "$(jq '[.summary.splits.train.cases, .summary.splits.test.cases] | min' "$A/baseline.json")" = "0" ]; then
+        echo "baseline ran no cases in one split; the case set needs both train and test cases" >&2
+        exit 1
+      fi
+      cp "$A/baseline.json" "$A/kept.json"
+      dirname "$(jq -r .home_results <<<"$RUN")" > "$A/home-dir"
+      "$A/bin/hc-view" "$A/kept.json" "$A/train-view" train
+      jq -r '.warnings[]' <<<"$RUN" >&2
+      jq -c '{results, errors, warnings, train, test, costUsd}' <<<"$RUN"
+
+  - id: propose-1
+    depends_on: [baseline]
+    context: fresh
+    model: deep
+    allowed_tools: [Read, Glob, Grep, Edit]
+    output_format: &propose-format
+      type: object
+      required: [changed, root_cause, change_summary]
+      properties:
+        changed: { type: boolean }
+        root_cause: { type: string }
+        change_summary: { type: string }
+    output_schema: *propose-format
+    prompt: &propose-prompt |
+      You are hillclimbing the prompts of the `$preflight.output.workflow`
+      workflow against an eval case set. This round you may make ONE change.
+      The round number is one more than the integer in `$ARTIFACTS_DIR/round`.
+
+      ## The only file you may edit
+
+      `$preflight.output.target`
+
+      Edit prompt text only: `prompt:` bodies, `loop.prompt`, and the wording
+      of a node's `description`. Leave node ids, `depends_on`, `when:`,
+      `bash:`, `script:`, `output_format`, `output_schema`, `model`,
+      `allowed_tools`, and provider fields exactly as they are; add or remove
+      no nodes. Keep the YAML valid: preserve block-scalar indentation. Do not
+      touch any other file in this repository.
+
+      ## What you may read
+
+      - `$ARTIFACTS_DIR/train-view/results.json`: every train-split row with
+        its status, the grader's detail, and the path of its full output.
+      - `$ARTIFACTS_DIR/train-view/outputs/`: the full text each train case
+        produced.
+      - `$ARTIFACTS_DIR/train-view/cases.json`: the train cases, their inputs,
+        and what the grader checks.
+      - `$ARTIFACTS_DIR/round-*-change.md` and `round-*-decision.json`: what
+        earlier rounds tried and whether each was kept.
+      - The target file itself.
+
+      Read nothing else. The case set has a held-out test split; its rows,
+      outputs, and expectations are deliberately absent here. Do not open the
+      eval case file, the keelson home's `evals/` directory, or any results
+      file: a change tuned on the test split measures nothing.
+
+      ## Method
+
+      1. Read every failing train row and its full output. Read the passing
+         rows too: your change must not break them.
+      2. Name ONE root cause shared by the most failures: a rule the prompt
+         never states, an ambiguous instruction, an output format the grader
+         expects that the prompt leaves implicit, a step the agent skips.
+      3. Make ONE change that addresses that root cause for every input of
+         its kind: a general rule, a rewritten instruction, a clarified step.
+         Never a patch for one transcript. Prefer the smallest wording that
+         would have fixed the failures without naming them.
+      4. If an earlier round tried the same root cause and was reverted, pick
+         the next most common cause or change nothing.
+      5. If no root-cause change is worth making, change nothing, set
+         `changed` to false, and say why in `change_summary`.
+
+      ## Hard rules
+
+      - Never paste text from an output file, a grader detail, an expected
+        string, or a case input into the prompt, and never name a case id.
+        A prompt that quotes its own eval is overfit by construction.
+      - Never add a special case for one input.
+      - Make at most one logical change; one root cause per round is what
+        makes the keep/revert verdict attributable.
+
+      Final answer: `root_cause` names the shared cause in one sentence;
+      `change_summary` states the rule or rewrite you applied in one sentence
+      (it becomes the commit subject if the round is kept).
+
+  - id: round-1
+    depends_on: [propose-1]
+    trigger_rule: all_done
+    timeout: 10800000
+    output_schema: &round-schema
+      type: object
+      required: [round, decision, changed, continue]
+      properties:
+        round: { type: integer }
+        decision: { type: string }
+        reason: { type: string }
+        changed: { type: boolean }
+        root_cause: { type: string }
+        change_summary: { type: string }
+        train_verdict: { type: string }
+        test_verdict: { type: string }
+        flat_streak: { type: integer }
+        continue: { type: boolean }
+        committed: { type: boolean }
+    bash: &round-body |
+      set -uo pipefail
+      A="$ARTIFACTS_DIR"
+      S="$A/state.json"
+      KEELSON="$A/bin/keelson"
+      N=$(( $(cat "$A/round") + 1 ))
+      STATE_VAR="KEELSON_NODE_propose_${N}_STATE"
+      PSTATE="${!STATE_VAR:-unknown}"
+      if [ "$PSTATE" = "skipped" ]; then
+        jq -n --argjson n "$N" '{round: $n, decision: "skipped", reason: "the loop had already stopped", changed: false, continue: false}'
+        exit 0
+      fi
+      echo "$N" > "$A/round"
+      TARGET=$(jq -r .target "$S")
+      WORKFLOW=$(jq -r .workflow "$S")
+      REPO=$(jq -r .repo "$S")
+      ROUNDS=$(jq -r .rounds "$S")
+      KEPT="$A/target.kept.yaml"
+      STREAK=$(cat "$A/streak")
+      OUT_VAR="KEELSON_NODE_propose_${N}_OUTPUT"
+      PROPOSAL="${!OUT_VAR:-}"
+      CHANGED=$(jq -r '.changed // false' <<<"$PROPOSAL" 2>/dev/null || echo false)
+      ROOT=$(jq -r '.root_cause // ""' <<<"$PROPOSAL" 2>/dev/null || true)
+      SUMMARY=$(jq -r '.change_summary // ""' <<<"$PROPOSAL" 2>/dev/null || true)
+      TRAIN_V=""
+      TEST_V=""
+      COMMITTED=false
+
+      finish() {
+        local decision="$1" reason="$2" continue="$3"
+        echo "$STREAK" > "$A/streak"
+        {
+          printf '# Round %s: %s\n\n' "$N" "$decision"
+          printf -- '- Root cause: %s\n- Change: %s\n- Reason: %s\n\n' "$ROOT" "$SUMMARY" "$reason"
+          if [ -f "$A/round-$N.diff" ]; then printf '```diff\n'; cat "$A/round-$N.diff"; printf '```\n'; fi
+        } > "$A/round-$N-change.md"
+        jq -n --argjson n "$N" --arg decision "$decision" --arg reason "$reason" \
+          --argjson changed "$CHANGED" --arg root "$ROOT" --arg summary "$SUMMARY" \
+          --arg train "$TRAIN_V" --arg test "$TEST_V" --argjson streak "$STREAK" \
+          --argjson continue "$continue" --argjson committed "$COMMITTED" \
+          '{round: $n, decision: $decision, reason: $reason, changed: $changed, root_cause: $root,
+            change_summary: $summary, train_verdict: $train, test_verdict: $test, flat_streak: $streak,
+            continue: $continue, committed: $committed}' | tee "$A/round-$N-decision.json"
+        exit 0
+      }
+      flat() {
+        STREAK=$((STREAK + 1))
+        if [ "$STREAK" -lt 2 ] && [ "$N" -lt "$ROUNDS" ]; then finish "$1" "$2" true; fi
+        finish "$1" "$2" false
+      }
+      revert() { cp "$KEPT" "$TARGET"; }
+
+      if [ -n "$REPO" ]; then
+        REL="${TARGET#"$REPO"/}"
+        git -C "$REPO" status --porcelain | grep -vF -- " $REL" > "$A/status.now" || true
+        grep -vF -- " $REL" "$A/status.before" > "$A/status.before.other" || true
+        if ! cmp -s "$A/status.before.other" "$A/status.now"; then
+          revert
+          CHANGED=false
+          finish "scope-violation" "the proposer changed files other than the target; review \`git status\` and discard them" false
+        fi
+      fi
+      if [ "$PSTATE" != "completed" ]; then
+        revert
+        CHANGED=false
+        flat "propose-failed" "the proposer did not complete (state $PSTATE)"
+      fi
+      if [ "$CHANGED" != "true" ]; then
+        revert
+        finish "no-change" "${SUMMARY:-the proposer made no change}" false
+      fi
+      if cmp -s "$KEPT" "$TARGET"; then
+        CHANGED=false
+        finish "no-change" "the proposer reported a change but the target is unchanged" false
+      fi
+      diff -u "$KEPT" "$TARGET" > "$A/round-$N.diff" || true
+      if ! "$KEELSON" --json workflow validate --dir "$(dirname "$TARGET")" "$WORKFLOW" > "$A/round-$N-validate.json" 2>&1; then
+        cp "$TARGET" "$A/round-$N-rejected.yaml"
+        revert
+        flat "invalid" "the edited target failed workflow validate (kept as round-$N-rejected.yaml): $(jq -r '.data.results[0].error // .error // "see round-'"$N"'-validate.json"' "$A/round-$N-validate.json" 2>/dev/null)"
+      fi
+      RUN=$("$A/bin/hc-eval" "round-$N")
+      if [ "$(jq -r .errors <<<"$RUN")" != "0" ]; then
+        revert
+        finish "error" "eval run failed: $(jq -r 'if .errors < 0 then .error else "\(.errors) case run(s) errored (see round-'"$N"'.md)" end' <<<"$RUN")" false
+      fi
+      if ! CMP=$("$KEELSON" --json eval compare "$A/kept.json" "$A/round-$N.json" 2>&1); then
+        revert
+        finish "error" "eval compare failed: $(jq -r '.error // empty' <<<"$CMP" 2>/dev/null || printf '%s' "$CMP" | tail -n 3)" false
+      fi
+      printf '%s\n' "$CMP" > "$A/round-$N-compare.json"
+      if [ "$(jq -r .data.definitionChanged <<<"$CMP")" = "false" ]; then
+        revert
+        finish "error" "the eval ran the same workflow definition as the kept results, so the edited target is not the copy the catalog runs; another '$WORKFLOW' shadows $TARGET" false
+      fi
+      DECISION=$(jq -r .data.decision <<<"$CMP")
+      REASON=$(jq -r .data.reason <<<"$CMP")
+      TRAIN_V=$(jq -r '.data.splits[] | select(.split == "train") | .verdict' <<<"$CMP")
+      TEST_V=$(jq -r '.data.splits[] | select(.split == "test") | .verdict' <<<"$CMP")
+      if [ "$DECISION" != "keep" ]; then
+        revert
+        flat "revert" "$REASON"
+      fi
+      cp "$TARGET" "$KEPT"
+      cp "$A/round-$N.json" "$A/kept.json"
+      "$A/bin/hc-view" "$A/kept.json" "$A/train-view" train
+      if [ -n "$REPO" ]; then
+        SUBJECT="feat($WORKFLOW): ${SUMMARY:0:60}"
+        if git -C "$REPO" add -- "$TARGET" && git -C "$REPO" commit -q -m "$SUBJECT" -m "Root cause: $ROOT" -m "Hillclimb round $N: $REASON" >/dev/null 2>"$A/round-$N-commit.stderr"; then
+          COMMITTED=true
+        else
+          REASON="$REASON; git commit failed ($(tail -n 1 "$A/round-$N-commit.stderr")), the kept change is only in the working tree"
+        fi
+      fi
+      STREAK=0
+      if [ "$N" -lt "$ROUNDS" ]; then finish "keep" "$REASON" true; fi
+      finish "keep" "$REASON" false
+
+  - id: propose-2
+    depends_on: [round-1]
+    when: "$round-1.output.continue == 'true'"
+    context: fresh
+    model: deep
+    allowed_tools: [Read, Glob, Grep, Edit]
+    output_format: *propose-format
+    output_schema: *propose-format
+    prompt: *propose-prompt
+
+  - id: round-2
+    depends_on: [propose-2]
+    trigger_rule: all_done
+    timeout: 10800000
+    output_schema: *round-schema
+    bash: *round-body
+
+  - id: propose-3
+    depends_on: [round-2]
+    when: "$round-2.output.continue == 'true'"
+    context: fresh
+    model: deep
+    allowed_tools: [Read, Glob, Grep, Edit]
+    output_format: *propose-format
+    output_schema: *propose-format
+    prompt: *propose-prompt
+
+  - id: round-3
+    depends_on: [propose-3]
+    trigger_rule: all_done
+    timeout: 10800000
+    output_schema: *round-schema
+    bash: *round-body
+
+  - id: collect
+    depends_on: [round-1, round-2, round-3]
+    trigger_rule: all_done
+    timeout: 300000
+    output_schema:
+      type: object
+      required: [kept_rounds, remaining_failures, recommendation, ledger]
+      properties:
+        kept_rounds: { type: integer }
+        remaining_failures: { type: integer }
+        branch: { type: string }
+        recommendation: { type: string }
+        ledger: { type: string }
+        kept_at: { type: string }
+        notes: { type: array, items: { type: string } }
+    bash: |
+      set -euo pipefail
+      A="$ARTIFACTS_DIR"
+      S="$A/state.json"
+      KEELSON="$A/bin/keelson"
+      WORKFLOW=$(jq -r .workflow "$S")
+      TARGET=$(jq -r .target "$S")
+      REPO=$(jq -r .repo "$S")
+      BRANCH=$(jq -r .branch "$S")
+      ORIG_REF=$(jq -r .orig_ref "$S")
+      NOTES=()
+      # The run's artifacts directory does not outlive an in-process run, so
+      # the ledger and each round's change are kept beside the eval results.
+      KEEP=""
+      if [ -s "$A/home-dir" ]; then KEEP="$(cat "$A/home-dir")/hillclimb-${KEELSON_RUN_ID:-run}"; fi
+      for N in 1 2 3; do
+        STATE_VAR="KEELSON_NODE_round_${N}_STATE"
+        ERR_VAR="KEELSON_NODE_round_${N}_ERROR"
+        if [ "${!STATE_VAR:-}" = "failed" ]; then
+          NOTES+=("round-$N crashed: ${!ERR_VAR:-unknown error}; its change was not kept")
+          cp "$A/target.kept.yaml" "$TARGET"
+        fi
+      done
+      ROUNDS_JSON=$(for N in 1 2 3; do if [ -f "$A/round-$N-decision.json" ]; then cat "$A/round-$N-decision.json"; fi; done | jq -s '.')
+      KEPT=$(jq '[.[] | select(.decision == "keep")] | length' <<<"$ROUNDS_JSON")
+      REMAINING=$(jq '.summary.overall | .failed + .errors' "$A/kept.json")
+      "$A/bin/hc-view" "$A/kept.json" "$A/final-view" all
+
+      COST_LINE="cost delta: n/a (no kept round)"
+      if [ "$KEPT" -gt 0 ]; then
+        if CMP=$("$KEELSON" --json eval compare "$A/baseline.json" "$A/kept.json" 2>&1); then
+          COST_LINE=$(jq -r '.data.cost | if .deltaUsd == null then "cost delta: unpriced" else "cost delta: \(if .deltaUsd >= 0 then "+" else "-" end)$\(.deltaUsd | fabs | . * 10000 | round / 10000) ($\(.beforeUsd) -> $\(.afterUsd))" end' <<<"$CMP")
+        fi
+      fi
+
+      if [ -n "$REPO" ] && [ "$KEPT" -eq 0 ] && [ -n "$BRANCH" ]; then
+        if git -C "$REPO" checkout -q "$ORIG_REF" && git -C "$REPO" branch -q -d "$BRANCH"; then
+          NOTES+=("no round was kept; returned to $ORIG_REF and deleted the empty branch $BRANCH")
+          BRANCH=""
+        fi
+      fi
+
+      if [ "$KEPT" -gt 0 ]; then
+        if [ -n "$BRANCH" ]; then
+          RECOMMENDATION="Merge $BRANCH: $KEPT kept round(s), each improved the pooled result with train and test both moving up."
+        else
+          RECOMMENDATION="Keep the edited $TARGET: $KEPT kept round(s), each improved the pooled result with train and test both moving up (no git branch; the file is outside a repository)."
+        fi
+      else
+        RECOMMENDATION="Do not merge: no round improved the pooled result with both splits moving up; remaining gains are within noise, so add cases before another pass."
+      fi
+
+      fmt() { jq -r --arg split "$1" '
+        def pct: if . == null then "n/a" else "\(. * 1000 | round / 10)%" end;
+        (if $split == "overall" then .summary.overall else .summary.splits[$split] end)
+        | "\(.passRate | pct) [\(.interval.low | pct), \(.interval.high | pct)] (\(.passed)/\(.graded), \(.errors) errors)"' "$2"; }
+      {
+        printf '# Hillclimb: %s\n\n' "$WORKFLOW"
+        printf -- '- Target: `%s`\n' "$TARGET"
+        [ -n "$BRANCH" ] && printf -- '- Branch: `%s`\n' "$BRANCH"
+        [ -n "$KEEP" ] && printf -- '- Round changes and this ledger: `%s`\n' "$KEEP"
+        printf -- '- Rounds run: %s, kept: %s\n' "$(jq 'map(select(.decision != "skipped")) | length' <<<"$ROUNDS_JSON")" "$KEPT"
+        printf -- '- %s\n\n' "$COST_LINE"
+        printf '## Pass rate before and after (95%% Wilson interval)\n\n'
+        printf '| Split | Baseline | Final |\n| --- | --- | --- |\n'
+        for SPLIT in overall train test; do
+          printf '| %s | %s | %s |\n' "$SPLIT" "$(fmt "$SPLIT" "$A/baseline.json")" "$(fmt "$SPLIT" "$A/kept.json")"
+        done
+        printf '\n## Rounds\n\n| Round | Decision | Train | Test | Root cause | Change |\n| --- | --- | --- | --- | --- | --- |\n'
+        jq -r '.[] | select(.decision != "skipped") | "| \(.round) | \(.decision) | \(.train_verdict // "") | \(.test_verdict // "") | \(.root_cause // "" | gsub("\\|"; "\\\\|")) | \(.change_summary // "" | gsub("\\|"; "\\\\|")) |"' <<<"$ROUNDS_JSON"
+        printf '\n## Reasons\n\n'
+        jq -r '.[] | select(.decision != "skipped") | "- Round \(.round) (\(.decision)): \(.reason // "")"' <<<"$ROUNDS_JSON"
+        printf '\n## Baseline warnings\n\n'
+        W=$(jq -r '.summary.warnings[]' "$A/baseline.json")
+        if [ -n "$W" ]; then printf '%s\n' "$W" | sed 's/^/- /'; else printf -- '- none\n'; fi
+        printf '\n## Remaining failures\n\n%s failed or errored case run(s) in the final results.\n' "$REMAINING"
+        if [ "${#NOTES[@]}" -gt 0 ]; then printf '\n## Notes\n\n'; printf -- '- %s\n' "${NOTES[@]}"; fi
+      } > "$A/ledger.md"
+      if [ -n "$KEEP" ] && mkdir -p "$KEEP"; then
+        for F in "$A"/ledger.md "$A"/round-*-change.md "$A"/round-*-decision.json "$A"/round-*-compare.json; do
+          if [ -f "$F" ]; then cp "$F" "$KEEP"/; fi
+        done
+      fi
+
+      NOTES_JSON=$(printf '%s\n' "${NOTES[@]+"${NOTES[@]}"}" | jq -R . | jq -s 'map(select(. != ""))')
+      jq -n --argjson kept "$KEPT" --argjson remaining "$REMAINING" --arg branch "$BRANCH" \
+        --arg recommendation "$RECOMMENDATION" --rawfile ledger "$A/ledger.md" --argjson notes "$NOTES_JSON" \
+        --arg kept_at "$KEEP" \
+        '{kept_rounds: $kept, remaining_failures: $remaining, branch: $branch, recommendation: $recommendation, ledger: $ledger, notes: $notes, kept_at: $kept_at}'
+
+  - id: bucket
+    depends_on: [collect]
+    when: "$collect.output.remaining_failures > '0'"
+    context: fresh
+    model: deep
+    allowed_tools: [Read, Glob, Grep]
+    output_format: &bucket-format
+      type: object
+      required: [buckets, ambiguous, recommendation]
+      properties:
+        buckets:
+          type: array
+          items:
+            type: object
+            required: [root_cause, count, cases]
+            properties:
+              root_cause: { type: string }
+              count: { type: integer }
+              cases: { type: array, items: { type: string } }
+        ambiguous:
+          type: array
+          items:
+            type: object
+            required: [case, why]
+            properties:
+              case: { type: string }
+              why: { type: string }
+        recommendation: { type: string }
+    output_schema: *bucket-format
+    prompt: |
+      The hillclimb loop over the `$preflight.output.workflow` workflow has
+      stopped. Group what still fails by root cause so the operator knows what
+      a prompt change cannot fix and what to do next.
+
+      Read `$ARTIFACTS_DIR/final-view/results.json` (every case run in the
+      final results, both splits, with status, grader detail, and the path of
+      its output), the output files under `$ARTIFACTS_DIR/final-view/outputs/`,
+      and `$ARTIFACTS_DIR/final-view/cases.json` (each case's inputs and what
+      its grader checks). `$ARTIFACTS_DIR/ledger.md` has the before/after
+      numbers and `$ARTIFACTS_DIR/round-*-change.md` what each round tried.
+
+      For every failing or errored row, decide what it shares with the others:
+
+      - `buckets`: one entry per root cause, most common first, with the case
+        ids it covers. A root cause is a mechanism (the agent skips a step,
+        the format the grader wants is never stated, the task needs a tool the
+        node lacks, the case is infeasible), not a restatement of the detail.
+      - `ambiguous`: cases whose expectation is unclear, contradicts another
+        case, or where the grader's verdict contradicts the output you read
+        (a judge rep disagreement, a `contains` string the output states in
+        other words). Say why in one sentence each.
+      - `recommendation`: one sentence. If the ledger shows a `NOISE` warning
+        or an interval wider than 20 points, recommend more reps or cases
+        before another pass; if the failures are grader problems, say to fix
+        the cases; if a bucket is structural (a missing tool, a missing node),
+        say that no prompt change will close it.
+
+      $DIRECTIVES.confirm
+
+  - id: report
+    depends_on: [collect, bucket]
+    trigger_rule: none_failed_min_one_success
+    context: fresh
+    model: balanced
+    allowed_tools: []
+    prompt: |
+      Write the hillclimb report for the operator. Use only what is below; do
+      not invent numbers.
+
+      ## Ledger (deterministic, from the eval results)
+
+      $collect.output.ledger
+
+      ## Remaining-failure buckets (empty when nothing failed)
+
+      $bucket.output
+
+      ## Format
+
+      1. A two-line summary: what changed and what moved, per split.
+      2. The before/after table from the ledger, verbatim.
+      3. Kept changes: one bullet per kept round with its root cause and the
+         rule it added. If no round was kept, say so and name what each round
+         tried and why it was reverted.
+      4. What still fails: the buckets with counts, then the ambiguous cases
+         and grader contradictions, then the bucket's recommendation. If the
+         buckets section above is empty, say every case passes.
+      5. Last line, verbatim: $collect.output.recommendation
+
+      If the ledger above is empty, say that the collect step failed and that
+      the run's node outputs hold what each round decided; write nothing else.
+
+      $DIRECTIVES.confirm

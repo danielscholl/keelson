@@ -1,0 +1,143 @@
+---
+title: hillclimb
+description: Improves a workflow's prompts against an eval case set by measurement. Each round proposes one root-cause change from the train split, re-runs the eval, and keeps the change only when the paired compare says keep.
+sidebar:
+  order: 13
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`hillclimb` closes the loop that [evaluating workflows](../../guides/evaluating-workflows/)
+opens. You hand it an eval case set; it baselines the target workflow, then runs
+up to three rounds in which a **proposer** reads the train split's failures and
+makes one root-cause change to the target YAML, a deterministic **round** node
+validates the edit, re-runs the eval, and asks `keelson eval compare` whether to
+keep it. Keep means a commit on a `keelson/hillclimb/<workflow>-<stamp>` branch;
+revert means the file is restored byte for byte. After two flat rounds it stops,
+a **bucket** node groups what still fails by root cause, and a **report** says
+whether to merge.
+
+It optimizes prompt text only. Node ids, edges, gates, bash bodies, models, and
+tools stay as they are, so a kept change is attributable to one wording change
+and nothing else.
+
+## Invoke it
+
+```sh
+# The case file is the only required argument:
+keelson workflow run hillclimb --arguments .keelson/evals/triage.eval.yaml --watch
+
+# One round, three reps per case, against an explicit copy of the workflow:
+keelson workflow run hillclimb --arguments .keelson/evals/triage.eval.yaml \
+  --inputs rounds=1 --inputs reps=3 --inputs target=.keelson/workflows/triage.yaml
+```
+
+| Input | Default | Means |
+| --- | --- | --- |
+| `$ARGUMENTS` | required | Path to the eval case file (`keelson eval init <workflow>` writes one). |
+| `rounds` | `3` | How many propose/evaluate rounds to allow, 1 to 3. |
+| `reps` | the case file's `reps` | Repetitions per case for every eval the run makes. |
+| `target` | resolved from the case file | The workflow YAML to edit. |
+
+The target must be an editable copy: the `.keelson/workflows/<name>.yaml` of the
+project you run from, or the copy in your keelson home. Bundled assets are
+read-only, so a workflow that exists only as a bundled starter fails preflight
+with the copy command to run first. The eval resolves the same name through the
+same layers, and both the server catalog and the in-process runner re-read the
+file on every run, so each round evaluates the edit it just made without a
+restart.
+
+The run needs `keelson` on `PATH` (it falls back to `bun apps/cli/bin/keelson.ts`
+inside a keelson checkout), plus `git`, `jq`, and `bun`. When the target is
+tracked by git it must be clean, and the kept changes land as one commit per
+round on a fresh branch; a target outside a repository is edited in place and
+restored from a snapshot on revert.
+
+<Aside type="caution" title="It runs the eval many times">
+Every round re-runs the whole case set, both splits. With a paid provider the
+cost is the baseline eval times the number of rounds plus one; the report
+prints the cost delta when the server priced every run. Run
+`keelson eval run` once by hand first and read its `POWER`, `NOISE`, and
+`HEADROOM` warnings: a set that cannot show improvement wastes every round. The
+case set must put cases in both the train and the test split.
+</Aside>
+
+## The shape
+
+A straight line with three gated detours. `preflight` and `baseline` set the
+starting point; each `propose-N` runs only while the previous round said
+`continue`, and each `round-N` always settles so the chain never stalls on a
+failed proposer; `collect` joins the three rounds under `all_done`, `bucket`
+runs only when something still fails, and `report` writes the verdict.
+
+## Node by node
+
+| Node | Kind | What it does |
+| --- | --- | --- |
+| `preflight` | bash | Parses the case file, resolves and validates the target, refuses a dirty target, creates the branch, snapshots the file, and writes the `hc-eval` and `hc-view` helpers the rounds share. |
+| `baseline` | bash | Runs the case set, fails the run on any errored case with the count, copies the results beside the run, and builds the train-only view. |
+| `propose-1..3` | prompt (`deep`) | Reads the train view and makes one root-cause change to the target. Emits `{changed, root_cause, change_summary}`. |
+| `round-1..3` | bash | Reverts any out-of-scope edits, validates the YAML, re-runs the eval, runs `eval compare`, then commits or restores. Emits the decision and whether to continue. |
+| `collect` | bash | Assembles the ledger: before/after table per split, the rounds and their reasons, cost delta, remaining failures. Copies the ledger and each round's change and decision to `hillclimb-<run id>/` beside the eval results, so they outlive the run. Returns to the original branch when nothing was kept. |
+| `bucket` | prompt (`deep`) | Groups the remaining failures by root cause, flags ambiguous cases and grader contradictions, and recommends more reps or cases where the interval is wide. |
+| `report` | prompt (`balanced`) | Formats the ledger and the buckets, and ends with the one-line merge recommendation `collect` computed. |
+
+### The parts worth a second look
+
+**The proposer never sees the test split.** `baseline` and every kept round
+build `train-view/` from the results file: the train rows, their output files,
+and the train cases' inputs and expectations, nothing else. The prompt names
+that directory as the only evidence it may read and forbids opening the case
+file or the home's `evals/` directory. Overfitting then shows up where it
+should, in the compare verdict, as train improving while test does not.
+
+**One change, never a quote.** The proposer is told to find the one root cause
+shared by the most failures and fix it with a general rule. Pasting an output,
+an expected string, or a case id into the prompt is forbidden outright: a prompt
+that quotes its own eval passes that eval and measures nothing. The round node
+stores the diff in `round-N-change.md` so the operator can check the rule reads
+as a rule.
+
+**Keep is the compare decision, not the agent's opinion.** The round node is
+deterministic bash. It runs `keelson eval compare <kept> <round>` and keeps only
+on `keep`, which the eval runner grants only when the paired per-case test
+calls the pooled result improved and train and test each moved up. Within-noise,
+a regression on either split, a flat test split, or any errored case run all
+restore the file. So does a round whose eval ran the same definition as the
+kept results: the edit never reached the copy the catalog runs, usually because
+another copy of the workflow shadows the target.
+
+**Flat rounds end the loop.** Two consecutive non-keep rounds, a proposer that
+declines to change anything, a scope violation, or an eval error sets
+`continue` to false, and the next proposer skips. Rounds are unrolled rather
+than a `loop` node because a loop is one agent prompt and the keep/revert step
+must run outside the agent.
+
+**Nothing is held.** The workflow declares `mutates_checkout: false` even
+though it edits a file, because a held project lock would refuse every nested
+`keelson eval run` the rounds depend on. Do not run two hillclimbs on the same
+project at once.
+
+## Patterns it demonstrates
+
+- **[Classify, then branch](../../guides/authoring-workflows/#classify-then-branch)**: each `propose-N` gates on `$round-(N-1).output.continue`.
+- **[Feed agent output into a script safely](../../guides/authoring-workflows/#feed-agent-output-into-a-script-safely)**: the round reads the proposer's JSON from `KEELSON_NODE_propose_N_OUTPUT` and the decision never leaves bash.
+- **Fail-closed structured output**: every node a gate reads from carries an `output_schema`, the prompt nodes an `output_format` too, so a malformed verdict fails the node instead of steering the loop.
+
+## Adapt it
+
+- **More rounds.** Copy the file and add a `propose-4` / `round-4` pair; the
+  round body is a YAML anchor, so the new pair is six lines.
+- **A different surface.** The proposer's "only file you may edit" and "edit
+  prompt text only" rules are the attributable surface. Loosen them to let it
+  touch a command file or a skill, and keep the scope guard in the round node.
+- **Reps per round.** Pass `reps` higher than the case file's default when
+  cases flip between runs of an unchanged workflow. Reps steady each case; they
+  do not replace cases, and the compare needs six cases to move before it can
+  say `improved`.
+
+## Related
+
+- [Evaluating workflows](../../guides/evaluating-workflows/): the case set, the graders, and the compare rule this loop applies.
+- [Authoring workflows](../../guides/authoring-workflows/): where the editable copy lives and how the layers merge.
+- [CLI reference](../../reference/cli/): every `eval` option the rounds call.
