@@ -29,6 +29,9 @@ list`, open one whose shape is close, and edit from there.
 3. **Run it.** `keelson workflow run <name> --watch` streams the DAG executing
    in dependency order.
 
+Once it runs, [write a case set and grade it](../evaluating-workflows/) so the
+next prompt tweak is measured against held-out cases instead of eyeballed.
+
 ```sh
 keelson workflow validate test-triage
 keelson workflow run test-triage --watch

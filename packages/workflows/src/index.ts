@@ -34,6 +34,7 @@ export {
   workflowDefinitionHash,
 } from "./definition-hash.ts";
 export { DIRECTIVE_NAMES, DIRECTIVES, resolveDirective } from "./directives.ts";
+export * from "./eval/index.ts";
 export {
   ExecutorValidationError,
   type MemoryTools,

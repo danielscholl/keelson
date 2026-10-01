@@ -84,6 +84,7 @@ const eventsQuerySchema = z
     model: z.string().optional(),
     status: z.string().optional(),
     conversationId: z.string().min(1).optional(),
+    runId: z.string().min(1).optional(),
   })
   .strict();
 
@@ -173,16 +174,20 @@ export function usageRoutes(app: Hono, deps: UsageRoutesDeps): void {
       model: c.req.query("model"),
       status: c.req.query("status"),
       conversationId: c.req.query("conversationId"),
+      runId: c.req.query("runId"),
     });
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
     }
-    const { conversationId } = parsed.data;
+    const { conversationId, runId } = parsed.data;
+    // An id filter names a specific conversation or run, so the lookback
+    // window must not hide it.
+    const scoped = conversationId !== undefined || runId !== undefined;
     const result = usageEventsResponseSchema.parse(
       store.events({
-        ...(conversationId !== undefined
-          ? { conversationId }
-          : { sinceIso: windowToSinceIso(parsed.data.window) }),
+        ...(scoped ? {} : { sinceIso: windowToSinceIso(parsed.data.window) }),
+        ...(conversationId !== undefined ? { conversationId } : {}),
+        ...(runId !== undefined ? { runId } : {}),
         limit: parsed.data.limit,
         source: parsed.data.source,
         model: parsed.data.model,

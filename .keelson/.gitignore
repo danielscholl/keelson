@@ -7,3 +7,6 @@
 /*
 !/.gitignore
 !/workflows/
+# Eval case sets are tracked; the results each run writes beside them are not.
+!/evals/
+/evals/*/

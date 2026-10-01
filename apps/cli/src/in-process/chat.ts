@@ -27,6 +27,11 @@ export interface ChatHeadlessOptions {
   thinking?: boolean;
   reasoningEffort?: ReasoningEffortLevel;
   abortSignal?: AbortSignal;
+  // SDK-level tool whitelist; an empty list means the turn runs with no tools.
+  allowedTools?: readonly string[];
+  // False when the caller makes several turns and drains providers itself:
+  // a disposed Copilot singleton cannot serve another turn.
+  disposeProviders?: boolean;
   onChunk?: (chunk: MessageChunk) => void;
 }
 
@@ -85,7 +90,8 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
       ...(opts.abortSignal ? { abortSignal: opts.abortSignal } : {}),
       ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
       ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
-      ...(tools.length > 0 ? { tools } : {}),
+      ...(tools.length > 0 && opts.allowedTools === undefined ? { tools } : {}),
+      ...(opts.allowedTools !== undefined ? { allowedTools: [...opts.allowedTools] } : {}),
       ...(systemPrompt !== undefined ? { systemPrompt } : {}),
     })) {
       if (chunk.type === "usage") {
@@ -100,7 +106,7 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
   } finally {
     // One-shot path: no server outlives this turn to drain providers, so reap
     // any warm subprocess here before the CLI exits rather than orphaning it.
-    await disposeAllProviders();
+    if (opts.disposeProviders !== false) await disposeAllProviders();
   }
 
   return { providerId, text, ...(usage !== undefined ? { usage } : {}) };

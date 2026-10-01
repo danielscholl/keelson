@@ -255,6 +255,18 @@ describe("GET /api/usage/events", () => {
     expect(parsed[0]!.workflowName).toBe("smoke-test");
   });
 
+  test("filters by runId so a caller can price one run", async () => {
+    const res = await app.fetch(
+      new Request("http://test/api/usage/events?window=30d&runId=run-smoke"),
+    );
+    expect(res.status).toBe(200);
+    const parsed = usageEventsResponseSchema.parse(await res.json());
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]!.runId).toBe("run-smoke");
+    const none = await app.fetch(new Request("http://test/api/usage/events?runId=nope"));
+    expect(usageEventsResponseSchema.parse(await none.json())).toHaveLength(0);
+  });
+
   test("200 at the limit cap boundary", async () => {
     const res = await app.fetch(new Request("http://test/api/usage/events?limit=500"));
     expect(res.status).toBe(200);
