@@ -10,12 +10,14 @@ import {
   hasSpend,
 } from "../../lib/formatTokens.ts";
 
-// Turns and cache reads count every billable turn, including one served
-// entirely from cache; inputTokens/outputTokens stay the fresh ↑/↓ figures.
+// Turns and the cache totals count every billable turn, including one served
+// from or written to cache only; inputTokens/outputTokens stay the fresh ↑/↓
+// figures.
 export interface SessionUsageTotals {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
+  cacheWriteTokens: number;
   turns: number;
 }
 
@@ -41,12 +43,13 @@ export function UsageChip({ latest, totals, popoverId }: UsageChipProps) {
   const pct = contextPercent(latest.contextTokens, latest.contextWindow);
   if (pct === null && totals.turns === 0) return null;
   const cacheOnly = !hasSpend(totals);
+  const cachedTokens = totals.cacheReadTokens + totals.cacheWriteTokens;
   const level = pct !== null ? contextFillLevel(pct) : "ok";
   const label =
     pct !== null
       ? `Context ${pct}% full (${formatTokens(latest.contextTokens ?? 0)} of ${formatTokens(latest.contextWindow ?? 0)} tokens). Click for details.`
       : cacheOnly
-        ? `Session tokens: ${formatTokens(totals.cacheReadTokens)} served from cache. Click for details.`
+        ? `Session tokens: ${formatTokens(totals.cacheReadTokens)} cache read, ${formatTokens(totals.cacheWriteTokens)} cache write. Click for details.`
         : `Session tokens: ${formatTokens(totals.inputTokens)} in, ${formatTokens(totals.outputTokens)} out. Click for details.`;
   return (
     <button
@@ -64,7 +67,7 @@ export function UsageChip({ latest, totals, popoverId }: UsageChipProps) {
           <span className="chat-usage-chip-value">{pct}%</span>
         </>
       ) : cacheOnly ? (
-        <span className="chat-usage-chip-value">⟳ {formatTokens(totals.cacheReadTokens)}</span>
+        <span className="chat-usage-chip-value">⟳ {formatTokens(cachedTokens)}</span>
       ) : (
         <span className="chat-usage-chip-value">
           ↑ {formatTokens(totals.inputTokens)} ↓ {formatTokens(totals.outputTokens)}

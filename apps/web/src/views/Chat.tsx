@@ -2018,6 +2018,7 @@ export function Chat({
     let inputTokens = 0;
     let outputTokens = 0;
     let cacheReadTokens = 0;
+    let cacheWriteTokens = 0;
     let turns = 0;
     let latest: TokenUsage | undefined;
     for (const m of messages) {
@@ -2027,9 +2028,13 @@ export function Chat({
       inputTokens += m.usage.inputTokens;
       outputTokens += m.usage.outputTokens;
       cacheReadTokens += m.usage.cacheReadInputTokens ?? 0;
+      cacheWriteTokens += m.usage.cacheCreationInputTokens ?? 0;
       turns++;
     }
-    return { latest, totals: { inputTokens, outputTokens, cacheReadTokens, turns } };
+    return {
+      latest,
+      totals: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, turns },
+    };
   }, [messages]);
 
   // Cost comes from the ledger, not from pricing messages client-side: only

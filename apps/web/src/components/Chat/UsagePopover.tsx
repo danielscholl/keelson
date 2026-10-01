@@ -209,6 +209,9 @@ export function UsagePopover({ popoverId, latest, totals, ledger }: UsagePopover
           {totals.cacheReadTokens > 0 && (
             <Row label="Cache read" value={formatTokens(totals.cacheReadTokens)} />
           )}
+          {totals.cacheWriteTokens > 0 && (
+            <Row label="Cache write" value={formatTokens(totals.cacheWriteTokens)} />
+          )}
           <Row label="Turns" value={String(totals.turns)} />
           {ledger && (
             <>

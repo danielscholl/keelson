@@ -64,18 +64,24 @@ export function normalizeModelId(model: string): string {
     .replace(/\./g, "-");
 }
 
+// Own-property lookup: a gateway model id is arbitrary text, so "constructor"
+// or "toString" must miss rather than resolve to an inherited function.
+function ownPrice(table: Readonly<Record<string, ModelPrice>>, id: string): ModelPrice | undefined {
+  return Object.hasOwn(table, id) ? table[id] : undefined;
+}
+
 // Operator overrides win by exact id, then by normalized id, before the
 // bundled table is consulted. Unknown → undefined, never a zero price.
 export function resolveModelPrice(model: string, overrides?: ModelPrices): ModelPrice | undefined {
   const normalized = normalizeModelId(model);
   if (overrides) {
-    const exact = overrides[model];
+    const exact = ownPrice(overrides, model);
     if (exact) return exact;
     for (const [id, p] of Object.entries(overrides)) {
       if (normalizeModelId(id) === normalized) return p;
     }
   }
-  return BUNDLED_MODEL_PRICES[normalized];
+  return ownPrice(BUNDLED_MODEL_PRICES, normalized);
 }
 
 export interface PricedTokenCounts {

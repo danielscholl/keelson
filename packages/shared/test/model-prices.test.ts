@@ -41,6 +41,11 @@ describe("resolveModelPrice", () => {
 
   test("unknown model is undefined, never a zero price", () => {
     expect(resolveModelPrice("gpt-5")).toBeUndefined();
+    expect(resolveModelPrice("constructor")).toBeUndefined();
+    expect(
+      resolveModelPrice("toString", { "gpt-5": BUNDLED_MODEL_PRICES["claude-haiku-4-5"]! }),
+    ).toBeUndefined();
+    expect(resolveModelPrice("constructor", {})).toBeUndefined();
     expect(resolveModelPrice("auto")).toBeUndefined();
     expect(resolveModelPrice("claude-opus")).toBeUndefined();
   });
