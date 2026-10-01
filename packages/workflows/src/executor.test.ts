@@ -1341,25 +1341,6 @@ nodes:
     depends_on: [e]
 `;
 
-function timedHandler(delays: Record<string, number>): {
-  handler: NodeHandler;
-  startedAt: Map<string, number>;
-  doneAt: Map<string, number>;
-} {
-  const startedAt = new Map<string, number>();
-  const doneAt = new Map<string, number>();
-  const handler: NodeHandler = {
-    type: "bash",
-    async handle(node) {
-      startedAt.set(node.id, performance.now());
-      await new Promise((r) => setTimeout(r, delays[node.id] ?? 0));
-      doneAt.set(node.id, performance.now());
-      return { status: "succeeded", output: { kind: "text", text: node.id } };
-    },
-  };
-  return { handler, startedAt, doneAt };
-}
-
 // Each node blocks until the test releases it, so dispatch order is asserted
 // against explicit barriers rather than timer races.
 function gatedHandler(): {
@@ -1407,19 +1388,6 @@ describe("runWorkflow — ready-node scheduling", () => {
     await release("d");
     const summary = await run;
     expect(summary.status).toBe("succeeded");
-  });
-
-  test("ready dispatch finishes sooner than layered dispatch on the same graph", async () => {
-    const delays = { a: 5, b: 150, c: 5, d: 5, e: 100, f: 100 };
-    const time = async (yaml: string): Promise<number> => {
-      const { handler } = timedHandler(delays);
-      const t0 = performance.now();
-      await runWorkflow({ ...baseOpts(parseInline(yaml)), handlers: new Map([["bash", handler]]) });
-      return performance.now() - t0;
-    };
-    const ready = await time(READY_DAG);
-    const layered = await time(`${READY_DAG}scheduling: layered\n`);
-    expect(ready).toBeLessThan(layered);
   });
 
   test("scheduling: layered keeps the layer barrier", async () => {

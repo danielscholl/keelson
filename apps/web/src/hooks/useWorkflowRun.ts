@@ -657,6 +657,13 @@ export function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView 
   // terminal-only fields (completedAt, durationMs, error) when live is
   // still mid-flight. Choose the side whose status won for those fields.
   const winningSide = winningStatus === liveSide.status ? liveSide : snapshotSide;
+  // A terminal snapshot row carries server-recorded timestamps; the live
+  // completedAt is a browser clock stamp, so the persisted values replace it.
+  const persistedTiming =
+    snapTerminal &&
+    TERMINAL_NODE_STATUSES.has(winningStatus) &&
+    snapshotSide.startedAt !== undefined &&
+    snapshotSide.completedAt !== undefined;
   // When winningStatus is `awaiting`, the approval message must come from
   // whichever side actually has it (snapshot writes it at pause time; live
   // only has it if the WS approval_awaiting frame arrived). Live's spread
@@ -675,8 +682,16 @@ export function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView 
     ...snapshotSide,
     ...liveSide,
     status: winningStatus,
-    completedAt: winningSide.completedAt ?? liveSide.completedAt ?? snapshotSide.completedAt,
-    durationMs: winningSide.durationMs ?? liveSide.durationMs ?? snapshotSide.durationMs,
+    ...(persistedTiming
+      ? {
+          startedAt: snapshotSide.startedAt,
+          completedAt: snapshotSide.completedAt,
+          durationMs: snapshotSide.durationMs,
+        }
+      : {
+          completedAt: winningSide.completedAt ?? liveSide.completedAt ?? snapshotSide.completedAt,
+          durationMs: winningSide.durationMs ?? liveSide.durationMs ?? snapshotSide.durationMs,
+        }),
     error: winningSide.error ?? liveSide.error ?? snapshotSide.error,
     contentParts: winningParts,
     // Thinking is live-only (not persisted) — snapshot side is always "".

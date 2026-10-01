@@ -1221,6 +1221,30 @@ nodes:
     ]);
   });
 
+  test("invalid scheduling warns and is dropped", () => {
+    const result = parseWorkflow(
+      `
+name: bad-scheduling
+description: invalid scheduling mode
+scheduling: bogus
+nodes:
+  - id: a
+    bash: echo ok
+`,
+      "bad-scheduling.yaml",
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.workflow?.scheduling).toBeUndefined();
+    expect(result.warnings).toEqual([
+      {
+        filename: "bad-scheduling.yaml",
+        kind: "invalid_field_value",
+        message: "invalid 'scheduling' value (ignored); valid: ready, layered",
+      },
+    ]);
+  });
+
   test("interactive loop in non-interactive workflow warns", () => {
     const yaml = `
 name: lonely-loop
