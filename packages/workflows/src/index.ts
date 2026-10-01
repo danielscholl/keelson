@@ -28,6 +28,7 @@ export {
 } from "./catalog-resolution.ts";
 export { evaluateCondition } from "./conditions.ts";
 export { DIRECTIVE_NAMES, DIRECTIVES, resolveDirective } from "./directives.ts";
+export * from "./eval/index.ts";
 export {
   ExecutorValidationError,
   type MemoryTools,

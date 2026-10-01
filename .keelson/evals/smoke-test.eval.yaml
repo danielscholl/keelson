@@ -1,0 +1,40 @@
+# Eval case set for the bundled smoke-test workflow. Every assertion holds
+# against the stub provider, so this runs offline:
+#   KEELSON_USE_STUBS=1 KEELSON_PROVIDERS=stub keelson eval run .keelson/evals/smoke-test.eval.yaml
+name: smoke-test
+workflow: smoke-test
+reps: 1
+
+split:
+  train: [final-assert]
+  test: [bash-json, downstream-echo]
+
+grader:
+  type: contains
+
+cases:
+  # The run's final output is the `assert` node, which prints PASS only when
+  # every upstream node produced output.
+  - id: final-assert
+    arguments: "smoke eval"
+    expect:
+      strings: ["PASS: all node types verified"]
+
+  # Grade one node instead of the final output: bash-json-node must emit an
+  # object with a string `status`.
+  - id: bash-json
+    node: bash-json-node
+    grader: { type: json_schema }
+    expect:
+      schema:
+        type: object
+        required: [status]
+        properties:
+          status: { type: string }
+
+  # The depends_on edge carries the prompt node's text into `downstream`.
+  - id: downstream-echo
+    node: downstream
+    arguments: "smoke eval"
+    expect:
+      strings: ["downstream got: Reply with exactly"]

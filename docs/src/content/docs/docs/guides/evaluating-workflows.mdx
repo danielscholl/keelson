@@ -1,0 +1,182 @@
+---
+title: Evaluating workflows
+description: Write a case set, grade a workflow against it with programmatic or judge graders, read the summary statistics, and let the compare verdict decide whether a change stays.
+sidebar:
+  order: 10
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+A workflow that runs is not a workflow that works. Once a prompt, a model pin, or
+a node boundary changes, the only honest answer to "did that help?" is a set of
+cases you run before and after, graded the same way both times. `keelson eval`
+is that loop: a YAML case set, a grader per case, a results file with the
+statistics you need to tell signal from noise, and a compare command that says
+keep or revert.
+
+## Why evals
+
+Four properties make an eval worth trusting. The summary warns when any of them
+slips.
+
+- **Production-aligned cases.** Each case is an input the workflow really
+  receives: the free text that arrives as `$ARGUMENTS`, the named inputs that
+  arrive as `KEELSON_INPUTS_<key>`. Synthetic prompts measure a workflow nobody
+  runs.
+- **Headroom.** A set the workflow already passes at 100% cannot show
+  improvement. The summary prints a `HEADROOM` warning when the test split
+  passes above 95%: add harder cases.
+- **Low variance.** A pass rate is an estimate. The summary carries a 95%
+  Wilson interval for every split and prints a `NOISE` warning when that
+  interval is wider than 20 points. More reps per case, or more cases, narrow it.
+- **A held-out split.** Tuning a prompt against the cases you stare at makes
+  those cases pass. The train/test split exists so that overfitting shows up as
+  a gap: train improves, test does not, and the verdict says revert.
+
+Graders are either programmatic or an LLM judge with checkable claims. There is
+no 1-to-5 scale anywhere: a claim is met or it is not, and the judge grades the
+same output twice so its own disagreement is measured and reported as grader
+noise rather than hidden in the pass rate.
+
+## The case file
+
+Scaffold one with `keelson eval init <workflow>`, which writes
+`<home>/evals/<workflow>.eval.yaml` and refuses to overwrite an existing file.
+The repository ships a working example at `.keelson/evals/smoke-test.eval.yaml`.
+
+```yaml
+name: beads-groom-smoke
+workflow: beads-groom            # resolved like `workflow run`
+project: my-project              # optional, as `workflow run --project`
+reps: 3                          # default 1
+
+split:                           # optional; default puts every case in test
+  train: [c1, c2]
+  test: [c3, c4]
+  # or a seeded draw:
+  # seed: 42
+  # train_fraction: 0.5
+
+grader:                          # the default grader; a case may override
+  type: contains
+
+cases:
+  - id: c1
+    arguments: "free text passed as $ARGUMENTS"
+    inputs: { key: value }       # KEELSON_INPUTS_key
+    expect:                      # the grader's reference; never shown to the workflow
+      strings: ["PASS"]
+  - id: c2
+    node: bash-json-node         # grade one node's output instead of the final output
+    grader: { type: json_schema }
+    expect:
+      schema: { type: object, required: [status] }
+```
+
+| Field | Means |
+| --- | --- |
+| `name` | Names the results directory, `<home>/evals/<name>/`. |
+| `workflow` | The workflow to run, resolved exactly as `workflow run` resolves it. |
+| `project` | A named project to run against. Requires the server. |
+| `reps` | How many times each case runs. `--reps` overrides it. |
+| `split` | Explicit `train` and `test` lists covering every case once, or `seed` plus `train_fraction` for a deterministic draw. |
+| `grader` | The default grader. Each case may carry its own `grader:` block. |
+| `node` | Which node's output to grade. Default is the run's final output: the last node that succeeded. A case or grader may override it. |
+| `cases[].expect` | The grader's reference. It never reaches the workflow, and the judge grader sees only `expect.claims`. |
+
+Every case must land in exactly one split. Overlapping lists, an unknown id, or a
+case left out of both lists is a load error.
+
+## Graders
+
+| Type | Reference | Passes when |
+| --- | --- | --- |
+| `exact` | `expect.text` | The graded output equals the text, both trimmed. |
+| `contains` | `expect.strings` | Every string appears in the output. |
+| `regex` | `expect.pattern`, optional `expect.flags` | The pattern matches the output. |
+| `json_schema` | `expect.schema` | The output parses as JSON (a fenced block is fine) and validates against the schema, the same `type` / `required` / `properties` / `items` subset `output_schema` accepts on a node. |
+| `bash` | `expect.script` | The script exits 0. Exit 1 is a fail; any other exit, or a timeout, is an error. |
+| `judge` | `expect.claims` | An agent turn reports every claim met. |
+
+The `bash` grader runs with `EVAL_OUTPUT`, `EVAL_OUTPUT_FILE` (the full text on
+disk), `EVAL_CASE_ID`, `EVAL_RUN_ID`, and one `EVAL_EXPECT_<KEY>` per scalar in
+`expect`, so a script can compare against its own reference values without
+parsing YAML.
+
+The `judge` grader builds a rubric from `expect.claims`, asks the provider the
+in-process chat uses for a JSON verdict per claim, and passes only when every
+claim is met. It asks `grader_reps` times (default 2) about the same output.
+When the reps disagree the case counts as a fail, never a pass, and the
+disagreement is reported as grader noise. Set `provider:` and `model:` on the
+grader to pin the judge; leave the rubric to things a reader could check by
+quoting the output.
+
+<Aside type="caution" title="Three states, not two">
+A case that errors (the run failed before producing output, a provider timed
+out, the grader itself crashed) is neither a pass nor a fail. It is excluded
+from the pass rate, counted separately, and makes `eval run` exit 1 so a script
+cannot mistake an infrastructure failure for a graded result.
+</Aside>
+
+## Running
+
+```sh
+keelson eval run .keelson/evals/smoke-test.eval.yaml
+keelson eval run cases.eval.yaml --reps 3 --split test --json
+```
+
+Runs go through the server when it is up and in-process when it is down, one
+case at a time, exactly as `workflow run` does. `--watch` streams node events
+per case (the default on a TTY). `--provider`, `--base-url`, and
+`--no-preflight` mean what they mean on `workflow run`.
+
+| Exit code | Means |
+| --- | --- |
+| `0` | The eval ran and every case graded. |
+| `1` | At least one case errored. |
+| `2` | Bad arguments or an invalid case file. |
+| `3` | The file names a `project` and the server is down. |
+| `4` | The workflow was not found. |
+
+## Reading the summary
+
+Each run writes `<home>/evals/<name>/<timestamp>.json`, a Markdown summary
+beside it, and a `<timestamp>.outputs/` directory holding every case's full
+output (the JSON inlines the first 16 KiB). `--out <path>` relocates all three.
+
+| Statistic | What it tells you |
+| --- | --- |
+| Pass rate per split, with its Wilson interval | The estimate and how much to trust it. A narrow interval means more cases or reps. |
+| Errors | Runs that never produced a gradable output. Fix the infrastructure before reading the pass rate. |
+| Grader noise | The share of judged outputs where the judge's reps disagreed. A high rate means the rubric, not the workflow, needs work. |
+| Duration mean and p95 | What a change cost in wall time. |
+| Cost | Summed from the server's usage ledger when it prices events, `null` otherwise. Never zero. |
+| Definition hash | The workflow definition the runs executed, when the server reports it. Two hashes in one eval means the workflow changed mid-run. |
+
+The warnings line names what to fix next: `HEADROOM` when the test split passes
+above 95%, `NOISE` when an interval is wider than 20 points, `HASH` when more
+than one definition was observed, `ERRORS` when any case errored.
+
+## The compare verdict
+
+```sh
+keelson eval compare before.json after.json
+```
+
+For each split, compare reports the pass-rate delta and a verdict: `improved` or
+`regressed` when the two Wilson intervals do not overlap, `within-noise` when
+they do. It then applies the hillclimb rule: **keep** only when train and test
+both improved; **revert** when test is flat or either split regressed. A set
+with no train split decides on test alone and says so, which is a reason to
+declare one. The cost delta prints alongside, so an improvement that doubled the
+spend is visible in the same line.
+
+Two runs of the same case set always compare `within-noise`, which is the point:
+a change has to clear the interval, not just nudge the number.
+
+## Related
+
+- [Authoring workflows](../authoring-workflows/): the loop the eval closes.
+- [Workflow nodes](../../reference/workflow-nodes/): the `output_schema` subset
+  the `json_schema` grader validates against.
+- [CLI reference](../../reference/cli/): every `eval` option and exit code.

@@ -103,6 +103,7 @@ export interface UsageEventsFilter {
   source?: UsageEventSource;
   model?: string;
   status?: string;
+  runId?: string;
   sinceIso?: string;
 }
 
@@ -441,6 +442,10 @@ export function createUsageStore(db: Database): UsageStore {
       if (filter.status !== undefined) {
         clauses.push("status = ?");
         params.push(filter.status);
+      }
+      if (filter.runId !== undefined) {
+        clauses.push("run_id = ?");
+        params.push(filter.runId);
       }
       if (filter.sinceIso !== undefined) {
         clauses.push("ts >= ?");

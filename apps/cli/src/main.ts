@@ -16,6 +16,7 @@ import { runBackup } from "./commands/backup.ts";
 import { runChatEntry } from "./commands/chat.ts";
 import { runConnect, runConnectStatus, runDisconnect } from "./commands/connect.ts";
 import { runDoctor } from "./commands/doctor.ts";
+import { runEvalCompare, runEvalInit, runEvalRun } from "./commands/eval.ts";
 import { runGatewayAdd, runGatewayList, runGatewayRemove } from "./commands/gateway.ts";
 import { runMcpBridge } from "./commands/mcp.ts";
 import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/project.ts";
@@ -422,6 +423,87 @@ export function buildProgram(): Command {
         workflow: statusOpts.workflow,
         brief: Boolean(statusOpts.brief),
       });
+    });
+
+  const evalCmd = program
+    .command("eval")
+    .description("eval operations (run, compare, init) — grade a workflow against a case set");
+
+  evalCmd
+    .command("run <file>")
+    .description("run every case in a case-set file against its workflow and grade the outputs")
+    .option("--reps <n>", "repetitions per case (default: the file's reps, else 1)")
+    .option("--split <name>", "run only the train or test split (default: all)")
+    .option("--out <path>", "results JSON path (default: <home>/evals/<name>/<timestamp>.json)")
+    .option("--watch", "stream node events per case (default when stdout is a TTY)")
+    .option("--no-watch", "suppress node events; print only per-case verdicts")
+    .option("--provider <id>", "provider id for prompt nodes")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .option("--no-preflight", "skip the live model/effort preflight check at run start")
+    .action(async function evalRunAction(
+      this: Command,
+      file: string,
+      runOpts: {
+        reps?: string;
+        split?: string;
+        out?: string;
+        watch?: boolean;
+        provider?: string;
+        baseUrl?: string;
+        preflight?: boolean;
+      },
+    ) {
+      const { json } = globalOpts(this);
+      const provider = requireNonEmpty(json, "--provider", runOpts.provider);
+      const out = requireNonEmpty(json, "--out", runOpts.out);
+      let reps: number | undefined;
+      if (runOpts.reps !== undefined) {
+        reps = Number(runOpts.reps);
+        if (!Number.isInteger(reps) || reps < 1) {
+          emit(
+            {
+              error: `--reps must be a positive integer (got '${runOpts.reps}')`,
+              code: "BAD_INPUTS",
+            },
+            { json },
+          );
+          process.exit(EXIT_BAD_ARGS);
+        }
+      }
+      await runEvalRun(file, {
+        json,
+        ...(reps !== undefined ? { reps } : {}),
+        ...(runOpts.split !== undefined ? { split: runOpts.split } : {}),
+        ...(out ? { out } : {}),
+        ...(runOpts.watch !== undefined ? { watch: runOpts.watch } : {}),
+        ...(provider ? { provider } : {}),
+        ...(runOpts.baseUrl ? { baseUrl: runOpts.baseUrl } : {}),
+        ...(runOpts.preflight !== undefined ? { preflight: runOpts.preflight } : {}),
+      });
+    });
+
+  evalCmd
+    .command("compare <before> <after>")
+    .description(
+      "compare two results files: per-split delta, verdict, and the keep/revert decision",
+    )
+    .action(async function evalCompareAction(this: Command, before: string, after: string) {
+      const { json } = globalOpts(this);
+      await runEvalCompare(before, after, { json });
+    });
+
+  evalCmd
+    .command("init <workflow>")
+    .description("scaffold a case-set file for a workflow (refuses to overwrite)")
+    .option("--out <file>", "where to write it (default: <home>/evals/<workflow>.eval.yaml)")
+    .action(async function evalInitAction(
+      this: Command,
+      workflow: string,
+      initOpts: { out?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const out = requireNonEmpty(json, "--out", initOpts.out);
+      await runEvalInit(workflow, { json, ...(out ? { out } : {}) });
     });
 
   const project = program

@@ -80,6 +80,7 @@ const eventsQuerySchema = z
     source: eventSourceSchema.optional(),
     model: z.string().optional(),
     status: z.string().optional(),
+    runId: z.string().min(1).optional(),
   })
   .strict();
 
@@ -163,6 +164,7 @@ export function usageRoutes(app: Hono, deps: UsageRoutesDeps): void {
       source: c.req.query("source"),
       model: c.req.query("model"),
       status: c.req.query("status"),
+      runId: c.req.query("runId"),
     });
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
@@ -175,6 +177,7 @@ export function usageRoutes(app: Hono, deps: UsageRoutesDeps): void {
         source: parsed.data.source,
         model: parsed.data.model,
         status: parsed.data.status,
+        runId: parsed.data.runId,
       }),
     );
     return c.json(result);

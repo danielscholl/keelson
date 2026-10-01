@@ -110,6 +110,32 @@ Use `--arguments` for free-form text and reserve `--inputs` for named key-value 
 `approval_awaiting` frame, to disambiguate retries against interactive loops.
 `workflow status` takes `--workflow <name>` to filter to one workflow's runs.
 
+## Evals
+
+| Command | Does |
+| --- | --- |
+| `keelson eval run <file>` | Run every case in a case-set file against its workflow, grade the outputs, and write a results JSON plus Markdown summary under `<home>/evals/<name>/`. Server-up over HTTP, server-down in-process. |
+| `keelson eval compare <before.json> <after.json>` | Per-split pass-rate delta with an `improved` / `regressed` / `within-noise` verdict from the Wilson intervals, the cost delta, and the keep/revert decision. |
+| `keelson eval init <workflow> [--out <file>]` | Scaffold a case-set file for a workflow. Refuses to overwrite. |
+
+`eval run` options:
+
+| Option | Effect |
+| --- | --- |
+| `--reps <n>` | Repetitions per case, overriding the file's `reps`. |
+| `--split train\|test\|all` | Run one split only. Default `all`. |
+| `--out <path>` | Results JSON path; the summary and outputs directory land beside it. |
+| `--watch` / `--no-watch` | Stream node events per case, or print only per-case verdicts. Watch is the default on a TTY. |
+| `--provider <id>` | Provider for prompt nodes, as on `workflow run`. |
+| `--no-preflight` | Skip the live model and effort check at run start. |
+| `--base-url <url>` | An explicit server URL, skipping the probe. |
+
+`eval run` exits `1` when any case errored (a run that produced no gradable
+output, as opposed to a graded fail), `2` on a bad case file, `3` when the file
+names a `project` and the server is down, and `4` when the workflow is not
+found. See [Evaluating workflows](../../guides/evaluating-workflows/) for the
+file format and graders.
+
 ## Approvals
 
 | Command | Does |
