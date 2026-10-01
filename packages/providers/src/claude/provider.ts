@@ -121,7 +121,8 @@ function usesFixedBudget({ family, major, minor }: ClaudeModelVersion): boolean 
 // These always think, so "off" becomes the lowest effort instead of `disabled`.
 function alwaysThinks({ family, major, minor }: ClaudeModelVersion): boolean {
   if (family === "fable" || family === "mythos") return true;
-  return family === "opus" && major !== undefined && (major > 5 || (major === 5 && minor >= 5));
+  if (family !== "opus" && family !== "sonnet") return false;
+  return major !== undefined && (major > 5 || (major === 5 && minor >= 5));
 }
 
 const FIXED_BUDGETS: Record<ClaudeEffort, number> = {

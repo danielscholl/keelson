@@ -997,6 +997,27 @@ describe("ClaudeProvider — extended thinking (F10.4)", () => {
     expect(sdk.lastOptions()!.thinking).toEqual({ type: "disabled" });
   });
 
+  it.each([["claude-sonnet-5-5"], ["claude-sonnet-5-5-20260901"], ["claude-sonnet-6"]])(
+    "maps none reasoning effort to adaptive low on always-thinking Sonnet %s",
+    (id) => {
+      const expected = {
+        thinking: { type: "adaptive", display: "summarized" },
+        effort: "low",
+      } as const;
+      expect(resolveClaudeThinking(id, "none", undefined)).toEqual(expected);
+      expect(resolveClaudeThinking(id, undefined, false)).toEqual(expected);
+    },
+  );
+
+  it.each([["claude-sonnet-5"], ["claude-sonnet-4-6"], ["claude-opus-5"]])(
+    "still disables thinking for none on %s, which can turn thinking off",
+    (id) => {
+      expect(resolveClaudeThinking(id, "none", undefined)).toEqual({
+        thinking: { type: "disabled" },
+      });
+    },
+  );
+
   it.each([
     ["claude-sonnet-4-20250514"],
     ["claude-opus-4-20250514"],
