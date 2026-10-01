@@ -224,7 +224,28 @@ export interface EvalComparison {
     readonly afterUsd: number | null;
     readonly deltaUsd: number | null;
   };
+  // What the change cost when the provider is unpriced: wall time per case run
+  // and tokens summed over the eval (null when any run reported none).
+  readonly duration: { readonly beforeMeanMs: number | null; readonly afterMeanMs: number | null };
+  readonly tokens: { readonly before: TokenTotals | null; readonly after: TokenTotals | null };
   readonly warnings: readonly string[];
+}
+
+export interface TokenTotals {
+  readonly input: number;
+  readonly output: number;
+}
+
+function tokenTotals(results: readonly EvalCaseResult[]): TokenTotals | null {
+  if (results.length === 0) return null;
+  let input = 0;
+  let output = 0;
+  for (const r of results) {
+    if (r.tokens === null) return null;
+    input += r.tokens.input;
+    output += r.tokens.output;
+  }
+  return { input, output };
 }
 
 function caseRates(
@@ -388,6 +409,11 @@ export function compareResults(a: EvalResultsFile, b: EvalResultsFile): EvalComp
       afterUsd,
       deltaUsd: beforeUsd !== null && afterUsd !== null ? afterUsd - beforeUsd : null,
     },
+    duration: {
+      beforeMeanMs: a.summary.duration.meanMs,
+      afterMeanMs: b.summary.duration.meanMs,
+    },
+    tokens: { before: tokenTotals(a.cases), after: tokenTotals(b.cases) },
     warnings,
   };
 }
@@ -495,6 +521,12 @@ export function renderComparisonText(cmp: EvalComparison): string {
       ? "unpriced"
       : `${cmp.cost.deltaUsd >= 0 ? "+" : "-"}${fmtUsd(Math.abs(cmp.cost.deltaUsd))} (${fmtUsd(cmp.cost.beforeUsd)} → ${fmtUsd(cmp.cost.afterUsd)})`;
   lines.push(`cost: ${costDelta}`);
+  lines.push(
+    `duration: mean ${fmtMs(cmp.duration.beforeMeanMs)} → ${fmtMs(cmp.duration.afterMeanMs)} per case run`,
+  );
+  const fmtTokens = (t: TokenTotals | null) =>
+    t === null ? "n/a" : `${t.input} in / ${t.output} out`;
+  lines.push(`tokens: ${fmtTokens(cmp.tokens.before)} → ${fmtTokens(cmp.tokens.after)}`);
   lines.push(`decision: ${cmp.decision} (${cmp.reason})`);
   for (const w of cmp.warnings) lines.push(`warning: ${w}`);
   return lines.join("\n");

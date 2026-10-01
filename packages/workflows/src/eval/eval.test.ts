@@ -709,6 +709,24 @@ describe("compareResults", () => {
     expect(evalResultsFileSchema.safeParse(a).success).toBe(true);
   });
 
+  test("duration and tokens ride along, and tokens are null when any run reported none", () => {
+    const run = (tokens: { input: number; output: number } | null, durationMs: number) =>
+      file(["a", "b"].map((caseId) => result({ caseId, tokens, durationMs })));
+    const cmp = compareResults(
+      run({ input: 10, output: 400 }, 200),
+      run({ input: 10, output: 100 }, 50),
+    );
+    expect(cmp.duration).toEqual({ beforeMeanMs: 200, afterMeanMs: 50 });
+    expect(cmp.tokens).toEqual({
+      before: { input: 20, output: 800 },
+      after: { input: 20, output: 200 },
+    });
+    const text = renderComparisonText(cmp);
+    expect(text).toContain("duration: mean 200ms → 50ms per case run");
+    expect(text).toContain("tokens: 20 in / 800 out → 20 in / 200 out");
+    expect(compareResults(run(null, 1), run({ input: 1, output: 1 }, 1)).tokens.before).toBeNull();
+  });
+
   test("cost delta is null when either side is unpriced", () => {
     const a = file(batch("test", 5, 5));
     const b = file([result({ costUsd: 0.5 })]);

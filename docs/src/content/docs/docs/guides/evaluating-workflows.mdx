@@ -185,8 +185,9 @@ the train and test splits each moved up. **Revert** when the pooled result is
 within noise, when either split regressed, or when the pooled gain came from
 train while test stayed flat: that is overfitting. A set with no train split
 decides on test alone and says so, which is a reason to declare one. The cost
-delta prints alongside, so an improvement that doubled the spend is visible in
-the same line.
+delta prints alongside, with the mean duration per case run and the token
+totals, so an improvement that doubled the spend is visible in the same place
+even on a provider the price table does not cover.
 
 ```
 overall  60.0% [38.7%, 78.1%] → 90.0% [69.9%, 97.2%]  +30.0 pts  improved  (6/20 cases changed, p=0.031)

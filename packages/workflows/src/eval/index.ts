@@ -61,6 +61,7 @@ export {
   type SplitVerdict,
   splitStats,
   summarize,
+  type TokenTotals,
 } from "./results.ts";
 export {
   mean,
