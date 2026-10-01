@@ -8,7 +8,13 @@
 
 import { z } from "zod";
 import { canvasActionItemSchema, canvasKindSchema, canvasToneSchema } from "./canvas.ts";
-import type { MessageChunk, ModelClass, ModelClassMap, TokenUsage } from "./chat.ts";
+import type {
+  MessageChunk,
+  ModelClass,
+  ModelClassMap,
+  ReasoningEffortLevel,
+  TokenUsage,
+} from "./chat.ts";
 
 import type { CommandCompletion, CommandInvokeResult, RibCommandDescriptor } from "./commands.ts";
 import type { RibDocsSource } from "./docs.ts";
@@ -102,6 +108,9 @@ export interface RibAgentTurnRequest {
   // Resolved per provider like a workflow node's class: config.json modelClasses,
   // then the provider's own map, then its default model. An explicit `model` wins.
   modelClass?: ModelClass;
+  // A hint forwarded only to providers whose capabilities report
+  // `reasoningEffort: true`; dropped otherwise, never a failure.
+  reasoningEffort?: ReasoningEffortLevel;
   // Omit for a text-only turn (the room default — no Bash/Edit between turns).
   tools?: readonly { name: string; [k: string]: unknown }[];
   // Forwarded verbatim to tool executions; only the calling rib interprets it.

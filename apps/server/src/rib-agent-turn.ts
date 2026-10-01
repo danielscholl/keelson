@@ -250,6 +250,10 @@ async function runTurn(
       : undefined;
 
   const model = await requestedModel(req, provider, providerId, deps, controller.signal);
+  const effort =
+    req.reasoningEffort !== undefined && provider.getCapabilities?.()?.reasoningEffort === true
+      ? req.reasoningEffort
+      : undefined;
   if (controller.signal.aborted) {
     if (timer) clearTimeout(timer);
     req.abortSignal?.removeEventListener("abort", onCallerAbort);
@@ -268,6 +272,7 @@ async function runTurn(
     abortSignal: controller.signal,
     ...(req.system ? { systemPrompt: req.system } : {}),
     ...(model ? { model } : {}),
+    ...(effort !== undefined ? { reasoningEffort: effort } : {}),
     ...(req.turnContext !== undefined ? { turnContext: req.turnContext } : {}),
     ...(req.allowedDirectories !== undefined ? { allowedDirectories: req.allowedDirectories } : {}),
     onSessionId: (id) => {
