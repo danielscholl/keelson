@@ -5282,6 +5282,9 @@ describe("runWorkflow — output_schema failure inside the retry loop", () => {
           status: "succeeded",
           output: { kind: "text", text: '{"summary":"a"}' },
           usage: { inputTokens: 10, outputTokens: 5 },
+          provider: "copilot",
+          model: "m-1",
+          effort: "high",
         };
       },
     };
@@ -5293,9 +5296,12 @@ describe("runWorkflow — output_schema failure inside the retry loop", () => {
     });
     expect(summary.nodes.judge).toMatchObject({ state: "failed", error: "provider exploded" });
     const done = events.find((e) => e.type === "node_done" && e.nodeId === "judge");
-    expect(done?.type === "node_done" ? done.result.usage : undefined).toEqual({
-      inputTokens: 10,
-      outputTokens: 5,
+    expect(done?.type === "node_done" ? done.result : undefined).toMatchObject({
+      status: "failed",
+      usage: { inputTokens: 10, outputTokens: 5 },
+      provider: "copilot",
+      model: "m-1",
+      effort: "high",
     });
   });
 

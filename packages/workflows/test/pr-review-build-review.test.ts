@@ -44,6 +44,10 @@ bashDescribe("pr-review build-review repro rendering", () => {
   }
 
   function render(findings: Finding[]): Comment[] {
+    return renderPayload(findings).comments;
+  }
+
+  function renderPayload(findings: Finding[]): { body: string; comments: Comment[] } {
     const artifacts = mkdtempSync(join(tmpdir(), "keelson-build-review-"));
     tmps.push(artifacts);
     writeFileSync(
@@ -72,10 +76,10 @@ bashDescribe("pr-review build-review repro rendering", () => {
       stderr: "pipe",
     });
     if (proc.exitCode !== 0) throw new Error(proc.stderr.toString());
-    const payload = JSON.parse(readFileSync(join(artifacts, "payload.json"), "utf8")) as {
+    return JSON.parse(readFileSync(join(artifacts, "payload.json"), "utf8")) as {
+      body: string;
       comments: Comment[];
     };
-    return payload.comments;
   }
 
   const base = { path: "a.ts", severity: "HIGH", confidence: 90, what: "w", why: "because" };
@@ -103,6 +107,17 @@ bashDescribe("pr-review build-review repro rendering", () => {
   test("omits the line when the field is absent", () => {
     const [comment] = render([{ ...base, line: 2, fix: "" }]);
     expect(comment?.body).toBe("blocking: w\n\nbecause");
+  });
+
+  test("a finding that cannot be anchored keeps its repro in the review body", () => {
+    const { body, comments } = renderPayload([
+      { ...base, line: 40, fix: "", repro: "bun test a.test.ts\nexpected 3, got 2" },
+      { ...base, line: 41, fix: "", repro: "none" },
+    ]);
+    expect(comments).toEqual([]);
+    expect(body).toContain(
+      "- blocking: `a.ts` — w\n  Repro: bun test a.test.ts\n  expected 3, got 2\n- blocking: `a.ts` — w\n\n<!--",
+    );
   });
 
   test("keeps a repro that only resembles the sentinel", () => {

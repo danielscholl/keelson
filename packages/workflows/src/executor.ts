@@ -1165,8 +1165,11 @@ async function runHandlerWithRetry(
   const maxRetries = retry?.max_attempts ?? 0;
   // A rejected attempt still spent tokens; the final result carries the total.
   let spent: NodeTokenUsage | undefined;
+  // The usage ledger drops a node_done without provider/model, so a final
+  // attempt that reports none inherits the last usage-bearing attempt's.
+  let spentBy: Pick<NodeResult, "provider" | "model" | "effort"> = {};
   const withSpent = (r: NodeResult): NodeResult =>
-    spent === undefined ? r : { ...r, usage: spent };
+    spent === undefined ? r : { ...spentBy, ...r, usage: spent };
   for (let attempt = 0; ; attempt++) {
     const backoff = async (reason: string): Promise<void> => {
       const delayMs = (retry?.delay_ms ?? DEFAULT_RETRY_DELAY_MS) * 2 ** attempt;
@@ -1180,6 +1183,13 @@ async function runHandlerWithRetry(
     try {
       const result = checkNodeOutput(node, await handler.handle(node, nodeCtx), emit);
       spent = addNodeUsage(spent, result.usage);
+      if (result.usage !== undefined) {
+        spentBy = {
+          ...(result.provider !== undefined ? { provider: result.provider } : {}),
+          ...(result.model !== undefined ? { model: result.model } : {}),
+          ...(result.effort !== undefined ? { effort: result.effort } : {}),
+        };
+      }
       if (
         result.status === "failed" &&
         retry !== undefined &&

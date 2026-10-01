@@ -786,6 +786,9 @@ nodes:
           COMMENTS=$(printf '%s' "$COMMENTS" | jq ". + [$COMMENT]")
         else
           FALLBACK="${FALLBACK}"$'\n'"- ${PREFIX}: \`${PATH_F}\` — ${WHAT}"
+          if [ -n "$REPRO" ]; then
+            FALLBACK="${FALLBACK}"$'\n'"$(printf 'Repro: %s' "$REPRO" | sed 's/^/  /')"
+          fi
         fi
       done < <(jq -c '.findings[]' "$TRIAGE_JSON" 2>/dev/null || true)
 
