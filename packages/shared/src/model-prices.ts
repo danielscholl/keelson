@@ -51,10 +51,13 @@ export const BUNDLED_MODEL_PRICES: Readonly<Record<string, ModelPrice>> = Object
 // Collapses the spellings one Anthropic model travels under across providers
 // (Copilot's dotted `claude-opus-4.8`, Bedrock's `us.anthropic.` prefix, dated
 // or `[1m]` suffixes) onto the hyphenated id the bundled table is keyed by.
+// Only Claude ids are rewritten: another vendor's `gpt-4.1` and `gpt-4-1` are
+// distinct ids and must stay distinct override keys.
 export function normalizeModelId(model: string): string {
-  return model
-    .trim()
-    .toLowerCase()
+  const trimmed = model.trim();
+  const lower = trimmed.toLowerCase();
+  if (!lower.includes("claude")) return trimmed;
+  return lower
     .replace(/\[1m\]$/, "")
     .replace(/^(?:[a-z]{2}\.)?anthropic\./, "")
     .replace(/[@-]\d{8}$/, "")

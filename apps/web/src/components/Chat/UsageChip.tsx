@@ -14,10 +14,6 @@ export interface SessionUsageTotals {
   inputTokens: number;
   outputTokens: number;
   turns: number;
-  // Summed per-turn estimates at the conversation model's price; null when
-  // that model is unpriced (or unresolved, as Copilot's `auto`), absent when
-  // the caller doesn't price at all.
-  costUsd?: number | null;
 }
 
 interface UsageChipProps {

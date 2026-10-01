@@ -20,6 +20,12 @@ describe("normalizeModelId", () => {
     expect(normalizeModelId("claude-sonnet-5@20260101")).toBe("claude-sonnet-5");
     expect(normalizeModelId("claude-sonnet-5[1m]")).toBe("claude-sonnet-5");
   });
+
+  test("leaves another vendor's ids exact so distinct override keys stay distinct", () => {
+    expect(normalizeModelId("gpt-4.1")).toBe("gpt-4.1");
+    expect(normalizeModelId("gpt-4-1")).toBe("gpt-4-1");
+    expect(normalizeModelId("GPT-5.5-20260101")).toBe("GPT-5.5-20260101");
+  });
 });
 
 describe("resolveModelPrice", () => {

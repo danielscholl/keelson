@@ -10,6 +10,7 @@ import { UsageBreakdown, UsagePopover } from "../src/components/Chat/UsagePopove
 import {
   contextFillLevel,
   contextPercent,
+  formatCostUsd,
   formatTokens,
   sumTokenSpend,
 } from "../src/lib/formatTokens.ts";
@@ -227,38 +228,57 @@ describe("UsagePopover", () => {
 });
 
 describe("UsagePopover — cost and cache hit", () => {
-  test("prices the last turn and the session at the given model price", () => {
+  test("shows the ledger's last-turn and session cost plus the session cache hit", () => {
     render(
       <UsagePopover
         popoverId="usage-pop-8"
         latest={{ inputTokens: 1000, outputTokens: 500, cacheReadInputTokens: 3000 }}
-        totals={{ inputTokens: 2000, outputTokens: 1000, turns: 2, costUsd: 0.0153 }}
-        price={{
-          inputPerMTok: 2,
-          outputPerMTok: 10,
-          cacheReadPerMTok: 0.2,
-          cacheWritePerMTok: 2.5,
-        }}
+        totals={{ inputTokens: 2000, outputTokens: 1000, turns: 2 }}
+        ledger={{ lastTurnCostUsd: 0.0076, sessionCostUsd: 0.0153, cacheHitRatio: 0.6 }}
       />,
     );
-    expect(screen.getByText("Cache hit")).toBeDefined();
+    // Last turn's own hit ratio from its counts, the session's from the ledger.
+    expect(screen.getAllByText("Cache hit")).toHaveLength(2);
     expect(screen.getByText("75%")).toBeDefined();
+    expect(screen.getByText("60%")).toBeDefined();
     expect(screen.getAllByText("Cost")).toHaveLength(2);
-    // 1000*2 + 500*10 + 3000*0.2 = 7600 → $0.0076
     expect(screen.getByText("$0.0076")).toBeDefined();
     expect(screen.getByText("$0.0153")).toBeDefined();
   });
 
-  test("reads unpriced, never $0, when the model has no price", () => {
+  test("reads unpriced, never $0, when the ledger has no price for the model", () => {
     render(
       <UsagePopover
         popoverId="usage-pop-9"
         latest={{ inputTokens: 1000, outputTokens: 500 }}
-        totals={{ inputTokens: 1000, outputTokens: 500, turns: 1, costUsd: null }}
+        totals={{ inputTokens: 1000, outputTokens: 500, turns: 1 }}
+        ledger={{ lastTurnCostUsd: null, sessionCostUsd: null, cacheHitRatio: null }}
       />,
     );
     expect(screen.getAllByText("unpriced")).toHaveLength(2);
+    expect(screen.getByText("—")).toBeDefined();
+  });
+
+  test("omits cost rows until the ledger has answered", () => {
+    render(
+      <UsagePopover
+        popoverId="usage-pop-10"
+        latest={{ inputTokens: 1000, outputTokens: 500 }}
+        totals={{ inputTokens: 1000, outputTokens: 500, turns: 1 }}
+      />,
+    );
+    expect(screen.queryByText("Cost")).toBeNull();
     expect(screen.queryByText("Cache hit")).toBeNull();
+  });
+});
+
+describe("formatCostUsd", () => {
+  test("never shows a positive cost as $0.0000, and null as unpriced", () => {
+    expect(formatCostUsd(0)).toBe("$0.0000");
+    expect(formatCostUsd(0.000001)).toBe("<$0.0001");
+    expect(formatCostUsd(0.0123)).toBe("$0.0123");
+    expect(formatCostUsd(12.345)).toBe("$12.35");
+    expect(formatCostUsd(null)).toBe("unpriced");
   });
 });
 

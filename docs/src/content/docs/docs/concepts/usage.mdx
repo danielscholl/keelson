@@ -97,7 +97,11 @@ catalog uses. Price any other model yourself with the
 which also overrides a bundled rate.
 
 Cost is computed when you read it, never stored. A corrected price reprices
-history on the next load, and nothing in the ledger has to be rewritten.
+history on the next load, and nothing in the ledger has to be rewritten. One
+caveat on old history: rows written before the providers normalized their
+counts may carry an input figure that already includes cache tokens, and the
+ledger has no per-row marker to tell them apart, so the cost of those rows can
+overstate by the cache portion. Rows written since are priced exactly.
 
 **A null cost means unpriced, and it is never shown as zero.** When any event in
 an aggregate ran on a model with no price, the whole aggregate's cost is null and
@@ -115,7 +119,8 @@ reads at all or when there was nothing to divide by, so a provider that does not
 report caching never shows a 0% hit rate it did not earn.
 
 The chat composer's usage popover shows the same two figures for the open
-conversation, priced at the model the conversation selected.
+conversation, read from the ledger rather than priced in the browser, so each
+turn is priced at the model that actually served it even across a model swap.
 
 ## Observability, not admission control
 

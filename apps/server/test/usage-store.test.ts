@@ -976,6 +976,36 @@ describe("SQLite UsageStore", () => {
       ).toBeNull();
     });
 
+    test("conversationId scopes summary and events to one conversation's rows", () => {
+      store.record({
+        source: "chat",
+        provider: "claude",
+        model: "claude-sonnet-5",
+        conversationId: "c1",
+        ...SONNET,
+      });
+      store.record({
+        source: "chat",
+        provider: "claude",
+        model: "claude-haiku-4-5",
+        conversationId: "c1",
+        ...HAIKU,
+      });
+      store.record({
+        source: "chat",
+        provider: "codex",
+        model: "gpt-5",
+        conversationId: "c2",
+        inputTokens: 1,
+        outputTokens: 1,
+      });
+      const result = store.summary({ groupBy: "model", conversationId: "c1" });
+      expect(result.totals.events).toBe(2);
+      expect(result.totals.costUsd).toBeCloseTo(SONNET_COST + HAIKU_COST, 6);
+      expect(store.events({ conversationId: "c1", limit: 1 })[0]?.model).toBe("claude-haiku-4-5");
+      expect(store.summary({ groupBy: "model", conversationId: "nope" }).totals.events).toBe(0);
+    });
+
     test("a window with no events costs nothing and has no hit ratio", () => {
       const result = store.summary({ groupBy: "model" });
       expect(result.totals).toMatchObject({

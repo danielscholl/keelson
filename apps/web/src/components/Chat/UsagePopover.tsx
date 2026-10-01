@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { cacheHitRatio, estimateCostUsd, type ModelPrice, type TokenUsage } from "@keelson/shared";
+import { cacheHitRatio, type TokenUsage } from "@keelson/shared";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef } from "react";
 import {
@@ -20,21 +20,15 @@ interface UsagePopoverProps {
   // Required: mounted only once a turn has reported (same gate as UsageChip).
   latest: TokenUsage;
   totals: SessionUsageTotals;
-  // The conversation model's price; undefined reads as "unpriced", never $0.
-  price?: ModelPrice;
+  // Read from the usage ledger for this conversation, which prices each turn
+  // at its served model. Omitted until the ledger has answered.
+  ledger?: ConversationLedgerCost;
 }
 
-export function turnCostUsd(usage: TokenUsage, price: ModelPrice | undefined): number | null {
-  if (!price) return null;
-  return estimateCostUsd(
-    {
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      cacheReadTokens: usage.cacheReadInputTokens ?? null,
-      cacheWriteTokens: usage.cacheCreationInputTokens ?? null,
-    },
-    price,
-  );
+export interface ConversationLedgerCost {
+  lastTurnCostUsd: number | null;
+  sessionCostUsd: number | null;
+  cacheHitRatio: number | null;
 }
 
 interface UsagePopoverPanelProps {
@@ -203,17 +197,22 @@ export function UsagePopoverPanel({
   );
 }
 
-export function UsagePopover({ popoverId, latest, totals, price }: UsagePopoverProps) {
+export function UsagePopover({ popoverId, latest, totals, ledger }: UsagePopoverProps) {
   return (
     <UsagePopoverPanel popoverId={popoverId}>
-      <UsageBreakdown usage={latest} costUsd={turnCostUsd(latest, price)} />
+      <UsageBreakdown usage={latest} costUsd={ledger?.lastTurnCostUsd} />
       {totals.turns > 0 && (
         <section className="usage-popover-section">
           <div className="usage-popover-section-title">Session</div>
           <Row label="↑ Input" value={formatTokens(totals.inputTokens)} />
           <Row label="↓ Output" value={formatTokens(totals.outputTokens)} />
           <Row label="Turns" value={String(totals.turns)} />
-          <Row label="Cost" value={formatCostUsd(totals.costUsd)} />
+          {ledger && (
+            <>
+              <Row label="Cache hit" value={formatCacheHit(ledger.cacheHitRatio)} />
+              <Row label="Cost" value={formatCostUsd(ledger.sessionCostUsd)} />
+            </>
+          )}
         </section>
       )}
     </UsagePopoverPanel>

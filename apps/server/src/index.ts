@@ -14,7 +14,6 @@ import {
   unregisterProvider,
 } from "@keelson/providers";
 import {
-  BUNDLED_MODEL_PRICES,
   DEFAULT_PROJECT_NAME,
   POLICY_APPROVALS_SNAPSHOT_KEY,
   policyApprovalsSnapshotSchema,
@@ -781,9 +780,6 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     c.json({
       schemaVersion: SCHEMA_VERSION,
       wireProtocolVersion: WIRE_PROTOCOL_VERSION,
-      // The effective price table (operator overrides over the bundled one) so
-      // the SPA can price a live chat turn by the same rule the ledger uses.
-      modelPrices: { ...BUNDLED_MODEL_PRICES, ...(modelPriceOverrides() ?? {}) },
     }),
   );
 

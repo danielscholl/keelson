@@ -90,6 +90,7 @@ export type UsageSeriesBucket = "hour" | "day";
 export interface UsageSummaryArgs {
   sinceIso?: string;
   groupBy: UsageGroupBy;
+  conversationId?: string;
 }
 
 export interface UsageSeriesArgs {
@@ -110,6 +111,7 @@ export interface UsageEventsFilter {
   model?: string;
   status?: string;
   sinceIso?: string;
+  conversationId?: string;
 }
 
 export interface UsageJobsArgs {
@@ -427,6 +429,10 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
         clauses.push("ts >= ?");
         params.push(args.sinceIso);
       }
+      if (args.conversationId !== undefined) {
+        clauses.push("conversation_id = ?");
+        params.push(args.conversationId);
+      }
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       const pricer = pricerForQuery();
       const groupRows = db
@@ -583,6 +589,10 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
       if (filter.sinceIso !== undefined) {
         clauses.push("ts >= ?");
         params.push(filter.sinceIso);
+      }
+      if (filter.conversationId !== undefined) {
+        clauses.push("conversation_id = ?");
+        params.push(filter.conversationId);
       }
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       const limit =

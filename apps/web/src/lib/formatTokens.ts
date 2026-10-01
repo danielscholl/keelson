@@ -60,9 +60,12 @@ export function sumTokenSpend(
 
 // Ledger cost: four decimals under a dollar ($0.0123) so a single cheap turn
 // still reads as a number, two above it. Null is an unpriced model, and the
-// word says so rather than a "$0.00" that would look like a free turn.
+// word says so rather than a "$0.00" that would look like a free turn; a
+// positive cost too small for four decimals shows as a lower bound for the
+// same reason.
 export function formatCostUsd(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n) || n < 0) return "unpriced";
+  if (n > 0 && n < 0.0001) return "<$0.0001";
   return n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
 }
 
