@@ -326,8 +326,15 @@ describe("graders", () => {
     const prompt = buildJudgePrompt("out", ["c1"]);
     expect(prompt).toContain("c1");
     expect(prompt).toContain("OUTPUT:");
-    const parsed = parseJudgeResponse('{"claims":[{"met":true}]}', ["c1"]);
+    const parsed = parseJudgeResponse('{"claims":[{"claim":" C1 ","met":true}]}', ["c1"]);
     expect(parsed.ok).toBe(true);
+    const unnamed = parseJudgeResponse('{"claims":[{"met":true}]}', ["c1"]);
+    expect(unnamed.ok).toBe(false);
+    const duplicated = parseJudgeResponse(
+      '{"claims":[{"claim":"a","met":true},{"claim":"a","met":true}]}',
+      ["a", "b"],
+    );
+    expect(duplicated.ok).toBe(false);
     const short = parseJudgeResponse('{"claims":[]}', ["c1"]);
     expect(short.ok).toBe(false);
   });
@@ -543,6 +550,8 @@ describe("compareResults", () => {
     expect(cmp.reason).toContain("case sets differ");
     const c = file(batch("test", 10, 0), { splitFilter: "test" });
     expect(compareResults(a, c).comparable).toBe(false);
+    const d = file(batch("test", 10, 0), { project: "other" });
+    expect(compareResults(a, d).reason).toContain("projects differ");
     expect(evalResultsFileSchema.safeParse({ ...a, summary: null }).success).toBe(false);
     expect(evalResultsFileSchema.safeParse(a).success).toBe(true);
   });

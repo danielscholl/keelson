@@ -220,6 +220,10 @@ export function buildJudgePrompt(output: string, claims: readonly string[]): str
 
 type JudgeParse = { ok: true; claims: JudgeClaimVerdict[] } | { ok: false; error: string };
 
+function normalizeClaim(text: string): string {
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
 export function parseJudgeResponse(text: string, claims: readonly string[]): JudgeParse {
   const extracted = extractJson(text);
   if (!extracted.ok) return { ok: false, error: `judge returned no JSON: ${extracted.error}` };
@@ -239,6 +243,15 @@ export function parseJudgeResponse(text: string, claims: readonly string[]): Jud
     const row = rows[i] as { claim?: unknown; met?: unknown; evidence?: unknown };
     if (typeof row !== "object" || row === null || typeof row.met !== "boolean") {
       return { ok: false, error: `judge verdict ${i + 1} lacks a boolean 'met'` };
+    }
+    if (
+      typeof row.claim !== "string" ||
+      normalizeClaim(row.claim) !== normalizeClaim(claims[i] as string)
+    ) {
+      return {
+        ok: false,
+        error: `judge verdict ${i + 1} does not restate claim ${i + 1} (${JSON.stringify(claims[i])})`,
+      };
     }
     verdicts.push({
       claim: claims[i] as string,

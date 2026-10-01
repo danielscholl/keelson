@@ -18,6 +18,7 @@ import { join, resolve } from "node:path";
 import { clearRegistry } from "@keelson/providers";
 import { parseEvalCaseFile } from "@keelson/workflows";
 
+import { judgeProviderError } from "../src/commands/eval.ts";
 import { type CaseExecution, makeInProcessExecutor } from "../src/eval/execute.ts";
 import { runEval } from "../src/eval/runner.ts";
 import { spawnEnv } from "./spawn-env.ts";
@@ -200,6 +201,16 @@ cases:
     expect(prompts.join("\n")).not.toContain("never shown");
     expect(results.summary.graderNoise.judged).toBe(1);
     expect(results.summary.graderNoise.rate).toBe(0);
+  });
+});
+
+describe("judge provider rail", () => {
+  test("only providers that honor an empty allowedTools list may judge", () => {
+    expect(judgeProviderError("claude")).toBeNull();
+    expect(judgeProviderError("copilot")).toBeNull();
+    expect(judgeProviderError("stub")).toBeNull();
+    expect(judgeProviderError("codex")).toContain("cannot run without tools");
+    expect(judgeProviderError("pi")).toContain("cannot run without tools");
   });
 });
 

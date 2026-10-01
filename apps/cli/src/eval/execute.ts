@@ -2,7 +2,12 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import type { WorkflowFrame } from "@keelson/shared";
+import {
+  getWorkflowRunResponseSchema,
+  usageEventsResponseSchema,
+  type WorkflowFrame,
+  type WorkflowRunDetail,
+} from "@keelson/shared";
 import type { RunStreamEvent } from "@keelson/workflows";
 
 import { normalizeBase, originHeader } from "../http/base.ts";
@@ -151,47 +156,26 @@ export async function resolveProjectId(baseUrl: string, nameOrId: string): Promi
   return projects.find((p) => p.name === nameOrId)?.id ?? null;
 }
 
-interface RunDetailLoose {
-  status?: unknown;
-  error?: unknown;
-  startedAt?: unknown;
-  completedAt?: unknown;
-  definitionHash?: unknown;
-  nodes?: unknown;
-}
-
-interface NodeRowLoose {
-  nodeId?: unknown;
-  status?: unknown;
-  outputText?: unknown;
-  completedAt?: unknown;
-  usage?: unknown;
-}
-
-// Sum `costUsd` over the run's usage events when the server reports it; null
-// (never 0) when the server predates pricing or no event carries a price.
+// Sum the server's per-event `costUsd` for one run. Null (never 0) when any
+// event is unpriced, when the run has no events, or when the server is older
+// than the pricing migration and does not serve the field.
 export async function fetchRunCostUsd(baseUrl: string, runId: string): Promise<number | null> {
   try {
     const res = await fetch(
-      `${normalizeBase(baseUrl)}/api/usage/events?window=24h&limit=500&runId=${encodeURIComponent(runId)}`,
+      `${normalizeBase(baseUrl)}/api/usage/events?limit=500&runId=${encodeURIComponent(runId)}`,
       { headers: { accept: "application/json", origin: originHeader(baseUrl) } },
     );
     if (!res.ok) return null;
-    const rows = (await res.json()) as unknown;
-    if (!Array.isArray(rows)) return null;
-    // The server prices per event and leaves `costUsd` null where it cannot;
-    // one unpriced event makes the run unpriced rather than under-counted.
+    const parsed = usageEventsResponseSchema.safeParse(await res.json());
+    if (!parsed.success) return null;
+    const rows = parsed.data.filter((row) => row.runId === runId);
+    if (rows.length === 0) return null;
     let total = 0;
-    let matched = 0;
     for (const row of rows) {
-      if (typeof row !== "object" || row === null) continue;
-      if ((row as { runId?: unknown }).runId !== runId) continue;
-      matched++;
-      const cost = (row as { costUsd?: unknown }).costUsd;
-      if (typeof cost !== "number" || !Number.isFinite(cost)) return null;
-      total += cost;
+      if (row.costUsd === null) return null;
+      total += row.costUsd;
     }
-    return matched > 0 ? total : null;
+    return total;
   } catch {
     return null;
   }
@@ -235,10 +219,17 @@ export function makeHttpExecutor(opts: HttpExecutorOptions): CaseExecutor {
     if (terminalStatus === null) {
       return errorExecution(`run ${runId} ended without a terminal frame`, runId);
     }
-    let detail: RunDetailLoose;
+    let detail: WorkflowRunDetail;
     try {
-      const body = (await getRun(opts.baseUrl, runId)) as { run?: RunDetailLoose };
-      detail = body.run ?? {};
+      const body = await getRun(opts.baseUrl, runId);
+      const parsed = getWorkflowRunResponseSchema.safeParse(body);
+      if (!parsed.success) {
+        return errorExecution(
+          `run ${runId} detail did not match this CLI's schema: ${parsed.error.issues[0]?.message ?? "invalid"}`,
+          runId,
+        );
+      }
+      detail = parsed.data.run;
     } catch (err) {
       return errorExecution(
         `run ${runId} detail fetch failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -249,40 +240,32 @@ export function makeHttpExecutor(opts: HttpExecutorOptions): CaseExecutor {
     let input = 0;
     let output = 0;
     let sawUsage = false;
-    const rows = Array.isArray(detail.nodes) ? (detail.nodes as NodeRowLoose[]) : [];
-    for (const row of rows) {
-      if (typeof row.nodeId !== "string") continue;
-      nodeOutputs[row.nodeId] = typeof row.outputText === "string" ? row.outputText : "";
-      const usage = row.usage as { inputTokens?: unknown; outputTokens?: unknown } | null;
-      if (
-        usage &&
-        typeof usage.inputTokens === "number" &&
-        typeof usage.outputTokens === "number"
-      ) {
+    for (const row of detail.nodes) {
+      nodeOutputs[row.nodeId] = row.outputText ?? "";
+      if (row.usage !== null) {
         sawUsage = true;
-        input += usage.inputTokens;
-        output += usage.outputTokens;
+        input += row.usage.inputTokens;
+        output += row.usage.outputTokens;
       }
     }
     // A run that finished before the socket attached replays only run_done,
     // so recover the completion order from the persisted rows instead.
     const last =
       succeededOrder.at(-1) ??
-      rows
-        .filter((row) => row.status === "succeeded" && typeof row.nodeId === "string")
-        .sort((x, y) => String(x.completedAt ?? "").localeCompare(String(y.completedAt ?? "")))
-        .map((row) => row.nodeId as string)
+      [...detail.nodes]
+        .filter((row) => row.status === "succeeded")
+        .sort((x, y) => (x.completedAt ?? "").localeCompare(y.completedAt ?? ""))
+        .map((row) => row.nodeId)
         .at(-1);
-    const startedAt = typeof detail.startedAt === "string" ? Date.parse(detail.startedAt) : NaN;
-    const completedAt =
-      typeof detail.completedAt === "string" ? Date.parse(detail.completedAt) : NaN;
+    const startedAt = Date.parse(detail.startedAt);
+    const completedAt = detail.completedAt !== null ? Date.parse(detail.completedAt) : NaN;
     const status =
       terminalStatus === "succeeded" ||
       terminalStatus === "failed" ||
       terminalStatus === "cancelled"
         ? terminalStatus
         : null;
-    const runError = typeof detail.error === "string" ? detail.error : null;
+    const runError = detail.error;
     return {
       runId,
       runStatus: status,
@@ -293,7 +276,8 @@ export function makeHttpExecutor(opts: HttpExecutorOptions): CaseExecutor {
         Number.isFinite(startedAt) && Number.isFinite(completedAt) ? completedAt - startedAt : null,
       tokens: sawUsage ? { input, output } : null,
       costUsd: await fetchRunCostUsd(opts.baseUrl, runId),
-      definitionHash: typeof detail.definitionHash === "string" ? detail.definitionHash : null,
+      // Null only for rows persisted before the definition-hash migration.
+      definitionHash: detail.definitionHash,
     };
   };
 }

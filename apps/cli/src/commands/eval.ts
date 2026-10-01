@@ -27,8 +27,9 @@ import {
 import { runEval, selectCases } from "../eval/runner.ts";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import { resolveKeelsonHome } from "../home.ts";
-import { isServerDownError, listWorkflows } from "../http/workflow-client.ts";
+import { isServerDownError, workflowExists } from "../http/workflow-client.ts";
 import { chatHeadless } from "../in-process/chat.ts";
+import { bootstrapCliProviders, pickDefaultProvider } from "../in-process/providers.ts";
 import { emit } from "../output.ts";
 import { workflowDiscoveryRoots } from "../paths.ts";
 import { gateSchemaSkew } from "../schema-gate.ts";
@@ -113,12 +114,31 @@ function resolveWatch(opts: EvalRunOptions): boolean {
   return process.stdout.isTTY === true;
 }
 
+// Providers whose SDK honors `allowedTools: []`, so a judge turn over
+// workflow-controlled text cannot be prompt-injected into touching the checkout.
+export const JUDGE_PROVIDERS: ReadonlySet<string> = new Set(["stub", "claude", "copilot"]);
+
+export function judgeProviderError(id: string): string | null {
+  return JUDGE_PROVIDERS.has(id)
+    ? null
+    : `judge provider '${id}' cannot run without tools; use one of ${[...JUDGE_PROVIDERS].join(", ")}`;
+}
+
+function resolveJudgeDefaultProvider(): string {
+  bootstrapCliProviders();
+  return pickDefaultProvider();
+}
+
 function makeJudge(cwd: string): JudgeFn {
   return async ({ prompt, provider, model, timeoutMs }) => {
+    const providerId = provider ?? resolveJudgeDefaultProvider();
+    const rejection = judgeProviderError(providerId);
+    if (rejection !== null) throw new Error(rejection);
     const result = await chatHeadless({
       message: prompt,
       cwd,
-      ...(provider !== undefined ? { provider } : {}),
+      provider: providerId,
+      allowedTools: [],
       ...(model !== undefined ? { model } : {}),
       ...(timeoutMs !== undefined ? { abortSignal: AbortSignal.timeout(timeoutMs) } : {}),
     });
@@ -136,15 +156,6 @@ async function resolveExecutor(
   if (effectiveBase) {
     await gateSchemaSkew(effectiveBase, info?.schemaVersion, opts.json);
     try {
-      const catalog = await listWorkflows(effectiveBase);
-      if (!catalog.workflows.some((w) => w.name === caseSet.workflow)) {
-        fail(
-          `no workflow named '${caseSet.workflow}' in the server catalog`,
-          "WORKFLOW_NOT_FOUND",
-          opts.json,
-          EXIT_NOT_FOUND,
-        );
-      }
       let projectId: string | undefined;
       if (caseSet.project !== undefined) {
         const id = await resolveProjectId(effectiveBase, caseSet.project);
@@ -157,6 +168,14 @@ async function resolveExecutor(
           );
         }
         projectId = id;
+      }
+      if (!(await workflowExists(effectiveBase, caseSet.workflow, projectId))) {
+        fail(
+          `no workflow named '${caseSet.workflow}'${caseSet.project !== undefined ? ` in project '${caseSet.project}'` : " in the server catalog"}`,
+          "WORKFLOW_NOT_FOUND",
+          opts.json,
+          EXIT_NOT_FOUND,
+        );
       }
       return {
         mode: "http",

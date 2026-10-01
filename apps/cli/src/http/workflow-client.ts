@@ -169,6 +169,22 @@ export async function startRun(
   return (await res.json()) as StartRunResponse;
 }
 
+// Resolves through the detail route, which uses the same catalog lookup as
+// starting a run, so project-scoped workflows and forgiving names agree.
+export async function workflowExists(
+  baseUrl: string,
+  name: string,
+  projectId?: string,
+): Promise<boolean> {
+  const query = projectId !== undefined ? `?projectId=${encodeURIComponent(projectId)}` : "";
+  const res = await fetch(url(baseUrl, `/api/workflows/${encodeURIComponent(name)}${query}`), {
+    headers: defaultHeaders(baseUrl),
+  });
+  if (res.status === 404) return false;
+  if (!res.ok) throw new HttpError(res.status, `GET /api/workflows/${name} failed: ${res.status}`);
+  return true;
+}
+
 export async function getRun(baseUrl: string, runId: string): Promise<unknown> {
   const res = await fetch(url(baseUrl, `/api/workflows/runs/${encodeURIComponent(runId)}`), {
     headers: defaultHeaders(baseUrl),

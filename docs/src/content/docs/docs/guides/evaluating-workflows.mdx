@@ -109,9 +109,12 @@ claim is met. It asks `grader_reps` times (default 2) about the same output and
 takes the majority; a tie reads as fail, so with the default two reps any
 disagreement fails the case. The disagreement is reported as grader noise
 either way. A rep that errors (no JSON, a provider failure) makes the case an
-error, never a verdict from the reps that survived. Set `provider:` and
-`model:` on the grader to pin the judge; leave the rubric to things a reader
-could check by quoting the output.
+error, never a verdict from the reps that survived. The judge turn runs with no
+tools, because it reads text the workflow produced and must not be talked into
+touching the checkout; only `claude`, `copilot`, and `stub` enforce that rail,
+so the grader rejects any other `provider:`. Set `provider:` and `model:` on
+the grader to pin the judge; leave the rubric to things a reader could check by
+quoting the output.
 
 <Aside type="caution" title="Three states, not two">
 A case that errors (the run failed before producing output, a provider timed
@@ -173,7 +176,7 @@ with no train split decides on test alone and says so, which is a reason to
 declare one. The cost delta prints alongside, so an improvement that doubled the
 spend is visible in the same line.
 
-Compare refuses two files that did not run the same cases under the same split
+Compare refuses two files that did not run the same cases, project, and split
 filter (the results file carries a fingerprint of the case set), and reverts
 when either side errored: an infrastructure failure is not a measurement.
 Comparing a results file with itself is always `within-noise`; two independent

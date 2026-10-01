@@ -237,6 +237,9 @@ export function compareResults(a: EvalResultsFile, b: EvalResultsFile): EvalComp
   if (a.workflow !== b.workflow) {
     incomparable.push(`workflows differ: '${a.workflow}' vs '${b.workflow}'`);
   }
+  if (a.project !== b.project) {
+    incomparable.push(`projects differ: '${a.project ?? "none"}' vs '${b.project ?? "none"}'`);
+  }
   if (a.caseSetHash !== b.caseSetHash) {
     incomparable.push(
       `case sets differ (${a.caseSetHash.slice(0, 12)} vs ${b.caseSetHash.slice(0, 12)}): the cases, inputs, graders, or expectations changed between runs`,

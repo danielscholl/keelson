@@ -27,6 +27,8 @@ export interface ChatHeadlessOptions {
   thinking?: boolean;
   reasoningEffort?: ReasoningEffortLevel;
   abortSignal?: AbortSignal;
+  // SDK-level tool whitelist; an empty list means the turn runs with no tools.
+  allowedTools?: readonly string[];
   onChunk?: (chunk: MessageChunk) => void;
 }
 
@@ -85,7 +87,8 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
       ...(opts.abortSignal ? { abortSignal: opts.abortSignal } : {}),
       ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
       ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
-      ...(tools.length > 0 ? { tools } : {}),
+      ...(tools.length > 0 && opts.allowedTools === undefined ? { tools } : {}),
+      ...(opts.allowedTools !== undefined ? { allowedTools: [...opts.allowedTools] } : {}),
       ...(systemPrompt !== undefined ? { systemPrompt } : {}),
     })) {
       if (chunk.type === "usage") {
