@@ -27,6 +27,7 @@ export {
   type WorkflowResolution,
 } from "./catalog-resolution.ts";
 export { evaluateCondition } from "./conditions.ts";
+export { DIRECTIVE_NAMES, DIRECTIVES, resolveDirective } from "./directives.ts";
 export {
   ExecutorValidationError,
   type MemoryTools,
@@ -126,7 +127,9 @@ export {
   seedStarterWorkflows,
 } from "./seed.ts";
 export {
+  findUnknownDirectiveRefs,
   shellQuote,
+  substituteDirectiveRefs,
   substituteNodeOutputRefs,
   substituteWorkflowVariables,
 } from "./substitute.ts";

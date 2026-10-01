@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DIRECTIVES } from "./directives.ts";
 import {
   ExecutorValidationError,
   type MemoryTools,
@@ -1216,6 +1217,56 @@ nodes:
       inputs: { ARGUMENTS: "HELLO" },
     });
     expect(calls[0].resolvedBody).toBe("literal=$ARGUMENTS value=HELLO");
+  });
+});
+
+describe("runWorkflow — $DIRECTIVES refs", () => {
+  test("$DIRECTIVES.<name> expands in a prompt body and \\$DIRECTIVES stays literal", async () => {
+    const { handler, calls } = echoHandler("prompt");
+    await runWorkflow({
+      ...baseOpts(single("Do X.\n\n$DIRECTIVES.verify\n\nsyntax: \\$DIRECTIVES.verify")),
+      handlers: new Map([["prompt", handler]]),
+    });
+    expect(calls[0].resolvedBody).toBe(
+      `Do X.\n\n${DIRECTIVES.verify}\n\nsyntax: $DIRECTIVES.verify`,
+    );
+  });
+
+  test("a $DIRECTIVES ref inside upstream output is not rescanned", async () => {
+    const workflow = parseInline(`
+name: t
+description: test
+nodes:
+  - id: source
+    bash: echo unused
+  - id: consumer
+    depends_on: [source]
+    prompt: "report: $source.output"
+`);
+    const { handler: consumer, calls } = echoHandler("prompt");
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map<string, NodeHandler>([
+        ["bash", cannedHandler({ source: "mentions $DIRECTIVES.verify" }, "bash")],
+        ["prompt", consumer],
+      ]),
+    });
+    expect(calls[0].resolvedBody).toBe("report: mentions $DIRECTIVES.verify");
+  });
+});
+
+describe("resolveBody — $DIRECTIVES", () => {
+  test("resolves each known name and leaves an unknown one literal", () => {
+    expect(resolveBody("$DIRECTIVES.confirm", {}, new Map())).toBe(DIRECTIVES.confirm);
+    expect(resolveBody("$DIRECTIVES.nope", {}, new Map())).toBe("$DIRECTIVES.nope");
+    expect(resolveBody("$DIRECTIVES.verify-extra", {}, new Map())).toBe("$DIRECTIVES.verify-extra");
+  });
+
+  test("a node named DIRECTIVES cannot shadow the namespace", () => {
+    const outputs = new Map<string, NodeOutput>([
+      ["DIRECTIVES", { state: "completed", output: '{"verify":"shadow"}' }],
+    ]);
+    expect(resolveBody("$DIRECTIVES.verify", {}, outputs)).toBe(DIRECTIVES.verify);
   });
 });
 

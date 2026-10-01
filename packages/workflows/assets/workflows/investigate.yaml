@@ -273,7 +273,8 @@ nodes:
       Write `\|` for every literal `|` inside a table cell, including inside
       backticks, so GitHub renders the row with the intended columns.
 
-      Include a `## Not checked` section. Do not publish or post the result.
+      $DIRECTIVES.confirm Put those in a `## Not checked` section and in
+      `not_checked`. Do not publish or post the result.
       Do not write a tally or model attribution. Reply only with JSON containing
       `claims`, `done_when_met`, and `not_checked`.
 
@@ -352,8 +353,10 @@ nodes:
 
       A reproduced negative is not confirmation of a broader negative. Partial
       support never rounds up. Return one exact verdict per checked claim:
-      CONFIRMED, CONFIRMED in part, REFUTED, or UNVERIFIABLE. Reply only with
-      JSON containing `verdicts` and `not_checked`.
+      CONFIRMED, CONFIRMED in part, REFUTED, or UNVERIFIABLE. $DIRECTIVES.confirm
+      A claim you could not confirm is UNVERIFIABLE with where you looked in its
+      `note`; claims you did not check go in `not_checked`. Reply only with JSON
+      containing `verdicts` and `not_checked`.
 
       Investigator output:
       $investigate.output

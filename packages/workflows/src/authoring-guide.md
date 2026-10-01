@@ -298,9 +298,17 @@ are ignored with a warning.
   and provider-reported model changes. Unset for deterministic nodes.
 - `$converge.round` — current converge round while a node runs inside a
   `converge` subgraph; empty outside converge rounds.
+- `$DIRECTIVES.<name>` — a harness-owned working rule, expanded verbatim in
+  prompt text (the same rules the chat system prompt carries). Names: `verify`
+  (run a real check before reporting a code change done), `continue` (keep
+  going without the operator, stopping only when blocked or before a
+  destructive step), `confirm` (mark what you couldn't confirm and where you
+  looked), `review` (list only merge-blocking problems, each with file and
+  line, why it's wrong, and how to show it fails). An unknown name is a
+  validation error, not a warning.
 
 Reserved node ids (they collide with substitution namespaces): `inputs`,
-`ARGUMENTS`, `ARTIFACTS_DIR`, `memory`, `converge`.
+`ARGUMENTS`, `ARTIFACTS_DIR`, `memory`, `converge`, `DIRECTIVES`.
 
 ## Control flow patterns
 

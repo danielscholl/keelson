@@ -573,12 +573,13 @@ nodes:
         alias for callers that exist only on some other unmerged branch —
         compatibility with anything not on the base branch is scope creep
         unless the plan explicitly calls for it.
-      - Read each file before editing it. After each task, run the NARROWEST
-        check that covers your change (the touched workspace/package's type-check
-        + tests — e.g. `bun --filter <pkg> test`, `cargo test -p <crate>`,
-        `pytest path/`), NOT the full `verify.sh`. The dedicated validate node
-        runs the full gate once; running the whole suite after every task is what
-        makes large changes time out.
+      - Read each file before editing it.
+      - $DIRECTIVES.verify
+        After each task that check is the NARROWEST one covering your change (the
+        touched workspace/package's type-check + tests — e.g. `bun --filter <pkg>
+        test`, `cargo test -p <crate>`, `pytest path/`), NOT the full `verify.sh`.
+        The dedicated validate node runs the full gate once; running the whole
+        suite after every task is what makes large changes time out.
       - **Never** `git add -A` / `git add .` / `git add -u`. Stage files by name.
       - **Never** commit anything under `$ARTIFACTS_DIR`, scratch files
         (`*.scratch.md`, `*.tmp.md`), or PR-body drafts at the repo root.
@@ -674,7 +675,8 @@ nodes:
         nudge), revert the offending commit instead of papering over it.
       - Stage edited files by name. Never `git add -A`. Never commit anything
         under `$ARTIFACTS_DIR`.
-      - After each fix, re-run `bash $ARTIFACTS_DIR/verify.sh` to confirm.
+      - $DIRECTIVES.verify
+        Here that check is `bash $ARTIFACTS_DIR/verify.sh`, re-run after each fix.
       - COMMIT the fixes before handing off — staging alone is dropped, since
         create-pr later pushes HEAD: `git add <files>; git commit -m "fix: address validation failures"`.
 
@@ -886,7 +888,8 @@ nodes:
       another agent earlier in this run — review it as a skeptical outsider
       whose job is to catch what it missed.
 
-      1. Read the diff patch file. For each hunk worth flagging, write one finding.
+      1. Read the diff patch file. $DIRECTIVES.review
+         Write one finding per problem.
       2. Weight the hunt by cost of failure, highest first:
          - auth, permissions, and trust-boundary changes
          - data loss, corruption, and irreversible state changes
@@ -931,8 +934,8 @@ nodes:
 
       Return a single-line JSON object matching the declared contract. Each
       finding must include `location` (`path:line`), `severity`, `confidence`
-      (0-100), `what`, `why` (the concrete failure scenario), and `fix`. Return
-      `{"findings":[]}` when you find nothing real.
+      (0-100), `what`, `why` (the concrete failure scenario that shows it
+      fails), and `fix`. Return `{"findings":[]}` when you find nothing real.
 
   - id: review-conventions
     depends_on: [capture-diff]
@@ -1144,9 +1147,10 @@ nodes:
 
       ## Rules
 
-      - For each issue: read the file, make the change, then run the NARROWEST
-        check that covers it (the touched workspace's type-check + tests), not the
-        full suite.
+      - For each issue: read the file, then make the change.
+      - $DIRECTIVES.verify
+        The NARROWEST check that covers the change (the touched workspace's
+        type-check + tests) is the right one here, not the full suite.
       - Before committing a fix, name what else it touches: the other callers
         and entry paths of the changed code (resume or retry, cancel and
         shutdown, the disabled or opt-out configuration, data written before
@@ -1497,9 +1501,11 @@ nodes:
         not delete or invert the behavior to force CI green. Treat that path as
         a conflict: revert the attempted edit, write `$ARTIFACTS_DIR/.ci-conflict`
         with the criterion, check, and reason, and do not commit or push.
-      - For each actionable failure: read the file, make the change, then run the
-        NARROWEST check that covers it (the touched workspace's type-check +
-        tests), not the full suite.
+      - For each actionable failure: read the file, then make the change.
+      - $DIRECTIVES.verify
+        The NARROWEST check that covers the change (the touched workspace's
+        type-check + tests) is the right one here, not the full suite; the
+        `verify.sh` gate below runs once after all edits.
       - After all edits and narrow checks pass, run
         `bash "$ARTIFACTS_DIR/verify.sh"`. If it fails, do not commit or push;
         report the failing check and stop. This is the required final pre-push gate.

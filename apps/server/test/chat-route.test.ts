@@ -34,6 +34,7 @@ import {
   handleChatRequest,
   handleChatUpgrade,
 } from "../src/chat-handler.ts";
+import { buildWorkingRules } from "../src/chat-prompt.ts";
 import { type ConversationStore, createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { createPolicyEngine } from "../src/policy-engine.ts";
@@ -1376,7 +1377,7 @@ describe("handleChatRequest dispatch", () => {
     }
   }
 
-  test("omits systemPrompt when the conversation has no seed", async () => {
+  test("sends only the working rules when the conversation has no seed", async () => {
     let captured: SendQueryOptions | undefined;
     const spyId = "spy-identity-empty";
     registerProvider(
@@ -1395,7 +1396,7 @@ describe("handleChatRequest dispatch", () => {
     });
 
     expect(captured).toBeDefined();
-    expect(captured!.systemPrompt).toBeUndefined();
+    expect(captured!.systemPrompt).toBe(buildWorkingRules());
   });
 
   test("aborting mid-stream stops emitting and skips the final done", async () => {

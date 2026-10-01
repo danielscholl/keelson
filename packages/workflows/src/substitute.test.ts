@@ -1,8 +1,15 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
+import { DIRECTIVES } from "./directives.ts";
 import type { NodeOutput } from "./schema/index.ts";
-import { shellQuote, substituteNodeOutputRefs, substituteWorkflowVariables } from "./substitute.ts";
+import {
+  findUnknownDirectiveRefs,
+  shellQuote,
+  substituteDirectiveRefs,
+  substituteNodeOutputRefs,
+  substituteWorkflowVariables,
+} from "./substitute.ts";
 
 function completed(output: string): NodeOutput {
   return { state: "completed", output };
@@ -162,5 +169,53 @@ describe("shellQuote", () => {
 
   test("handles empty string", () => {
     expect(shellQuote("")).toBe("''");
+  });
+});
+
+describe("substituteDirectiveRefs", () => {
+  test("expands $DIRECTIVES.<name> to the directive text", () => {
+    expect(substituteDirectiveRefs("Do X.\n\n$DIRECTIVES.verify")).toBe(
+      `Do X.\n\n${DIRECTIVES.verify}`,
+    );
+  });
+
+  test("expands every known name, each once", () => {
+    const out = substituteDirectiveRefs(
+      "$DIRECTIVES.verify|$DIRECTIVES.continue|$DIRECTIVES.confirm|$DIRECTIVES.review",
+    );
+    expect(out).toBe(
+      [DIRECTIVES.verify, DIRECTIVES.continue, DIRECTIVES.confirm, DIRECTIVES.review].join("|"),
+    );
+  });
+
+  test("\\$DIRECTIVES.<name> stays literal with the backslash stripped", () => {
+    expect(substituteDirectiveRefs("see \\$DIRECTIVES.verify")).toBe("see $DIRECTIVES.verify");
+  });
+
+  test("an unknown name is left untouched", () => {
+    expect(substituteDirectiveRefs("$DIRECTIVES.nope")).toBe("$DIRECTIVES.nope");
+  });
+
+  test("a longer identifier is not a prefix match of a known name", () => {
+    expect(substituteDirectiveRefs("$DIRECTIVES.verifying")).toBe("$DIRECTIVES.verifying");
+    expect(substituteDirectiveRefs("$DIRECTIVES.verify-extra")).toBe("$DIRECTIVES.verify-extra");
+  });
+});
+
+describe("findUnknownDirectiveRefs", () => {
+  test("reports unknown names in order and ignores known and escaped refs", () => {
+    expect(
+      findUnknownDirectiveRefs(
+        "$DIRECTIVES.verify $DIRECTIVES.nope \\$DIRECTIVES.bogus $DIRECTIVES.zz",
+      ),
+    ).toEqual(["nope", "zz"]);
+  });
+
+  test("a hyphenated tail makes the whole candidate unknown", () => {
+    expect(findUnknownDirectiveRefs("$DIRECTIVES.verify-extra")).toEqual(["verify-extra"]);
+  });
+
+  test("returns an empty list when every ref is known", () => {
+    expect(findUnknownDirectiveRefs("$DIRECTIVES.review and $DIRECTIVES.confirm")).toEqual([]);
   });
 });

@@ -652,7 +652,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       ...(gatedTools.length > 0 ? { tools: gatedTools } : {}),
       ...(evaluateToolCall !== undefined ? { evaluateToolCall } : {}),
       ...(evaluateToolResult !== undefined ? { evaluateToolResult } : {}),
-      ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+      systemPrompt,
     })) {
       // Usage is handled BEFORE the abort check — providers deliver it after
       // the drain on a user Stop, and it must reach the persisted row. It is
