@@ -469,6 +469,9 @@ function validateDirectiveRefs(nodes: readonly DagNode[]): string | null {
       sources.push({ text: node.prompt, label: "prompt" });
     }
     if (isLoopNode(node)) sources.push({ text: node.loop.prompt, label: "loop.prompt" });
+    if (isApprovalNode(node) && node.approval.reviewer !== undefined) {
+      sources.push({ text: node.approval.reviewer.prompt, label: "approval.reviewer.prompt" });
+    }
     for (const source of sources) {
       const unknown = findUnknownDirectiveRefs(source.text)[0];
       if (unknown !== undefined) {
@@ -534,6 +537,23 @@ function validateOutputRefs(nodes: readonly DagNode[]): string | null {
     // empty reason at runtime instead of failing at load.
     if (isCancelNode(node)) {
       sources.push({ text: node.cancel, label: "cancel", allowReservedNamespace: true });
+    }
+    // The reviewer's `when:` goes through evaluateCondition and its prompt
+    // through resolveBody, so both get the same checks as a node's own.
+    if (isApprovalNode(node) && node.approval.reviewer !== undefined) {
+      const reviewer = node.approval.reviewer;
+      if (reviewer.when !== undefined) {
+        sources.push({
+          text: reviewer.when,
+          label: "approval.reviewer.when",
+          allowReservedNamespace: false,
+        });
+      }
+      sources.push({
+        text: stripMarkdownCode(reviewer.prompt),
+        label: "approval.reviewer.prompt",
+        allowReservedNamespace: true,
+      });
     }
     // Memory templates flow through resolveBody too — parse-time-validate $nodeId.output refs
     // there so a typo doesn't silently expand to "" at runtime.

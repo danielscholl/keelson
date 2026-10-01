@@ -1,6 +1,6 @@
 import { resolvePrompt, resolveWorkflowResolution } from "./catalog-resolution.ts";
 import { applyModelCase } from "./model-by.ts";
-import { nodeReachesProvider, type WorkflowDefinition } from "./schema/index.ts";
+import { nodeReachesProvider, providerNodeView, type WorkflowDefinition } from "./schema/index.ts";
 
 type ModelClass = "fast" | "balanced" | "deep";
 
@@ -87,7 +87,9 @@ export function checkWorkflowCatalog(
 ): PreflightResult {
   const resolution = resolveWorkflowResolution(workflow, options);
   const providerNodes = new Map(
-    workflow.nodes.filter(nodeReachesProvider).map((node) => [node.id, node]),
+    workflow.nodes
+      .filter(nodeReachesProvider)
+      .map((node) => [node.id, providerNodeView(node)] as const),
   );
   const violations: PreflightViolation[] = [];
   const notChecked = new Set<string>();

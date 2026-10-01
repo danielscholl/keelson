@@ -324,6 +324,75 @@ describe("makeApprovalHandler — reviewer", () => {
     expect(warnings.every((w) => w.startsWith("approval reviewer:"))).toBe(true);
   });
 
+  test("an extra key or changes on an approve verdict never clears the gate", async () => {
+    const seen: unknown[] = [];
+    const await_: AwaitApproval = async (_r, _n, _m, _s, review) => {
+      seen.push(review);
+      return "human";
+    };
+    const shapes = [
+      { decision: "approve", confidence: 99, reason: "fine", requires_changes: true },
+      { decision: "approve", confidence: 99, reason: "fine", changes: "rename the helper" },
+    ];
+    for (const value of shapes) {
+      const { handler: prompt } = stubPromptHandler(verdictReply(value));
+      const handler = makeApprovalHandler({
+        awaitApproval: await_,
+        reviewer: { promptHandler: prompt },
+      });
+      const result = await handler.handle(reviewerNode(), buildCtx({}));
+      expect(result.output).toEqual({ kind: "text", text: "human" });
+    }
+    expect(seen).toEqual([
+      {
+        reviewerError: "reviewer verdict rejected: unexpected key(s) in verdict: requires_changes",
+      },
+      {
+        reviewerError:
+          "reviewer verdict rejected: changes are only valid with decision=changes (got approve)",
+      },
+    ]);
+  });
+
+  test("an approval does not count when the provider cannot enforce allowed_tools", async () => {
+    let seen: unknown;
+    const await_: AwaitApproval = async (_r, _n, _m, _s, review) => {
+      seen = review;
+      return "human";
+    };
+    const prompt: NodeHandler = {
+      type: "prompt",
+      async handle(_node, ctx) {
+        ctx.emit({
+          type: "node_warning",
+          message:
+            "Provider 'codex' does not enforce per-node allowed_tools — these will silently no-op.",
+        });
+        return {
+          ...verdictReply({ decision: "approve", confidence: 99, reason: "looks fine" }),
+          provider: "codex",
+        };
+      },
+    };
+    const warnings: string[] = [];
+    const handler = makeApprovalHandler({
+      awaitApproval: await_,
+      reviewer: { promptHandler: prompt },
+    });
+    const result = await handler.handle(reviewerNode({ allowed_tools: ["Read"] }), {
+      ...buildCtx({}),
+      emit: (event) => {
+        if (event.type === "node_warning") warnings.push(event.message);
+      },
+    });
+    expect(result.output).toEqual({ kind: "text", text: "human" });
+    expect(seen).toEqual({
+      reviewerError: "provider 'codex' does not enforce the reviewer's allowed_tools",
+    });
+    // The provider's own warning still reaches the run.
+    expect(warnings[0]).toContain("does not enforce per-node allowed_tools");
+  });
+
   test("an empty reply and a failed turn both pause for the human", async () => {
     const seen: unknown[] = [];
     const await_: AwaitApproval = async (_r, _n, _m, _s, review) => {
@@ -481,6 +550,8 @@ describe("parseReviewerVerdict", () => {
       { decision: "approve", confidence: 50, reason: 7 },
       { decision: "escalate", confidence: 50, reason: "" },
       { decision: "approve", confidence: 50, reason: "r", changes: 3 },
+      { decision: "escalate", confidence: 50, reason: "r", changes: "x" },
+      { decision: "approve", confidence: 50, reason: "r", verdict: "yes" },
     ];
     for (const value of rejected) {
       const parsed = parseReviewerVerdict(value);

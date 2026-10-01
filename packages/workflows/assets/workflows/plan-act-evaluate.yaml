@@ -289,10 +289,9 @@ nodes:
   #   • reply "delegate" (or "assign to copilot")   → hand off to Copilot
   # ═══════════════════════════════════════════════════════════════════════════
 
-  # Started with the input auto_approve=true (`--inputs auto_approve=true`), a
-  # reviewer turn answers the gate first; the default stays the human gate.
-  # `when:` reads node outputs, not inputs, so gate-mode echoes the input.
-  # A reviewer approval implements locally (the delegate path needs a human).
+  # `when:` reads node outputs, not inputs, so the reviewer's auto_approve
+  # switch is echoed through a node. A reviewer approval implements locally;
+  # the delegate path needs a human reply.
   - id: gate-mode
     bash: |
       printf '%s' "${KEELSON_INPUTS_auto_approve:-false}"
@@ -327,10 +326,10 @@ nodes:
           functions, and current behavior with Read and Grep before you decide.
 
           Otherwise answer `changes`, naming the missing criterion, the scope
-          creep, or the contradiction and the exact fix the plan needs (the run
-          applies your feedback without asking again). Answer `escalate` when
-          the plan shows the task was misread. Never approve a plan you could
-          not read.
+          creep, or the contradiction and the exact fix the plan needs: the run
+          pauses for the operator, who sees your verdict beside the plan and
+          decides what to send back. Answer `escalate` when the plan shows the
+          task was misread. Never approve a plan you could not read.
 
   # ═══════════════════════════════════════════════════════════════════════════
   # ACT — choose the path from the human's reply

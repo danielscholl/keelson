@@ -26,7 +26,7 @@
  */
 
 import { evaluateCondition } from "../conditions.ts";
-import type { NodeContext, NodeHandler, NodeResult } from "../executor.ts";
+import type { NodeContext, NodeHandler, NodeResult, NodeStreamEvent } from "../executor.ts";
 import { resolveBody } from "../executor.ts";
 import {
   APPROVAL_REVIEWER_DEFAULT_MIN_CONFIDENCE,
@@ -37,6 +37,7 @@ import {
   type OutputSchema,
   validateOutput,
 } from "../schema/index.ts";
+import { TOOL_RAILS_UNENFORCED_MARKER } from "./prompt.ts";
 
 export const APPROVAL_REVIEWER_DECISIONS = ["approve", "changes", "escalate"] as const;
 export type ApprovalReviewerDecision = (typeof APPROVAL_REVIEWER_DECISIONS)[number];
@@ -116,15 +117,22 @@ export type ParsedReviewerVerdict =
   | { ok: true; verdict: ApprovalReviewerVerdict }
   | { ok: false; error: string };
 
+const VERDICT_KEYS = new Set(Object.keys(APPROVAL_REVIEWER_OUTPUT_SCHEMA.properties ?? {}));
+
 /**
  * Fail-closed read of a reviewer reply. Anything that is not exactly the
- * verdict shape (unknown decision, non-integer or out-of-range confidence,
- * blank reason) is an error, never an approval.
+ * verdict shape (unknown decision, an extra key, non-integer or out-of-range
+ * confidence, blank reason, `changes` on a non-changes decision) is an error,
+ * never an approval.
  */
 export function parseReviewerVerdict(value: unknown): ParsedReviewerVerdict {
   const validation = validateOutput(value, APPROVAL_REVIEWER_OUTPUT_SCHEMA);
   if (!validation.ok) return { ok: false, error: validation.error };
   const obj = value as Record<string, unknown>;
+  const extra = Object.keys(obj).filter((key) => !VERDICT_KEYS.has(key));
+  if (extra.length > 0) {
+    return { ok: false, error: `unexpected key(s) in verdict: ${extra.join(", ")}` };
+  }
   const decision = obj.decision;
   if (
     typeof decision !== "string" ||
@@ -142,6 +150,9 @@ export function parseReviewerVerdict(value: unknown): ParsedReviewerVerdict {
   const reason = (obj.reason as string).trim();
   if (reason.length === 0) return { ok: false, error: "reason must not be empty" };
   const changes = typeof obj.changes === "string" ? obj.changes.trim() : "";
+  if (changes.length > 0 && decision !== "changes") {
+    return { ok: false, error: `changes are only valid with decision=changes (got ${decision})` };
+  }
   return {
     ok: true,
     verdict: {
@@ -213,10 +224,24 @@ async function runReviewer(
     output_format: APPROVAL_REVIEWER_OUTPUT_FORMAT,
   } as unknown as DagNode;
 
+  // A reviewer whose tool allowlist the provider cannot enforce may have
+  // changed the workspace it then approves, so its approval must not count.
+  let railsUnenforced = false;
+  const emit = (event: NodeStreamEvent): void => {
+    if (
+      event.type === "node_warning" &&
+      event.message.includes(TOOL_RAILS_UNENFORCED_MARKER) &&
+      event.message.includes("allowed_tools")
+    ) {
+      railsUnenforced = true;
+    }
+    ctx.emit(event);
+  };
   let result: NodeResult;
   try {
     result = await promptHandler.handle(reviewerNode, {
       ...ctx,
+      emit,
       resolvedBody: body,
       rawBody: body,
     });
@@ -225,6 +250,14 @@ async function runReviewer(
     return { review: { reviewerError: `reviewer turn threw: ${reason}` }, provenance: {} };
   }
   const provenance = reviewerProvenance(result);
+  if (railsUnenforced) {
+    return {
+      review: {
+        reviewerError: `provider '${result.provider ?? "unknown"}' does not enforce the reviewer's allowed_tools`,
+      },
+      provenance,
+    };
+  }
   if (result.status !== "succeeded") {
     return {
       review: { reviewerError: result.error ?? `reviewer turn ${result.status}` },

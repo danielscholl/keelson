@@ -1,6 +1,6 @@
 import { applyModelCase } from "./model-by.ts";
 import { diagnoseModelDiversity } from "./model-diversity.ts";
-import { nodeReachesProvider, type WorkflowDefinition } from "./schema/index.ts";
+import { nodeReachesProvider, providerNodeView, type WorkflowDefinition } from "./schema/index.ts";
 
 type ModelClass = "fast" | "balanced" | "deep";
 
@@ -104,7 +104,7 @@ export function resolveWorkflowResolution(
 ): WorkflowResolution {
   const nodes = workflow.nodes
     .filter(nodeReachesProvider)
-    .map((node) => resolvePrompt(workflow, node, options));
+    .map((node) => resolvePrompt(workflow, providerNodeView(node), options));
   const effectiveProviders = new Set(
     nodes
       .map(({ effectiveProvider }) => effectiveProvider)
@@ -156,7 +156,8 @@ export async function resolveWorkflowResolutionReady(
   waitForCopilotClasses: () => Promise<void>,
   signal?: AbortSignal,
 ): Promise<WorkflowResolution> {
-  const requiresCopilotClass = workflow.nodes.filter(nodeReachesProvider).some((node) => {
+  const providerNodes = workflow.nodes.filter(nodeReachesProvider).map(providerNodeView);
+  const requiresCopilotClass = providerNodes.some((node) => {
     const variants =
       node.model_by === undefined
         ? [node]

@@ -56,6 +56,7 @@ export {
   modelCaseSchema,
   nodeReachesProvider,
   promptNodeSchema,
+  providerNodeView,
   SCRIPT_NODE_AI_FIELDS,
   sandboxSettingsSchema,
   scriptNodeSchema,

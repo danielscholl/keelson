@@ -752,7 +752,35 @@ export function isScriptNode(node: DagNode): node is ScriptNode {
 }
 
 export function nodeReachesProvider(node: DagNode): boolean {
-  return node.prompt !== undefined || node.command !== undefined || isLoopNode(node);
+  return (
+    node.prompt !== undefined ||
+    node.command !== undefined ||
+    isLoopNode(node) ||
+    (isApprovalNode(node) && node.approval.reviewer !== undefined)
+  );
+}
+
+/**
+ * The node whose model/provider fields catalog resolution and preflight should
+ * read. An approval node's reviewer turn carries its own pins under
+ * `approval.reviewer`, so it is projected onto a prompt-shaped view; every other
+ * node is returned as is.
+ */
+export function providerNodeView(node: DagNode): DagNode {
+  if (!isApprovalNode(node) || node.approval.reviewer === undefined) return node;
+  const reviewer = node.approval.reviewer;
+  return {
+    id: node.id,
+    ...(node.depends_on !== undefined ? { depends_on: node.depends_on } : {}),
+    ...(node.when !== undefined ? { when: node.when } : {}),
+    prompt: reviewer.prompt,
+    ...(reviewer.model !== undefined ? { model: reviewer.model } : {}),
+    ...(reviewer.model_by_provider !== undefined
+      ? { model_by_provider: reviewer.model_by_provider }
+      : {}),
+    ...(reviewer.effort !== undefined ? { effort: reviewer.effort } : {}),
+    ...(reviewer.allowed_tools !== undefined ? { allowed_tools: reviewer.allowed_tools } : {}),
+  } as PromptNode;
 }
 
 /** Type guard: validates a value is a known TriggerRule */

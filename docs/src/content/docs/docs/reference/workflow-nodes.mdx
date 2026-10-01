@@ -260,7 +260,7 @@ in the approval callout so the operator sees why it escalated.
 |---|---|---|
 | `prompt` | yes | The rubric. Takes the same substitutions as a `prompt` node (`$nodeId.output`, `$inputs.<key>`, `$ARGUMENTS`, `$ARTIFACTS_DIR`). The turn sees the gate's message first, then this. |
 | `model`, `model_by_provider`, `effort` | no | Model selection, as on a `prompt` node. Unset falls back to the workflow default. |
-| `allowed_tools` | no | Tool allowlist for the turn. Keep reviewers read-only. |
+| `allowed_tools` | no | Tool allowlist for the turn. Keep reviewers read-only. On a provider that cannot enforce it, the reviewer's approval does not count and the gate goes to the operator. |
 | `min_confidence` | no | Integer 0 to 100, default `85`. An `approve` below it still pauses for the operator. |
 | `when` | no | Same condition syntax as a node's `when:`. False skips the reviewer and the gate pauses as usual. The evaluator reads node outputs, not inputs, so a workflow that keys the reviewer on a run input echoes it from a small `bash` node first. |
 
@@ -273,10 +273,14 @@ The reviewer's reply is pinned to a fixed verdict shape and validated fail-close
 `decision: approve` with `confidence` at or above `min_confidence` resolves the
 gate: the node's output is the `reason`, and the run's node record carries
 `answeredBy: "reviewer"` with the verdict. A `changes` or `escalate` decision, a
-low confidence, a failed turn, or a reply that is not this shape pauses for the
-human with the verdict (or the parse error) attached; an empty or malformed
-reply never reads as an approval. The verdict is also written to
-`$ARTIFACTS_DIR/approvals/<nodeId>.reviewer.json`.
+low confidence, a failed turn, or a reply that is not this shape (an extra key,
+`changes` on a non-changes decision) pauses for the human with the verdict (or
+the parse error) attached; an empty or malformed reply never reads as an
+approval. The operator reads the verdict and decides what to send back; the
+reviewer's requested changes reach downstream nodes only through that reply.
+The verdict is also written to `$ARTIFACTS_DIR/approvals/<nodeId>.reviewer.json`.
+A reviewer counts as provider work for catalog resolution and preflight, and its
+`when:` and `prompt` get the same reference checks at load as a node's own.
 
 `KEELSON_APPROVAL_REVIEWER=off` is the operator floor: it disables every
 reviewer, so all gates go to the human regardless of what a workflow declares.

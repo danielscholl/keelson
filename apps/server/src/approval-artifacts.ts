@@ -77,9 +77,11 @@ export function pendingApprovalWithArtifacts(
 }
 
 // Where a gate's reviewer record lands in the run's artifacts dir, so the
-// verdict can be opened from the trace and read by later nodes.
+// verdict can be opened from the trace and read by later nodes. The node id
+// becomes one filename component: ids are free strings, so a `/` or `..` in
+// one must not change the directory.
 export function reviewerVerdictArtifactPath(nodeId: string): string {
-  return `approvals/${nodeId}.reviewer.json`;
+  return `approvals/${encodeURIComponent(nodeId)}.reviewer.json`;
 }
 
 export function persistReviewerRecord(

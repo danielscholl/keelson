@@ -38,6 +38,37 @@ function makeWorkflow(
 }
 
 describe("resolveWorkflowResolution", () => {
+  test("an approval node's reviewer counts as provider work and resolves its own pins", () => {
+    const workflow = makeWorkflow(
+      [
+        { id: "gate-mode", bash: "printf true" },
+        {
+          id: "gate",
+          depends_on: ["gate-mode"],
+          approval: {
+            message: "Approve?",
+            reviewer: {
+              prompt: "Check it.",
+              model: "deep",
+              model_by_provider: { copilot: "gpt-6-astra" },
+            },
+          },
+        },
+        { id: "plain", approval: { message: "Approve too?" } },
+      ],
+      { provider: "copilot" },
+    );
+    const resolution = resolveWorkflowResolution(workflow, {
+      providers: new Map([["copilot", COPILOT_CAPABILITIES]]),
+      defaultProviderId: "copilot",
+    });
+    expect(resolution.nodes.map((n) => n.nodeId)).toEqual(["gate"]);
+    expect(resolution.nodes[0]).toMatchObject({
+      effectiveProvider: "copilot",
+      model: "gpt-6-astra",
+    });
+  });
+
   test("awaits one in-flight Copilot catalog for concurrent class resolutions", async () => {
     const gate = Promise.withResolvers<void>();
     let loads = 0;
