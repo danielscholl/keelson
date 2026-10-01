@@ -57,6 +57,8 @@ export interface CreateRunInput {
   // every other launch source.
   startedByRibId?: string | null;
   providerOverride?: string | null;
+  // sha256 of the canonical definition the executor ran (workflowDefinitionHash).
+  definitionHash?: string | null;
 }
 
 // Filter for the general runs feed (GET /api/workflows/runs) and bulk delete.
@@ -106,8 +108,10 @@ export interface WorkflowStore {
   // Atomic compare-and-set for resume: flips a failed/cancelled run to running
   // in one UPDATE and returns whether THIS caller won the claim. Guards the
   // resume route against two concurrent starts and against resuming a
-  // non-interrupted (e.g. succeeded) run.
-  claimRunForResume(runId: string): boolean;
+  // non-interrupted (e.g. succeeded) run. The same UPDATE re-stamps
+  // definition_hash when given one, since resume re-executes under the
+  // catalog's current definition; omitted, the stored hash is kept.
+  claimRunForResume(runId: string, definitionHash?: string): boolean;
   upsertNodeOutput(input: UpsertNodeOutputInput): void;
   // Removes a node's persisted snapshot row. Used by the interactive-loop
   // resume path so the row stops reporting `awaiting` while the loop
@@ -195,6 +199,7 @@ interface RunRow {
   rib_id: string | null;
   brief_json: string | null;
   preflight_notice: string | null;
+  definition_hash: string | null;
 }
 
 interface NodeRow {
@@ -230,6 +235,7 @@ function rowToRunSummary(row: RunRow): WorkflowRunSummary {
     origin: row.origin === "scheduled" ? "scheduled" : "manual",
     ribId: row.rib_id,
     preflightNotice: row.preflight_notice,
+    definitionHash: row.definition_hash,
   };
 }
 
@@ -324,7 +330,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   );
 
   const insertRun = db.prepare(
-    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, worktree_base, origin, rib_id, provider_override, isolation_enabled, worktree_established, started_by_rib_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, worktree_base, origin, rib_id, provider_override, isolation_enabled, worktree_established, started_by_rib_id, definition_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const updateRun = db.prepare(
     "UPDATE workflow_runs SET status = ?, completed_at = ?, error = ? WHERE id = ?",
@@ -333,7 +339,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     "UPDATE workflow_runs SET preflight_notice = ? WHERE id = ?",
   );
   const claimResume = db.prepare(
-    "UPDATE workflow_runs SET status = 'running', completed_at = NULL, error = NULL WHERE id = ? AND status IN ('failed', 'cancelled') AND worktree_pruned = 0",
+    "UPDATE workflow_runs SET status = 'running', completed_at = NULL, error = NULL, definition_hash = COALESCE(?, definition_hash) WHERE id = ? AND status IN ('failed', 'cancelled') AND worktree_pruned = 0",
   );
   // worktree_established latches: clearing the path after cleanup must not erase
   // the record that the run executed in its own worktree.
@@ -452,6 +458,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
             : 0,
         input.worktreePath === undefined || input.worktreePath === null ? 0 : 1,
         input.startedByRibId ?? null,
+        input.definitionHash ?? null,
       );
     },
     updateRunStatus(input) {
@@ -460,8 +467,8 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     setRunPreflightNotice(runId, notice) {
       updatePreflightNotice.run(notice, runId);
     },
-    claimRunForResume(runId) {
-      return claimResume.run(runId).changes > 0;
+    claimRunForResume(runId, definitionHash) {
+      return claimResume.run(definitionHash ?? null, runId).changes > 0;
     },
     setRunWorktreePath(runId, worktreePath) {
       updateWorktreePath.run(worktreePath, runId);

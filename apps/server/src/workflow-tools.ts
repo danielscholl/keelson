@@ -23,7 +23,7 @@ import {
   type WorkflowFrame,
   type WorkflowRunDetail,
 } from "@keelson/shared";
-import { isGitRepo } from "@keelson/workflows";
+import { isGitRepo, shortDefinitionHash } from "@keelson/workflows";
 import { z } from "zod";
 import type { WorkflowCatalog, WorkflowScopeContext } from "./bootstrap.ts";
 import { canonicalPath, isPathInside, type ProjectsStore } from "./projects-store.ts";
@@ -135,11 +135,20 @@ function renderNodes(detail: WorkflowRunDetail): string {
 
 type RunFacts = Pick<
   WorkflowRunDetail,
-  "status" | "error" | "workingDir" | "worktreePath" | "isolationEnabled" | "worktreeEstablished"
+  | "status"
+  | "error"
+  | "workingDir"
+  | "worktreePath"
+  | "isolationEnabled"
+  | "worktreeEstablished"
+  | "definitionHash"
 >;
 
 function renderRunFacts(detail: RunFacts): string[] {
   const lines = detail.error !== null ? [`Run error: ${detail.error}`] : [];
+  if (detail.definitionHash !== null) {
+    lines.push(`Definition: ${shortDefinitionHash(detail.definitionHash)}.`);
+  }
   const source =
     detail.workingDir !== null
       ? `Requested source: "${detail.workingDir}".`

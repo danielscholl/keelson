@@ -30,7 +30,7 @@ describe("migrations", () => {
         version: number;
       }>
     ).map((r) => r.version);
-    expect(versions).toEqual([12, 13, 14, 15, 16, 17, 18]);
+    expect(versions).toEqual([12, 13, 14, 15, 16, 17, 18, 19]);
 
     expect(tableNames(db)).toContain("conversations");
     expect(tableNames(db)).toContain("memories");
@@ -42,6 +42,7 @@ describe("migrations", () => {
     expect(runColumns.map((column) => column.name)).toContain("isolation_enabled");
     expect(runColumns.map((column) => column.name)).toContain("started_by_rib_id");
     expect(runColumns.map((column) => column.name)).toContain("worktree_established");
+    expect(runColumns.map((column) => column.name)).toContain("definition_hash");
     const nodeColumns = db.query("PRAGMA table_info(workflow_node_outputs)").all() as Array<{
       name: string;
     }>;
@@ -72,7 +73,7 @@ describe("migrations", () => {
     }>;
     expect(nodeColumns.map((column) => column.name)).toContain("approval_json");
     expect(db.query("SELECT MAX(version) AS v FROM schema_version").get() as { v: number }).toEqual(
-      { v: 18 },
+      { v: 19 },
     );
     db.close();
   });
@@ -99,7 +100,7 @@ describe("migrations", () => {
 
     expect(tableNames(db)).toEqual(before);
     expect(db.query("SELECT count(*) AS c FROM schema_version").get() as { c: number }).toEqual({
-      c: 7,
+      c: 8,
     });
     db.close();
   });

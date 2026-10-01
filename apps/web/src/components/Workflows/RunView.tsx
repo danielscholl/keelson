@@ -274,6 +274,14 @@ export function RunView({
                   {runProvenance}
                 </span>
               )}
+              {run.definitionHash && (
+                <span
+                  className="run-definition"
+                  title={`Workflow definition sha256 ${run.definitionHash}`}
+                >
+                  def {run.definitionHash.slice(0, 8)}
+                </span>
+              )}
               {isRunning && (
                 <button type="button" className="btn danger" onClick={handleCancel}>
                   ✕ Cancel
