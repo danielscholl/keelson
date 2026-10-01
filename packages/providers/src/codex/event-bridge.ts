@@ -35,8 +35,8 @@ function stringify(v: unknown): string {
 // codex Usage { input_tokens, cached_input_tokens, output_tokens,
 // reasoning_output_tokens } → keelson TokenUsage. Counts are sanitized through
 // toTokenCount; when codex reports no usable count we emit nothing rather than a
-// fabricated zero row. cacheRead is kept only when positive so a cache-miss
-// turn's 0 doesn't render a "Cache read 0" row. Mirrors the claude/pi policy.
+// fabricated zero row. A reported cached_input_tokens is forwarded even as 0 (a
+// miss is a measurement); only an absent key omits the field.
 // reasoning_output_tokens is left off outputTokens — codex bills it inside
 // output_tokens, so adding it would double-count.
 function mapCodexUsage(u: unknown): TokenUsage | undefined {
@@ -51,7 +51,7 @@ function mapCodexUsage(u: unknown): TokenUsage | undefined {
     inputTokens: Math.max(0, (input ?? 0) - (cacheRead ?? 0)),
     outputTokens: output ?? 0,
   };
-  if (cacheRead !== undefined && cacheRead > 0) usage.cacheReadInputTokens = cacheRead;
+  if (cacheRead !== undefined) usage.cacheReadInputTokens = cacheRead;
   return usage;
 }
 

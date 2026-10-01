@@ -2305,7 +2305,7 @@ describe("ClaudeProvider — token usage edge cases", () => {
     }
   });
 
-  it("omits zero-valued cache fields so a cache-miss turn renders no cache rows", async () => {
+  it("forwards zero-valued cache fields the SDK reported (a miss is a measurement)", async () => {
     const sdk = makeMockSdk({
       scenario: async (push) => {
         await push({
@@ -2331,6 +2331,36 @@ describe("ClaudeProvider — token usage edge cases", () => {
     const chunks = await drain(provider.sendQuery("hi", "/tmp"));
     const usageChunk = chunks.find((c) => c.type === "usage");
     expect(usageChunk).toEqual({
+      type: "usage",
+      usage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+      },
+    });
+  });
+
+  it("omits cache fields the SDK did not report", async () => {
+    const sdk = makeMockSdk({
+      scenario: async (push) => {
+        await push({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          usage: { input_tokens: 100, output_tokens: 20 },
+          uuid: "result-uuid",
+          session_id: "sess-id",
+        } as ClaudeSdkMessage);
+      },
+    });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+    expect(chunks.find((c) => c.type === "usage")).toEqual({
       type: "usage",
       usage: { inputTokens: 100, outputTokens: 20 },
     });

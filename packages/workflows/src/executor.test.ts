@@ -1316,6 +1316,181 @@ nodes:
   });
 });
 
+// A → {B (slow), C} ; D ← {B, C} ; C → E → F. Layered dispatch serializes
+// E and F behind the slow B; ready dispatch lets the C branch run alongside it.
+const READY_DAG = `
+name: t
+description: test
+nodes:
+  - id: a
+    bash: a
+  - id: b
+    bash: b
+    depends_on: [a]
+  - id: c
+    bash: c
+    depends_on: [a]
+  - id: d
+    bash: d
+    depends_on: [b, c]
+  - id: e
+    bash: e
+    depends_on: [c]
+  - id: f
+    bash: f
+    depends_on: [e]
+`;
+
+// Each node blocks until the test releases it, so dispatch order is asserted
+// against explicit barriers rather than timer races.
+function gatedHandler(): {
+  handler: NodeHandler;
+  started: Set<string>;
+  release(id: string): Promise<void>;
+} {
+  const started = new Set<string>();
+  const gates = new Map<string, () => void>();
+  const handler: NodeHandler = {
+    type: "bash",
+    async handle(node) {
+      started.add(node.id);
+      await new Promise<void>((r) => gates.set(node.id, r));
+      return { status: "succeeded", output: { kind: "text", text: node.id } };
+    },
+  };
+  const release = async (id: string): Promise<void> => {
+    await waitFor(() => gates.has(id), `${id} never started`);
+    gates.get(id)?.();
+    gates.delete(id);
+    // Let the settle → dispatch microtasks run before the test inspects state.
+    await new Promise((r) => setTimeout(r, 0));
+  };
+  return { handler, started, release };
+}
+
+describe("runWorkflow — ready-node scheduling", () => {
+  test("a dependent starts when its own dependencies settle, not when the layer does", async () => {
+    const workflow = parseInline(READY_DAG);
+    const { handler, started, release } = gatedHandler();
+    const run = runWorkflow({ ...baseOpts(workflow), handlers: new Map([["bash", handler]]) });
+    await release("a");
+    expect([...started].sort()).toEqual(["a", "b", "c"]);
+    await release("c");
+    // b is still held; e (depends on c) starts anyway, d (depends on b, c) waits.
+    expect(started.has("e")).toBe(true);
+    expect(started.has("d")).toBe(false);
+    await release("e");
+    expect(started.has("f")).toBe(true);
+    expect(started.has("d")).toBe(false);
+    await release("b");
+    expect(started.has("d")).toBe(true);
+    await release("f");
+    await release("d");
+    const summary = await run;
+    expect(summary.status).toBe("succeeded");
+  });
+
+  test("scheduling: layered keeps the layer barrier", async () => {
+    const workflow = parseInline(`${READY_DAG}scheduling: layered\n`);
+    expect(workflow.scheduling).toBe("layered");
+    const { handler, started, release } = gatedHandler();
+    const run = runWorkflow({ ...baseOpts(workflow), handlers: new Map([["bash", handler]]) });
+    await release("a");
+    await release("c");
+    expect(started.has("e")).toBe(false);
+    await release("b");
+    expect(started.has("e")).toBe(true);
+    expect(started.has("d")).toBe(true);
+    await release("e");
+    expect(started.has("f")).toBe(false);
+    await release("d");
+    expect(started.has("f")).toBe(true);
+    await release("f");
+    expect((await run).status).toBe("succeeded");
+  });
+
+  test("a node sees every ancestor and no concurrent sibling in upstreamOutputs", async () => {
+    const workflow = parseInline(READY_DAG);
+    const seen = new Map<string, string[]>();
+    const { handler: gated, release } = gatedHandler();
+    const handler: NodeHandler = {
+      type: "bash",
+      async handle(node, ctx) {
+        const result = await gated.handle(node, ctx);
+        seen.set(node.id, [...ctx.upstreamOutputs.keys()].sort());
+        return result;
+      },
+    };
+    const run = runWorkflow({ ...baseOpts(workflow), handlers: new Map([["bash", handler]]) });
+    await release("a");
+    await release("c");
+    // e is dispatched while b is in flight; b settles before e is released,
+    // but e's view was snapshotted at dispatch.
+    await release("b");
+    await release("e");
+    await release("f");
+    await release("d");
+    await run;
+    expect(seen.get("e")).toEqual(["a", "c"]);
+    expect(seen.get("d")).toEqual(["a", "b", "c"]);
+    expect(seen.get("f")).toEqual(expect.arrayContaining(["a", "c", "e"]));
+  });
+
+  test("a resumed node's dependents wait for its re-running ancestor", async () => {
+    const workflow = parseInline(`
+name: t
+description: test
+nodes:
+  - id: a
+    bash: a
+  - id: b
+    bash: b
+    depends_on: [a]
+  - id: c
+    bash: c
+    depends_on: [b]
+`);
+    const { handler, started, release } = gatedHandler();
+    const run = runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      completedNodeOutputs: new Map([["b", { state: "completed", output: "seeded" }]]),
+    });
+    await waitFor(() => started.has("a"), "a never started");
+    expect(started.has("c")).toBe(false);
+    await release("a");
+    expect(started.has("b")).toBe(false);
+    expect(started.has("c")).toBe(true);
+    await release("c");
+    expect((await run).status).toBe("succeeded");
+  });
+
+  test("an abort stops dispatching new nodes while in-flight ones settle", async () => {
+    const workflow = parseInline(READY_DAG);
+    const controller = new AbortController();
+    const { handler, started, release } = gatedHandler();
+    const run = runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      abortSignal: controller.signal,
+    });
+    await release("a");
+    await release("c");
+    expect(started.has("e")).toBe(true);
+    controller.abort();
+    await release("b");
+    await release("e");
+    const summary = await run;
+    expect(summary.status).toBe("cancelled");
+    expect(started.has("d")).toBe(false);
+    expect(started.has("f")).toBe(false);
+    expect(summary.nodes.a.state).toBe("completed");
+    expect(summary.nodes.c.state).toBe("completed");
+    expect(summary.nodes.d.state).toBe("skipped");
+    expect(summary.nodes.f.state).toBe("skipped");
+  });
+});
+
 describe("runWorkflow — malformed when:", () => {
   test("malformed when: skips the node with a run_warning", async () => {
     const workflow = parseInline(`

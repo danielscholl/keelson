@@ -333,7 +333,7 @@ Reserved node ids (they collide with substitution namespaces): `inputs`,
 
 ## Control flow patterns
 
-Fan-out/fan-in — independent nodes run in parallel, a join waits for all:
+Fan-out/fan-in — independent nodes run in parallel, a join waits for all. A node starts as soon as its own `depends_on` settle, not when every node at its depth does:
 
 ```yaml
 nodes:

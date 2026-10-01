@@ -41,6 +41,9 @@ function summaryFixture() {
       outputTokens: 20,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
+      costUsd: null,
+      unpricedEvents: 1,
+      cacheHitRatio: null,
     },
     groups: [],
   };
@@ -88,6 +91,9 @@ describe("Usage — Over time stacked chart", () => {
         outputTokens: 200_000,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        costUsd: null,
+        unpricedEvents: 3,
+        cacheHitRatio: null,
       },
       {
         bucketIso: "2026-07-01T00:00:00.000Z",
@@ -97,6 +103,9 @@ describe("Usage — Over time stacked chart", () => {
         outputTokens: 100_000,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        costUsd: null,
+        unpricedEvents: 2,
+        cacheHitRatio: null,
       },
       {
         bucketIso: "2026-07-02T00:00:00.000Z",
@@ -106,6 +115,9 @@ describe("Usage — Over time stacked chart", () => {
         outputTokens: 90_000,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        costUsd: null,
+        unpricedEvents: 1,
+        cacheHitRatio: null,
       },
     ];
 

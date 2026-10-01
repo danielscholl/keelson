@@ -87,6 +87,11 @@ export const workflowBaseSchema = z.object({
   mutates_checkout: z.boolean().optional(),
   locking: z.enum(["exclusive", "shared"]).optional(),
   /**
+   * Node dispatch order. `ready` (default) starts a node as soon as its own
+   * dependencies settle; `layered` waits for the whole topological layer.
+   */
+  scheduling: z.enum(["ready", "layered"]).optional(),
+  /**
    * Marks a repo-scoped workflow: the run's working directory must be a git
    * repository. `workflow_run` preflights this before creating a run and
    * refuses to start when the resolved directory is not a repo. Defaults off.

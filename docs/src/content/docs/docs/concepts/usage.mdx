@@ -13,9 +13,11 @@ and the Usage tab renders that ledger as six read-only views. It answers a
 question the other surfaces cannot give you on their own, where the tokens went,
 and it needs no rib. A running provider is enough to start filling it.
 
-Usage measures token counts, never currency. There is no price table anywhere in
-the harness. Everything on the tab is a count of tokens, a rate, or a turn tally,
-and the one recommendation it makes is a heuristic over those counts, not a bill.
+Usage measures token counts first. Everything on the tab is a count of tokens, a
+rate, or a turn tally, and the one recommendation it makes is a heuristic over
+those counts. Alongside the counts it reports an estimated dollar cost, derived
+at read time from a price table, and a cache hit ratio. Neither is a bill: see
+[Cost and cache hit ratio](#cost-and-cache-hit-ratio) for exactly what they are.
 
 ## One ledger, three capture seams
 
@@ -57,9 +59,9 @@ ledger each get their own sub-view.
 | Pulse | Today's running totals and a trailing-hour tokens-per-minute sparkline, streamed live. |
 | Over time | A stacked bar chart of tokens by served model across the window's buckets. |
 | Source to model flow | A ribbon diagram tracing which source (a chat, a workflow, a rib) drove which model. |
-| Model roster | Per model: turns, input and output tokens, cache read rate, average tokens per turn, and share of the window. |
-| Jobs | Per recurring workflow or rib job: runs, average and p95 tokens per run, and the window total. |
-| Ledger | The raw rows, newest first, filterable by source, model, and status. |
+| Model roster | Per model: turns, input and output tokens, cache hit ratio, cost, average tokens per turn, and share of the window. |
+| Jobs | Per recurring workflow or rib job: runs, average and p95 tokens per run, the window total, cost per run, window cost, and cache hit ratio. |
+| Ledger | The raw rows, newest first, each with its priced cost, filterable by source, model, and status. |
 
 ## Windows are fixed
 
@@ -80,14 +82,55 @@ ledger writes coalesces into a single recompose before it broadcasts, so a busy
 minute lands as one frame rather than a storm. Everything else on the tab is a
 plain read of a `/api/usage` endpoint over the selected window.
 
-## Tokens, not currency
+## Cost and cache hit ratio
 
-Usage is observability. It records what turns did run and shows you the shape of
-it; it never stops a turn and never prices one. The one recommendation it
-surfaces, the right-size nudge, flags a recurring workflow or rib job that has run
-at least three times and averaged under five hundred tokens a run, small enough
-that a lighter model would likely keep up. That threshold is a heuristic over
-per-run token averages, not a cost estimate.
+Every aggregate on the tab carries two derived figures next to its token
+counts, and every ledger row carries the first of them, its own cost.
+
+**Cost** is an estimate in US dollars: each event's token counts multiplied by
+the per-million-token rates of the model that served it, summed over the rows in
+view. The harness bundles the Anthropic first-party list prices for the Claude
+models its Claude provider offers (input, output, cache read, and 5-minute cache
+write rates), and recognizes the same models under the dotted ids the Copilot
+catalog uses. Price any other model yourself with the
+[`modelPrices`](../../guides/configuration/#model-prices) key in `config.json`,
+which also overrides a bundled rate.
+
+Cost is computed when you read it, never stored. A corrected price reprices
+history on the next load, and nothing in the ledger has to be rewritten. One
+caveat on old history: rows written before the providers normalized their
+counts may carry an input figure that already includes cache tokens, and the
+ledger has no per-row marker to tell them apart, so the cost of those rows can
+overstate by the cache portion. Rows written since are priced exactly.
+
+**A null cost means unpriced, and it is never shown as zero.** When any event in
+an aggregate ran on a model with no price, the whole aggregate's cost is null and
+its `unpricedEvents` count says how many rows kept it that way. The tab renders
+that as `unpriced` with the count beneath it, so a window that reads `$0.0000`
+really did cost nothing and a window on an unpriced model never looks free. The
+same rule holds for a job: one unpriced run nulls both its cost per run and its
+window cost. A Copilot turn that never resolved past the `auto` alias is
+unpriced, since the served model is unknown.
+
+**Cache hit ratio** is cache-read tokens divided by fresh input plus cache-read
+tokens, the share of a turn's prompt the provider served from its prompt cache.
+A provider that reports a cache count of zero records zero, so an all-miss
+window reads as 0%. The ratio is null, rendered as a dash, only when no event in
+the aggregate carried a cache-read count at all (a provider with no cache
+accounting) or when there was nothing to divide by, so such a provider never
+shows a 0% hit rate it did not earn.
+
+The chat composer's usage popover shows the same two figures for the open
+conversation, read from the ledger rather than priced in the browser, so each
+turn is priced at the model that actually served it even across a model swap.
+
+## Observability, not admission control
+
+Usage records what turns did run and shows you the shape of it; it never stops a
+turn. The one recommendation it surfaces, the right-size nudge, flags a recurring
+workflow or rib job that has run at least three times and averaged under five
+hundred tokens a run, small enough that a lighter model would likely keep up.
+That threshold is a heuristic over per-run token averages, not a cost estimate.
 
 Ceilings live elsewhere. The [budget gate](../../guides/governance/) is a
 separate feature that denies a turn at request time once a running token or turn
@@ -108,6 +151,8 @@ Neither reads the other's state.
   admission-control counterpart to this observability ledger.
 - [Snapshots and surfaces](../snapshots-and-surfaces/) is the substrate the live
   pulse streams over.
+- [Configuration](../../guides/configuration/#model-prices) documents the
+  `modelPrices` key that prices models the bundled table does not cover.
 - [Chat](../chat/) is where a turn's usage also surfaces inline, on the composer
   usage chip.
 - [The API reference](../../reference/api/) documents the read-only `/api/usage`

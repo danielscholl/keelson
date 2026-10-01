@@ -28,6 +28,9 @@ const validTotals = {
   outputTokens: 20,
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
+  costUsd: null,
+  unpricedEvents: 3,
+  cacheHitRatio: null,
 };
 
 describe("getUsageSummary", () => {
@@ -81,6 +84,10 @@ describe("getUsageJobs", () => {
         totalTokens: 100,
         avgTokensPerRun: 50,
         p95TokensPerRun: 75,
+        totalCostUsd: 0.0123,
+        costUsdPerRun: 0.00615,
+        unpricedEvents: 0,
+        cacheHitRatio: null,
       },
     ]);
     const result = await getUsageJobs();
@@ -103,6 +110,7 @@ const validEventRow = {
   outputTokens: 20,
   cacheReadTokens: null,
   cacheWriteTokens: null,
+  costUsd: null,
   durationMs: null,
   status: "ok",
   conversationId: null,

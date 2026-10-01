@@ -187,7 +187,7 @@ describe("mapCodexEvent", () => {
     ]);
   });
 
-  test("turn.completed → usage chunk (cached_input_tokens → cacheRead, kept only when positive)", () => {
+  test("turn.completed → usage chunk (cached_input_tokens → cacheRead)", () => {
     expect(
       mapCodexEvent({
         type: "turn.completed",
@@ -224,13 +224,18 @@ describe("mapCodexEvent", () => {
     ]);
   });
 
-  test("turn.completed with all-zero usage emits no fabricated zero row", () => {
+  test("a reported cached_input_tokens of 0 is forwarded; an absent key is omitted", () => {
     expect(
       mapCodexEvent({
         type: "turn.completed",
-        usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 },
+        usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 3 },
       }),
-    ).toEqual([{ type: "usage", usage: { inputTokens: 0, outputTokens: 0 } }]);
+    ).toEqual([
+      { type: "usage", usage: { inputTokens: 10, outputTokens: 3, cacheReadInputTokens: 0 } },
+    ]);
+    expect(
+      mapCodexEvent({ type: "turn.completed", usage: { input_tokens: 10, output_tokens: 3 } }),
+    ).toEqual([{ type: "usage", usage: { inputTokens: 10, outputTokens: 3 } }]);
   });
 
   test("turn.completed with no usable counts emits nothing", () => {

@@ -67,6 +67,7 @@ test("workflow status brief preserves run errors and isolation facts", async () 
     worktreePath: null,
     isolationEnabled: true,
     worktreeEstablished: false,
+    definitionHash: "9e".repeat(32),
     inputs: {},
     nodes: [],
   };
@@ -114,6 +115,85 @@ test("workflow status brief preserves run errors and isolation facts", async () 
       worktreePath: null,
       isolationEnabled: true,
       worktreeEstablished: false,
+      definitionHash: "9e".repeat(32),
+    });
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("workflow status derives run timing from node timestamps and the workflow's edges", async () => {
+  const detail = {
+    runId: "run-1",
+    workflowName: "diamond",
+    status: "succeeded",
+    startedAt: "2026-09-21T10:00:00.000Z",
+    completedAt: "2026-09-21T10:00:01.100Z",
+    error: null,
+    conversationId: null,
+    projectId: null,
+    workingDir: "/repo",
+    worktreePath: null,
+    isolationEnabled: false,
+    worktreeEstablished: false,
+    inputs: {},
+    nodes: [
+      ["a", "10:00:00.000Z", "10:00:00.100Z"],
+      ["b", "10:00:00.100Z", "10:00:00.500Z"],
+      ["c", "10:00:00.100Z", "10:00:00.150Z"],
+      ["d", "10:00:01.100Z", "10:00:01.200Z"],
+    ].map(([nodeId, startedAt, completedAt]) => ({
+      nodeId,
+      status: "succeeded",
+      outputText: "",
+      contentParts: null,
+      startedAt: `2026-09-21T${startedAt}`,
+      completedAt: `2026-09-21T${completedAt}`,
+      error: null,
+    })),
+  };
+  const workflow = {
+    name: "diamond",
+    description: "diamond",
+    nodes: [
+      { id: "a", type: "bash" },
+      { id: "b", type: "bash", dependsOn: ["a"] },
+      { id: "c", type: "bash", dependsOn: ["a"] },
+      { id: "d", type: "bash", dependsOn: ["b", "c"] },
+    ],
+  };
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch(req) {
+      const { pathname } = new URL(req.url);
+      if (pathname === "/api/health") {
+        return Response.json({ ok: true, name: "keelson", schema_version: SCHEMA_VERSION });
+      }
+      if (pathname === "/api/workflows/runs/run-1") return Response.json({ run: detail });
+      if (pathname === "/api/workflows/diamond") return Response.json({ workflow });
+      return new Response("not found", { status: 404 });
+    },
+  });
+  try {
+    const baseUrl = `http://${server.hostname}:${server.port}`;
+    const proc = Bun.spawn(
+      ["bun", BIN, "--json", "workflow", "status", "run-1", "--base-url", baseUrl],
+      { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe", env: spawnEnv() },
+    );
+    const [stdout, , exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+
+    expect(exitCode).toBe(0);
+    const payload = JSON.parse(stdout.trim());
+    expect(payload.data.run.runId).toBe("run-1");
+    expect(payload.data.timing).toEqual({
+      wallClockMs: 1200,
+      criticalPathMs: 600,
+      criticalPathRatio: 0.5,
     });
   } finally {
     server.stop(true);

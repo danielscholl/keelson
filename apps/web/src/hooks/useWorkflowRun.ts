@@ -105,6 +105,8 @@ export interface RunView {
   projectId?: string | null;
   workingDir?: string | null;
   worktreePath?: string | null;
+  // sha256 of the definition this run executed; null for pre-column rows.
+  definitionHash?: string | null;
 }
 
 export type UseWorkflowRunStatus = "loading" | "ready" | "error";
@@ -282,6 +284,7 @@ export function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
     projectId: snapshot.projectId,
     workingDir: snapshot.workingDir,
     worktreePath: snapshot.worktreePath,
+    definitionHash: snapshot.definitionHash,
   };
   return { run, nodes };
 }
@@ -378,7 +381,11 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
   // pauseId. Stays null until the WS effect installs one for the active
   // runId (then nulled again on unmount / runId change).
   const hydrateRef = useRef<((gen: number) => Promise<void>) | null>(null);
+  // Bumped after a successful resume-run so the stream effect tears down the
+  // socket `run_done` parked and opens a fresh one against the re-running row.
+  const [streamGen, setStreamGen] = useState(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: streamGen is a reopen trigger the effect never reads
   useEffect(() => {
     if (!runId) {
       setStatus("loading");
@@ -506,20 +513,23 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
       hydrateRef.current = null;
       handle.close();
     };
-  }, [runId]);
+  }, [runId, streamGen]);
 
   const cancel = useCallback(async () => {
     if (!runId) return;
     await cancelWorkflowRun(runId);
   }, [runId]);
 
-  // Resume a terminal (failed/cancelled) run from its last completed node. Like
-  // `resume` above, no optimistic update: the server flips status back to
-  // running and the next snapshot/frame is the source of truth. Errors propagate
-  // so the caller can surface a non-resumable run.
+  // Resume a terminal (failed/cancelled) run from its last completed node. No
+  // optimistic update: the server flips status back to running and the fresh
+  // stream's open-time hydrate is the source of truth. The reopen is required
+  // because `run_done` stopped reconnection, so without it nothing after the
+  // POST would reach this view. Errors propagate so the caller can surface a
+  // non-resumable run.
   const resumeRun = useCallback(async () => {
     if (!runId) return;
     await resumeWorkflowRun(runId);
+    setStreamGen((gen) => gen + 1);
   }, [runId]);
 
   // Resume the paused approval node. The server flips run status back to
@@ -647,6 +657,13 @@ export function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView 
   // terminal-only fields (completedAt, durationMs, error) when live is
   // still mid-flight. Choose the side whose status won for those fields.
   const winningSide = winningStatus === liveSide.status ? liveSide : snapshotSide;
+  // A terminal snapshot row carries server-recorded timestamps; the live
+  // completedAt is a browser clock stamp, so the persisted values replace it.
+  const persistedTiming =
+    snapTerminal &&
+    TERMINAL_NODE_STATUSES.has(winningStatus) &&
+    snapshotSide.startedAt !== undefined &&
+    snapshotSide.completedAt !== undefined;
   // When winningStatus is `awaiting`, the approval message must come from
   // whichever side actually has it (snapshot writes it at pause time; live
   // only has it if the WS approval_awaiting frame arrived). Live's spread
@@ -665,8 +682,16 @@ export function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView 
     ...snapshotSide,
     ...liveSide,
     status: winningStatus,
-    completedAt: winningSide.completedAt ?? liveSide.completedAt ?? snapshotSide.completedAt,
-    durationMs: winningSide.durationMs ?? liveSide.durationMs ?? snapshotSide.durationMs,
+    ...(persistedTiming
+      ? {
+          startedAt: snapshotSide.startedAt,
+          completedAt: snapshotSide.completedAt,
+          durationMs: snapshotSide.durationMs,
+        }
+      : {
+          completedAt: winningSide.completedAt ?? liveSide.completedAt ?? snapshotSide.completedAt,
+          durationMs: winningSide.durationMs ?? liveSide.durationMs ?? snapshotSide.durationMs,
+        }),
     error: winningSide.error ?? liveSide.error ?? snapshotSide.error,
     contentParts: winningParts,
     // Thinking is live-only (not persisted) — snapshot side is always "".

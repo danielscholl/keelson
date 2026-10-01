@@ -20,7 +20,12 @@ import {
 } from "@keelson/providers";
 import { TERMINAL_RUN_STATUSES, type TokenUsage } from "@keelson/shared";
 
-import { makePromptHandler, type WorkflowDefinition } from "@keelson/workflows";
+import {
+  makePromptHandler,
+  parseWorkflow,
+  type WorkflowDefinition,
+  workflowDefinitionHash,
+} from "@keelson/workflows";
 import { Hono } from "hono";
 
 import { bootstrapWorkflows } from "../src/bootstrap.ts";
@@ -116,6 +121,20 @@ function makeRig(promptHandler?: ReturnType<typeof makePromptHandler>): Rig {
 
 function writeWorkflow(filename: string, body: string): void {
   writeFileSync(join(wfDir, filename), body);
+}
+
+async function startAndRead(
+  app: Hono,
+  name: string,
+): Promise<{ runId: string; status: string; definitionHash: string | null }> {
+  const res = await app.fetch(postRun(`http://test/api/workflows/${name}/runs`, { inputs: {} }));
+  expect(res.status).toBe(200);
+  const { runId } = (await res.json()) as { runId: string };
+  return (await pollUntilTerminal(app, runId)) as {
+    runId: string;
+    status: string;
+    definitionHash: string | null;
+  };
 }
 
 function makeSuccessfulPromptHandler() {
@@ -405,6 +424,58 @@ nodes:
     expect(run.nodes).toHaveLength(1);
     expect(run.nodes[0]!.status).toBe("succeeded");
     expect(run.nodes[0]!.outputText).toContain("hello from W2");
+  });
+
+  test("a run persists the hash of the definition it executed", async () => {
+    const yaml = `name: hashed
+description: hashes its definition
+nodes:
+  - id: shout
+    bash: echo "v1"
+`;
+    writeWorkflow("hashed.yaml", yaml);
+    const { app } = makeRig();
+    const first = await startAndRead(app, "hashed");
+    const expected = workflowDefinitionHash(parseWorkflow(yaml, "hashed.yaml").workflow);
+    expect(first.definitionHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(first.definitionHash).toBe(expected);
+
+    writeWorkflow("hashed.yaml", yaml.replace('echo "v1"', 'echo  "v1"'));
+    const second = await startAndRead(app, "hashed");
+    expect(second.definitionHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(second.definitionHash).not.toBe(first.definitionHash);
+  });
+
+  test("resume re-stamps the hash with the definition the resume executed", async () => {
+    const broken = `name: rehash
+description: fails until fixed
+nodes:
+  - id: step
+    bash: exit 7
+`;
+    writeWorkflow("rehash.yaml", broken);
+    const { app } = makeRig();
+    const first = await startAndRead(app, "rehash");
+    expect(first.status).toBe("failed");
+    expect(first.definitionHash).toBe(
+      workflowDefinitionHash(parseWorkflow(broken, "rehash.yaml").workflow),
+    );
+
+    const fixed = broken.replace("exit 7", "echo fixed");
+    writeWorkflow("rehash.yaml", fixed);
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${first.runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+    const second = (await pollUntilTerminal(app, first.runId)) as {
+      status: string;
+      definitionHash: string | null;
+    };
+    expect(second.status).toBe("succeeded");
+    expect(second.definitionHash).toBe(
+      workflowDefinitionHash(parseWorkflow(fixed, "rehash.yaml").workflow),
+    );
+    expect(second.definitionHash).not.toBe(first.definitionHash);
   });
 
   test("GET .../runs/:runId overlays in-flight nodes as runningNodes", async () => {

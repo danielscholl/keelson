@@ -132,7 +132,8 @@ function parseSseData(payload: string): ParsedSseEvent {
       inputTokens: Math.max(0, inp - (cacheRead ?? 0)),
       outputTokens: out,
     };
-    if (cacheRead !== undefined && cacheRead > 0) usage.cacheReadInputTokens = cacheRead;
+    // A reported cached_tokens, even 0, is forwarded; only an absent key omits it.
+    if (cacheRead !== undefined) usage.cacheReadInputTokens = cacheRead;
     return { ...base, usage };
   }
   return base;

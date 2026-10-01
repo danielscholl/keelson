@@ -26,6 +26,7 @@ import {
   type TokenUsage,
   type ToolDefinition,
   type ToolReachability,
+  tokenUsageHasSpend,
 } from "@keelson/shared";
 import { getRegisteredTools as liveRegisteredTools } from "@keelson/skills";
 import { DEFAULT_TOOL_DENYLIST } from "@keelson/workflows";
@@ -297,7 +298,7 @@ async function runTurn(
   // when the turn carried real spend" rule so a content-only or zero-total
   // turn doesn't add a row.
   const settle = (result: RibAgentTurnResult): RibAgentTurnResult => {
-    if (turnUsage !== undefined && turnUsage.inputTokens + turnUsage.outputTokens > 0) {
+    if (turnUsage !== undefined && tokenUsageHasSpend(turnUsage)) {
       deps.getUsageStore?.()?.record({
         source: "rib",
         provider: providerId,

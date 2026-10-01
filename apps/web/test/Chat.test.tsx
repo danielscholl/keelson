@@ -92,6 +92,20 @@ mock.module("../src/api.ts", () => ({
   }),
   fetchTools: async () => [],
   getCommands: async () => [],
+  getUsageEvents: async () => [],
+  getUsageSummary: async () => ({
+    totals: {
+      events: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 0,
+      unpricedEvents: 0,
+      cacheHitRatio: null,
+    },
+    groups: [],
+  }),
   getConversation: async (id: string) => {
     if (getConversationGate) await getConversationGate;
     return conversations.find((c) => c.id === id) ?? null;

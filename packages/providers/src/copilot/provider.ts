@@ -768,6 +768,10 @@ export class CopilotProvider implements IAgentProvider {
       let turnCacheRead = 0;
       let turnCacheWrite = 0;
       let sawCallUsage = false;
+      // A cache key the SDK carried on any call, even as 0, is a measurement;
+      // the field is omitted only when no call ever reported it.
+      let sawCacheRead = false;
+      let sawCacheWrite = false;
       // Context gauge straight from the SDK; latest event wins.
       let contextTokens: number | undefined;
       let contextWindow: number | undefined;
@@ -809,6 +813,8 @@ export class CopilotProvider implements IAgentProvider {
           sawCallUsage = true;
           turnInput += Math.max(0, (input ?? 0) - (cacheRead ?? 0) - (cacheWrite ?? 0));
           turnOutput += output ?? 0;
+          if (cacheRead !== undefined) sawCacheRead = true;
+          if (cacheWrite !== undefined) sawCacheWrite = true;
           turnCacheRead += cacheRead ?? 0;
           turnCacheWrite += cacheWrite ?? 0;
         }),
@@ -862,8 +868,8 @@ export class CopilotProvider implements IAgentProvider {
       // Omitted entirely when the SDK reported nothing (no fabricated zeros).
       if (sawCallUsage || contextTokens !== undefined) {
         const usage: TokenUsage = { inputTokens: turnInput, outputTokens: turnOutput };
-        if (turnCacheRead > 0) usage.cacheReadInputTokens = turnCacheRead;
-        if (turnCacheWrite > 0) usage.cacheCreationInputTokens = turnCacheWrite;
+        if (sawCacheRead) usage.cacheReadInputTokens = turnCacheRead;
+        if (sawCacheWrite) usage.cacheCreationInputTokens = turnCacheWrite;
         if (contextTokens !== undefined) usage.contextTokens = contextTokens;
         if (contextWindow !== undefined) usage.contextWindow = contextWindow;
         yield yieldChunk({ type: "usage", usage });
