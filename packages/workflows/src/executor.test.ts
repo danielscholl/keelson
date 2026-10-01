@@ -5142,3 +5142,83 @@ nodes:
     expect(calls[0].resolvedBody).toContain("criteria all mapped");
   });
 });
+
+describe("runWorkflow — output_schema failure inside the retry loop", () => {
+  const wf = (retry: string): WorkflowDefinition =>
+    parseInline(
+      `name: s\ndescription: |\n  Use when: t\nnodes:\n  - id: judge\n    bash: echo hi\n    output_schema:\n      type: object\n      required: [verdict]\n      properties:\n        verdict: { type: string }\n${retry}`,
+    );
+
+  // Returns `replies` in order, one per call; the schema check must see each
+  // attempt, so a malformed first reply followed by a valid one succeeds.
+  function sequencedHandler(replies: string[]): { handler: NodeHandler; attempts: () => number } {
+    let calls = 0;
+    const handler: NodeHandler = {
+      type: "bash",
+      async handle() {
+        const text = replies[calls] ?? replies[replies.length - 1] ?? "";
+        calls++;
+        return { status: "succeeded", output: { kind: "text", text } };
+      },
+    };
+    return { handler, attempts: () => calls };
+  }
+
+  test("a malformed reply is re-asked under on_error: all and the valid retry wins", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 1\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    const { handler, attempts } = sequencedHandler([
+      '{"summary":"no verdict"}',
+      '{"verdict":"ok"}',
+    ]);
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      onEvent,
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(summary.nodes.judge.state).toBe("completed");
+    expect(summary.nodes.judge.output).toBe('{"verdict":"ok"}');
+    expect(attempts()).toBe(2);
+    expect(
+      events.some(
+        (e) =>
+          e.type === "run_warning" &&
+          /retry 1\/1 .*output_schema validation failed/.test(e.message),
+      ),
+    ).toBe(true);
+  });
+
+  test("a malformed reply on the final attempt still fails closed", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 1\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    const { handler, attempts } = sequencedHandler(['{"summary":"no verdict"}']);
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+    });
+    expect(summary.status).toBe("failed");
+    expect(summary.nodes.judge).toMatchObject({
+      state: "failed",
+      error: expect.stringContaining("output_schema validation failed"),
+    });
+    expect(attempts()).toBe(2);
+  });
+
+  test("without on_error: all a schema failure is not retried", async () => {
+    const workflow = wf("    retry:\n      max_attempts: 1\n      delay_ms: 1000\n");
+    const { handler, attempts } = sequencedHandler([
+      '{"summary":"no verdict"}',
+      '{"verdict":"ok"}',
+    ]);
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+    });
+    expect(summary.status).toBe("failed");
+    expect(attempts()).toBe(1);
+  });
+});

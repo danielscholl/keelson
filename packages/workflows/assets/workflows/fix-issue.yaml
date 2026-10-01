@@ -1129,6 +1129,9 @@ nodes:
       copilot: claude-opus-4.8
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
+    retry:
+      max_attempts: 1
+      on_error: all
     output_format:
       type: object
       required: [ship_ready, summary, must_fix]
@@ -1143,6 +1146,24 @@ nodes:
             properties:
               location: { type: string }
               severity: { type: string, enum: [CRITICAL, HIGH] }
+              confidence: { type: integer }
+              problem: { type: string }
+              fix: { type: string }
+              repro: { type: string }
+    output_schema:
+      type: object
+      required: [ship_ready, summary, must_fix]
+      properties:
+        ship_ready: { type: boolean }
+        summary: { type: string }
+        must_fix:
+          type: array
+          items:
+            type: object
+            required: [location, severity, confidence, problem, fix, repro]
+            properties:
+              location: { type: string }
+              severity: { type: string }
               confidence: { type: integer }
               problem: { type: string }
               fix: { type: string }
