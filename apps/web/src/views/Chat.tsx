@@ -8,6 +8,7 @@ import {
   parseWorkflowDescription,
   type ReasoningEffortLevel,
   type RegisteredToolInfo,
+  resolveModelPrice,
   type TokenUsage,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
@@ -53,7 +54,7 @@ import {
 import { ToolsChip } from "../components/Chat/ToolsChip.tsx";
 import { ToolsPopover } from "../components/Chat/ToolsPopover.tsx";
 import { type SessionUsageTotals, UsageChip } from "../components/Chat/UsageChip.tsx";
-import { UsagePopover } from "../components/Chat/UsagePopover.tsx";
+import { turnCostUsd, UsagePopover } from "../components/Chat/UsagePopover.tsx";
 import { AddToNotebookModal } from "../components/Memory/AddToNotebookModal.tsx";
 import { useRibsContext } from "../components/RibsProvider.tsx";
 import { SkeletonStack } from "../components/Skeleton.tsx";
@@ -61,6 +62,7 @@ import { useToast } from "../components/Toast.tsx";
 import { useActiveProject } from "../hooks/useActiveProject.ts";
 import { useConversation } from "../hooks/useConversation.ts";
 import { useConversations } from "../hooks/useConversations.ts";
+import { useModelPrices } from "../hooks/useModelPrices.ts";
 import { useNotebookAppend } from "../hooks/useNotebookAppend.ts";
 import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
 import { resizeTextareaToContent } from "../lib/autoGrowTextarea.ts";
@@ -354,6 +356,7 @@ export function Chat({
   const toast = useToast();
   const { openCanvas } = useCanvas();
   const { ribs } = useRibsContext();
+  const modelPrices = useModelPrices();
   const { settings, toggleFavorite, setLastUsed, setSidebarCollapsed } = useSettings();
 
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -2011,10 +2014,17 @@ export function Chat({
   // usage carries the context gauge (fill, not spend — context-only reports
   // keep it fresh), while totals/turns count only turns with real spend so
   // zero-total reports don't inflate the session group.
+  // Priced at the selected model: the ledger knows the served model per turn,
+  // the chat does not, so an alias like Copilot's `auto` stays unpriced here.
+  const modelPrice = useMemo(
+    () => (selectedModel ? resolveModelPrice(selectedModel, modelPrices) : undefined),
+    [selectedModel, modelPrices],
+  );
   const usageSummary = useMemo<{ latest?: TokenUsage; totals: SessionUsageTotals }>(() => {
     let inputTokens = 0;
     let outputTokens = 0;
     let turns = 0;
+    let costUsd: number | null = modelPrice ? 0 : null;
     let latest: TokenUsage | undefined;
     for (const m of messages) {
       if (m.role !== "assistant" || !m.usage) continue;
@@ -2023,9 +2033,10 @@ export function Chat({
       inputTokens += m.usage.inputTokens;
       outputTokens += m.usage.outputTokens;
       turns++;
+      if (costUsd !== null) costUsd += turnCostUsd(m.usage, modelPrice) ?? 0;
     }
-    return { latest, totals: { inputTokens, outputTokens, turns } };
-  }, [messages]);
+    return { latest, totals: { inputTokens, outputTokens, turns, costUsd } };
+  }, [messages, modelPrice]);
 
   const sidebarCollapsed = settings.sidebarCollapsed ?? false;
 
@@ -2368,6 +2379,7 @@ export function Chat({
             popoverId={USAGE_POPOVER_ID}
             latest={usageSummary.latest}
             totals={usageSummary.totals}
+            price={modelPrice}
           />
         )}
 

@@ -29,7 +29,10 @@ export const WIRE_PROTOCOL_VERSION = "1.0" as const;
 // `worktreeEstablished` fields on WorkflowRunSummary.
 // 0.8: approval reviewer — `approval` on node rows and `node_done`, `review`
 // on `approval_awaiting`.
-export const SCHEMA_VERSION = "0.8" as const;
+// 0.9: usage cost — new `costUsd`, `cacheHitRatio`, and `unpricedEvents` on
+// usage totals/group/series/breakdown rows; `totalCostUsd`, `costUsdPerRun`,
+// `cacheHitRatio`, and `unpricedEvents` on jobs rows; `costUsd` on event rows.
+export const SCHEMA_VERSION = "0.9" as const;
 
 // A peer (the server on /api/health + /api/config, or a client's bundle)
 // reports its SCHEMA_VERSION. Any difference from this build's value signals

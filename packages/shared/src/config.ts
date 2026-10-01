@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import type { ModelClassMap } from "./chat.ts";
 import { credentialServiceIdSchema } from "./chat.ts";
+import { modelPricesSchema } from "./model-prices.ts";
 import { resolveKeelsonHome } from "./paths.ts";
 
 const CONFIG_FILE_NAME = "config.json";
@@ -216,6 +217,9 @@ const keelsonConfigSchema = z.object({
   // for the gateway. Non-secret metadata only — the API key lives in the
   // keychain (see gatewayCredentialServiceId).
   gateways: z.array(gatewayConfigSchema).optional(),
+  // USD-per-million-token overrides keyed by model id, consulted before the
+  // bundled Anthropic table so any vendor's models can be priced locally.
+  modelPrices: modelPricesSchema.optional(),
 });
 
 export type KeelsonConfig = z.infer<typeof keelsonConfigSchema>;

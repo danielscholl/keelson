@@ -20,6 +20,7 @@ export * from "./design-tokens.ts";
 export * from "./directives.ts";
 export * from "./docs.ts";
 export * from "./memory.ts";
+export * from "./model-prices.ts";
 export * from "./palette.ts";
 export * from "./policy.ts";
 export * from "./projects.ts";

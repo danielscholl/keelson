@@ -315,6 +315,9 @@ describe("SQLite UsageStore", () => {
         outputTokens: 12,
         cacheReadTokens: 2,
         cacheWriteTokens: 1,
+        costUsd: null,
+        unpricedEvents: 2,
+        cacheHitRatio: 2 / 15,
       });
       expect(result.groups).toEqual([
         {
@@ -324,6 +327,9 @@ describe("SQLite UsageStore", () => {
           outputTokens: 5,
           cacheReadTokens: 2,
           cacheWriteTokens: 1,
+          costUsd: null,
+          unpricedEvents: 1,
+          cacheHitRatio: 2 / 12,
         },
         {
           key: "gpt-5",
@@ -332,6 +338,9 @@ describe("SQLite UsageStore", () => {
           outputTokens: 7,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
+          costUsd: null,
+          unpricedEvents: 1,
+          cacheHitRatio: null,
         },
       ]);
     });
@@ -426,6 +435,9 @@ describe("SQLite UsageStore", () => {
           outputTokens: 3,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
+          costUsd: null,
+          unpricedEvents: 2,
+          cacheHitRatio: null,
         },
         {
           bucketIso: "2026-01-01T11:00:00.000Z",
@@ -435,6 +447,9 @@ describe("SQLite UsageStore", () => {
           outputTokens: 4,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
+          costUsd: null,
+          unpricedEvents: 1,
+          cacheHitRatio: null,
         },
       ]);
     });
@@ -497,6 +512,9 @@ describe("SQLite UsageStore", () => {
           outputTokens: 2,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
+          costUsd: null,
+          unpricedEvents: 1,
+          cacheHitRatio: null,
         },
         {
           key: "chat",
@@ -506,6 +524,9 @@ describe("SQLite UsageStore", () => {
           outputTokens: 1,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
+          costUsd: null,
+          unpricedEvents: 1,
+          cacheHitRatio: null,
         },
         {
           key: "workflow",
@@ -515,6 +536,9 @@ describe("SQLite UsageStore", () => {
           outputTokens: 3,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
+          costUsd: null,
+          unpricedEvents: 1,
+          cacheHitRatio: null,
         },
       ]);
     });
@@ -562,6 +586,9 @@ describe("SQLite UsageStore", () => {
           outputTokens: 6,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
+          costUsd: null,
+          unpricedEvents: 1,
+          cacheHitRatio: null,
         },
         {
           key: "rib",
@@ -571,6 +598,9 @@ describe("SQLite UsageStore", () => {
           outputTokens: 8,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
+          costUsd: null,
+          unpricedEvents: 1,
+          cacheHitRatio: null,
         },
         {
           key: "rib:squad",
@@ -580,6 +610,9 @@ describe("SQLite UsageStore", () => {
           outputTokens: 6,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
+          costUsd: null,
+          unpricedEvents: 2,
+          cacheHitRatio: null,
         },
       ]);
     });
@@ -673,6 +706,10 @@ describe("SQLite UsageStore", () => {
           totalTokens: 50,
           avgTokensPerRun: 25,
           p95TokensPerRun: 40,
+          totalCostUsd: null,
+          costUsdPerRun: null,
+          unpricedEvents: 3,
+          cacheHitRatio: null,
         },
       ]);
     });
@@ -774,6 +811,179 @@ describe("SQLite UsageStore", () => {
       expect(limited).toHaveLength(2);
       expect(limited[0]!.inputTokens).toBe(4);
       expect(limited[1]!.inputTokens).toBe(3);
+    });
+  });
+
+  describe("pricing", () => {
+    const SONNET = {
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheReadTokens: 2000,
+      cacheWriteTokens: 100,
+    };
+    // (1000*2 + 500*10 + 2000*0.2 + 100*2.5) / 1e6
+    const SONNET_COST = 0.00765;
+    const HAIKU = { inputTokens: 10_000, outputTokens: 1000 };
+    // (10000*1 + 1000*5) / 1e6
+    const HAIKU_COST = 0.015;
+
+    test("two priced events and one unpriced event null the total and count the unpriced one", () => {
+      store.record({ source: "chat", provider: "claude", model: "claude-sonnet-5", ...SONNET });
+      store.record({ source: "chat", provider: "claude", model: "claude-haiku-4-5", ...HAIKU });
+      store.record({
+        source: "chat",
+        provider: "codex",
+        model: "gpt-5",
+        inputTokens: 5,
+        outputTokens: 5,
+      });
+      const result = store.summary({ groupBy: "model" });
+      expect(result.totals.costUsd).toBeNull();
+      expect(result.totals.unpricedEvents).toBe(1);
+      expect(result.groups.map((g) => [g.key, g.costUsd, g.unpricedEvents])).toEqual([
+        ["claude-haiku-4-5", HAIKU_COST, 0],
+        ["claude-sonnet-5", SONNET_COST, 0],
+        ["gpt-5", null, 1],
+      ]);
+    });
+
+    test("all-priced events sum to the exact dollar value across every aggregate", () => {
+      store.record({
+        ts: "2026-01-01T10:00:00.000Z",
+        source: "workflow",
+        provider: "claude",
+        model: "claude-sonnet-5",
+        runId: "run-1",
+        workflowName: "smoke-test",
+        ...SONNET,
+      });
+      store.record({
+        ts: "2026-01-01T10:30:00.000Z",
+        source: "workflow",
+        provider: "copilot",
+        model: "claude-haiku-4.5",
+        runId: "run-2",
+        workflowName: "smoke-test",
+        ...HAIKU,
+      });
+      const total = SONNET_COST + HAIKU_COST;
+      const summary = store.summary({ groupBy: "workflow" });
+      expect(summary.totals.costUsd).toBeCloseTo(total, 6);
+      expect(summary.totals.unpricedEvents).toBe(0);
+      expect(summary.groups[0]?.costUsd).toBeCloseTo(total, 6);
+      const series = store.series({ bucket: "hour", groupBy: "source" });
+      expect(series).toHaveLength(1);
+      expect(series[0]?.costUsd).toBeCloseTo(total, 6);
+      const breakdown = store.breakdown({ groupBy: "workflow", splitBy: "model" });
+      expect(breakdown.map((r) => [r.split, r.costUsd])).toEqual([
+        ["claude-haiku-4.5", HAIKU_COST],
+        ["claude-sonnet-5", SONNET_COST],
+      ]);
+      const jobs = store.jobs();
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]?.totalCostUsd).toBeCloseTo(total, 6);
+      expect(jobs[0]?.costUsdPerRun).toBeCloseTo(total / 2, 6);
+      expect(jobs[0]?.unpricedEvents).toBe(0);
+      const events = store.events();
+      expect(events.map((e) => [e.model, e.costUsd])).toEqual([
+        ["claude-haiku-4.5", HAIKU_COST],
+        ["claude-sonnet-5", SONNET_COST],
+      ]);
+    });
+
+    test("a job with one unpriced run reports null cost on both cost fields", () => {
+      store.record({
+        source: "workflow",
+        provider: "claude",
+        model: "claude-sonnet-5",
+        runId: "a",
+        workflowName: "w",
+        ...SONNET,
+      });
+      store.record({
+        source: "workflow",
+        provider: "codex",
+        model: "gpt-5",
+        runId: "b",
+        workflowName: "w",
+        inputTokens: 1,
+        outputTokens: 1,
+      });
+      const [job] = store.jobs();
+      expect(job).toMatchObject({
+        key: "w",
+        runs: 2,
+        totalCostUsd: null,
+        costUsdPerRun: null,
+        unpricedEvents: 1,
+      });
+    });
+
+    test("config overrides price otherwise-unknown models at read time", () => {
+      const priced = createUsageStore(db, {
+        priceOverrides: () => ({
+          "gpt-5": { inputPerMTok: 1, outputPerMTok: 1, cacheReadPerMTok: 0, cacheWritePerMTok: 0 },
+        }),
+      });
+      store.record({
+        source: "chat",
+        provider: "codex",
+        model: "gpt-5",
+        inputTokens: 1000,
+        outputTokens: 1000,
+      });
+      expect(store.summary({ groupBy: "model" }).totals.costUsd).toBeNull();
+      const result = priced.summary({ groupBy: "model" });
+      expect(result.totals.costUsd).toBeCloseTo(0.002, 6);
+      expect(result.totals.unpricedEvents).toBe(0);
+      expect(priced.events()[0]?.costUsd).toBeCloseTo(0.002, 6);
+    });
+
+    test("cacheHitRatio is cacheRead over input plus cacheRead, null without reported cache reads", () => {
+      store.record({
+        source: "chat",
+        provider: "claude",
+        model: "claude-sonnet-5",
+        inputTokens: 100,
+        outputTokens: 10,
+        cacheReadTokens: 300,
+      });
+      store.record({
+        source: "chat",
+        provider: "claude",
+        model: "claude-sonnet-5",
+        inputTokens: 100,
+        outputTokens: 10,
+        cacheReadTokens: 0,
+      });
+      store.record({
+        source: "chat",
+        provider: "codex",
+        model: "gpt-5",
+        inputTokens: 100,
+        outputTokens: 10,
+      });
+      const result = store.summary({ groupBy: "model" });
+      expect(result.totals.cacheHitRatio).toBeCloseTo(300 / 600, 6);
+      expect(result.groups.find((g) => g.key === "claude-sonnet-5")?.cacheHitRatio).toBeCloseTo(
+        300 / 500,
+        6,
+      );
+      expect(result.groups.find((g) => g.key === "gpt-5")?.cacheHitRatio).toBeNull();
+      expect(
+        store.breakdown({ groupBy: "model", splitBy: "source" }).find((r) => r.key === "gpt-5")
+          ?.cacheHitRatio,
+      ).toBeNull();
+    });
+
+    test("a window with no events costs nothing and has no hit ratio", () => {
+      const result = store.summary({ groupBy: "model" });
+      expect(result.totals).toMatchObject({
+        events: 0,
+        costUsd: 0,
+        unpricedEvents: 0,
+        cacheHitRatio: null,
+      });
     });
   });
 

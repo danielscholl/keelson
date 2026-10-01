@@ -33,7 +33,9 @@ import {
   type MemoryListQuery,
   type MemoryListResponse,
   type ModelInfo,
+  type ModelPrices,
   memoryListResponseSchema,
+  modelPricesSchema,
   type OpenChatSeed,
   openChatSeedSchema,
   type Project,
@@ -75,6 +77,9 @@ import {
 export interface ServerConfig {
   schemaVersion: string;
   wireProtocolVersion: string;
+  // Effective USD-per-MTok table (operator overrides over the bundled one); a
+  // server too old to send one leaves this empty and chat cost reads unpriced.
+  modelPrices: ModelPrices;
 }
 
 type ApiErrorBody = "text" | "json-error";
@@ -127,11 +132,14 @@ export async function fetchConfig(): Promise<ServerConfig> {
   const body = await apiRequest<{
     schemaVersion?: unknown;
     wireProtocolVersion?: unknown;
+    modelPrices?: unknown;
   }>("/api/config");
+  const prices = modelPricesSchema.safeParse(body.modelPrices);
   return {
     schemaVersion: typeof body.schemaVersion === "string" ? body.schemaVersion : "",
     wireProtocolVersion:
       typeof body.wireProtocolVersion === "string" ? body.wireProtocolVersion : "",
+    modelPrices: prices.success ? prices.data : {},
   };
 }
 

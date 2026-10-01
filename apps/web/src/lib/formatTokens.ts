@@ -57,3 +57,18 @@ export function sumTokenSpend(
   }
   return hasSpend({ inputTokens, outputTokens }) ? { inputTokens, outputTokens } : null;
 }
+
+// Ledger cost: four decimals under a dollar ($0.0123) so a single cheap turn
+// still reads as a number, two above it. Null is an unpriced model, and the
+// word says so rather than a "$0.00" that would look like a free turn.
+export function formatCostUsd(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n) || n < 0) return "unpriced";
+  return n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
+}
+
+// Cache hit ratio as a whole percentage; null (no cache reads reported, or
+// nothing to divide by) renders as a dash rather than a fabricated 0%.
+export function formatCacheHit(ratio: number | null | undefined): string {
+  if (ratio === null || ratio === undefined || !Number.isFinite(ratio)) return "—";
+  return `${Math.round(Math.min(1, Math.max(0, ratio)) * 100)}%`;
+}

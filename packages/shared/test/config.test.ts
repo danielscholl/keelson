@@ -66,6 +66,23 @@ describe("loadKeelsonConfig", () => {
     expect(loadKeelsonConfig(home).ribApprovalGrants).toEqual({ chat: ["fix-issue"] });
   });
 
+  test("retains modelPrices written to disk", () => {
+    const price = {
+      inputPerMTok: 1,
+      outputPerMTok: 2,
+      cacheReadPerMTok: 0.1,
+      cacheWritePerMTok: 1.25,
+    };
+    writeConfig(JSON.stringify({ modelPrices: { "gpt-5": price } }));
+    expect(loadKeelsonConfig(home).modelPrices).toEqual({ "gpt-5": price });
+  });
+
+  test("a modelPrices entry missing a rate fails the read, so it never prices as zero", () => {
+    writeConfig(JSON.stringify({ modelPrices: { "gpt-5": { inputPerMTok: 1 } } }));
+    const result = readKeelsonConfig(home);
+    expect(result.ok).toBe(false);
+  });
+
   test("ignores a malformed crossRibGrants rather than failing boot", () => {
     writeConfig(
       JSON.stringify({ defaultProvider: "copilot", crossRibGrants: { chamber: "osdu" } }),
