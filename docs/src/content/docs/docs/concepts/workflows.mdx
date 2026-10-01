@@ -23,10 +23,12 @@ is bounded.
 ## The graph is the contract
 
 A workflow is a set of nodes and `depends_on` edges, a directed acyclic
-graph. The executor sorts it into layers: nodes with no unmet dependencies
-run first, concurrently; each later layer starts when the layer before it
-settles. The [first-workflow tutorial](../../tutorials/run-a-workflow/) walks
-this shape end to end, with two independent nodes starting together.
+graph. The executor starts every node with no unmet dependencies at once, and
+starts each remaining node the moment its own dependencies settle, so a slow
+branch never holds up an independent one. A workflow can set
+`scheduling: layered` to wait for whole topological layers instead. The
+[first-workflow tutorial](../../tutorials/run-a-workflow/) walks this shape
+end to end, with two independent nodes starting together.
 
 Whether a node runs at all is decided by two declarations on the node, both
 evaluated against upstream results:
@@ -106,9 +108,13 @@ or a cost figure can be pinned to one exact version of that definition. Edit the
 YAML in any way that changes a node, even whitespace inside an inline prompt, and
 the next run carries a different hash; a resumed run is re-stamped with whatever
 definition the resume ran. Content a node reads at execution time, such as the
-Markdown file behind a `command` node, is outside the hash. The watch stream you see in the CLI and
-the browser is the same event feed, emitted as each node starts, streams, and
-settles. The figure shows every state a run can occupy:
+Markdown file behind a `command` node, is outside the hash. From those per-node
+timestamps, `keelson workflow status` and the run header in the browser derive a
+critical-path figure: the longest dependency chain by node duration, shown
+beside the wall clock, so the gap between the two reads as scheduling wait
+rather than node work. The watch stream you see in the CLI and the browser is the
+same event feed, emitted as each node starts, streams, and settles. The figure
+shows every state a run can occupy:
 
 <figure>
   <img

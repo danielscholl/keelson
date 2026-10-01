@@ -27,7 +27,7 @@ import {
 import { runEval, selectCases } from "../eval/runner.ts";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import { resolveKeelsonHome } from "../home.ts";
-import { isServerDownError, workflowExists } from "../http/workflow-client.ts";
+import { getWorkflow, HttpError, isServerDownError } from "../http/workflow-client.ts";
 import { chatHeadless } from "../in-process/chat.ts";
 import { bootstrapCliProviders, pickDefaultProvider } from "../in-process/providers.ts";
 import { emit } from "../output.ts";
@@ -169,7 +169,14 @@ async function resolveExecutor(
         }
         projectId = id;
       }
-      if (!(await workflowExists(effectiveBase, caseSet.workflow, projectId))) {
+      const exists = await getWorkflow(effectiveBase, caseSet.workflow, projectId).then(
+        () => true,
+        (err: unknown) => {
+          if (err instanceof HttpError && err.status === 404) return false;
+          throw err;
+        },
+      );
+      if (!exists) {
         fail(
           `no workflow named '${caseSet.workflow}'${caseSet.project !== undefined ? ` in project '${caseSet.project}'` : " in the server catalog"}`,
           "WORKFLOW_NOT_FOUND",

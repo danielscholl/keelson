@@ -10,8 +10,8 @@
  * `cancel` NodeHandler. Signals run-level cancel via `opts.requestCancel`
  * and returns `failed` so the executor's per-node accounting sees a terminal
  * state. The server wires `requestCancel` to write the run's `cancelled`
- * status row and trip its AbortController; downstream layers then skip via
- * the executor's between-layer abort check.
+ * status row and trip its AbortController; nodes not yet dispatched then skip
+ * via the executor's pre-dispatch abort check.
  */
 
 import type { NodeHandler, NodeResult } from "../executor.ts";

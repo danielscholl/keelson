@@ -10,7 +10,7 @@
 import { createHash } from "node:crypto";
 import { evaluateCondition } from "./conditions.ts";
 import { resolveDirective } from "./directives.ts";
-import { buildTopologicalLayers, type DagShapeError, validateDagShape } from "./graph.ts";
+import { type DagShapeError, validateDagShape } from "./graph.ts";
 import { applyModelCase, selectModelCase } from "./model-by.ts";
 import { diagnoseModelDiversity } from "./model-diversity.ts";
 import { classifyModelVendor } from "./model-vendor.ts";
@@ -555,7 +555,7 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
 
   let cancelled = false;
 
-  const sharedCtx: LayerRunCtx = {
+  const sharedCtx: SharedRunCtx = {
     workflow,
     runId,
     inputs,
@@ -570,14 +570,16 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
     ...(projectId !== undefined ? { projectId } : {}),
     ...(notebook !== undefined ? { notebook } : {}),
   };
+  const runPartition: Scheduler =
+    workflow.scheduling === "layered"
+      ? (nodes, outputs, ctx, round) => runLayers(buildPartitionLayers(nodes), outputs, ctx, round)
+      : runReady;
 
   if (workflow.converge !== undefined) {
     const { gate, max_rounds: maxRounds, on_exhaust: onExhaust } = workflow.converge;
     const subgraphIds = buildConvergeSubgraphIds(workflow.nodes, gate);
     const subgraphNodes = workflow.nodes.filter((node) => subgraphIds.has(node.id));
     const restNodes = workflow.nodes.filter((node) => !subgraphIds.has(node.id));
-    const subgraphLayers = buildTopologicalLayers(subgraphNodes);
-    const restLayers = buildPartitionLayers(restNodes);
     let converged = false;
     if (nodeOutputs.get(gate)?.state !== "completed") {
       for (const id of subgraphIds) nodeOutputs.delete(id);
@@ -588,7 +590,7 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
         cancelled = true;
         break;
       }
-      cancelled = await runLayers(subgraphLayers, nodeOutputs, sharedCtx, round);
+      cancelled = await runPartition(subgraphNodes, nodeOutputs, sharedCtx, round);
       if (cancelled) break;
       const gateOutput = nodeOutputs.get(gate);
       if (gateOutput?.state === "completed") {
@@ -620,15 +622,15 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
     }
 
     if (!cancelled && converged) {
-      cancelled = await runLayers(restLayers, nodeOutputs, sharedCtx);
+      cancelled = await runPartition(restNodes, nodeOutputs, sharedCtx);
     } else if (!cancelled) {
       markMissingNodesSkipped(restNodes, nodeOutputs, emit);
     }
   } else {
-    cancelled = await runLayers(buildTopologicalLayers(workflow.nodes), nodeOutputs, sharedCtx);
+    cancelled = await runPartition(workflow.nodes, nodeOutputs, sharedCtx);
   }
-  // Catches the case where the signal fires mid-last-layer: handlers settle
-  // but no further iteration of the loop happens to see aborted=true.
+  // Catches the case where the signal fires while the last nodes are in
+  // flight: handlers settle but no further dispatch happens to see aborted=true.
   if (!cancelled && runAbortSignal.aborted) cancelled = true;
 
   if (cancelled) {
@@ -664,10 +666,10 @@ interface RunCtx {
   inputs: Record<string, string>;
   cwd: string;
   abortSignal: AbortSignal;
-  /** Read-only view of upstream layers; stays stable during the current layer. */
+  /** Outputs settled before this node was dispatched; stable for the node's lifetime. */
   nodeOutputs: Map<string, NodeOutput>;
-  /** Per-layer write buffer. Merged into nodeOutputs after Promise.allSettled. */
-  layerResults: Map<string, NodeOutput>;
+  /** Per-dispatch write buffer; the scheduler merges it into the shared map once the node settles. */
+  nodeResults: Map<string, NodeOutput>;
   emit: (event: RunStreamEvent) => void;
   warnOnce: (key: string, message: string) => void;
   handlers: ReadonlyMap<string, NodeHandler>;
@@ -684,31 +686,107 @@ interface RunCtx {
   convergeRound?: number;
 }
 
-type LayerRunCtx = Omit<RunCtx, "nodeOutputs" | "layerResults" | "convergeRound">;
+type SharedRunCtx = Omit<RunCtx, "nodeOutputs" | "nodeResults" | "convergeRound">;
+
+/**
+ * Runs one partition of the DAG (every node, or one side of a converge split)
+ * to quiescence. Nodes already present in `nodeOutputs` count as settled and
+ * are not re-run. Resolves to `true` when the run was aborted.
+ */
+type Scheduler = (
+  nodes: readonly DagNode[],
+  nodeOutputs: Map<string, NodeOutput>,
+  sharedCtx: SharedRunCtx,
+  convergeRound?: number,
+) => Promise<boolean>;
 
 async function runLayers(
   layers: readonly (readonly DagNode[])[],
   nodeOutputs: Map<string, NodeOutput>,
-  sharedCtx: LayerRunCtx,
+  sharedCtx: SharedRunCtx,
   convergeRound?: number,
 ): Promise<boolean> {
   for (const layer of layers) {
     if (sharedCtx.abortSignal.aborted) return true;
-    const layerResults = new Map<string, NodeOutput>();
+    const nodeResults = new Map<string, NodeOutput>();
     const pending = layer.filter((node) => !nodeOutputs.has(node.id));
     await Promise.allSettled(
       pending.map((node) =>
         runNodeOnce(node, {
           ...sharedCtx,
           nodeOutputs,
-          layerResults,
+          nodeResults,
           ...(convergeRound !== undefined ? { convergeRound } : {}),
         }),
       ),
     );
-    for (const [id, out] of layerResults) nodeOutputs.set(id, out);
+    for (const [id, out] of nodeResults) nodeOutputs.set(id, out);
   }
   return sharedCtx.abortSignal.aborted;
+}
+
+// Ready-queue dispatch: a node starts the moment its last in-partition
+// dependency settles. Each node receives a snapshot of the outputs settled at
+// dispatch time, so it sees every ancestor and never a concurrent sibling.
+// A pre-settled (resumed) node still waits for its own dependencies before it
+// counts as settled, which keeps "all ancestors settled before start" true for
+// its dependents even when an ancestor is being re-run.
+function runReady(
+  nodes: readonly DagNode[],
+  nodeOutputs: Map<string, NodeOutput>,
+  sharedCtx: SharedRunCtx,
+  convergeRound?: number,
+): Promise<boolean> {
+  const ids = new Set(nodes.map((node) => node.id));
+  const remaining = new Map<string, number>();
+  const dependents = new Map<string, DagNode[]>();
+  for (const node of nodes) {
+    const internalDeps = (node.depends_on ?? []).filter((dep) => ids.has(dep));
+    remaining.set(node.id, internalDeps.length);
+    for (const dep of internalDeps) {
+      const list = dependents.get(dep) ?? [];
+      list.push(node);
+      dependents.set(dep, list);
+    }
+  }
+  const ready = nodes.filter((node) => remaining.get(node.id) === 0);
+  let inFlight = 0;
+
+  return new Promise<boolean>((resolve) => {
+    const settle = (node: DagNode): void => {
+      for (const dependent of dependents.get(node.id) ?? []) {
+        const left = (remaining.get(dependent.id) ?? 0) - 1;
+        remaining.set(dependent.id, left);
+        if (left === 0) ready.push(dependent);
+      }
+    };
+    const dispatch = (): void => {
+      while (ready.length > 0 && !sharedCtx.abortSignal.aborted) {
+        const node = ready.shift() as DagNode;
+        if (nodeOutputs.has(node.id)) {
+          settle(node);
+          continue;
+        }
+        const nodeResults = new Map<string, NodeOutput>();
+        inFlight++;
+        const onSettled = (): void => {
+          const out = nodeResults.get(node.id);
+          if (out !== undefined) nodeOutputs.set(node.id, out);
+          inFlight--;
+          settle(node);
+          dispatch();
+        };
+        void runNodeOnce(node, {
+          ...sharedCtx,
+          nodeOutputs: new Map(nodeOutputs),
+          nodeResults,
+          ...(convergeRound !== undefined ? { convergeRound } : {}),
+        }).then(onSettled, onSettled);
+      }
+      if (inFlight === 0) resolve(sharedCtx.abortSignal.aborted);
+    };
+    dispatch();
+  });
 }
 
 function buildConvergeSubgraphIds(nodes: readonly DagNode[], gate: string): Set<string> {
@@ -890,7 +968,7 @@ async function runConvergeExhaustApproval(
   maxRounds: number,
   subgraphIds: ReadonlySet<string>,
   nodeOutputs: Map<string, NodeOutput>,
-  sharedCtx: LayerRunCtx,
+  sharedCtx: SharedRunCtx,
 ): Promise<boolean> {
   const approvalNodeId = makeConvergeExhaustApprovalNodeId(gate, sharedCtx.workflow.nodes);
   const approvalNode: DagNode = {
@@ -899,15 +977,15 @@ async function runConvergeExhaustApproval(
       message: `Converge gate '${gate}' did not pass after ${maxRounds} round(s). Approve to continue anyway.`,
     },
   };
-  const layerResults = new Map<string, NodeOutput>();
+  const nodeResults = new Map<string, NodeOutput>();
   await runNodeOnce(approvalNode, {
     ...sharedCtx,
     nodeOutputs,
-    layerResults,
+    nodeResults,
   });
   // Keep synthetic approval output out of nodeOutputs so it can't shadow a
   // real workflow node that happens to use the same id.
-  const approvalOutput = layerResults.get(approvalNode.id);
+  const approvalOutput = nodeResults.get(approvalNode.id);
   if (approvalOutput?.state !== "completed") return false;
   absorbConvergeSubgraphFailures(subgraphIds, gate, nodeOutputs, sharedCtx.emit);
   const acceptedGateOutput = toCompletedOutput(approvalOutput);
@@ -1076,7 +1154,7 @@ async function runNodeOnce(node: DagNode, ctx: RunCtx): Promise<void> {
     // nodeTypeOf encountering a malformed node) is converted to a failed
     // outcome so Promise.allSettled doesn't drop the node silently.
     const message = err instanceof Error ? err.message : String(err);
-    ctx.layerResults.set(node.id, {
+    ctx.nodeResults.set(node.id, {
       state: "failed",
       output: "",
       error: message,
@@ -1086,11 +1164,11 @@ async function runNodeOnce(node: DagNode, ctx: RunCtx): Promise<void> {
 }
 
 async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
-  const { nodeOutputs, layerResults, emit, handlers, abortSignal } = ctx;
+  const { nodeOutputs, nodeResults, emit, handlers, abortSignal } = ctx;
 
-  // 1. trigger_rule (reads upstream-layer outputs only — layerResults is private to this layer)
+  // 1. trigger_rule (reads settled upstream outputs only — nodeResults is private to this dispatch)
   if (checkTriggerRule(node, nodeOutputs) === "skip") {
-    layerResults.set(node.id, skippedOutput());
+    nodeResults.set(node.id, skippedOutput());
     emit({ type: "node_done", nodeId: node.id, result: skippedResult() });
     return;
   }
@@ -1104,12 +1182,12 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
         nodeId: node.id,
         message: `malformed when:: ${node.when}`,
       });
-      layerResults.set(node.id, skippedOutput());
+      nodeResults.set(node.id, skippedOutput());
       emit({ type: "node_done", nodeId: node.id, result: skippedResult() });
       return;
     }
     if (!result) {
-      layerResults.set(node.id, skippedOutput());
+      nodeResults.set(node.id, skippedOutput());
       emit({ type: "node_done", nodeId: node.id, result: skippedResult() });
       return;
     }
@@ -1121,7 +1199,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
   if (!handler) {
     const error = `no handler registered for node type '${nodeType}'`;
     emit({ type: "run_warning", nodeId: node.id, message: error });
-    layerResults.set(node.id, {
+    nodeResults.set(node.id, {
       state: "failed",
       output: "",
       error,
@@ -1233,7 +1311,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     }
     const recordedOutput = bodyToSchemaOutput(result, startedAtMs, Date.now());
     emitVendorCollapseWarning(node, recordedOutput, nodeOutputs, emit);
-    layerResults.set(node.id, recordedOutput);
+    nodeResults.set(node.id, recordedOutput);
     // 6. Memory writeback fires after the recorded output is captured but before `node_done`,
     // so subscribers see writeback events as node-scoped. Gated on `on === "always" || succeeded`.
     // provenance and idempotencyKey are hard-coded — author-uncontrollable — to keep evidence-default.
@@ -1250,7 +1328,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
       completedAt: nowIso(Date.now()),
       durationMs: Date.now() - startedAtMs,
     };
-    layerResults.set(node.id, recordedOutput);
+    nodeResults.set(node.id, recordedOutput);
     // `memory.writeback.on: always` must also fire on thrown handler errors, not just returned NodeResults.
     const failedNodeResult = failedResult(message);
     await runPostWriteback(

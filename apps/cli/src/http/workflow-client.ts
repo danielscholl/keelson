@@ -2,7 +2,12 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import type { ListWorkflowsResponse, WorkflowFrame } from "@keelson/shared";
+import {
+  type ListWorkflowsResponse,
+  type WorkflowDetail,
+  type WorkflowFrame,
+  workflowDetailSchema,
+} from "@keelson/shared";
 import { normalizeBase, originHeader } from "./base.ts";
 
 export type { ListWorkflowsResponse, WorkflowSummary } from "@keelson/shared";
@@ -169,20 +174,19 @@ export async function startRun(
   return (await res.json()) as StartRunResponse;
 }
 
-// Resolves through the detail route, which uses the same catalog lookup as
-// starting a run, so project-scoped workflows and forgiving names agree.
-export async function workflowExists(
+export async function getWorkflow(
   baseUrl: string,
   name: string,
-  projectId?: string,
-): Promise<boolean> {
-  const query = projectId !== undefined ? `?projectId=${encodeURIComponent(projectId)}` : "";
+  projectId?: string | null,
+): Promise<WorkflowDetail> {
+  const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
   const res = await fetch(url(baseUrl, `/api/workflows/${encodeURIComponent(name)}${query}`), {
     headers: defaultHeaders(baseUrl),
   });
-  if (res.status === 404) return false;
-  if (!res.ok) throw new HttpError(res.status, `GET /api/workflows/${name} failed: ${res.status}`);
-  return true;
+  if (res.status === 404) throw new HttpError(404, `workflow '${name}' not found`);
+  if (!res.ok) throw new HttpError(res.status, `GET /workflows/${name} failed: ${res.status}`);
+  const body = (await res.json()) as { workflow?: unknown };
+  return workflowDetailSchema.parse(body.workflow);
 }
 
 export async function getRun(baseUrl: string, runId: string): Promise<unknown> {
