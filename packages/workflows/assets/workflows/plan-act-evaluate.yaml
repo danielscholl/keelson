@@ -368,7 +368,9 @@ nodes:
       - Learn this project's conventions and verify commands first — read whichever
         exist: `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `README.md`, plus its
         build config (package.json scripts, Makefile, pyproject.toml, Cargo.toml,
-        go.mod, …). Run THAT project's checks after each change — assume no tool.
+        go.mod, …). Assume no specific tool.
+      - $DIRECTIVES.verify
+        That check is THIS project's own, run after each change.
       - If the feedback above is more than a bare approval, record a short
         `forge issue comment <N>` noting the agreed change BEFORE coding.
       - Read each file before editing it. Stage files **by name** — never

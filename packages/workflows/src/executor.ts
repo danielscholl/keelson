@@ -9,6 +9,7 @@
 
 import { createHash } from "node:crypto";
 import { evaluateCondition } from "./conditions.ts";
+import { resolveDirective } from "./directives.ts";
 import { buildTopologicalLayers, type DagShapeError, validateDagShape } from "./graph.ts";
 import { applyModelCase, selectModelCase } from "./model-by.ts";
 import { diagnoseModelDiversity } from "./model-diversity.ts";
@@ -273,6 +274,9 @@ function nodeBodyOf(node: DagNode): string {
 //                                safety); they receive `$ARTIFACTS_DIR`
 //                                and `$KEELSON_ARTIFACTS_DIR` as env vars
 //                                via buildSubprocessEnv instead.
+//   DIRECTIVES.<name>         — harness-owned directive text (raw). An
+//                                unknown name stays literal; the loader
+//                                rejects it before a run starts.
 //   inputs.<key>              — workflow input by key (raw) — matched BEFORE
 //                                node-output refs so $inputs.output resolves
 //                                to the input named "output" rather than a
@@ -300,7 +304,7 @@ function nodeBodyOf(node: DagNode): string {
 // must exclude all of those — falling through to the node-output alt
 // where the full id is captured (subject to the loader's reserved-id check).
 const SUB_PATTERN =
-  /(\\)?\$(?:(ARGUMENTS)(?![a-zA-Z0-9_-])|(ARTIFACTS_DIR)(?![a-zA-Z0-9_-])|(converge\.round)(?![a-zA-Z0-9_-])|memory\.recall\.(items|trace)(?![a-zA-Z0-9_-])|inputs\.([a-zA-Z_][a-zA-Z0-9_]*)|([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?)?/g;
+  /(\\)?\$(?:(ARGUMENTS)(?![a-zA-Z0-9_-])|(ARTIFACTS_DIR)(?![a-zA-Z0-9_-])|(converge\.round)(?![a-zA-Z0-9_-])|memory\.recall\.(items|trace)(?![a-zA-Z0-9_-])|DIRECTIVES\.([a-zA-Z_][a-zA-Z0-9_]*)|inputs\.([a-zA-Z_][a-zA-Z0-9_]*)|([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?)?/g;
 const CONVERGE_ROUND_PATTERN = /(\\)?\$(converge\.round)(?![a-zA-Z0-9_-])/g;
 
 /**
@@ -342,6 +346,7 @@ export function resolveBody(
       artifactsMarker: string | undefined,
       convergeRoundMarker: string | undefined,
       memoryField: string | undefined,
+      directiveName: string | undefined,
       inputKey: string | undefined,
       nodeId: string | undefined,
       field: string | undefined,
@@ -365,6 +370,7 @@ export function resolveBody(
         // resolve to "" so workflow bodies can interpolate without guards.
         return recall?.traceId ?? "";
       }
+      if (directiveName !== undefined) return resolveDirective(directiveName) ?? match;
       if (inputKey !== undefined) {
         // Defensive: bracket-access can return inherited prototype values
         // for keys like `constructor` / `toString`. Restrict to string

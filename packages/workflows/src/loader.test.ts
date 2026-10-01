@@ -601,6 +601,106 @@ nodes:
   });
 });
 
+describe("parseWorkflow — $DIRECTIVES refs", () => {
+  test("a known directive name loads cleanly", () => {
+    const yaml = `
+name: directives-ok
+description: known directive
+nodes:
+  - id: a
+    prompt: |
+      Do X.
+
+      $DIRECTIVES.verify
+  - id: b
+    depends_on: [a]
+    loop:
+      prompt: "$DIRECTIVES.confirm"
+      until: DONE
+      max_iterations: 2
+`;
+    const result = parseWorkflow(yaml, "directives-ok.yaml");
+    expect(result.error).toBeNull();
+    expect(result.workflow).not.toBeNull();
+  });
+
+  test("an unknown directive name is a hard load error naming the valid names", () => {
+    const yaml = `
+name: directives-bad
+description: unknown directive
+nodes:
+  - id: a
+    prompt: "Do X. $DIRECTIVES.nope"
+`;
+    const result = parseWorkflow(yaml, "directives-bad.yaml");
+    expect(result.workflow).toBeNull();
+    expect(result.error?.errorType).toBe("validation_error");
+    expect(result.error?.error).toBe(
+      "Node 'a' prompt: unknown directive '$DIRECTIVES.nope' (valid names: verify, continue, confirm, review)",
+    );
+  });
+
+  test("an unknown directive inside loop.prompt is rejected too", () => {
+    const yaml = `
+name: directives-loop
+description: unknown directive in a loop
+nodes:
+  - id: a
+    loop:
+      prompt: "$DIRECTIVES.nah"
+      until: DONE
+      max_iterations: 2
+`;
+    const result = parseWorkflow(yaml, "directives-loop.yaml");
+    expect(result.error?.error).toMatch(
+      /Node 'a' loop\.prompt: unknown directive '\$DIRECTIVES\.nah'/,
+    );
+  });
+
+  test("an escaped \\$DIRECTIVES ref is a literal and never validated", () => {
+    const yaml = `
+name: directives-escaped
+description: escaped ref
+nodes:
+  - id: a
+    prompt: 'Write \\$DIRECTIVES.whatever to show the syntax'
+`;
+    const result = parseWorkflow(yaml, "directives-escaped.yaml");
+    expect(result.error).toBeNull();
+  });
+
+  test("node id 'DIRECTIVES' is rejected (collides with the $DIRECTIVES.* substitution namespace)", () => {
+    const yaml = `
+name: directives-node
+description: shadows DIRECTIVES namespace
+nodes:
+  - id: DIRECTIVES
+    bash: "echo x"
+`;
+    const result = parseWorkflow(yaml, "directives-node.yaml");
+    expect(result.error?.error).toMatch(/Node id 'DIRECTIVES' is reserved.*substitution namespace/);
+  });
+
+  test("validateWorkflowInvariants rejects an unknown directive on the rib-contribution path", () => {
+    const yaml = `
+name: directives-ok
+description: known directive
+nodes:
+  - id: a
+    prompt: "$DIRECTIVES.review"
+`;
+    const parsed = parseWorkflow(yaml, "x.yaml");
+    expect(parsed.workflow).not.toBeNull();
+    const workflow = parsed.workflow!;
+    expect(validateWorkflowInvariants(workflow)).toBeNull();
+    const tampered = {
+      ...workflow,
+      nodes: [{ ...workflow.nodes[0], prompt: "$DIRECTIVES.nope" }],
+    } as typeof workflow;
+    expect(validateWorkflowInvariants(tampered)).toMatch(/unknown directive '\$DIRECTIVES\.nope'/);
+  });
+});
+
 describe("parseWorkflow — warnings (non-fatal)", () => {
   test("hooks on a prompt node parses cleanly and is NOT in the dropped-fields warning", () => {
     const yaml = `

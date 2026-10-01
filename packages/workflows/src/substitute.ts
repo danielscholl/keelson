@@ -6,10 +6,13 @@
  *    Ported from Archon `packages/workflows/src/utils/variable-substitution.ts`.
  * 2. {@link substituteNodeOutputRefs} — `$nodeId.output` and `$nodeId.output.field`.
  *    Ported from Archon `packages/workflows/src/dag-executor.ts:substituteNodeOutputRefs`.
+ * 3. {@link substituteDirectiveRefs} — `$DIRECTIVES.<name>` expands to the
+ *    harness-owned directive text; `\$DIRECTIVES.<name>` stays literal.
  *
- * Both helpers are pure and deterministic.
+ * All helpers are pure and deterministic.
  */
 
+import { DIRECTIVE_NAMES, resolveDirective } from "./directives.ts";
 import type { NodeOutput } from "./schema/index.ts";
 
 /**
@@ -104,4 +107,35 @@ export function substituteNodeOutputRefs(
       }
     },
   );
+}
+
+const DIRECTIVE_REF_PATTERN = /(\\)?\$DIRECTIVES\.([a-zA-Z_][a-zA-Z0-9_]*)/g;
+
+/**
+ * Substitute `$DIRECTIVES.<name>` with the named directive's text.
+ *
+ * - `\$DIRECTIVES.<name>` — the backslash is stripped and the marker stays
+ *   literal, matching the `\$` escape of the other substitutions.
+ * - An unknown name is left untouched; the loader rejects it at parse time,
+ *   so a literal survivor here is a workflow that bypassed the loader.
+ */
+export function substituteDirectiveRefs(text: string): string {
+  return text.replace(
+    DIRECTIVE_REF_PATTERN,
+    (match, backslash: string | undefined, name: string) => {
+      if (backslash !== undefined) return match.slice(1);
+      return resolveDirective(name) ?? match;
+    },
+  );
+}
+
+/** Unknown names behind unescaped `$DIRECTIVES.` refs, in order of appearance. */
+export function findUnknownDirectiveRefs(text: string): string[] {
+  const unknown: string[] = [];
+  for (const m of text.matchAll(DIRECTIVE_REF_PATTERN)) {
+    const name = m[2];
+    if (m[1] !== undefined || name === undefined) continue;
+    if (!DIRECTIVE_NAMES.includes(name)) unknown.push(name);
+  }
+  return unknown;
 }

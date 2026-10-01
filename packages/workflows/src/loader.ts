@@ -29,6 +29,7 @@ import * as path from "node:path";
 
 import { parse as parseYamlString } from "yaml";
 import type { z } from "zod";
+import { DIRECTIVE_NAMES } from "./directives.ts";
 import { validateDagShape } from "./graph.ts";
 import { ENV_VALUE_MAX_CHARS } from "./handlers/subprocess.ts";
 import {
@@ -52,6 +53,7 @@ import {
   webSearchModeSchema,
   workflowBaseSchema,
 } from "./schema/index.ts";
+import { findUnknownDirectiveRefs } from "./substitute.ts";
 
 /**
  * Non-fatal warning from the loader. Distinct from `WorkflowLoadError` (which
@@ -325,7 +327,14 @@ const RESERVED_REF_NAMESPACES = new Set(["inputs", "ARTIFACTS_DIR"]);
  *  `$ARTIFACTS_DIR`, and `$memory.recall.*` before considering them as node
  *  refs, so a node literally named any of these would be silently shadowed
  *  — reject at parse time. */
-const RESERVED_NODE_IDS = new Set(["inputs", "ARGUMENTS", "ARTIFACTS_DIR", "memory", "converge"]);
+const RESERVED_NODE_IDS = new Set([
+  "inputs",
+  "ARGUMENTS",
+  "ARTIFACTS_DIR",
+  "memory",
+  "converge",
+  "DIRECTIVES",
+]);
 
 /** Workflow names that can't be declared because they collide with the
  *  `/api/workflows/<name>` route family. The path segment `runs` is owned by
@@ -389,6 +398,8 @@ export function validateWorkflowInvariants(workflow: WorkflowDefinition): string
   if (convergeError) return convergeError;
   const vendorReferenceError = validateDifferentVendorReferences(workflow.nodes);
   if (vendorReferenceError) return vendorReferenceError;
+  const directiveError = validateDirectiveRefs(workflow.nodes);
+  if (directiveError) return directiveError;
   return validateOutputRefs(workflow.nodes);
 }
 
@@ -444,6 +455,25 @@ function validateDifferentVendorReferences(nodes: readonly DagNode[]): string | 
     }
     if (!("prompt" in target) || typeof target.prompt !== "string") {
       return `Node '${node.id}' different_vendor_from target '${reference}' is not a prompt node`;
+    }
+  }
+  return null;
+}
+
+// Fail closed: an unknown `$DIRECTIVES.<name>` would otherwise reach the model
+// as literal text, which reads like a working instruction it cannot follow.
+function validateDirectiveRefs(nodes: readonly DagNode[]): string | null {
+  for (const node of nodes) {
+    const sources: { text: string; label: string }[] = [];
+    if ("prompt" in node && typeof node.prompt === "string") {
+      sources.push({ text: node.prompt, label: "prompt" });
+    }
+    if (isLoopNode(node)) sources.push({ text: node.loop.prompt, label: "loop.prompt" });
+    for (const source of sources) {
+      const unknown = findUnknownDirectiveRefs(source.text)[0];
+      if (unknown !== undefined) {
+        return `Node '${node.id}' ${source.label}: unknown directive '$DIRECTIVES.${unknown}' (valid names: ${DIRECTIVE_NAMES.join(", ")})`;
+      }
     }
   }
   return null;
@@ -753,6 +783,15 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
         error: vendorReferenceError,
         errorType: "validation_error",
       },
+    };
+  }
+
+  const directiveError = validateDirectiveRefs(nodes);
+  if (directiveError) {
+    return {
+      workflow: null,
+      warnings,
+      error: { filename, error: directiveError, errorType: "validation_error" },
     };
   }
 
