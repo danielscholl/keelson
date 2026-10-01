@@ -667,6 +667,22 @@ describe("compareResults", () => {
     expect(cmp.warnings).toContain("no train split: the decision rests on test alone");
   });
 
+  test("a train-only comparison reverts for want of a held-out split, not for overfitting", () => {
+    const before = file(batch("train", 5, 25), { splitFilter: "train" });
+    const after = file(batch("train", 25, 5), { splitFilter: "train" });
+    const cmp = compareResults(before, after);
+    expect(cmp.splits[0]?.verdict).toBe("improved");
+    expect(cmp.decision).toBe("revert");
+    expect(cmp.reason).toContain("nothing held out");
+  });
+
+  test("different rep counts are not comparable", () => {
+    const a = file(batch("test", 5, 5));
+    const cmp = compareResults(a, { ...a, reps: 3 });
+    expect(cmp.comparable).toBe(false);
+    expect(cmp.reason).toContain("reps differ: 1 vs 3");
+  });
+
   test("errored runs on either side force revert", () => {
     const before = file([...batch("train", 5, 25), ...batch("test", 5, 25)]);
     const after = file([...batch("train", 25, 5), ...batch("test", 25, 5, 1)]);
@@ -688,7 +704,10 @@ describe("compareResults", () => {
     expect(cmp.definitionChanged).toBe(true);
     expect(cmp.warnings).toContain("provider overrides differ: 'none' vs 'claude'");
     expect(cmp.warnings).toContain("keelson versions differ: '0.113.0' vs '0.114.0'");
-    // Files written before these fields existed carry no claim either way.
+    // A file without the fields, or with a null version, makes no claim.
+    expect(compareResults(file(cases("aaa"), { keelsonVersion: null }), b).warnings).not.toContain(
+      "keelson versions differ: 'unknown' vs '0.114.0'",
+    );
     const old = compareResults(file(cases(null)), b);
     expect(old.definitionChanged).toBeNull();
     expect(old.warnings.some((w) => w.includes("differ:"))).toBe(false);

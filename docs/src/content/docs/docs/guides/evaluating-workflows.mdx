@@ -193,12 +193,13 @@ even on a provider the price table does not cover.
 overall  60.0% [38.7%, 78.1%] → 90.0% [69.9%, 97.2%]  +30.0 pts  improved  (6/20 cases changed, p=0.031)
 ```
 
-Compare refuses two files that did not run the same cases, project, and split
-filter (the results file carries a fingerprint of the case set), and reverts
+Compare refuses two files that did not run the same cases, project, reps, and
+split filter (the results file carries a fingerprint of the case set), and reverts
 when either side errored: an infrastructure failure is not a measurement. It
 warns when both runs executed the same workflow definition, since any difference
 then came from outside the workflow or from run-to-run variation, and when the
-two runs used a different `--provider` or keelson version. Comparing a results
+two runs used a different `--provider` or, for in-process runs, a different
+keelson version. Comparing a results
 file with itself is always `within-noise`.
 
 ## Related

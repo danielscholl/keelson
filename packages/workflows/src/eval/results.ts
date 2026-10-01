@@ -92,7 +92,8 @@ export interface EvalResultsFile {
   readonly reps: number;
   readonly splitFilter: EvalSplit | "all";
   // What produced the numbers, so compare can say when two runs differ by
-  // more than the workflow. Absent in files written before these were recorded.
+  // more than the workflow. Absent or null makes no claim: the version is
+  // null over HTTP, where the server's build runs the workflow, not the CLI's.
   readonly provider?: string | null;
   readonly keelsonVersion?: string | null;
   readonly cases: readonly EvalCaseResult[];
@@ -319,6 +320,11 @@ export function compareResults(a: EvalResultsFile, b: EvalResultsFile): EvalComp
   if (a.splitFilter !== b.splitFilter) {
     incomparable.push(`split filters differ: '${a.splitFilter}' vs '${b.splitFilter}'`);
   }
+  // The sign-flip test needs each case's two rates to be exchangeable, which
+  // a rate over one rep and a rate over three are not.
+  if (a.reps !== b.reps) {
+    incomparable.push(`reps differ: ${a.reps} vs ${b.reps}`);
+  }
   const splitOf = (split: EvalSplit | "overall") =>
     compareSplit(
       split,
@@ -342,13 +348,11 @@ export function compareResults(a: EvalResultsFile, b: EvalResultsFile): EvalComp
     );
   }
   if (
-    a.keelsonVersion !== undefined &&
-    b.keelsonVersion !== undefined &&
+    typeof a.keelsonVersion === "string" &&
+    typeof b.keelsonVersion === "string" &&
     a.keelsonVersion !== b.keelsonVersion
   ) {
-    warnings.push(
-      `keelson versions differ: '${a.keelsonVersion ?? "unknown"}' vs '${b.keelsonVersion ?? "unknown"}'`,
-    );
+    warnings.push(`keelson versions differ: '${a.keelsonVersion}' vs '${b.keelsonVersion}'`);
   }
   if (
     overall.verdict === "within-noise" &&
@@ -377,6 +381,9 @@ export function compareResults(a: EvalResultsFile, b: EvalResultsFile): EvalComp
   } else if (overall.verdict !== "improved") {
     decision = "revert";
     reason = `overall ${overall.verdict}`;
+  } else if (test.verdict === "n/a") {
+    decision = "revert";
+    reason = "no test case was graded on both sides, so nothing held out confirms the change";
   } else if (!hasTrain) {
     // Nothing to check overfitting against, so the summary says so.
     decision = "keep";
