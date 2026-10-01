@@ -449,7 +449,8 @@ describe("chat memory recall", () => {
       abortSignal: new AbortController().signal,
     });
 
-    expect(captured?.systemPrompt).toBe("seed");
+    expect(captured?.systemPrompt?.endsWith("\n\nseed")).toBe(true);
+    expect(captured?.systemPrompt).not.toContain(RECALL_SECTION_HEADING);
   });
 
   test("truncates long content with an ellipsis and stays under the cap", async () => {
@@ -545,8 +546,9 @@ describe("chat memory recall", () => {
       abortSignal: new AbortController().signal,
     });
 
-    // Filtered out → no injection, systemPrompt is just the seed.
-    expect(captured?.systemPrompt).toBe("seed");
+    // Filtered out → no injection, nothing rides between the fixed rules and the seed.
+    expect(captured?.systemPrompt?.endsWith("\n\nseed")).toBe(true);
+    expect(captured?.systemPrompt).not.toContain(RECALL_SECTION_HEADING);
   });
 
   test("excludes recalled items that require user confirmation", async () => {
@@ -581,7 +583,8 @@ describe("chat memory recall", () => {
       abortSignal: new AbortController().signal,
     });
 
-    expect(captured?.systemPrompt).toBe("seed");
+    expect(captured?.systemPrompt?.endsWith("\n\nseed")).toBe(true);
+    expect(captured?.systemPrompt).not.toContain(RECALL_SECTION_HEADING);
   });
 
   test("excludes recalled items flagged doNotInjectAutomatically (defense-in-depth)", async () => {
@@ -618,7 +621,8 @@ describe("chat memory recall", () => {
       abortSignal: new AbortController().signal,
     });
 
-    expect(captured?.systemPrompt).toBe("seed");
+    expect(captured?.systemPrompt?.endsWith("\n\nseed")).toBe(true);
+    expect(captured?.systemPrompt).not.toContain(RECALL_SECTION_HEADING);
   });
 
   test("injects only the items that pass every gate, dropping the rest", async () => {

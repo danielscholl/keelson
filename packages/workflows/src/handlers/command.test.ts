@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DIRECTIVES } from "../directives.ts";
 import type { NodeContext, NodeHandler, NodeResult } from "../executor.ts";
 import type { DagNode, WorkflowDefinition } from "../schema/index.ts";
 import { makeCommandHandler } from "./command.ts";
@@ -142,6 +143,33 @@ describe("makeCommandHandler", () => {
       "args=from-user lane=stable prior=upstream-text",
     );
     expect(calls[0].ctx.resolvedBody).toBe("args=from-user lane=stable prior=upstream-text");
+  });
+
+  test("fails closed on an unknown $DIRECTIVES name inside the command file body", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "keelson-cmd-"));
+    await mkdir(join(cwd, ".keelson/commands"), { recursive: true });
+    await writeFile(join(cwd, ".keelson/commands/bad.md"), "Do X. $DIRECTIVES.nope");
+    const { handler: promptHandler, calls } = makeRecorderHandler();
+    const handler = makeCommandHandler({ promptHandler });
+    const node = { id: "cmd", command: "bad" } as unknown as DagNode;
+    const result = await handler.handle(node, buildCtx(cwd));
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe(
+      "Command node 'cmd': 'bad.md' references unknown directive '$DIRECTIVES.nope' (valid names: verify, continue, confirm, review)",
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  test("expands a known $DIRECTIVES name inside the command file body", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "keelson-cmd-"));
+    await mkdir(join(cwd, ".keelson/commands"), { recursive: true });
+    await writeFile(join(cwd, ".keelson/commands/good.md"), "Do X. $DIRECTIVES.confirm");
+    const { handler: promptHandler, calls } = makeRecorderHandler();
+    const handler = makeCommandHandler({ promptHandler });
+    const node = { id: "cmd", command: "good" } as unknown as DagNode;
+    await handler.handle(node, buildCtx(cwd));
+    expect(calls).toHaveLength(1);
+    expect(calls[0].ctx.resolvedBody).toBe(`Do X. ${DIRECTIVES.confirm}`);
   });
 
   test("substitutes $converge.round inside the command file body", async () => {

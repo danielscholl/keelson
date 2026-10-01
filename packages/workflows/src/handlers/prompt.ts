@@ -270,6 +270,10 @@ export interface MakePromptHandlerOptions {
 // `denylist` explicitly when constructing the prompt handler.
 export const DEFAULT_TOOL_DENYLIST: readonly string[] = [];
 
+// Marker inside the warning a provider gets when it cannot enforce a node's
+// tool rails; the approval handler reads it to refuse a reviewer's approval.
+export const TOOL_RAILS_UNENFORCED_MARKER = "does not enforce per-node";
+
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
 export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
@@ -452,7 +456,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             if (usedFields.length > 0) {
               ctx.emit({
                 type: "node_warning",
-                message: `Provider '${providerType}' does not enforce per-node ${usedFields.join(", ")} — these will silently no-op.`,
+                message: `Provider '${providerType}' ${TOOL_RAILS_UNENFORCED_MARKER} ${usedFields.join(", ")} — these will silently no-op.`,
               });
             }
           }

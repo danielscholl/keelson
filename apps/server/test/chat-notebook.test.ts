@@ -13,6 +13,7 @@ import {
 } from "@keelson/providers";
 import { type ClientFrame, WIRE_PROTOCOL_VERSION } from "@keelson/shared";
 import { handleChatRequest } from "../src/chat-handler.ts";
+import { buildWorkingRules } from "../src/chat-prompt.ts";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { createProjectNotebookStore } from "../src/project-notebook-store.ts";
@@ -91,7 +92,7 @@ describe("chat project-notebook injection", () => {
     expect(sp).toContain("chat cwd defaults to ~/keelson");
   });
 
-  test("no notebook → system prompt stays untouched", async () => {
+  test("no notebook → system prompt is only the working rules", async () => {
     let captured: SendQueryOptions | undefined;
     const spyId = "spy-notebook-absent";
     const { store, notebooks, project } = setup(spyId, (o) => {
@@ -106,7 +107,7 @@ describe("chat project-notebook injection", () => {
       abortSignal: new AbortController().signal,
     });
 
-    expect(captured?.systemPrompt).toBeUndefined();
+    expect(captured?.systemPrompt).toBe(buildWorkingRules());
   });
 
   test("notebook is injected ahead of the conversation seed", async () => {

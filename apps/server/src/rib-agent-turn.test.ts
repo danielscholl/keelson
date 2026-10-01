@@ -524,6 +524,41 @@ describe("makeRibAgentTurn — model classes and the served model", () => {
   });
 });
 
+describe("makeRibAgentTurn — reasoning effort", () => {
+  function effortProvider(reasoningEffort: boolean, onQuery: (c: QueryCall) => void) {
+    return {
+      ...fakeProvider({ onQuery }),
+      getCapabilities: () => ({ reasoningEffort }) as never,
+    } satisfies IAgentProvider;
+  }
+
+  it("forwards the effort when the provider reports it consumes one", async () => {
+    let sent: SendQueryOptions | undefined;
+    const run = makeRun(effortProvider(true, (c) => (sent = c.options)));
+    const result = await run("chat", { prompt: "hi", reasoningEffort: "low" }).result;
+    expect(result.status).toBe("ok");
+    expect(sent?.reasoningEffort).toBe("low");
+  });
+
+  it("drops the effort when the provider does not consume one, without failing the turn", async () => {
+    let sent: SendQueryOptions | undefined;
+    const run = makeRun(effortProvider(false, (c) => (sent = c.options)));
+    const result = await run("chat", { prompt: "hi", reasoningEffort: "low" }).result;
+    expect(result.status).toBe("ok");
+    expect(result.text).toBe("hello");
+    expect(sent).toBeDefined();
+    expect("reasoningEffort" in sent!).toBe(false);
+  });
+
+  it("sends no effort when the turn asked for none", async () => {
+    let sent: SendQueryOptions | undefined;
+    const run = makeRun(effortProvider(true, (c) => (sent = c.options)));
+    await run("chat", { prompt: "hi" }).result;
+    expect(sent).toBeDefined();
+    expect("reasoningEffort" in sent!).toBe(false);
+  });
+});
+
 describe("makeRibAgentTurn — seam invariants", () => {
   it("rejects an empty prompt with a clear seam error, never touching a provider (#115)", async () => {
     let called = false;

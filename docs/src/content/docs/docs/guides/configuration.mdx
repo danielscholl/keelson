@@ -497,6 +497,7 @@ replacing it, so a grant from either source stands.
 | `KEELSON_PROVIDERS` | unset | Exact list of providers to load. Overrides the config file. |
 | `KEELSON_WORKFLOW_PROVIDER` | first real provider | Provider that backs workflow `prompt` nodes. |
 | `KEELSON_WORKFLOW_TOOL_DENYLIST` | unset | Operator floor: tool names no workflow `prompt` node may use, subtracted on top of whatever a node allows. |
+| `KEELSON_APPROVAL_REVIEWER` | unset | Operator floor: set to `off` to disable every approval-node `reviewer`, so all gates pause for a human. See [Workflow nodes](../../reference/workflow-nodes/#reviewer). |
 | `KEELSON_ASK_ON_SHELL` | unset | Set to `1` to pause for human approval before any shell or file-mutating call. See [Governance](../governance/#approvals). |
 | `KEELSON_TURN_BUDGET` | unset | Positive integer: cap a session's model-calling turns. A downgrade gate, not a wall. See [Budgets](../governance/#budgets). |
 | `KEELSON_COST_BUDGET` | unset | Positive integer: cap a session's accumulated input+output tokens. Same downgrade-gate behavior. |

@@ -1,4 +1,4 @@
-import type { WorkflowDefinition } from "./schema/index.ts";
+import { providerNodeView, type WorkflowDefinition } from "./schema/index.ts";
 
 interface DiversityCandidate {
   nodeId: string;
@@ -18,7 +18,9 @@ export function diagnoseModelDiversity(
 ): string[] {
   const groups = new Map<string, DiversityCandidate[]>();
 
-  for (const node of workflow.nodes) {
+  // Reviewers carry their own pins under `approval.reviewer`; project them so
+  // two reviewers collapsing onto one model warn like any other provider nodes.
+  for (const node of workflow.nodes.map(providerNodeView)) {
     if (node.prompt === undefined && node.command === undefined) continue;
 
     const hasResolvedNode = resolvedNodes?.has(node.id) === true;

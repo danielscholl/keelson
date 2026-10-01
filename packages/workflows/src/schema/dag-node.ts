@@ -333,16 +333,40 @@ export const approvalOnRejectSchema = z.object({
 
 export type ApprovalOnReject = z.infer<typeof approvalOnRejectSchema>;
 
+export const APPROVAL_REVIEWER_DEFAULT_MIN_CONFIDENCE = 85;
+
+/**
+ * Schema for the `reviewer` sub-object on approval nodes: one agent turn that
+ * may answer the gate for the operator. Strict so a misspelled key cannot
+ * silently widen what the reviewer is allowed to do.
+ */
+export const approvalReviewerSchema = z
+  .object({
+    prompt: z.string().min(1, "'reviewer.prompt' must be a non-empty string"),
+    model: z.string().min(1).optional(),
+    model_by_provider: z.record(z.string(), z.string().min(1)).optional(),
+    effort: effortLevelSchema.optional(),
+    allowed_tools: z.array(z.string()).optional(),
+    min_confidence: z.number().int().min(0).max(100).optional(),
+    when: z.string().min(1).optional(),
+  })
+  .strict();
+
+export type ApprovalReviewer = z.infer<typeof approvalReviewerSchema>;
+
+const approvalBlockSchema = z.object({
+  message: z.string().min(1, "'approval.message' must not be empty"),
+  capture_response: z.boolean().optional(),
+  on_reject: approvalOnRejectSchema.optional(),
+  reviewer: approvalReviewerSchema.optional(),
+});
+
 /**
  * Approval node schema — pauses the workflow for human review.
  * Extends full base for type compatibility; AI-specific fields are ignored at runtime.
  */
 export const approvalNodeSchema = dagNodeBaseSchema.extend({
-  approval: z.object({
-    message: z.string().min(1, "'approval.message' must not be empty"),
-    capture_response: z.boolean().optional(),
-    on_reject: approvalOnRejectSchema.optional(),
-  }),
+  approval: approvalBlockSchema,
 });
 
 /** DAG node that pauses workflow execution for human approval */
@@ -451,13 +475,7 @@ export const dagNodeSchema = dagNodeBaseSchema
     prompt: z.string().optional(),
     bash: z.string().optional(),
     loop: loopNodeConfigSchema.optional(),
-    approval: z
-      .object({
-        message: z.string().min(1, "'approval.message' must not be empty"),
-        capture_response: z.boolean().optional(),
-        on_reject: approvalOnRejectSchema.optional(),
-      })
-      .optional(),
+    approval: approvalBlockSchema.optional(),
     cancel: z.string().optional(),
     // Script-only
     script: z.string().optional(),
@@ -734,7 +752,57 @@ export function isScriptNode(node: DagNode): node is ScriptNode {
 }
 
 export function nodeReachesProvider(node: DagNode): boolean {
-  return node.prompt !== undefined || node.command !== undefined || isLoopNode(node);
+  return (
+    node.prompt !== undefined ||
+    node.command !== undefined ||
+    isLoopNode(node) ||
+    (isApprovalNode(node) && node.approval.reviewer !== undefined)
+  );
+}
+
+/**
+ * The workflow with every approval reviewer removed: what the operator floor
+ * (`KEELSON_APPROVAL_REVIEWER=off`) runs and preflights, so a reviewer's pin
+ * cannot fail a run whose gates all go to the human. Returns the same object
+ * when nothing declares a reviewer, so identity-keyed lookups still match.
+ */
+export function withoutApprovalReviewers<T extends { nodes: readonly DagNode[] }>(workflow: T): T {
+  if (
+    !workflow.nodes.some((node) => isApprovalNode(node) && node.approval.reviewer !== undefined)
+  ) {
+    return workflow;
+  }
+  return {
+    ...workflow,
+    nodes: workflow.nodes.map((node) => {
+      if (!isApprovalNode(node) || node.approval.reviewer === undefined) return node;
+      const { reviewer: _reviewer, ...approval } = node.approval;
+      return { ...node, approval } as ApprovalNode;
+    }),
+  };
+}
+
+/**
+ * The node whose model/provider fields catalog resolution and preflight should
+ * read. An approval node's reviewer turn carries its own pins under
+ * `approval.reviewer`, so it is projected onto a prompt-shaped view; every other
+ * node is returned as is.
+ */
+export function providerNodeView(node: DagNode): DagNode {
+  if (!isApprovalNode(node) || node.approval.reviewer === undefined) return node;
+  const reviewer = node.approval.reviewer;
+  return {
+    id: node.id,
+    ...(node.depends_on !== undefined ? { depends_on: node.depends_on } : {}),
+    ...(node.when !== undefined ? { when: node.when } : {}),
+    prompt: reviewer.prompt,
+    ...(reviewer.model !== undefined ? { model: reviewer.model } : {}),
+    ...(reviewer.model_by_provider !== undefined
+      ? { model_by_provider: reviewer.model_by_provider }
+      : {}),
+    ...(reviewer.effort !== undefined ? { effort: reviewer.effort } : {}),
+    ...(reviewer.allowed_tools !== undefined ? { allowed_tools: reviewer.allowed_tools } : {}),
+  } as PromptNode;
 }
 
 /** Type guard: validates a value is a known TriggerRule */

@@ -3,9 +3,11 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
+import { DIRECTIVES } from "@keelson/shared";
 import {
   buildChatSystemPrompt,
   buildWorkflowGuidance,
+  buildWorkingRules,
   type WorkflowSummaryLike,
 } from "../src/chat-prompt.ts";
 
@@ -73,19 +75,44 @@ describe("buildWorkflowGuidance", () => {
   });
 });
 
+describe("buildWorkingRules", () => {
+  test("carries verify, continue, and confirm once each, never review", () => {
+    const out = buildWorkingRules();
+    expect(out.startsWith("## Working rules\n\n")).toBe(true);
+    for (const name of ["verify", "continue", "confirm"] as const) {
+      expect(out.split(DIRECTIVES[name]).length - 1).toBe(1);
+    }
+    expect(out).not.toContain(DIRECTIVES.review);
+  });
+});
+
 describe("buildChatSystemPrompt", () => {
-  test("returns undefined when nothing contributes", () => {
-    expect(buildChatSystemPrompt({})).toBeUndefined();
+  test("is only the working rules when nothing else contributes", () => {
+    expect(buildChatSystemPrompt({})).toBe(buildWorkingRules());
   });
 
-  test("passes the seed through untouched when it is the only part", () => {
-    expect(buildChatSystemPrompt({ seedSystemPrompt: "seed" })).toBe("seed");
+  test("appends the seed untouched as the last part", () => {
+    expect(buildChatSystemPrompt({ seedSystemPrompt: "seed" })).toBe(
+      `${buildWorkingRules()}\n\nseed`,
+    );
+  });
+
+  test("includes each working-rule directive exactly once", () => {
+    const out = buildChatSystemPrompt({
+      canvasArtifacts: true,
+      docs: true,
+      workflows: [SMOKE],
+      seedSystemPrompt: "seed",
+    });
+    for (const name of ["verify", "continue", "confirm"] as const) {
+      expect(out.split(DIRECTIVES[name]).length - 1).toBe(1);
+    }
   });
 
   test("omits workflow guidance only when workflows is absent (tools inactive)", () => {
-    // Tools inactive => no `workflows` key => no guidance; the seed-only
-    // assertion in chat-memory.test.ts stays valid.
-    expect(buildChatSystemPrompt({ seedSystemPrompt: "seed" })).toBe("seed");
+    // Tools inactive => no `workflows` key => no guidance; the seed-last
+    // assertions in chat-memory.test.ts stay valid.
+    expect(buildChatSystemPrompt({ seedSystemPrompt: "seed" })).not.toContain("## Workflows");
     // Tools active with an EMPTY catalog still get the section — the
     // authoring rules matter most when the first workflow is about to be
     // written.
@@ -103,8 +130,9 @@ describe("buildChatSystemPrompt", () => {
       notebookSection: "## Project notebook\n\n- n",
       seedSystemPrompt: "SEED-DIRECTIVE",
       recallSection: "## Relevant prior memory\n\n- x",
-    })!;
+    });
     const order = [
+      "## Working rules",
       "## Canvas artifacts",
       "## Documentation",
       "## Workflows",

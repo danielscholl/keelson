@@ -11,7 +11,9 @@
  * and delegates to the prompt handler with a synthesized `PromptNode`.
  */
 
+import { DIRECTIVE_NAMES } from "../directives.ts";
 import { type NodeHandler, type NodeResult, resolveBody } from "../executor.ts";
+import { findUnknownDirectiveRefs } from "../substitute.ts";
 import { isValidCommandName, resolveCommand } from "./discovery.ts";
 import { failed, synthesizePromptNode } from "./helpers.ts";
 
@@ -35,6 +37,15 @@ export function makeCommandHandler(opts: MakeCommandHandlerOptions): NodeHandler
       if (!resolved) {
         return failed(
           `Command node '${node.id}': command '${name}.md' not found in .keelson/commands/`,
+        );
+      }
+
+      // The loader only sees the command name, so the fail-closed directive
+      // check the loader applies to inline prompts has to run here.
+      const unknownDirective = findUnknownDirectiveRefs(resolved.content)[0];
+      if (unknownDirective !== undefined) {
+        return failed(
+          `Command node '${node.id}': '${name}.md' references unknown directive '$DIRECTIVES.${unknownDirective}' (valid names: ${DIRECTIVE_NAMES.join(", ")})`,
         );
       }
 

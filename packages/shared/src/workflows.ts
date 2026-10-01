@@ -129,6 +129,40 @@ export const workflowDetailSchema = z
   .strict();
 export type WorkflowDetail = z.infer<typeof workflowDetailSchema>;
 
+// The verdict an approval node's declared reviewer returns. Fixed shape: the
+// reviewer turn is pinned to it as its output schema, so a reply that does not
+// parse to this fails closed to the human gate.
+export const approvalReviewerVerdictSchema = z
+  .object({
+    decision: z.enum(["approve", "changes", "escalate"]),
+    confidence: z.number().int().min(0).max(100),
+    reason: z.string(),
+    changes: z.string().optional(),
+  })
+  .strict();
+export type ApprovalReviewerVerdict = z.infer<typeof approvalReviewerVerdictSchema>;
+
+// What a reviewer turn left behind when the gate still went to the operator:
+// the verdict it returned below the bar (or a non-approve decision), or the
+// reason no verdict could be read.
+export const approvalReviewSchema = z
+  .object({
+    reviewerVerdict: approvalReviewerVerdictSchema.optional(),
+    reviewerError: z.string().optional(),
+  })
+  .strict();
+export type ApprovalReview = z.infer<typeof approvalReviewSchema>;
+
+// Who answered an approval gate. `reviewer` means the declared reviewer
+// approved above its confidence floor and the run never paused; `operator`
+// means the gate paused for a human (with the reviewer's verdict attached when
+// one ran). Rows written before the reviewer existed carry no record and read
+// as operator-answered.
+export const approvalRecordSchema = approvalReviewSchema
+  .extend({ answeredBy: z.enum(["operator", "reviewer"]) })
+  .strict();
+export type ApprovalRecord = z.infer<typeof approvalRecordSchema>;
+
 // One row of workflow_node_outputs. `contentParts` is null for bash nodes
 // and populated by the prompt handler with the assistant's structured turn.
 export const nodeOutputRowSchema = z
@@ -152,6 +186,10 @@ export const nodeOutputRowSchema = z
     // spelling. Null when the node declared none — providers then apply their
     // own per-model default, which they don't report back.
     effort: reasoningEffortLevelSchema.nullable().default(null),
+    // Approval-gate record (migration 18): who answered and the reviewer's
+    // verdict when one ran. Null for every other node type and for rows that
+    // predate the column.
+    approval: approvalRecordSchema.nullable().default(null),
   })
   .strict();
 export type NodeOutputRow = z.infer<typeof nodeOutputRowSchema>;
@@ -353,6 +391,9 @@ export const workflowFrameSchema = z.discriminatedUnion("type", [
       model: z.string().optional(),
       // Effective reasoning tier, omitted when the node declared none.
       effort: reasoningEffortLevelSchema.optional(),
+      // Present for approval nodes: who answered the gate and the reviewer's
+      // verdict when one ran.
+      approval: approvalRecordSchema.optional(),
     })
     .strict(),
   z
@@ -380,6 +421,9 @@ export const workflowFrameSchema = z.discriminatedUnion("type", [
       nodeId: z.string(),
       message: z.string(),
       pauseId: z.string(),
+      // Set when a declared reviewer ran and did not approve above its floor,
+      // so the callout can say why the gate reached the operator.
+      review: approvalReviewSchema.optional(),
     })
     .strict(),
   // Broadcast when a paused node is resumed via POST /resume. Tells live

@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DIRECTIVES } from "./directives.ts";
 import {
   ExecutorValidationError,
   type MemoryTools,
@@ -1216,6 +1217,56 @@ nodes:
       inputs: { ARGUMENTS: "HELLO" },
     });
     expect(calls[0].resolvedBody).toBe("literal=$ARGUMENTS value=HELLO");
+  });
+});
+
+describe("runWorkflow — $DIRECTIVES refs", () => {
+  test("$DIRECTIVES.<name> expands in a prompt body and \\$DIRECTIVES stays literal", async () => {
+    const { handler, calls } = echoHandler("prompt");
+    await runWorkflow({
+      ...baseOpts(single("Do X.\n\n$DIRECTIVES.verify\n\nsyntax: \\$DIRECTIVES.verify")),
+      handlers: new Map([["prompt", handler]]),
+    });
+    expect(calls[0].resolvedBody).toBe(
+      `Do X.\n\n${DIRECTIVES.verify}\n\nsyntax: $DIRECTIVES.verify`,
+    );
+  });
+
+  test("a $DIRECTIVES ref inside upstream output is not rescanned", async () => {
+    const workflow = parseInline(`
+name: t
+description: test
+nodes:
+  - id: source
+    bash: echo unused
+  - id: consumer
+    depends_on: [source]
+    prompt: "report: $source.output"
+`);
+    const { handler: consumer, calls } = echoHandler("prompt");
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map<string, NodeHandler>([
+        ["bash", cannedHandler({ source: "mentions $DIRECTIVES.verify" }, "bash")],
+        ["prompt", consumer],
+      ]),
+    });
+    expect(calls[0].resolvedBody).toBe("report: mentions $DIRECTIVES.verify");
+  });
+});
+
+describe("resolveBody — $DIRECTIVES", () => {
+  test("resolves each known name and leaves an unknown one literal", () => {
+    expect(resolveBody("$DIRECTIVES.confirm", {}, new Map())).toBe(DIRECTIVES.confirm);
+    expect(resolveBody("$DIRECTIVES.nope", {}, new Map())).toBe("$DIRECTIVES.nope");
+    expect(resolveBody("$DIRECTIVES.verify-extra", {}, new Map())).toBe("$DIRECTIVES.verify-extra");
+  });
+
+  test("a node named DIRECTIVES cannot shadow the namespace", () => {
+    const outputs = new Map<string, NodeOutput>([
+      ["DIRECTIVES", { state: "completed", output: '{"verify":"shadow"}' }],
+    ]);
+    expect(resolveBody("$DIRECTIVES.verify", {}, outputs)).toBe(DIRECTIVES.verify);
   });
 });
 
@@ -4782,5 +4833,137 @@ describe("runWorkflow — node retry", () => {
     });
     expect(summary.status).toBe("failed");
     expect(attempts()).toBe(1);
+  });
+});
+
+describe("runWorkflow — resumed gate does not re-run its reviewer", () => {
+  test("a seeded (already-answered) approval node skips the handler and its reviewer entirely", async () => {
+    const wf = parseInline(`
+name: resume-reviewed-gate
+description: test
+nodes:
+  - id: plan
+    bash: "echo plan"
+  - id: gate
+    depends_on: [plan]
+    approval:
+      message: "Approve $plan.output?"
+      reviewer:
+        prompt: "Check it."
+  - id: implement
+    depends_on: [gate]
+    bash: "echo $gate.output"
+`);
+    let reviewerCalls = 0;
+    let gateCalls = 0;
+    const approval = makeApprovalHandler({
+      awaitApproval: async () => {
+        gateCalls += 1;
+        return "human";
+      },
+      reviewer: {
+        promptHandler: {
+          type: "prompt",
+          async handle() {
+            reviewerCalls += 1;
+            return {
+              status: "succeeded",
+              output: {
+                kind: "structured",
+                value: { decision: "approve", confidence: 99, reason: "again" },
+              },
+            };
+          },
+        },
+      },
+    });
+    const { handler: bash, calls } = echoHandler("bash");
+    const stamp = new Date().toISOString();
+    const completedNodeOutputs = new Map<string, NodeOutput>([
+      [
+        "plan",
+        {
+          state: "completed",
+          output: "the plan",
+          startedAt: stamp,
+          completedAt: stamp,
+          durationMs: 1,
+        },
+      ],
+      [
+        "gate",
+        {
+          state: "completed",
+          output: "reviewer said yes",
+          startedAt: stamp,
+          completedAt: stamp,
+          durationMs: 1,
+        },
+      ],
+    ]);
+    const summary = await runWorkflow({
+      ...baseOpts(wf),
+      handlers: new Map([
+        ["bash", bash],
+        ["approval", approval],
+      ]),
+      completedNodeOutputs,
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(reviewerCalls).toBe(0);
+    expect(gateCalls).toBe(0);
+    expect(summary.nodes.gate.output).toBe("reviewer said yes");
+    expect(calls.map((c) => c.nodeId)).toEqual(["implement"]);
+    expect(calls[0].resolvedBody).toContain("reviewer said yes");
+  });
+
+  test("a fresh run with a reviewer that approves never pauses and feeds the reason downstream", async () => {
+    const wf = parseInline(`
+name: reviewed-gate
+description: test
+nodes:
+  - id: gate
+    approval:
+      message: "Approve?"
+      reviewer:
+        prompt: "Check it."
+        min_confidence: 80
+  - id: implement
+    depends_on: [gate]
+    bash: "echo $gate.output"
+`);
+    let gateCalls = 0;
+    const approval = makeApprovalHandler({
+      awaitApproval: async () => {
+        gateCalls += 1;
+        return "human";
+      },
+      reviewer: {
+        promptHandler: {
+          type: "prompt",
+          async handle() {
+            return {
+              status: "succeeded",
+              output: {
+                kind: "structured",
+                value: { decision: "approve", confidence: 85, reason: "criteria all mapped" },
+              },
+            };
+          },
+        },
+      },
+    });
+    const { handler: bash, calls } = echoHandler("bash");
+    const summary = await runWorkflow({
+      ...baseOpts(wf),
+      handlers: new Map([
+        ["bash", bash],
+        ["approval", approval],
+      ]),
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(gateCalls).toBe(0);
+    expect(summary.nodes.gate.output).toBe("criteria all mapped");
+    expect(calls[0].resolvedBody).toContain("criteria all mapped");
   });
 });

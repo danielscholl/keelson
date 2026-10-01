@@ -30,7 +30,7 @@ describe("migrations", () => {
         version: number;
       }>
     ).map((r) => r.version);
-    expect(versions).toEqual([12, 13, 14, 15, 16, 17]);
+    expect(versions).toEqual([12, 13, 14, 15, 16, 17, 18]);
 
     expect(tableNames(db)).toContain("conversations");
     expect(tableNames(db)).toContain("memories");
@@ -42,6 +42,10 @@ describe("migrations", () => {
     expect(runColumns.map((column) => column.name)).toContain("isolation_enabled");
     expect(runColumns.map((column) => column.name)).toContain("started_by_rib_id");
     expect(runColumns.map((column) => column.name)).toContain("worktree_established");
+    const nodeColumns = db.query("PRAGMA table_info(workflow_node_outputs)").all() as Array<{
+      name: string;
+    }>;
+    expect(nodeColumns.map((column) => column.name)).toContain("approval_json");
     expect(tableNames(db)).toContain("usage_events");
     expect(tableNames(db)).toContain("ops");
     db.close();
@@ -54,6 +58,7 @@ describe("migrations", () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE schema_version (version INTEGER PRIMARY KEY);");
     db.exec("CREATE TABLE workflow_runs (id TEXT PRIMARY KEY, worktree_path TEXT);");
+    db.exec("CREATE TABLE workflow_node_outputs (run_id TEXT, node_id TEXT);");
     for (let v = 1; v <= 12; v += 1) {
       db.prepare("INSERT INTO schema_version(version) VALUES (?)").run(v);
     }
@@ -62,8 +67,12 @@ describe("migrations", () => {
 
     const columns = db.query("PRAGMA table_info(workflow_runs)").all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toContain("provider_override");
+    const nodeColumns = db.query("PRAGMA table_info(workflow_node_outputs)").all() as Array<{
+      name: string;
+    }>;
+    expect(nodeColumns.map((column) => column.name)).toContain("approval_json");
     expect(db.query("SELECT MAX(version) AS v FROM schema_version").get() as { v: number }).toEqual(
-      { v: 17 },
+      { v: 18 },
     );
     db.close();
   });
@@ -90,7 +99,7 @@ describe("migrations", () => {
 
     expect(tableNames(db)).toEqual(before);
     expect(db.query("SELECT count(*) AS c FROM schema_version").get() as { c: number }).toEqual({
-      c: 6,
+      c: 7,
     });
     db.close();
   });
@@ -101,6 +110,7 @@ describe("migrations", () => {
       CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
       INSERT INTO schema_version VALUES (13);
       CREATE TABLE workflow_runs (id TEXT PRIMARY KEY, worktree_path TEXT);
+      CREATE TABLE workflow_node_outputs (run_id TEXT, node_id TEXT);
       INSERT INTO workflow_runs VALUES ('existing-run', NULL);
       INSERT INTO workflow_runs VALUES ('retained-worktree', '/repo/.worktrees/retained');
     `);

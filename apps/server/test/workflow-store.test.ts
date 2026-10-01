@@ -337,6 +337,71 @@ describe("SQLite WorkflowStore", () => {
     expect(run!.nodes[0]!.startedAt).toBe("2025-01-01T00:00:01.000Z");
   });
 
+  test("persists and reads back the approval record (migration 18)", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    store.createRun({
+      runId: "r1",
+      workflowName: "x",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:00.000Z",
+      conversationId: mintConv(db),
+    });
+    const verdict = { decision: "approve" as const, confidence: 92, reason: "all criteria map" };
+    store.upsertNodeOutput({
+      runId: "r1",
+      nodeId: "gate",
+      status: "succeeded",
+      outputText: "all criteria map",
+      contentParts: null,
+      startedAt: "2025-01-01T00:00:01.000Z",
+      completedAt: "2025-01-01T00:00:02.000Z",
+      error: null,
+      approval: { answeredBy: "reviewer", reviewerVerdict: verdict },
+    });
+    store.upsertNodeOutput({
+      runId: "r1",
+      nodeId: "gate-2",
+      status: "awaiting",
+      outputText: "Approve?",
+      contentParts: null,
+      startedAt: "2025-01-01T00:00:03.000Z",
+      completedAt: null,
+      error: null,
+      approval: { answeredBy: "operator", reviewerError: "reviewer reply was not a JSON verdict" },
+    });
+    store.upsertNodeOutput({
+      runId: "r1",
+      nodeId: "build",
+      status: "succeeded",
+      outputText: "ok",
+      contentParts: null,
+      startedAt: "2025-01-01T00:00:04.000Z",
+      completedAt: "2025-01-01T00:00:05.000Z",
+      error: null,
+    });
+
+    const run = store.getRun("r1");
+    const byId = new Map(run!.nodes.map((n) => [n.nodeId, n]));
+    expect(byId.get("gate")!.approval).toEqual({
+      answeredBy: "reviewer",
+      reviewerVerdict: verdict,
+    });
+    expect(byId.get("gate-2")!.approval).toEqual({
+      answeredBy: "operator",
+      reviewerError: "reviewer reply was not a JSON verdict",
+    });
+    // A non-gate node (and any row from before the column) reads null, which
+    // the surfaces treat as operator-answered.
+    expect(byId.get("build")!.approval).toBeNull();
+
+    // A corrupt value degrades to null rather than breaking the read.
+    db.exec(
+      "UPDATE workflow_node_outputs SET approval_json = '{\"answeredBy\":\"robot\"}' WHERE node_id = 'gate'",
+    );
+    expect(store.getRun("r1")!.nodes.find((n) => n.nodeId === "gate")!.approval).toBeNull();
+  });
+
   test("persists and reads back per-node provider/model (migration 5)", () => {
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);

@@ -7,11 +7,16 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   APPROVAL_ARTIFACT_MAX_CHARS,
   APPROVAL_ARTIFACTS_MAX,
   approvalArtifactPaths,
   pendingApprovalWithArtifacts,
+  persistReviewerRecord,
+  reviewerVerdictArtifactPath,
 } from "../src/approval-artifacts.ts";
 
 describe("approvalArtifactPaths", () => {
@@ -55,5 +60,35 @@ describe("pendingApprovalWithArtifacts", () => {
         content: "",
       })),
     ).toEqual({ nodeId: "review", prompt: "ship it?" });
+  });
+});
+
+describe("reviewer record artifact", () => {
+  test("encodes the node id into one filename component", () => {
+    expect(reviewerVerdictArtifactPath("approve-plan")).toBe(
+      "approvals/approve-plan.reviewer.json",
+    );
+    expect(reviewerVerdictArtifactPath("plan/one")).toBe("approvals/plan%2Fone.reviewer.json");
+    expect(reviewerVerdictArtifactPath("../escape")).toBe("approvals/..%2Fescape.reviewer.json");
+  });
+
+  test("persists the record under the run's artifacts dir and swallows an unwritable dir", () => {
+    const dir = mkdtempSync(join(tmpdir(), "keelson-approval-artifact-"));
+    try {
+      const record = {
+        answeredBy: "reviewer" as const,
+        reviewerVerdict: { decision: "approve" as const, confidence: 90, reason: "ok" },
+      };
+      persistReviewerRecord(dir, "gate/one", record);
+      const written = JSON.parse(
+        readFileSync(join(dir, "approvals", "gate%2Fone.reviewer.json"), "utf8"),
+      );
+      expect(written).toEqual(record);
+      // No artifacts dir (a run without one) and an unwritable path are both no-ops.
+      persistReviewerRecord(undefined, "gate", record);
+      persistReviewerRecord(join(dir, "approvals", "gate%2Fone.reviewer.json"), "x", record);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

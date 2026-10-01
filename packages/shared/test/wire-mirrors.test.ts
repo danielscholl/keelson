@@ -14,6 +14,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODEL_CLASSES } from "../src/chat.ts";
+import { DIRECTIVES } from "../src/directives.ts";
 import {
   memoryTypeSchema,
   RECALL_REQUEST_SCHEMA_VERSION,
@@ -34,6 +35,13 @@ describe("@keelson/workflows mirrors of shared wire constants", () => {
     expect(body.length).toBeGreaterThan(0);
     const mirrored = Array.from(body.matchAll(/["']([^"']+)["']/g), (match) => match[1] ?? "");
     expect(mirrored).toEqual([...MODEL_CLASSES]);
+  });
+
+  test("DIRECTIVES record matches entry for entry", async () => {
+    const mirror = (await import(join(WORKFLOWS_ROOT, "directives.ts"))) as {
+      DIRECTIVES: Record<string, string>;
+    };
+    expect(mirror.DIRECTIVES).toEqual({ ...DIRECTIVES });
   });
 
   test("RECALL_REQUEST_SCHEMA_VERSION literal matches", () => {

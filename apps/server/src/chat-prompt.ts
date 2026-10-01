@@ -3,12 +3,13 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 // Single source of truth for a chat turn's system prompt. Composes, in order,
-// the tool-conditional canvas, docs, and workflow guidance, the always-on project
-// notebook, the conversation seed, and the memory-recall section. The workflow
-// catalog index is the standing anchor that lets the model match a request like
-// "run smoke-test" without a workflow_list round-trip first.
+// the always-on working rules, the tool-conditional canvas, docs, and workflow
+// guidance, the always-on project notebook, the conversation seed, and the
+// memory-recall section. The workflow catalog index is the standing anchor that
+// lets the model match a request like "run smoke-test" without a workflow_list
+// round-trip first.
 
-import { buildCanvasArtifactGuidance } from "@keelson/shared";
+import { buildCanvasArtifactGuidance, renderDirectives } from "@keelson/shared";
 
 export interface WorkflowSummaryLike {
   name: string;
@@ -102,10 +103,15 @@ export function buildDocsGuidance(): string {
   ].join("\n");
 }
 
-export function buildChatSystemPrompt(input: BuildChatSystemPromptInput): string | undefined {
+// The review directive is deliberately left out: chat is not a review lens.
+export function buildWorkingRules(): string {
+  return ["## Working rules", "", renderDirectives(["verify", "continue", "confirm"])].join("\n");
+}
+
+export function buildChatSystemPrompt(input: BuildChatSystemPromptInput): string {
   // Fixed guidance first for prefix caching, per-turn recall last; the seed follows
   // the model-writable notebook so the conversation's directive keeps the last word.
-  const parts: string[] = [];
+  const parts: string[] = [buildWorkingRules()];
   if (input.canvasArtifacts === true) {
     parts.push(buildCanvasArtifactGuidance());
   }
@@ -124,5 +130,5 @@ export function buildChatSystemPrompt(input: BuildChatSystemPromptInput): string
   if (input.recallSection !== undefined && input.recallSection.length > 0) {
     parts.push(input.recallSection);
   }
-  return parts.length > 0 ? parts.join("\n\n") : undefined;
+  return parts.join("\n\n");
 }

@@ -233,6 +233,59 @@ Pauses the run for a human decision. The pause needs a running server
 downstream node can branch on approval versus requested changes. `on_reject`
 (`{ prompt, max_attempts }`) re-prompts on rejection instead of failing the run.
 
+#### `reviewer`
+
+An approval node may declare a `reviewer`: one agent turn that answers the gate
+for the operator when it approves with high confidence. Anything else falls
+through to the human gate exactly as before, with the reviewer's verdict shown
+in the approval callout so the operator sees why it escalated.
+
+```yaml
+- id: gate
+  approval:
+    message: "Approve this plan? $ARTIFACTS_DIR/plan.md"
+    capture_response: true
+    reviewer:
+      when: "$gate-mode.output == 'true'"
+      model: deep
+      allowed_tools: [Read, Glob, Grep]
+      min_confidence: 85
+      prompt: |
+        Approve only when every acceptance criterion maps to a plan step and
+        nothing in the plan contradicts the code; spot-check with Read and Grep.
+  depends_on: [plan, gate-mode]
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `prompt` | yes | The rubric. Takes the same substitutions as a `prompt` node (`$nodeId.output`, `$inputs.<key>`, `$ARGUMENTS`, `$ARTIFACTS_DIR`). The turn sees the gate's message first, then this. |
+| `model`, `model_by_provider`, `effort` | no | Model selection, as on a `prompt` node. Unset falls back to the workflow default. |
+| `allowed_tools` | no | Tool allowlist for the turn. Keep reviewers read-only. On a provider that cannot enforce it, the reviewer's approval does not count and the gate goes to the operator. |
+| `min_confidence` | no | Integer 0 to 100, default `85`. An `approve` below it still pauses for the operator. |
+| `when` | no | Same condition syntax as a node's `when:`. False skips the reviewer and the gate pauses as usual. The evaluator reads node outputs, not inputs, so a workflow that keys the reviewer on a run input echoes it from a small `bash` node first. |
+
+The reviewer's reply is pinned to a fixed verdict shape and validated fail-closed:
+
+```json
+{ "decision": "approve | changes | escalate", "confidence": 0, "reason": "...", "changes": "..." }
+```
+
+`decision: approve` with `confidence` at or above `min_confidence` resolves the
+gate: the node's output is the `reason`, and the run's node record carries
+`answeredBy: "reviewer"` with the verdict. A `changes` or `escalate` decision, a
+low confidence, a failed turn, or a reply that is not this shape (an extra key,
+`changes` on a non-changes decision) pauses for the human with the verdict (or
+the parse error) attached; an empty or malformed reply never reads as an
+approval. The operator reads the verdict and decides what to send back; the
+reviewer's requested changes reach downstream nodes only through that reply.
+The verdict is also written to `$ARTIFACTS_DIR/approvals/<nodeId>.reviewer.json`.
+A reviewer counts as provider work for catalog resolution and preflight, and its
+`when:` and `prompt` get the same reference checks at load as a node's own.
+
+`KEELSON_APPROVAL_REVIEWER=off` is the operator floor: it disables every
+reviewer, so all gates go to the human regardless of what a workflow declares.
+A resumed run does not re-run the reviewer for a gate that was already answered.
+
 ### `cancel`
 
 Terminates the run with a recorded reason. Pair it with `when:` as a guard that
@@ -478,11 +531,28 @@ cancel reasons:
 | `$converge.round` | The current [converge](#converge) round number, starting at `1`. The only marker that also expands in a `bash` or `script` body, since it carries no upstream text. Empty string outside a converge run. |
 | `$memory.recall.items` | JSON array (stringified) of recalled memory rows. Requires a node-level `memory.recall:` block; resolves to `[]` when recall did not run. |
 | `$memory.recall.trace` | Trace ID string recorded for the recall query. Empty string when unavailable or when recall did not run. |
+| `$DIRECTIVES.<name>` | One of the harness-owned [directives](#directives), expanded verbatim. |
 
 `\$` escapes a literal `$` in any substitution context.
 
 Substitution is a single atomic pass: if an upstream output itself contains
 `$something.output`, that marker stays literal instead of expanding again.
+
+### Directives
+
+Keelson owns a small set of named working rules, the same text the chat system
+prompt carries. A prompt node pulls one in with `$DIRECTIVES.<name>`, so a
+workflow states the rule once instead of paraphrasing it per node.
+
+| Name | Asks the agent to |
+| --- | --- |
+| `verify` | Run a real check that exercises a code change (tests, type-checker, build, or the changed command) before reporting it done. |
+| `continue` | Keep going when a step needs no operator input, and stop only when blocked or before a destructive action. |
+| `confirm` | Mark anything it could not confirm, and say where it looked. |
+| `review` | List only merge-blocking problems, each with file and line, why it is wrong, and how to show it fails. |
+
+An unknown name is a validation error, not a warning, so a typo cannot reach the
+model as literal text. `\$DIRECTIVES.<name>` keeps the marker literal.
 
 **Shell nodes read the environment instead.** A `bash` or `script` node runs its
 body as written (`$converge.round` aside), with upstream output delivered as
@@ -540,7 +610,7 @@ and not one.
 </Aside>
 
 Reserved node ids, because they collide with substitution namespaces: `inputs`,
-`ARGUMENTS`, `ARTIFACTS_DIR`, `memory`, `converge`.
+`ARGUMENTS`, `ARTIFACTS_DIR`, `memory`, `converge`, `DIRECTIVES`.
 
 ## Resume and side effects
 
@@ -580,7 +650,8 @@ These errors block a save or run:
 - Per-node schema violations.
 - Duplicate node ids, unknown `depends_on` targets, dependency cycles.
 - Reserved workflow names (`runs`) or node ids (`inputs`, `ARGUMENTS`,
-  `ARTIFACTS_DIR`, `memory`, `converge`).
+  `ARTIFACTS_DIR`, `memory`, `converge`, `DIRECTIVES`).
+- A `$DIRECTIVES.<name>` reference to a name the harness does not define.
 - A `converge.gate` that names no node in the workflow, or a gate that is a
   `loop` node or declares `retry:`.
 - A `$<id>.output` reference to a node that is not an ancestor (a forward or

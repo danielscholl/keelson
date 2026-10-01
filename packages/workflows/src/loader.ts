@@ -29,6 +29,7 @@ import * as path from "node:path";
 
 import { parse as parseYamlString } from "yaml";
 import type { z } from "zod";
+import { DIRECTIVE_NAMES } from "./directives.ts";
 import { validateDagShape } from "./graph.ts";
 import { ENV_VALUE_MAX_CHARS } from "./handlers/subprocess.ts";
 import {
@@ -52,6 +53,7 @@ import {
   webSearchModeSchema,
   workflowBaseSchema,
 } from "./schema/index.ts";
+import { findUnknownDirectiveRefs } from "./substitute.ts";
 
 /**
  * Non-fatal warning from the loader. Distinct from `WorkflowLoadError` (which
@@ -325,7 +327,14 @@ const RESERVED_REF_NAMESPACES = new Set(["inputs", "ARTIFACTS_DIR"]);
  *  `$ARTIFACTS_DIR`, and `$memory.recall.*` before considering them as node
  *  refs, so a node literally named any of these would be silently shadowed
  *  — reject at parse time. */
-const RESERVED_NODE_IDS = new Set(["inputs", "ARGUMENTS", "ARTIFACTS_DIR", "memory", "converge"]);
+const RESERVED_NODE_IDS = new Set([
+  "inputs",
+  "ARGUMENTS",
+  "ARTIFACTS_DIR",
+  "memory",
+  "converge",
+  "DIRECTIVES",
+]);
 
 /** Workflow names that can't be declared because they collide with the
  *  `/api/workflows/<name>` route family. The path segment `runs` is owned by
@@ -389,6 +398,8 @@ export function validateWorkflowInvariants(workflow: WorkflowDefinition): string
   if (convergeError) return convergeError;
   const vendorReferenceError = validateDifferentVendorReferences(workflow.nodes);
   if (vendorReferenceError) return vendorReferenceError;
+  const directiveError = validateDirectiveRefs(workflow.nodes);
+  if (directiveError) return directiveError;
   return validateOutputRefs(workflow.nodes);
 }
 
@@ -449,6 +460,28 @@ function validateDifferentVendorReferences(nodes: readonly DagNode[]): string | 
   return null;
 }
 
+// Fail closed: an unknown `$DIRECTIVES.<name>` would otherwise reach the model
+// as literal text, which reads like a working instruction it cannot follow.
+function validateDirectiveRefs(nodes: readonly DagNode[]): string | null {
+  for (const node of nodes) {
+    const sources: { text: string; label: string }[] = [];
+    if ("prompt" in node && typeof node.prompt === "string") {
+      sources.push({ text: node.prompt, label: "prompt" });
+    }
+    if (isLoopNode(node)) sources.push({ text: node.loop.prompt, label: "loop.prompt" });
+    if (isApprovalNode(node) && node.approval.reviewer !== undefined) {
+      sources.push({ text: node.approval.reviewer.prompt, label: "approval.reviewer.prompt" });
+    }
+    for (const source of sources) {
+      const unknown = findUnknownDirectiveRefs(source.text)[0];
+      if (unknown !== undefined) {
+        return `Node '${node.id}' ${source.label}: unknown directive '$DIRECTIVES.${unknown}' (valid names: ${DIRECTIVE_NAMES.join(", ")})`;
+      }
+    }
+  }
+  return null;
+}
+
 function validateOutputRefs(nodes: readonly DagNode[]): string | null {
   const ids = new Set(nodes.map((n) => n.id));
   const ancestors = buildAncestorMap(nodes);
@@ -504,6 +537,23 @@ function validateOutputRefs(nodes: readonly DagNode[]): string | null {
     // empty reason at runtime instead of failing at load.
     if (isCancelNode(node)) {
       sources.push({ text: node.cancel, label: "cancel", allowReservedNamespace: true });
+    }
+    // The reviewer's `when:` goes through evaluateCondition and its prompt
+    // through resolveBody, so both get the same checks as a node's own.
+    if (isApprovalNode(node) && node.approval.reviewer !== undefined) {
+      const reviewer = node.approval.reviewer;
+      if (reviewer.when !== undefined) {
+        sources.push({
+          text: reviewer.when,
+          label: "approval.reviewer.when",
+          allowReservedNamespace: false,
+        });
+      }
+      sources.push({
+        text: stripMarkdownCode(reviewer.prompt),
+        label: "approval.reviewer.prompt",
+        allowReservedNamespace: true,
+      });
     }
     // Memory templates flow through resolveBody too — parse-time-validate $nodeId.output refs
     // there so a typo doesn't silently expand to "" at runtime.
@@ -753,6 +803,15 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
         error: vendorReferenceError,
         errorType: "validation_error",
       },
+    };
+  }
+
+  const directiveError = validateDirectiveRefs(nodes);
+  if (directiveError) {
+    return {
+      workflow: null,
+      warnings,
+      error: { filename, error: directiveError, errorType: "validation_error" },
     };
   }
 

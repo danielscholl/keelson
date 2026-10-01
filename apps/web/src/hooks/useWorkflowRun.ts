@@ -1,4 +1,5 @@
 import type {
+  ApprovalRecord,
   ContentBlock,
   MessageChunk,
   ReasoningEffortLevel,
@@ -64,6 +65,10 @@ export interface NodeView {
   // provider/model; absent when the node declared none, in which case the
   // provider applied its own per-model default and never reported it back.
   effort?: ReasoningEffortLevel;
+  // Approval-gate record: who answered and the reviewer's verdict when one
+  // ran. Live source: the `approval_awaiting` frame's review (gate still open)
+  // or the `node_done` frame; snapshot source: the persisted row.
+  approval?: ApprovalRecord;
 }
 
 export interface RunView {
@@ -242,6 +247,7 @@ export function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
       ...(row.provider !== null ? { provider: row.provider } : {}),
       ...(row.model !== null ? { model: row.model } : {}),
       ...(row.effort !== null ? { effort: row.effort } : {}),
+      ...(row.approval !== null ? { approval: row.approval } : {}),
     };
   }
   // In-flight nodes have no persisted row yet; the server overlays them onto
@@ -678,6 +684,7 @@ export function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView 
     // option) must clear the snapshot's value rather than fall back to it. A
     // live side that never saw node_done has no key and defers to the snapshot.
     effort: Object.hasOwn(liveSide, "effort") ? liveSide.effort : snapshotSide.effort,
+    approval: liveSide.approval ?? snapshotSide.approval,
   };
 }
 
@@ -793,6 +800,7 @@ export function applyFrame(
             provider: frame.provider,
             model: frame.model,
             effort: frame.effort,
+            ...(frame.approval !== undefined ? { approval: frame.approval } : {}),
             // Approval node resolved — clear its message so the callout
             // doesn't linger after resume.
             awaitingMessage: undefined,
@@ -825,6 +833,9 @@ export function applyFrame(
             startedAt: base.startedAt ?? Date.now(),
             awaitingMessage: frame.message,
             awaitingPauseId: frame.pauseId,
+            ...(frame.review !== undefined
+              ? { approval: { answeredBy: "operator", ...frame.review } }
+              : {}),
           },
         };
       });
