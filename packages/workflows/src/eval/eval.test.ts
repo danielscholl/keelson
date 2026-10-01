@@ -316,6 +316,15 @@ describe("graders", () => {
     expect(unwired.status).toBe("error");
   });
 
+  test("extractJson keeps scanning past brackets that are not JSON", () => {
+    expect(extractJson('Result [draft]: {"status":"ok"}')).toEqual({
+      ok: true,
+      value: { status: "ok" },
+    });
+    expect(extractJson("see [note] and {draft} then nothing").ok).toBe(false);
+    expect(extractJson("").ok).toBe(false);
+  });
+
   test("extractJson reads a fenced block without a regex", () => {
     expect(extractJson('```json\n{"a":1}\n```')).toEqual({ ok: true, value: { a: 1 } });
     expect(extractJson("```\n[1,2]\n```")).toEqual({ ok: true, value: [1, 2] });

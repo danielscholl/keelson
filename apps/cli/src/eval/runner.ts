@@ -2,6 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -51,6 +52,19 @@ function truncate(text: string): { text: string; truncated: boolean } {
   return { text: cut, truncated: true };
 }
 
+// Case ids are unique only as exact strings, so the output filename carries
+// the case's index, a lowercase slug, and a hash of the exact id: `Foo` and
+// `foo` stay distinct on case-insensitive disks and `CON` is never a bare name.
+export function caseOutputBasename(index: number, id: string, rep: number): string {
+  const slug = id
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  const hash = createHash("sha256").update(id).digest("hex").slice(0, 8);
+  return `${String(index + 1).padStart(3, "0")}-${slug || "case"}-${hash}.rep${rep}.txt`;
+}
+
 export async function runEval(opts: RunEvalOptions): Promise<EvalResultsFile> {
   const cases = selectCases(opts.caseSet.cases, opts.split);
   const results: EvalCaseResult[] = [];
@@ -59,7 +73,7 @@ export async function runEval(opts: RunEvalOptions): Promise<EvalResultsFile> {
 
   // Rep-major so an interrupted eval still holds every case once.
   for (let rep = 1; rep <= opts.reps; rep++) {
-    for (const c of cases) {
+    for (const [index, c] of cases.entries()) {
       opts.onProgress?.(`▶ ${c.id} (${c.split}) rep ${rep}/${opts.reps}`);
       const execution = await opts.executor({
         inputs: c.inputs,
@@ -97,7 +111,7 @@ export async function runEval(opts: RunEvalOptions): Promise<EvalResultsFile> {
         opts.onProgress?.(`  ⚠ error — ${error}`);
         continue;
       }
-      const outputPath = join(opts.outputsDir, `${c.id}.rep${rep}.txt`);
+      const outputPath = join(opts.outputsDir, caseOutputBasename(index, c.id, rep));
       writeFileSync(outputPath, graded);
       const grade = await gradeOutput(
         {

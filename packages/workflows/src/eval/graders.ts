@@ -125,19 +125,30 @@ export function extractJson(text: string): JsonExtraction {
     const fenceClose = bodyStart >= 0 ? trimmed.indexOf("```", bodyStart) : -1;
     if (fenceClose > bodyStart) candidates.push(trimmed.slice(bodyStart + 1, fenceClose).trim());
   }
-  const firstBrace = trimmed.search(/[{[]/);
-  if (firstBrace >= 0) {
-    const end = balancedEnd(trimmed, firstBrace);
-    if (end > firstBrace) candidates.push(trimmed.slice(firstBrace, end + 1));
-  }
   let lastError = "empty output";
-  for (const candidate of candidates) {
-    if (candidate.length === 0) continue;
+  const attempt = (candidate: string): JsonExtraction | null => {
+    if (candidate.length === 0) return null;
     try {
       return { ok: true, value: JSON.parse(candidate) };
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
+      return null;
     }
+  };
+  for (const candidate of candidates) {
+    const parsed = attempt(candidate);
+    if (parsed !== null) return parsed;
+  }
+  // Prose can hold brackets before the real value (`Result [draft]: {...}`),
+  // so every opening delimiter is a candidate until one parses.
+  for (let start = trimmed.search(/[{[]/); start >= 0; ) {
+    const end = balancedEnd(trimmed, start);
+    if (end > start) {
+      const parsed = attempt(trimmed.slice(start, end + 1));
+      if (parsed !== null) return parsed;
+    }
+    const next = trimmed.slice(start + 1).search(/[{[]/);
+    start = next >= 0 ? start + 1 + next : -1;
   }
   return { ok: false, error: lastError };
 }

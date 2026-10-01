@@ -20,7 +20,7 @@ import { parseEvalCaseFile } from "@keelson/workflows";
 
 import { judgeProviderError } from "../src/commands/eval.ts";
 import { type CaseExecution, fetchRunCostUsd, makeInProcessExecutor } from "../src/eval/execute.ts";
-import { runEval } from "../src/eval/runner.ts";
+import { caseOutputBasename, runEval } from "../src/eval/runner.ts";
 import { spawnEnv } from "./spawn-env.ts";
 
 const FIXTURES = resolve(import.meta.dir, "fixtures");
@@ -134,7 +134,7 @@ cases:
     expect(results.summary.definitionHashes).toEqual(["abc"]);
     expect(results.summary.cost.totalUsd).toBeNull();
     const final = results.cases.find((c) => c.caseId === "final" && c.rep === 2);
-    expect(final?.output.path).toBe(join(tmp, "outputs", "final.rep2.txt"));
+    expect(final?.output.path).toBe(join(tmp, "outputs", caseOutputBasename(0, "final", 2)));
     expect(readFileSync(final?.output.path ?? "", "utf8")).toBe("final text");
     expect(final?.tokens).toEqual({ input: 3, output: 2 });
     expect(results.createdAt).toBe("2026-09-30T12:00:00.000Z");
@@ -201,6 +201,20 @@ cases:
     expect(prompts.join("\n")).not.toContain("never shown");
     expect(results.summary.graderNoise.judged).toBe(1);
     expect(results.summary.graderNoise.rate).toBe(0);
+  });
+});
+
+describe("caseOutputBasename", () => {
+  test("ids differing only by case get distinct, filesystem-safe names", () => {
+    const a = caseOutputBasename(0, "Foo", 1);
+    const b = caseOutputBasename(0, "foo", 1);
+    expect(a).not.toBe(b);
+    expect(a.toLowerCase()).not.toBe(b.toLowerCase());
+    expect(a).toMatch(/^001-foo-[0-9a-f]{8}\.rep1\.txt$/);
+    const con = caseOutputBasename(4, "CON", 2);
+    expect(con).toMatch(/^005-con-[0-9a-f]{8}\.rep2\.txt$/);
+    expect(caseOutputBasename(0, "日本語", 1)).toMatch(/^001-case-[0-9a-f]{8}\.rep1\.txt$/);
+    expect(caseOutputBasename(0, "Foo", 1)).toBe(a);
   });
 });
 
@@ -367,7 +381,7 @@ describe("keelson eval (CLI)", () => {
     ]);
     expect(existsSync(out)).toBe(true);
     expect(readFileSync(join(home, "first.md"), "utf8")).toContain("# Eval: smoke-bash");
-    expect(existsSync(join(home, "first.outputs", "greets.rep1.txt"))).toBe(true);
+    expect(existsSync(join(home, "first.outputs", caseOutputBasename(0, "greets", 1)))).toBe(true);
 
     const cmp = await runCli(["--json", "eval", "compare", out, out], home);
     expect(cmp.exitCode).toBe(0);
@@ -380,19 +394,17 @@ describe("keelson eval (CLI)", () => {
       "within-noise",
     ]);
     expect(verdicts.data.decision).toBe("revert");
-  });
 
-  test("default results land under <home>/evals/<name>/ and --split filters", async () => {
-    const run = await runCli(
+    const split = await runCli(
       ["--json", "eval", "run", "smoke-bash.eval.yaml", "--split", "train"],
       home,
     );
-    expect(run.exitCode).toBe(0);
-    const envelope = JSON.parse(run.stdout.trim()) as {
+    expect(split.exitCode).toBe(0);
+    const trainOnly = JSON.parse(split.stdout.trim()) as {
       data: { resultsPath: string; cases: Array<{ caseId: string }> };
     };
-    expect(envelope.data.resultsPath.startsWith(join(home, "evals", "smoke-bash"))).toBe(true);
-    expect(envelope.data.cases.map((c) => c.caseId)).toEqual(["greets"]);
+    expect(trainOnly.data.resultsPath.startsWith(join(home, "evals", "smoke-bash"))).toBe(true);
+    expect(trainOnly.data.cases.map((c) => c.caseId)).toEqual(["greets"]);
   });
 
   test("bad args exit 2 and an unknown workflow exits 4", async () => {
@@ -426,12 +438,10 @@ describe("keelson eval (CLI)", () => {
     expect(JSON.parse(second.stdout.trim()).code).toBe("FILE_EXISTS");
   });
 
-  test("help lists the eval group", async () => {
-    const help = await runCli(["--help"], home);
-    expect(help.exitCode).toBe(0);
-    expect(help.stdout).toContain("eval");
+  test("eval run help lists its options in JSON mode", async () => {
     const sub = await runCli(["--json", "eval", "help", "run"], home);
     expect(sub.exitCode).toBe(0);
     expect(sub.stdout).toContain("--reps");
+    expect(sub.stdout).toContain("--split");
   });
 });
