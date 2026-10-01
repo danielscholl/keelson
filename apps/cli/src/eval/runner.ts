@@ -6,6 +6,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  caseSetFingerprint,
   EVAL_OUTPUT_INLINE_LIMIT,
   EVAL_RESULTS_SCHEMA_VERSION,
   type EvalCaseResult,
@@ -132,6 +133,7 @@ export async function runEval(opts: RunEvalOptions): Promise<EvalResultsFile> {
     workflow: opts.caseSet.workflow,
     project: opts.caseSet.project ?? null,
     caseFile: opts.caseFile,
+    caseSetHash: caseSetFingerprint(opts.caseSet),
     createdAt,
     mode: opts.mode,
     reps: opts.reps,

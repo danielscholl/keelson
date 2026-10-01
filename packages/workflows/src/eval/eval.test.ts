@@ -7,12 +7,24 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { assignSplits, EvalCaseFileError, parseEvalCaseFile } from "./case-file.ts";
-import { buildJudgePrompt, type GradeInput, gradeOutput, parseJudgeResponse } from "./graders.ts";
+import {
+  assignSplits,
+  caseSetFingerprint,
+  EvalCaseFileError,
+  parseEvalCaseFile,
+} from "./case-file.ts";
+import {
+  buildJudgePrompt,
+  extractJson,
+  type GradeInput,
+  gradeOutput,
+  parseJudgeResponse,
+} from "./graders.ts";
 import {
   compareResults,
   type EvalCaseResult,
   type EvalResultsFile,
+  evalResultsFileSchema,
   renderComparisonText,
   renderSummaryMarkdown,
   summarize,
@@ -108,6 +120,20 @@ describe("parseEvalCaseFile", () => {
     expect(set.cases[0]?.grader.type).toBe("exact");
     const bad = BASE.replace("type: contains", "type: contains\n  grader_reps: 3");
     expect(() => parseEvalCaseFile(bad, "demo.yaml")).toThrow(/only valid on the judge/);
+  });
+
+  test("fingerprint ignores key order and comments but tracks expectations", () => {
+    const a = caseSetFingerprint(parseEvalCaseFile(BASE, "a.yaml"));
+    const reordered = BASE.replace(
+      "name: demo\nworkflow: smoke-test",
+      "workflow: smoke-test\nname: demo",
+    );
+    expect(caseSetFingerprint(parseEvalCaseFile(`# comment\n${reordered}`, "b.yaml"))).toBe(a);
+    const changed = BASE.replace(
+      'expect: { strings: ["ok"] }\n  - id: c2',
+      'expect: { strings: ["no"] }\n  - id: c2',
+    );
+    expect(caseSetFingerprint(parseEvalCaseFile(changed, "c.yaml"))).not.toBe(a);
   });
 
   test("json_schema expect is validated against the output_schema subset", () => {
@@ -273,10 +299,27 @@ describe("graders", () => {
     });
     expect(broken.status).toBe("error");
 
+    let flaky = 0;
+    const oneRepFailed = await gradeOutput(input({ output: "alpha", expect: { claims }, grader }), {
+      cwd,
+      judge: async () => {
+        if (flaky++ === 0) return allMet;
+        throw new Error("provider timeout");
+      },
+    });
+    expect(oneRepFailed.status).toBe("error");
+    expect(oneRepFailed.detail).toContain("1/2 rep(s)");
+
     const unwired = await gradeOutput(input({ output: "alpha", expect: { claims }, grader }), {
       cwd,
     });
     expect(unwired.status).toBe("error");
+  });
+
+  test("extractJson reads a fenced block without a regex", () => {
+    expect(extractJson('```json\n{"a":1}\n```')).toEqual({ ok: true, value: { a: 1 } });
+    expect(extractJson("```\n[1,2]\n```")).toEqual({ ok: true, value: [1, 2] });
+    expect(extractJson(`${"```"}${" ".repeat(5000)}`).ok).toBe(false);
   });
 
   test("judge prompt carries only the claims, never other expect fields", () => {
@@ -337,6 +380,7 @@ function file(cases: EvalCaseResult[], overrides: Partial<EvalResultsFile> = {})
     workflow: "w",
     project: null,
     caseFile: "demo.yaml",
+    caseSetHash: "deadbeef",
     createdAt: "2026-09-30T00:00:00.000Z",
     mode: "in-process",
     reps: 1,
@@ -391,14 +435,22 @@ describe("summarize", () => {
     const unpriced = summarize(batch("test", 1, 0));
     expect(unpriced.cost.totalUsd).toBeNull();
     expect(unpriced.cost.perCaseUsd.test0).toBeNull();
-    const priced = summarize([
+    const mixed = summarize([
       result({ caseId: "a", costUsd: 0.01 }),
       result({ caseId: "a", rep: 2, costUsd: 0.02 }),
       result({ caseId: "b", costUsd: null }),
+      result({ caseId: "c", costUsd: null }),
+      result({ caseId: "c", rep: 2, costUsd: 0.5 }),
+    ]);
+    expect(mixed.cost.totalUsd).toBeNull();
+    expect(mixed.cost.perCaseUsd.a).toBeCloseTo(0.03, 6);
+    expect(mixed.cost.perCaseUsd.b).toBeNull();
+    expect(mixed.cost.perCaseUsd.c).toBeNull();
+    const priced = summarize([
+      result({ caseId: "a", costUsd: 0.01 }),
+      result({ caseId: "b", costUsd: 0.02 }),
     ]);
     expect(priced.cost.totalUsd).toBeCloseTo(0.03, 6);
-    expect(priced.cost.perCaseUsd.a).toBeCloseTo(0.03, 6);
-    expect(priced.cost.perCaseUsd.b).toBeNull();
   });
 
   test("grader noise rate counts judge disagreements", () => {
@@ -413,6 +465,13 @@ describe("summarize", () => {
     expect(s.graderNoise.judged).toBe(2);
     expect(s.graderNoise.disagreements).toBe(1);
     expect(s.graderNoise.rate).toBe(0.5);
+  });
+
+  test("markdown escapes pipes and backslashes in details", () => {
+    const md = renderSummaryMarkdown(
+      file([result({ grader: { type: "contains", detail: String.raw`a|b\c` } })]),
+    );
+    expect(md).toContain(String.raw`a\|b\\c`);
   });
 
   test("markdown summary renders the headline table and warnings", () => {
@@ -464,6 +523,28 @@ describe("compareResults", () => {
     const cmp = compareResults(before, after);
     expect(cmp.decision).toBe("keep");
     expect(cmp.warnings).toContain("no train split: the decision rests on test alone");
+  });
+
+  test("errored runs on either side force revert", () => {
+    const before = file([...batch("train", 5, 25), ...batch("test", 5, 25)]);
+    const after = file([...batch("train", 25, 5), ...batch("test", 25, 5, 1)]);
+    const cmp = compareResults(before, after);
+    expect(cmp.comparable).toBe(true);
+    expect(cmp.decision).toBe("revert");
+    expect(cmp.reason).toContain("errored");
+  });
+
+  test("different case sets or split filters are not comparable", () => {
+    const a = file(batch("test", 5, 5));
+    const b = file(batch("test", 10, 0), { caseSetHash: "other" });
+    const cmp = compareResults(a, b);
+    expect(cmp.comparable).toBe(false);
+    expect(cmp.decision).toBe("revert");
+    expect(cmp.reason).toContain("case sets differ");
+    const c = file(batch("test", 10, 0), { splitFilter: "test" });
+    expect(compareResults(a, c).comparable).toBe(false);
+    expect(evalResultsFileSchema.safeParse({ ...a, summary: null }).success).toBe(false);
+    expect(evalResultsFileSchema.safeParse(a).success).toBe(true);
   });
 
   test("cost delta is null when either side is unpriced", () => {

@@ -346,7 +346,7 @@ describe("keelson eval (CLI)", () => {
     const path = (JSON.parse(first.stdout.trim()) as { data: { path: string } }).data.path;
     expect(path).toBe(join(home, "evals", "smoke-bash.eval.yaml"));
     const scaffold = readFileSync(path, "utf8");
-    expect(scaffold).toContain("workflow: smoke-bash");
+    expect(scaffold).toContain('workflow: "smoke-bash"');
     expect(() => parseEvalCaseFile(scaffold, path)).not.toThrow();
     const second = await runCli(["--json", "eval", "init", "smoke-bash"], home);
     expect(second.exitCode).toBe(1);

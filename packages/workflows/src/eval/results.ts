@@ -2,7 +2,13 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { EVAL_SPLITS, type EvalGraderType, type EvalSplit } from "./case-file.ts";
+import { z } from "zod";
+import {
+  EVAL_GRADER_TYPES,
+  EVAL_SPLITS,
+  type EvalGraderType,
+  type EvalSplit,
+} from "./case-file.ts";
 import type { GradeStatus, JudgeDetail } from "./graders.ts";
 import {
   intervalsOverlap,
@@ -75,6 +81,9 @@ export interface EvalResultsFile {
   readonly workflow: string;
   readonly project: string | null;
   readonly caseFile: string;
+  // Fingerprint of the case ids, inputs, graders, and expectations that ran,
+  // so compare can tell two runs of the same cases from two different sets.
+  readonly caseSetHash: string;
   readonly createdAt: string;
   readonly mode: "http" | "in-process";
   readonly reps: number;
@@ -110,17 +119,21 @@ export function summarize(results: readonly EvalCaseResult[]): EvalSummary {
   const durations = results
     .map((r) => r.durationMs)
     .filter((d): d is number => d !== null && Number.isFinite(d));
+  // One unpriced rep makes its case, and the total, unpriced: a partial sum
+  // would read as a real (and too small) spend.
   const perCaseUsd: Record<string, number | null> = {};
   for (const r of results) {
     const prior = perCaseUsd[r.caseId];
-    if (r.costUsd === null) {
-      if (prior === undefined) perCaseUsd[r.caseId] = null;
+    if (r.costUsd === null || prior === null) {
+      perCaseUsd[r.caseId] = null;
       continue;
     }
     perCaseUsd[r.caseId] = (prior ?? 0) + r.costUsd;
   }
-  const priced = results.filter((r) => r.costUsd !== null);
-  const totalUsd = priced.length > 0 ? priced.reduce((sum, r) => sum + (r.costUsd ?? 0), 0) : null;
+  const totalUsd =
+    results.length > 0 && results.every((r) => r.costUsd !== null)
+      ? results.reduce((sum, r) => sum + (r.costUsd ?? 0), 0)
+      : null;
   const definitionHashes = [
     ...new Set(results.map((r) => r.definitionHash).filter((h): h is string => h !== null)),
   ].sort();
@@ -180,6 +193,9 @@ export interface SplitComparison {
 export interface EvalComparison {
   readonly before: { readonly name: string; readonly createdAt: string };
   readonly after: { readonly name: string; readonly createdAt: string };
+  // False when the two files did not run the same cases under the same split
+  // filter; the decision is then forced to revert and `reason` says why.
+  readonly comparable: boolean;
   readonly splits: readonly SplitComparison[];
   readonly decision: CompareDecision;
   readonly reason: string;
@@ -217,19 +233,36 @@ export function compareSplit(
 
 export function compareResults(a: EvalResultsFile, b: EvalResultsFile): EvalComparison {
   const warnings: string[] = [];
+  const incomparable: string[] = [];
   if (a.workflow !== b.workflow) {
-    warnings.push(`workflows differ: '${a.workflow}' vs '${b.workflow}'`);
+    incomparable.push(`workflows differ: '${a.workflow}' vs '${b.workflow}'`);
   }
-  if (a.name !== b.name) warnings.push(`case sets differ: '${a.name}' vs '${b.name}'`);
+  if (a.caseSetHash !== b.caseSetHash) {
+    incomparable.push(
+      `case sets differ (${a.caseSetHash.slice(0, 12)} vs ${b.caseSetHash.slice(0, 12)}): the cases, inputs, graders, or expectations changed between runs`,
+    );
+  }
+  if (a.splitFilter !== b.splitFilter) {
+    incomparable.push(`split filters differ: '${a.splitFilter}' vs '${b.splitFilter}'`);
+  }
   const splits: SplitComparison[] = [
     compareSplit("overall", a.summary.overall, b.summary.overall),
     ...EVAL_SPLITS.map((s) => compareSplit(s, a.summary.splits[s], b.summary.splits[s])),
   ];
   const train = splits.find((s) => s.split === "train") as SplitComparison;
   const test = splits.find((s) => s.split === "test") as SplitComparison;
+  const errors = a.summary.errors + b.summary.errors;
   let decision: CompareDecision;
   let reason: string;
-  if (test.verdict === "regressed" || train.verdict === "regressed") {
+  if (incomparable.length > 0) {
+    decision = "revert";
+    reason = `not comparable: ${incomparable.join("; ")}`;
+  } else if (errors > 0) {
+    // Errored runs sit outside the intervals, so a candidate that crashed on
+    // its hardest cases could otherwise look better on the ones that survived.
+    decision = "revert";
+    reason = `${a.summary.errors} before / ${b.summary.errors} after case run(s) errored; fix the infrastructure and rerun before deciding`;
+  } else if (test.verdict === "regressed" || train.verdict === "regressed") {
     decision = "revert";
     reason = `${test.verdict === "regressed" ? "test" : "train"} regressed`;
   } else if (train.verdict === "n/a") {
@@ -256,6 +289,7 @@ export function compareResults(a: EvalResultsFile, b: EvalResultsFile): EvalComp
   return {
     before: { name: a.name, createdAt: a.createdAt },
     after: { name: b.name, createdAt: b.createdAt },
+    comparable: incomparable.length === 0,
     splits,
     decision,
     reason,
@@ -335,6 +369,7 @@ export function renderSummaryMarkdown(file: EvalResultsFile): string {
   lines.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const c of file.cases) {
     const detail = (c.status === "error" ? (c.error ?? c.grader.detail) : c.grader.detail)
+      .replace(/\\/g, "\\\\")
       .replace(/\|/g, "\\|")
       .replace(/\s+/g, " ");
     lines.push(
@@ -367,3 +402,97 @@ export function renderComparisonText(cmp: EvalComparison): string {
   for (const w of cmp.warnings) lines.push(`warning: ${w}`);
   return lines.join("\n");
 }
+
+const gradeStatusSchema = z.enum(["pass", "fail", "error"]);
+const wilsonSchema = z.object({ low: z.number(), high: z.number() }).strict();
+const splitStatsSchema = z
+  .object({
+    cases: z.number().int().nonnegative(),
+    graded: z.number().int().nonnegative(),
+    passed: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    errors: z.number().int().nonnegative(),
+    passRate: z.number().nullable(),
+    interval: wilsonSchema.nullable(),
+  })
+  .strict();
+
+// Validates a results file on the way back in, so compare works from a
+// checked shape instead of trusting a hand-edited or truncated document.
+export const evalResultsFileSchema: z.ZodType<EvalResultsFile> = z
+  .object({
+    schemaVersion: z.literal(EVAL_RESULTS_SCHEMA_VERSION),
+    name: z.string().min(1),
+    workflow: z.string().min(1),
+    project: z.string().nullable(),
+    caseFile: z.string(),
+    caseSetHash: z.string().min(1),
+    createdAt: z.string(),
+    mode: z.enum(["http", "in-process"]),
+    reps: z.number().int().positive(),
+    splitFilter: z.enum(["train", "test", "all"]),
+    cases: z.array(
+      z
+        .object({
+          caseId: z.string(),
+          split: z.enum(EVAL_SPLITS),
+          rep: z.number().int().positive(),
+          runId: z.string().nullable(),
+          status: gradeStatusSchema,
+          grader: z
+            .object({
+              type: z.enum(EVAL_GRADER_TYPES),
+              detail: z.string(),
+              judge: z
+                .object({
+                  reps: z.number().int(),
+                  verdicts: z.array(gradeStatusSchema),
+                  disagreement: z.boolean(),
+                  claims: z.array(
+                    z
+                      .object({ claim: z.string(), met: z.boolean(), evidence: z.string() })
+                      .strict(),
+                  ),
+                })
+                .strict()
+                .optional(),
+            })
+            .strict(),
+          output: z
+            .object({ text: z.string(), truncated: z.boolean(), path: z.string().nullable() })
+            .strict(),
+          durationMs: z.number().nullable(),
+          tokens: z.object({ input: z.number(), output: z.number() }).strict().nullable(),
+          costUsd: z.number().nullable(),
+          definitionHash: z.string().nullable(),
+          error: z.string().nullable(),
+        })
+        .strict(),
+    ),
+    summary: z
+      .object({
+        overall: splitStatsSchema,
+        splits: z.object({ train: splitStatsSchema, test: splitStatsSchema }).strict(),
+        errors: z.number().int().nonnegative(),
+        graderNoise: z
+          .object({
+            judged: z.number().int().nonnegative(),
+            disagreements: z.number().int().nonnegative(),
+            rate: z.number().nullable(),
+          })
+          .strict(),
+        duration: z
+          .object({ meanMs: z.number().nullable(), p95Ms: z.number().nullable() })
+          .strict(),
+        cost: z
+          .object({
+            totalUsd: z.number().nullable(),
+            perCaseUsd: z.record(z.string(), z.number().nullable()),
+          })
+          .strict(),
+        definitionHashes: z.array(z.string()),
+        warnings: z.array(z.string()),
+      })
+      .strict(),
+  })
+  .strict();

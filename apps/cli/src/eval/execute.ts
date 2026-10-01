@@ -179,18 +179,19 @@ export async function fetchRunCostUsd(baseUrl: string, runId: string): Promise<n
     if (!res.ok) return null;
     const rows = (await res.json()) as unknown;
     if (!Array.isArray(rows)) return null;
+    // The server prices per event and leaves `costUsd` null where it cannot;
+    // one unpriced event makes the run unpriced rather than under-counted.
     let total = 0;
-    let priced = false;
+    let matched = 0;
     for (const row of rows) {
       if (typeof row !== "object" || row === null) continue;
       if ((row as { runId?: unknown }).runId !== runId) continue;
+      matched++;
       const cost = (row as { costUsd?: unknown }).costUsd;
-      if (typeof cost === "number" && Number.isFinite(cost)) {
-        priced = true;
-        total += cost;
-      }
+      if (typeof cost !== "number" || !Number.isFinite(cost)) return null;
+      total += cost;
     }
-    return priced ? total : null;
+    return matched > 0 ? total : null;
   } catch {
     return null;
   }
@@ -263,7 +264,15 @@ export function makeHttpExecutor(opts: HttpExecutorOptions): CaseExecutor {
         output += usage.outputTokens;
       }
     }
-    const last = succeededOrder.at(-1);
+    // A run that finished before the socket attached replays only run_done,
+    // so recover the completion order from the persisted rows instead.
+    const last =
+      succeededOrder.at(-1) ??
+      rows
+        .filter((row) => row.status === "succeeded" && typeof row.nodeId === "string")
+        .sort((x, y) => String(x.completedAt ?? "").localeCompare(String(y.completedAt ?? "")))
+        .map((row) => row.nodeId as string)
+        .at(-1);
     const startedAt = typeof detail.startedAt === "string" ? Date.parse(detail.startedAt) : NaN;
     const completedAt =
       typeof detail.completedAt === "string" ? Date.parse(detail.completedAt) : NaN;

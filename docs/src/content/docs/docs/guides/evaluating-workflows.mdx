@@ -35,8 +35,8 @@ slips.
 
 Graders are either programmatic or an LLM judge with checkable claims. There is
 no 1-to-5 scale anywhere: a claim is met or it is not, and the judge grades the
-same output twice so its own disagreement is measured and reported as grader
-noise rather than hidden in the pass rate.
+same output repeatedly (`grader_reps`, default 2) so its own disagreement is
+measured and reported as grader noise rather than hidden in the pass rate.
 
 ## The case file
 
@@ -105,11 +105,13 @@ parsing YAML.
 
 The `judge` grader builds a rubric from `expect.claims`, asks the provider the
 in-process chat uses for a JSON verdict per claim, and passes only when every
-claim is met. It asks `grader_reps` times (default 2) about the same output.
-When the reps disagree the case counts as a fail, never a pass, and the
-disagreement is reported as grader noise. Set `provider:` and `model:` on the
-grader to pin the judge; leave the rubric to things a reader could check by
-quoting the output.
+claim is met. It asks `grader_reps` times (default 2) about the same output and
+takes the majority; a tie reads as fail, so with the default two reps any
+disagreement fails the case. The disagreement is reported as grader noise
+either way. A rep that errors (no JSON, a provider failure) makes the case an
+error, never a verdict from the reps that survived. Set `provider:` and
+`model:` on the grader to pin the judge; leave the rubric to things a reader
+could check by quoting the output.
 
 <Aside type="caution" title="Three states, not two">
 A case that errors (the run failed before producing output, a provider timed
@@ -171,8 +173,12 @@ with no train split decides on test alone and says so, which is a reason to
 declare one. The cost delta prints alongside, so an improvement that doubled the
 spend is visible in the same line.
 
-Two runs of the same case set always compare `within-noise`, which is the point:
-a change has to clear the interval, not just nudge the number.
+Compare refuses two files that did not run the same cases under the same split
+filter (the results file carries a fingerprint of the case set), and reverts
+when either side errored: an infrastructure failure is not a measurement.
+Comparing a results file with itself is always `within-noise`; two independent
+runs of an unchanged workflow usually are, and when they are not, the interval
+width is telling you the set needs more reps before it can judge a change.
 
 ## Related
 

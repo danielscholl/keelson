@@ -2,6 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { type OutputSchema, outputSchemaSchema } from "../schema/output-schema.ts";
@@ -278,6 +279,35 @@ export function resolveEvalCaseSet(raw: EvalCaseFileRaw, filename = "<memory>"):
     reps: raw.reps,
     cases,
   };
+}
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((k) => [k, canonical((value as Record<string, unknown>)[k])]),
+    );
+  }
+  return value;
+}
+
+// Stable over everything that decides a verdict (ids, split, inputs, graded
+// node, grader, expect); key order and the file's comments do not matter.
+export function caseSetFingerprint(caseSet: EvalCaseSet): string {
+  const body = canonical({
+    workflow: caseSet.workflow,
+    cases: caseSet.cases.map((c) => ({
+      id: c.id,
+      split: c.split,
+      inputs: c.inputs,
+      node: c.node ?? null,
+      grader: c.grader,
+      expect: c.expect,
+    })),
+  });
+  return createHash("sha256").update(JSON.stringify(body)).digest("hex");
 }
 
 export function parseEvalCaseFile(content: string, filename = "<memory>"): EvalCaseSet {

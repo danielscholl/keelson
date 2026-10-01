@@ -2,17 +2,17 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
   compareResults,
   discoverWorkflows,
-  EVAL_RESULTS_SCHEMA_VERSION,
   EvalCaseFileError,
   type EvalCaseSet,
   type EvalResultsFile,
   type EvalSplit,
+  evalResultsFileSchema,
   type JudgeFn,
   parseEvalCaseFile,
   renderComparisonText,
@@ -292,16 +292,18 @@ function readResults(file: string, json: boolean): EvalResultsFile {
       EXIT_BAD_ARGS,
     );
   }
-  const candidate = parsed as Partial<EvalResultsFile> | null;
-  if (
-    typeof candidate !== "object" ||
-    candidate === null ||
-    candidate.schemaVersion !== EVAL_RESULTS_SCHEMA_VERSION ||
-    typeof candidate.summary !== "object"
-  ) {
-    fail(`${path} is not a keelson eval results file`, "BAD_INPUTS", json, EXIT_BAD_ARGS);
+  const checked = evalResultsFileSchema.safeParse(parsed);
+  if (!checked.success) {
+    const issue = checked.error.issues[0];
+    const where = issue ? `${issue.path.map(String).join(".") || "<root>"}: ${issue.message}` : "";
+    fail(
+      `${path} is not a keelson eval results file (${where})`,
+      "BAD_INPUTS",
+      json,
+      EXIT_BAD_ARGS,
+    );
   }
-  return candidate as EvalResultsFile;
+  return checked.data;
 }
 
 export async function runEvalCompare(
@@ -312,6 +314,9 @@ export async function runEvalCompare(
   const before = readResults(a, opts.json);
   const after = readResults(b, opts.json);
   const comparison = compareResults(before, after);
+  if (!comparison.comparable) {
+    fail(comparison.reason, "NOT_COMPARABLE", opts.json, EXIT_BAD_ARGS);
+  }
   if (opts.json) {
     emit({ data: comparison }, { json: true });
   } else {
@@ -324,8 +329,8 @@ export function scaffoldCaseFile(workflow: string): string {
   return `# Eval case set for the '${workflow}' workflow.
 # Run:     keelson eval run <this file>
 # Compare: keelson eval compare <before.json> <after.json>
-name: ${workflow}
-workflow: ${workflow}
+name: ${JSON.stringify(workflow)}
+workflow: ${JSON.stringify(workflow)}
 # project: my-project        # as \`workflow run --project\`
 reps: 1
 
@@ -375,11 +380,15 @@ export async function runEvalInit(workflow: string, opts: EvalInitOptions): Prom
         ? opts.out
         : resolve(process.cwd(), opts.out)
       : join(evalsDir(), `${name}.eval.yaml`);
-  if (existsSync(target)) {
-    fail(`refusing to overwrite ${target}`, "FILE_EXISTS", opts.json, EXIT_FAIL);
-  }
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, scaffoldCaseFile(name), { flag: "wx" });
+  try {
+    writeFileSync(target, scaffoldCaseFile(name), { flag: "wx" });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+      fail(`refusing to overwrite ${target}`, "FILE_EXISTS", opts.json, EXIT_FAIL);
+    }
+    throw err;
+  }
   emit({ data: { path: target, file: basename(target) } }, { json: opts.json });
   process.exit(EXIT_OK);
 }

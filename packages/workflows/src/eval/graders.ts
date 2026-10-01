@@ -119,8 +119,12 @@ type JsonExtraction = { ok: true; value: unknown } | { ok: false; error: string 
 export function extractJson(text: string): JsonExtraction {
   const trimmed = text.trim();
   const candidates: string[] = [trimmed];
-  const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed);
-  if (fence?.[1]) candidates.push(fence[1].trim());
+  const fenceOpen = trimmed.indexOf("```");
+  if (fenceOpen >= 0) {
+    const bodyStart = trimmed.indexOf("\n", fenceOpen);
+    const fenceClose = bodyStart >= 0 ? trimmed.indexOf("```", bodyStart) : -1;
+    if (fenceClose > bodyStart) candidates.push(trimmed.slice(bodyStart + 1, fenceClose).trim());
+  }
   const firstBrace = trimmed.search(/[{[]/);
   if (firstBrace >= 0) {
     const open = trimmed[firstBrace];
@@ -283,11 +287,13 @@ async function gradeJudge(input: GradeInput, deps: GraderDeps): Promise<GradeRes
   const graded = verdicts.filter((v) => v !== "error");
   const passes = graded.filter((v) => v === "pass").length;
   const disagreement = graded.length > 1 && passes > 0 && passes < graded.length;
-  if (graded.length === 0) {
+  // Every requested rep must grade, or a lucky surviving rep would decide
+  // the case alone; an incomplete judging is an error, not a verdict.
+  if (errors.length > 0) {
     return {
       status: "error",
-      detail: `judge produced no usable verdict: ${errors.join("; ")}`,
-      judge: { reps, verdicts, disagreement: false, claims: [] },
+      detail: `judge failed on ${errors.length}/${reps} rep(s): ${errors.join("; ")}`,
+      judge: { reps, verdicts, disagreement, claims: [] },
     };
   }
   // Majority rules; a tie (which 2 reps always are when they disagree) reads

@@ -4,6 +4,7 @@
 
 export {
   assignSplits,
+  caseSetFingerprint,
   EVAL_GRADER_TYPES,
   EVAL_SPLITS,
   type EvalCase,
@@ -48,6 +49,7 @@ export {
   type EvalComparison,
   type EvalResultsFile,
   type EvalSummary,
+  evalResultsFileSchema,
   HEADROOM_PASS_RATE,
   NOISE_INTERVAL_WIDTH,
   pct,
