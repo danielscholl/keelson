@@ -29,6 +29,9 @@ export interface ChatHeadlessOptions {
   abortSignal?: AbortSignal;
   // SDK-level tool whitelist; an empty list means the turn runs with no tools.
   allowedTools?: readonly string[];
+  // False when the caller makes several turns and drains providers itself:
+  // a disposed Copilot singleton cannot serve another turn.
+  disposeProviders?: boolean;
   onChunk?: (chunk: MessageChunk) => void;
 }
 
@@ -103,7 +106,7 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
   } finally {
     // One-shot path: no server outlives this turn to drain providers, so reap
     // any warm subprocess here before the CLI exits rather than orphaning it.
-    await disposeAllProviders();
+    if (opts.disposeProviders !== false) await disposeAllProviders();
   }
 
   return { providerId, text, ...(usage !== undefined ? { usage } : {}) };

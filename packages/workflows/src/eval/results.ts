@@ -121,7 +121,8 @@ export function summarize(results: readonly EvalCaseResult[]): EvalSummary {
     .filter((d): d is number => d !== null && Number.isFinite(d));
   // One unpriced rep makes its case, and the total, unpriced: a partial sum
   // would read as a real (and too small) spend.
-  const perCaseUsd: Record<string, number | null> = {};
+  // Null prototype: a case id like `constructor` must not read an inherited value.
+  const perCaseUsd: Record<string, number | null> = Object.create(null);
   for (const r of results) {
     const prior = perCaseUsd[r.caseId];
     if (r.costUsd === null || prior === null) {
@@ -315,7 +316,10 @@ function fmtRate(stats: SplitStats): string {
 }
 
 function fmtUsd(value: number | null): string {
-  return value === null ? "unpriced" : `$${value.toFixed(4)}`;
+  if (value === null) return "unpriced";
+  // A positive cost too small for four decimals must not read as free.
+  if (value > 0 && value < 0.0001) return "<$0.0001";
+  return `$${value.toFixed(4)}`;
 }
 
 function fmtMs(value: number | null): string {
@@ -399,7 +403,7 @@ export function renderComparisonText(cmp: EvalComparison): string {
   const costDelta =
     cmp.cost.deltaUsd === null
       ? "unpriced"
-      : `${cmp.cost.deltaUsd >= 0 ? "+" : "-"}$${Math.abs(cmp.cost.deltaUsd).toFixed(4)} (${fmtUsd(cmp.cost.beforeUsd)} → ${fmtUsd(cmp.cost.afterUsd)})`;
+      : `${cmp.cost.deltaUsd >= 0 ? "+" : "-"}${fmtUsd(Math.abs(cmp.cost.deltaUsd))} (${fmtUsd(cmp.cost.beforeUsd)} → ${fmtUsd(cmp.cost.afterUsd)})`;
   lines.push(`cost: ${costDelta}`);
   lines.push(`decision: ${cmp.decision} (${cmp.reason})`);
   for (const w of cmp.warnings) lines.push(`warning: ${w}`);

@@ -52,6 +52,7 @@ import {
   runWorkflow,
   type WorkflowDefinition,
   withoutApprovalReviewers,
+  workflowDefinitionHash,
   worktreePathForRepoLocal,
 } from "@keelson/workflows";
 
@@ -72,11 +73,15 @@ export interface RunHeadlessOptions {
   // to in-place runs.
   isolation?: "worktree" | "none" | "auto";
   preflight?: boolean;
+  // False when the caller makes several runs and drains providers itself:
+  // a disposed Copilot singleton cannot serve another run.
+  disposeProviders?: boolean;
 }
 
 export interface RunHeadlessResult {
   summary: RunSummary;
   runId: string;
+  definitionHash: string;
 }
 
 export class WorkflowNotFoundError extends Error {
@@ -247,7 +252,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
       });
     }
     if (result.violations.length > 0) {
-      await disposeAllProviders();
+      if (opts.disposeProviders !== false) await disposeAllProviders();
       throw new WorkflowPreflightError(`preflight failed:\n${formatPreflightViolations(result)}`);
     }
   }
@@ -445,7 +450,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
     // A Copilot `prompt` node leaves the language-server warm; with no server
     // outliving this run, reap it here before the CLI exits rather than
     // orphaning the subprocess.
-    await disposeAllProviders();
+    if (opts.disposeProviders !== false) await disposeAllProviders();
     if (cleanupWorktree !== null && runSucceeded) {
       // Force-remove on success: same semantics as the server path — the
       // worktree is ephemeral, and any intentional artifacts should have
@@ -476,7 +481,11 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
     throw new Error("workflow executor returned without emitting run_done");
   }
 
-  return { summary: capturedSummary, runId };
+  return {
+    summary: capturedSummary,
+    runId,
+    definitionHash: workflowDefinitionHash(loadedWorkflow),
+  };
 }
 
 // One-shot validation entry used by run-command before dispatching: parse

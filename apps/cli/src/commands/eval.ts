@@ -5,6 +5,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
+import { disposeAllProviders } from "@keelson/providers";
 import {
   compareResults,
   discoverWorkflows,
@@ -139,6 +140,7 @@ function makeJudge(cwd: string): JudgeFn {
       cwd,
       provider: providerId,
       allowedTools: [],
+      disposeProviders: false,
       ...(model !== undefined ? { model } : {}),
       ...(timeoutMs !== undefined ? { abortSignal: AbortSignal.timeout(timeoutMs) } : {}),
     });
@@ -263,19 +265,26 @@ export async function runEvalRun(file: string, opts: EvalRunOptions): Promise<ne
       `◆ eval ${caseSet.name}: workflow=${caseSet.workflow} mode=${mode} reps=${reps} split=${split}\n`,
     );
   }
-  const results = await runEval({
-    caseSet,
-    caseFile: path,
-    reps,
-    split,
-    mode,
-    executor,
-    graderDeps: { cwd: process.cwd(), judge: opts.judge ?? makeJudge(process.cwd()) },
-    outputsDir: paths.outputsDir,
-    now: () => now,
-    ...(human ? { onProgress: (line) => process.stdout.write(`${line}\n`) } : {}),
-    ...(human && watch ? { onNodeEvent: (line) => process.stdout.write(`${line}\n`) } : {}),
-  });
+  let results: EvalResultsFile;
+  try {
+    results = await runEval({
+      caseSet,
+      caseFile: path,
+      reps,
+      split,
+      mode,
+      executor,
+      graderDeps: { cwd: process.cwd(), judge: opts.judge ?? makeJudge(process.cwd()) },
+      outputsDir: paths.outputsDir,
+      now: () => now,
+      ...(human ? { onProgress: (line) => process.stdout.write(`${line}\n`) } : {}),
+      ...(human && watch ? { onNodeEvent: (line) => process.stdout.write(`${line}\n`) } : {}),
+    });
+  } finally {
+    // Case runs and judge turns share provider instances across the whole
+    // eval, so the drain happens once here instead of after each turn.
+    await disposeAllProviders();
+  }
   writeResults(results, paths);
   if (opts.json) {
     emit(

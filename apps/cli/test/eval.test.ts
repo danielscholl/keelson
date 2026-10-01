@@ -19,7 +19,7 @@ import { clearRegistry } from "@keelson/providers";
 import { parseEvalCaseFile } from "@keelson/workflows";
 
 import { judgeProviderError } from "../src/commands/eval.ts";
-import { type CaseExecution, makeInProcessExecutor } from "../src/eval/execute.ts";
+import { type CaseExecution, fetchRunCostUsd, makeInProcessExecutor } from "../src/eval/execute.ts";
 import { runEval } from "../src/eval/runner.ts";
 import { spawnEnv } from "./spawn-env.ts";
 
@@ -228,7 +228,28 @@ describe("makeInProcessExecutor", () => {
     expect(result.nodeOutputs.greet).toContain("hello from");
     expect(result.durationMs).not.toBeNull();
     expect(result.costUsd).toBeNull();
-    expect(result.definitionHash).toBeNull();
+    expect(result.definitionHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(result.nodeOutputs.constructor).toBeUndefined();
+  });
+
+  test("reports one definition hash across runs and a new one after an edit", async () => {
+    const dir = join(tmp, "workflows");
+    mkdirSync(dir);
+    const target = join(dir, "smoke-bash.yaml");
+    copyFileSync(join(FIXTURES, "smoke-bash.yaml"), target);
+    const executor = makeInProcessExecutor({
+      workflow: "smoke-bash",
+      cwd: process.cwd(),
+      workflowsDir: dir,
+    });
+    const first = await executor({ inputs: {} });
+    const second = await executor({ inputs: {} });
+    expect(second.error).toBeNull();
+    expect(second.definitionHash).toBe(first.definitionHash);
+    writeFileSync(target, `${readFileSync(target, "utf8")}  - id: extra\n    bash: echo extra\n`);
+    const third = await executor({ inputs: {} });
+    expect(third.error).toBeNull();
+    expect(third.definitionHash).not.toBe(first.definitionHash);
   });
 
   test("a missing workflow is an error execution, not a thrown failure", async () => {
@@ -240,6 +261,47 @@ describe("makeInProcessExecutor", () => {
     const result = await executor({ inputs: {} });
     expect(result.runStatus).toBeNull();
     expect(result.error).toContain("no workflow named");
+  });
+});
+
+describe("fetchRunCostUsd", () => {
+  const RUN_ID = "11111111-2222-3333-4444-555555555555";
+
+  async function costFor(rowCount: number): Promise<number | null> {
+    const row = {
+      id: 1,
+      ts: "2026-09-30T00:00:00.000Z",
+      source: "workflow",
+      provider: "stub",
+      model: "m",
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: null,
+      cacheWriteTokens: null,
+      costUsd: 0.001,
+      durationMs: null,
+      status: "ok",
+      conversationId: null,
+      runId: RUN_ID,
+      nodeId: "n",
+      workflowName: "w",
+      ribId: null,
+      projectId: null,
+    };
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => Response.json(Array.from({ length: rowCount }, (_, i) => ({ ...row, id: i }))),
+    });
+    try {
+      return await fetchRunCostUsd(`http://127.0.0.1:${server.port}`, RUN_ID);
+    } finally {
+      await server.stop(true);
+    }
+  }
+
+  test("sums a complete page and refuses a full one as possibly truncated", async () => {
+    expect(await costFor(3)).toBeCloseTo(0.003, 6);
+    expect(await costFor(500)).toBeNull();
   });
 });
 

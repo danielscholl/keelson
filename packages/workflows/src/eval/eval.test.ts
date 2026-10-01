@@ -322,6 +322,22 @@ describe("graders", () => {
     expect(extractJson(`${"```"}${" ".repeat(5000)}`).ok).toBe(false);
   });
 
+  test("extractJson stops at the delimiter that closes the first value", () => {
+    expect(extractJson('Result: {"a":{"b":1}} and later {"c":2}')).toEqual({
+      ok: true,
+      value: { a: { b: 1 } },
+    });
+    expect(extractJson('{"a":"} not the end"} trailing }')).toEqual({
+      ok: true,
+      value: { a: "} not the end" },
+    });
+    expect(extractJson(String.raw`[{"q":"say \"hi\" ]"}] then ]`)).toEqual({
+      ok: true,
+      value: [{ q: 'say "hi" ]' }],
+    });
+    expect(extractJson('{"never":"closes"').ok).toBe(false);
+  });
+
   test("judge prompt carries only the claims, never other expect fields", () => {
     const prompt = buildJudgePrompt("out", ["c1"]);
     expect(prompt).toContain("c1");
@@ -337,6 +353,12 @@ describe("graders", () => {
     expect(duplicated.ok).toBe(false);
     const short = parseJudgeResponse('{"claims":[]}', ["c1"]);
     expect(short.ok).toBe(false);
+    for (const bare of ["null", "[]", "5"]) {
+      expect(parseJudgeResponse(bare, ["c1"])).toEqual({
+        ok: false,
+        error: "judge JSON lacks a 'claims' array",
+      });
+    }
   });
 });
 
@@ -458,6 +480,28 @@ describe("summarize", () => {
       result({ caseId: "b", costUsd: 0.02 }),
     ]);
     expect(priced.cost.totalUsd).toBeCloseTo(0.03, 6);
+  });
+
+  test("case ids that shadow Object.prototype keys still sum as numbers", () => {
+    const s = summarize([
+      result({ caseId: "constructor", costUsd: 0.01 }),
+      result({ caseId: "constructor", rep: 2, costUsd: 0.02 }),
+      result({ caseId: "__proto__", costUsd: 0.5 }),
+    ]);
+    expect(s.cost.perCaseUsd.constructor).toBeCloseTo(0.03, 6);
+    expect(Object.keys(s.cost.perCaseUsd).sort()).toEqual(["__proto__", "constructor"]);
+    const reread = evalResultsFileSchema.safeParse(
+      JSON.parse(JSON.stringify(file([result({ caseId: "constructor", costUsd: 0.01 })]))),
+    );
+    expect(reread.success).toBe(true);
+  });
+
+  test("a positive cost below four decimals renders as a lower bound, zero as zero", () => {
+    const tiny = renderSummaryMarkdown(file([result({ costUsd: 0.00002 })]));
+    expect(tiny).toContain("- Cost: <$0.0001 total");
+    expect(tiny).not.toContain("$0.0000");
+    const free = renderSummaryMarkdown(file([result({ costUsd: 0 })]));
+    expect(free).toContain("- Cost: $0.0000 total");
   });
 
   test("grader noise rate counts judge disagreements", () => {

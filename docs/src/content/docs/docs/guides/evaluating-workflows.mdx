@@ -155,8 +155,8 @@ output (the JSON inlines the first 16 KiB). `--out <path>` relocates all three.
 | Errors | Runs that never produced a gradable output. Fix the infrastructure before reading the pass rate. |
 | Grader noise | The share of judged outputs where the judge's reps disagreed. A high rate means the rubric, not the workflow, needs work. |
 | Duration mean and p95 | What a change cost in wall time. |
-| Cost | Summed from the server's usage ledger when it prices events, `null` otherwise. Never zero. |
-| Definition hash | The workflow definition the runs executed, when the server reports it. Two hashes in one eval means the workflow changed mid-run. |
+| Cost | Summed from the server's usage ledger when it prices every event of a run, `null` otherwise. A zero is a real zero, never a placeholder for unpriced. |
+| Definition hash | The workflow definition each run executed. Two hashes in one eval means the workflow changed mid-run. |
 
 The warnings line names what to fix next: `HEADROOM` when the test split passes
 above 95%, `NOISE` when an interval is wider than 20 points, `HASH` when more

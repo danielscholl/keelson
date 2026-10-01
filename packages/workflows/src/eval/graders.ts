@@ -127,10 +127,8 @@ export function extractJson(text: string): JsonExtraction {
   }
   const firstBrace = trimmed.search(/[{[]/);
   if (firstBrace >= 0) {
-    const open = trimmed[firstBrace];
-    const close = open === "{" ? "}" : "]";
-    const last = trimmed.lastIndexOf(close);
-    if (last > firstBrace) candidates.push(trimmed.slice(firstBrace, last + 1));
+    const end = balancedEnd(trimmed, firstBrace);
+    if (end > firstBrace) candidates.push(trimmed.slice(firstBrace, end + 1));
   }
   let lastError = "empty output";
   for (const candidate of candidates) {
@@ -142,6 +140,28 @@ export function extractJson(text: string): JsonExtraction {
     }
   }
   return { ok: false, error: lastError };
+}
+
+// Index of the delimiter closing the object or array opened at `start`, or -1
+// when it never closes. Delimiters inside JSON strings do not count.
+function balancedEnd(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") depth++;
+    else if (ch === "}" || ch === "]") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
 }
 
 function envKey(key: string): string {

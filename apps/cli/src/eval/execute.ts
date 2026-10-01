@@ -35,13 +35,19 @@ export interface CaseExecutionRequest {
 
 export type CaseExecutor = (request: CaseExecutionRequest) => Promise<CaseExecution>;
 
+// Node ids are arbitrary strings, so `__proto__` or `constructor` must land
+// (and miss) as an own key rather than reach Object.prototype.
+function emptyNodeOutputs(): Record<string, string> {
+  return Object.create(null) as Record<string, string>;
+}
+
 function errorExecution(error: string, runId: string | null = null): CaseExecution {
   return {
     runId,
     runStatus: null,
     error,
     finalOutput: null,
-    nodeOutputs: {},
+    nodeOutputs: emptyNodeOutputs(),
     durationMs: null,
     tokens: null,
     costUsd: null,
@@ -103,6 +109,7 @@ export function makeInProcessExecutor(opts: InProcessExecutorOptions): CaseExecu
         ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
         ...(opts.workflowsDir !== undefined ? { workflowsDir: opts.workflowsDir } : {}),
         ...(opts.preflight !== undefined ? { preflight: opts.preflight } : {}),
+        disposeProviders: false,
         onEvent: (event) => {
           if (event.type === "run_started") runId = event.runId;
           if (event.type === "node_done") {
@@ -117,9 +124,9 @@ export function makeInProcessExecutor(opts: InProcessExecutorOptions): CaseExecu
           if (line) request.onEvent?.(line);
         },
       });
-      const nodeOutputs: Record<string, string> = {};
+      const nodeOutputs = emptyNodeOutputs();
       for (const [id, node] of Object.entries(result.summary.nodes)) {
-        nodeOutputs[id] = node.output;
+        if (node.state === "completed") nodeOutputs[id] = node.output;
       }
       const last = succeededOrder.at(-1);
       return {
@@ -131,7 +138,7 @@ export function makeInProcessExecutor(opts: InProcessExecutorOptions): CaseExecu
         durationMs: result.summary.completedAtMs - result.summary.startedAtMs,
         tokens: sawUsage ? { input, output } : null,
         costUsd: null,
-        definitionHash: null,
+        definitionHash: result.definitionHash,
       };
     } catch (err) {
       return errorExecution(err instanceof Error ? err.message : String(err), runId);
@@ -156,18 +163,24 @@ export async function resolveProjectId(baseUrl: string, nameOrId: string): Promi
   return projects.find((p) => p.name === nameOrId)?.id ?? null;
 }
 
+// The events endpoint's row cap; it has no pagination, so a full page may be
+// a truncated one.
+const USAGE_EVENTS_LIMIT = 500;
+
 // Sum the server's per-event `costUsd` for one run. Null (never 0) when any
-// event is unpriced, when the run has no events, or when the server is older
-// than the pricing migration and does not serve the field.
+// event is unpriced, when the run has no events, when the page is full and so
+// possibly partial, or when the server is older than the pricing migration and
+// does not serve the field.
 export async function fetchRunCostUsd(baseUrl: string, runId: string): Promise<number | null> {
   try {
     const res = await fetch(
-      `${normalizeBase(baseUrl)}/api/usage/events?limit=500&runId=${encodeURIComponent(runId)}`,
+      `${normalizeBase(baseUrl)}/api/usage/events?limit=${USAGE_EVENTS_LIMIT}&runId=${encodeURIComponent(runId)}`,
       { headers: { accept: "application/json", origin: originHeader(baseUrl) } },
     );
     if (!res.ok) return null;
     const parsed = usageEventsResponseSchema.safeParse(await res.json());
     if (!parsed.success) return null;
+    if (parsed.data.length >= USAGE_EVENTS_LIMIT) return null;
     const rows = parsed.data.filter((row) => row.runId === runId);
     if (rows.length === 0) return null;
     let total = 0;
@@ -236,12 +249,12 @@ export function makeHttpExecutor(opts: HttpExecutorOptions): CaseExecutor {
         runId,
       );
     }
-    const nodeOutputs: Record<string, string> = {};
+    const nodeOutputs = emptyNodeOutputs();
     let input = 0;
     let output = 0;
     let sawUsage = false;
     for (const row of detail.nodes) {
-      nodeOutputs[row.nodeId] = row.outputText ?? "";
+      if (row.status === "succeeded") nodeOutputs[row.nodeId] = row.outputText ?? "";
       if (row.usage !== null) {
         sawUsage = true;
         input += row.usage.inputTokens;
