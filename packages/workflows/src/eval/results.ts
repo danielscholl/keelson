@@ -11,8 +11,11 @@ import {
 } from "./case-file.ts";
 import type { GradeStatus, JudgeDetail } from "./graders.ts";
 import {
-  intervalsOverlap,
   mean,
+  PAIRED_ALPHA,
+  PAIRED_MIN_CHANGED,
+  type PairedTest,
+  pairedPermutationTest,
   percentile,
   type WilsonInterval,
   wilsonInterval,
@@ -88,6 +91,11 @@ export interface EvalResultsFile {
   readonly mode: "http" | "in-process";
   readonly reps: number;
   readonly splitFilter: EvalSplit | "all";
+  // What produced the numbers, so compare can say when two runs differ by
+  // more than the workflow. Absent or null makes no claim: the version is
+  // null over HTTP, where the server's build runs the workflow, not the CLI's.
+  readonly provider?: string | null;
+  readonly keelsonVersion?: string | null;
   readonly cases: readonly EvalCaseResult[];
   readonly summary: EvalSummary;
 }
@@ -159,6 +167,12 @@ export function summarize(results: readonly EvalCaseResult[]): EvalSummary {
       );
     }
   }
+  const distinctCases = new Set(results.map((r) => r.caseId)).size;
+  if (distinctCases > 0 && distinctCases < PAIRED_MIN_CHANGED) {
+    warnings.push(
+      `POWER: ${distinctCases} case(s); compare needs at least ${PAIRED_MIN_CHANGED} cases to change before it can call a difference`,
+    );
+  }
   if (overall.errors > 0) {
     warnings.push(
       `ERRORS: ${overall.errors} case run(s) errored and are excluded from the pass rate`,
@@ -188,6 +202,9 @@ export interface SplitComparison {
   readonly before: SplitStats;
   readonly after: SplitStats;
   readonly delta: number | null;
+  // Per-case paired test behind the verdict; null when no case was graded on
+  // both sides.
+  readonly paired: PairedTest | null;
   readonly verdict: SplitVerdict;
 }
 
@@ -197,6 +214,9 @@ export interface EvalComparison {
   // False when the two files did not run the same cases under the same split
   // filter; the decision is then forced to revert and `reason` says why.
   readonly comparable: boolean;
+  // False when both sides ran one identical workflow definition, so any
+  // difference came from outside it; null when either side lacks a hash.
+  readonly definitionChanged: boolean | null;
   readonly splits: readonly SplitComparison[];
   readonly decision: CompareDecision;
   readonly reason: string;
@@ -205,31 +225,82 @@ export interface EvalComparison {
     readonly afterUsd: number | null;
     readonly deltaUsd: number | null;
   };
+  // What the change cost when the provider is unpriced: wall time per case run
+  // and tokens summed over the eval (null when any run reported none).
+  readonly duration: { readonly beforeMeanMs: number | null; readonly afterMeanMs: number | null };
+  readonly tokens: { readonly before: TokenTotals | null; readonly after: TokenTotals | null };
   readonly warnings: readonly string[];
+}
+
+export interface TokenTotals {
+  readonly input: number;
+  readonly output: number;
+}
+
+function tokenTotals(results: readonly EvalCaseResult[]): TokenTotals | null {
+  if (results.length === 0) return null;
+  let input = 0;
+  let output = 0;
+  for (const r of results) {
+    if (r.tokens === null) return null;
+    input += r.tokens.input;
+    output += r.tokens.output;
+  }
+  return { input, output };
+}
+
+function caseRates(
+  results: readonly EvalCaseResult[],
+  split: EvalSplit | "overall",
+): Map<string, number> {
+  const tally = new Map<string, { passed: number; graded: number }>();
+  for (const r of results) {
+    if (r.status === "error" || (split !== "overall" && r.split !== split)) continue;
+    const t = tally.get(r.caseId) ?? { passed: 0, graded: 0 };
+    t.graded++;
+    if (r.status === "pass") t.passed++;
+    tally.set(r.caseId, t);
+  }
+  return new Map([...tally].map(([id, t]) => [id, t.passed / t.graded]));
+}
+
+// One pass-rate difference per case graded on both sides: reps of a case are
+// not independent trials, so the case is the unit the test counts.
+export function pairedDeltas(
+  before: readonly EvalCaseResult[],
+  after: readonly EvalCaseResult[],
+  split: EvalSplit | "overall",
+): number[] {
+  const a = caseRates(before, split);
+  const b = caseRates(after, split);
+  const deltas: number[] = [];
+  for (const [id, rate] of a) {
+    const other = b.get(id);
+    if (other !== undefined) deltas.push(other - rate);
+  }
+  return deltas;
 }
 
 export function compareSplit(
   split: EvalSplit | "overall",
   before: SplitStats,
   after: SplitStats,
+  paired: PairedTest | null,
 ): SplitComparison {
   const delta =
     before.passRate !== null && after.passRate !== null ? after.passRate - before.passRate : null;
   let verdict: SplitVerdict;
-  if (
-    delta === null ||
-    before.interval === null ||
-    after.interval === null ||
-    before.passRate === null ||
-    after.passRate === null
-  ) {
-    verdict = "n/a";
-  } else if (intervalsOverlap(before.interval, after.interval)) {
-    verdict = "within-noise";
-  } else {
-    verdict = after.passRate > before.passRate ? "improved" : "regressed";
-  }
-  return { split, before, after, delta, verdict };
+  if (paired === null) verdict = "n/a";
+  else if (paired.pValue >= PAIRED_ALPHA || paired.meanDelta === 0) verdict = "within-noise";
+  else verdict = paired.meanDelta > 0 ? "improved" : "regressed";
+  return { split, before, after, delta, paired, verdict };
+}
+
+function definitionChanged(a: EvalResultsFile, b: EvalResultsFile): boolean | null {
+  const before = a.summary.definitionHashes;
+  const after = b.summary.definitionHashes;
+  if (before.length === 0 || after.length === 0) return null;
+  return !(before.length === 1 && after.length === 1 && before[0] === after[0]);
 }
 
 export function compareResults(a: EvalResultsFile, b: EvalResultsFile): EvalComparison {
@@ -249,44 +320,86 @@ export function compareResults(a: EvalResultsFile, b: EvalResultsFile): EvalComp
   if (a.splitFilter !== b.splitFilter) {
     incomparable.push(`split filters differ: '${a.splitFilter}' vs '${b.splitFilter}'`);
   }
-  const splits: SplitComparison[] = [
-    compareSplit("overall", a.summary.overall, b.summary.overall),
-    ...EVAL_SPLITS.map((s) => compareSplit(s, a.summary.splits[s], b.summary.splits[s])),
-  ];
-  const train = splits.find((s) => s.split === "train") as SplitComparison;
-  const test = splits.find((s) => s.split === "test") as SplitComparison;
+  // The sign-flip test needs each case's two rates to be exchangeable, which
+  // a rate over one rep and a rate over three are not.
+  if (a.reps !== b.reps) {
+    incomparable.push(`reps differ: ${a.reps} vs ${b.reps}`);
+  }
+  const splitOf = (split: EvalSplit | "overall") =>
+    compareSplit(
+      split,
+      split === "overall" ? a.summary.overall : a.summary.splits[split],
+      split === "overall" ? b.summary.overall : b.summary.splits[split],
+      pairedPermutationTest(pairedDeltas(a.cases, b.cases, split)),
+    );
+  const overall = splitOf("overall");
+  const train = splitOf("train");
+  const test = splitOf("test");
+  const splits: SplitComparison[] = [overall, train, test];
+  const changed = definitionChanged(a, b);
+  if (changed === false) {
+    warnings.push(
+      "both runs executed the same workflow definition: any difference came from outside it (provider, model, a command file, rib code) or is run-to-run noise",
+    );
+  }
+  if (a.provider !== undefined && b.provider !== undefined && a.provider !== b.provider) {
+    warnings.push(
+      `provider overrides differ: '${a.provider ?? "none"}' vs '${b.provider ?? "none"}'`,
+    );
+  }
+  if (
+    typeof a.keelsonVersion === "string" &&
+    typeof b.keelsonVersion === "string" &&
+    a.keelsonVersion !== b.keelsonVersion
+  ) {
+    warnings.push(`keelson versions differ: '${a.keelsonVersion}' vs '${b.keelsonVersion}'`);
+  }
+  if (
+    overall.verdict === "within-noise" &&
+    overall.paired !== null &&
+    overall.paired.changed < PAIRED_MIN_CHANGED
+  ) {
+    warnings.push(
+      `only ${overall.paired.changed} case(s) changed; at least ${PAIRED_MIN_CHANGED} must change before a difference can clear p < ${PAIRED_ALPHA}, so add cases`,
+    );
+  }
   const errors = a.summary.errors + b.summary.errors;
+  const hasTrain = train.verdict !== "n/a";
   let decision: CompareDecision;
   let reason: string;
   if (incomparable.length > 0) {
     decision = "revert";
     reason = `not comparable: ${incomparable.join("; ")}`;
   } else if (errors > 0) {
-    // Errored runs sit outside the intervals, so a candidate that crashed on
-    // its hardest cases could otherwise look better on the ones that survived.
+    // Errored runs sit outside the test, so a candidate that crashed on its
+    // hardest cases could otherwise look better on the ones that survived.
     decision = "revert";
     reason = `${a.summary.errors} before / ${b.summary.errors} after case run(s) errored; fix the infrastructure and rerun before deciding`;
   } else if (test.verdict === "regressed" || train.verdict === "regressed") {
     decision = "revert";
     reason = `${test.verdict === "regressed" ? "test" : "train"} regressed`;
-  } else if (train.verdict === "n/a") {
-    // No train split on either side: nothing to check overfitting against,
-    // so the test split alone decides and the summary says so.
-    decision = test.verdict === "improved" ? "keep" : "revert";
-    reason =
-      test.verdict === "improved"
-        ? "test improved (no train split to check against)"
-        : `test ${test.verdict}`;
-    warnings.push("no train split: the decision rests on test alone");
-  } else if (train.verdict === "improved" && test.verdict === "improved") {
-    decision = "keep";
-    reason = "train and test both improved";
-  } else {
+  } else if (overall.verdict !== "improved") {
     decision = "revert";
-    reason =
-      test.verdict === "improved"
-        ? `train ${train.verdict} while test improved`
-        : `test ${test.verdict}${train.verdict === "improved" ? " while train improved (overfitting?)" : ""}`;
+    reason = `overall ${overall.verdict}`;
+  } else if (test.verdict === "n/a") {
+    decision = "revert";
+    reason = "no test case was graded on both sides, so nothing held out confirms the change";
+  } else if (!hasTrain) {
+    // Nothing to check overfitting against, so the summary says so.
+    decision = "keep";
+    reason = "test improved (no train split to check against)";
+    warnings.push("no train split: the decision rests on test alone");
+  } else if ((test.paired?.meanDelta ?? 0) <= 0) {
+    // The pooled test carries the significance; the held-out split only has
+    // to move the same way, which a train-only gain does not.
+    decision = "revert";
+    reason = "overall improved but the test split did not move with it (overfitting?)";
+  } else if ((train.paired?.meanDelta ?? 0) <= 0) {
+    decision = "revert";
+    reason = "overall improved but the train split did not move with it";
+  } else {
+    decision = "keep";
+    reason = "overall improved, and train and test both moved up";
   }
   const beforeUsd = a.summary.cost.totalUsd;
   const afterUsd = b.summary.cost.totalUsd;
@@ -294,6 +407,7 @@ export function compareResults(a: EvalResultsFile, b: EvalResultsFile): EvalComp
     before: { name: a.name, createdAt: a.createdAt },
     after: { name: b.name, createdAt: b.createdAt },
     comparable: incomparable.length === 0,
+    definitionChanged: changed,
     splits,
     decision,
     reason,
@@ -302,6 +416,11 @@ export function compareResults(a: EvalResultsFile, b: EvalResultsFile): EvalComp
       afterUsd,
       deltaUsd: beforeUsd !== null && afterUsd !== null ? afterUsd - beforeUsd : null,
     },
+    duration: {
+      beforeMeanMs: a.summary.duration.meanMs,
+      afterMeanMs: b.summary.duration.meanMs,
+    },
+    tokens: { before: tokenTotals(a.cases), after: tokenTotals(b.cases) },
     warnings,
   };
 }
@@ -395,8 +514,12 @@ export function renderComparisonText(cmp: EvalComparison): string {
   for (const s of cmp.splits) {
     const delta =
       s.delta === null ? "n/a" : `${s.delta >= 0 ? "+" : ""}${(s.delta * 100).toFixed(1)} pts`;
+    const paired =
+      s.paired === null
+        ? ""
+        : `  (${s.paired.changed}/${s.paired.cases} cases changed, p=${s.paired.pValue.toFixed(3)})`;
     lines.push(
-      `${s.split.padEnd(8)} ${fmtRate(s.before)} → ${fmtRate(s.after)}  ${delta}  ${s.verdict}`,
+      `${s.split.padEnd(8)} ${fmtRate(s.before)} → ${fmtRate(s.after)}  ${delta}  ${s.verdict}${paired}`,
     );
   }
   lines.push("");
@@ -405,6 +528,12 @@ export function renderComparisonText(cmp: EvalComparison): string {
       ? "unpriced"
       : `${cmp.cost.deltaUsd >= 0 ? "+" : "-"}${fmtUsd(Math.abs(cmp.cost.deltaUsd))} (${fmtUsd(cmp.cost.beforeUsd)} → ${fmtUsd(cmp.cost.afterUsd)})`;
   lines.push(`cost: ${costDelta}`);
+  lines.push(
+    `duration: mean ${fmtMs(cmp.duration.beforeMeanMs)} → ${fmtMs(cmp.duration.afterMeanMs)} per case run`,
+  );
+  const fmtTokens = (t: TokenTotals | null) =>
+    t === null ? "n/a" : `${t.input} in / ${t.output} out`;
+  lines.push(`tokens: ${fmtTokens(cmp.tokens.before)} → ${fmtTokens(cmp.tokens.after)}`);
   lines.push(`decision: ${cmp.decision} (${cmp.reason})`);
   for (const w of cmp.warnings) lines.push(`warning: ${w}`);
   return lines.join("\n");
@@ -438,6 +567,8 @@ export const evalResultsFileSchema: z.ZodType<EvalResultsFile> = z
     mode: z.enum(["http", "in-process"]),
     reps: z.number().int().positive(),
     splitFilter: z.enum(["train", "test", "all"]),
+    provider: z.string().nullable().optional(),
+    keelsonVersion: z.string().nullable().optional(),
     cases: z.array(
       z
         .object({

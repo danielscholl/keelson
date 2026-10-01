@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { type OutputSchema, outputSchemaSchema } from "../schema/output-schema.ts";
+import { seededRandom } from "./stats.ts";
 
 export const EVAL_GRADER_TYPES = [
   "exact",
@@ -163,19 +164,6 @@ function formatIssues(error: z.ZodError): string {
       return path ? `${path}: ${issue.message}` : issue.message;
     })
     .join("; ");
-}
-
-// mulberry32: a tiny deterministic PRNG so a seeded split reproduces across
-// machines and runs without pulling in a dependency.
-function seededRandom(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }
 
 export function assignSplits(
