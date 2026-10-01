@@ -725,7 +725,7 @@ nodes:
         FIX=$(printf '%s' "$finding" | jq -r '.fix')
         REPRO=$(printf '%s' "$finding" | jq -r '.repro // ""')
         case "$REPRO" in
-          [Nn][Oo][Nn][Ee]|[Nn][Oo][Nn][Ee][^[:alnum:]]*) REPRO="" ;;
+          none|none[^[:alnum:]]*) REPRO="" ;;
         esac
         DETAIL="$WHY"
         if [ -n "$REPRO" ]; then

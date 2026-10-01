@@ -93,7 +93,6 @@ bashDescribe("pr-review build-review repro rendering", () => {
     const comments = render([
       { ...base, line: 2, fix: "", repro: "none: needs a live token" },
       { ...base, line: 3, fix: "", repro: "none" },
-      { ...base, line: 1, fix: "", repro: "NONE" },
     ]);
     for (const comment of comments) {
       expect(comment.body).toBe("blocking: w\n\nbecause");
@@ -106,8 +105,16 @@ bashDescribe("pr-review build-review repro rendering", () => {
     expect(comment?.body).toBe("blocking: w\n\nbecause");
   });
 
-  test("keeps a repro that merely starts with the letters none", () => {
-    const [comment] = render([{ ...base, line: 2, fix: "", repro: "nonexistent key read" }]);
-    expect(comment?.body).toBe("blocking: w\n\nbecause\n\nRepro: nonexistent key read");
+  test("keeps a repro that only resembles the sentinel", () => {
+    const comments = render([
+      { ...base, line: 1, fix: "", repro: "nonexistent key read" },
+      { ...base, line: 2, fix: "", repro: "None input: observed TypeError, expected empty result" },
+      { ...base, line: 3, fix: "", repro: "NONE" },
+    ]);
+    expect(comments.map((c) => c.body)).toEqual([
+      "blocking: w\n\nbecause\n\nRepro: nonexistent key read",
+      "blocking: w\n\nbecause\n\nRepro: None input: observed TypeError, expected empty result",
+      "blocking: w\n\nbecause\n\nRepro: NONE",
+    ]);
   });
 });
