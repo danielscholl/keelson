@@ -229,7 +229,7 @@ export const workflowRunSummarySchema = z
     ribId: z.string().nullable().default(null),
     preflightNotice: z.string().nullable().default(null),
     // sha256 of the canonical parsed definition the run last executed under
-    // (migration 18): stamped at start, re-stamped on resume. Null on rows
+    // (migration 19): stamped at start, re-stamped on resume. Null on rows
     // persisted before the column existed.
     definitionHash: z.string().nullable().default(null),
   })

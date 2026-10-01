@@ -1551,10 +1551,11 @@ function resumeRunCore(
     };
   }
 
-  // Atomically claim the run: one UPDATE flips failed/cancelled → running. A
-  // succeeded (or otherwise non-interrupted) run, or one a concurrent resume
-  // already claimed, loses here — only the winner launches a background run.
-  if (!store.claimRunForResume(runId)) {
+  // Atomically claim the run: one UPDATE flips failed/cancelled → running and
+  // re-stamps the definition hash. A succeeded (or otherwise non-interrupted)
+  // run, or one a concurrent resume already claimed, loses here — only the
+  // winner launches a background run.
+  if (!store.claimRunForResume(runId, workflowDefinitionHash(workflow))) {
     if (lockHandle !== undefined) {
       releaseMutationLockNow(runId, lockHandle);
       lockHandle = undefined;
@@ -1565,7 +1566,6 @@ function resumeRunCore(
       message: `run '${runId}' is not in a resumable state (only failed or cancelled runs can be resumed)`,
     };
   }
-  store.setRunDefinitionHash(runId, workflowDefinitionHash(workflow));
 
   const abort = new AbortController();
   const pendingApprovals = new Map<string, PendingApproval>();

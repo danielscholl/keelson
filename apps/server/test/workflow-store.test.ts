@@ -139,7 +139,16 @@ describe("SQLite WorkflowStore", () => {
     expect(run!.isolationEnabled).toBe(true);
     expect(run!.worktreeEstablished).toBe(false);
     expect(run!.definitionHash).toBe("ab".repeat(32));
-    store.setRunDefinitionHash("r1", "cd".repeat(32));
+    store.updateRunStatus({
+      runId: "r1",
+      status: "failed",
+      completedAt: "2025-01-01T00:01:00.000Z",
+      error: "boom",
+    });
+    expect(store.claimRunForResume("r1")).toBe(true);
+    expect(store.getRun("r1")!.definitionHash).toBe("ab".repeat(32));
+    store.updateRunStatus({ runId: "r1", status: "failed", completedAt: null, error: null });
+    expect(store.claimRunForResume("r1", "cd".repeat(32))).toBe(true);
     expect(store.getRun("r1")!.definitionHash).toBe("cd".repeat(32));
   });
 
