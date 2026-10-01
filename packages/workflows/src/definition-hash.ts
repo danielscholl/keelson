@@ -28,7 +28,11 @@ function canonicalize(value: unknown): unknown {
 }
 
 export function canonicalWorkflowJson(definition: unknown): string {
-  return JSON.stringify(canonicalize(definition));
+  const json = JSON.stringify(canonicalize(definition));
+  if (typeof json !== "string") {
+    throw new TypeError("workflow definition is not JSON-serializable");
+  }
+  return json;
 }
 
 export function workflowDefinitionHash(definition: unknown): string {

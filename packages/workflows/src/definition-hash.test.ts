@@ -59,6 +59,12 @@ describe("workflowDefinitionHash", () => {
     expect(workflowDefinitionHash(withProto)).not.toBe(workflowDefinitionHash(plain));
   });
 
+  test("rejects values JSON cannot represent instead of hashing undefined", () => {
+    expect(() => workflowDefinitionHash(undefined)).toThrow(TypeError);
+    expect(() => workflowDefinitionHash(() => {})).toThrow(TypeError);
+    expect(() => workflowDefinitionHash(Symbol("x"))).toThrow(TypeError);
+  });
+
   test("node order is part of the definition", () => {
     const a = { name: "x", description: "d", nodes: [{ id: "a" }, { id: "b" }] };
     const b = { name: "x", description: "d", nodes: [{ id: "b" }, { id: "a" }] };
