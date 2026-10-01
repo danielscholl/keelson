@@ -1006,6 +1006,29 @@ describe("SQLite UsageStore", () => {
       expect(store.summary({ groupBy: "model", conversationId: "nope" }).totals.events).toBe(0);
     });
 
+    test("an all-miss window with reported zero cache reads is 0%, not unreported", () => {
+      store.record({
+        source: "chat",
+        provider: "claude",
+        model: "claude-sonnet-5",
+        inputTokens: 100,
+        outputTokens: 10,
+        cacheReadTokens: 0,
+      });
+      store.record({
+        source: "chat",
+        provider: "claude",
+        model: "claude-sonnet-5",
+        inputTokens: 50,
+        outputTokens: 10,
+        cacheReadTokens: 0,
+      });
+      const result = store.summary({ groupBy: "model" });
+      expect(result.totals.cacheHitRatio).toBe(0);
+      expect(result.groups[0]?.cacheHitRatio).toBe(0);
+      expect(store.jobs()).toEqual([]);
+    });
+
     test("a window with no events costs nothing and has no hit ratio", () => {
       const result = store.summary({ groupBy: "model" });
       expect(result.totals).toMatchObject({

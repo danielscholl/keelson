@@ -49,9 +49,8 @@ function toolResultText(result: unknown): string {
 // pi Usage { input, output, cacheRead, cacheWrite, ... } → keelson TokenUsage.
 // Counts are sanitized through toTokenCount (drops non-numbers / negatives), and
 // when pi reports no usable count at all (e.g. an empty `{}`) we emit nothing
-// rather than a fabricated zero row. Cache fields are kept only when positive so
-// a cache-miss turn's 0 doesn't render as a "Cache read 0" row. Mirrors the
-// claude path's policy.
+// rather than a fabricated zero row. A cache field pi reported, even as 0, is
+// forwarded (a miss is a measurement); only an absent key omits the field.
 function mapPiUsage(u: unknown): TokenUsage | undefined {
   if (!isRecord(u)) return undefined;
   const input = toTokenCount(u.input);
@@ -67,8 +66,8 @@ function mapPiUsage(u: unknown): TokenUsage | undefined {
     return undefined;
   }
   const usage: TokenUsage = { inputTokens: input ?? 0, outputTokens: output ?? 0 };
-  if (cacheRead !== undefined && cacheRead > 0) usage.cacheReadInputTokens = cacheRead;
-  if (cacheWrite !== undefined && cacheWrite > 0) usage.cacheCreationInputTokens = cacheWrite;
+  if (cacheRead !== undefined) usage.cacheReadInputTokens = cacheRead;
+  if (cacheWrite !== undefined) usage.cacheCreationInputTokens = cacheWrite;
   return usage;
 }
 

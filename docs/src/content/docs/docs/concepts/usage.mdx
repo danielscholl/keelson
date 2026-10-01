@@ -114,9 +114,11 @@ unpriced, since the served model is unknown.
 
 **Cache hit ratio** is cache-read tokens divided by fresh input plus cache-read
 tokens, the share of a turn's prompt the provider served from its prompt cache.
-It is null, rendered as a dash, when no event in the aggregate reported cache
-reads at all or when there was nothing to divide by, so a provider that does not
-report caching never shows a 0% hit rate it did not earn.
+A provider that reports a cache count of zero records zero, so an all-miss
+window reads as 0%. The ratio is null, rendered as a dash, only when no event in
+the aggregate carried a cache-read count at all (a provider with no cache
+accounting) or when there was nothing to divide by, so such a provider never
+shows a 0% hit rate it did not earn.
 
 The chat composer's usage popover shows the same two figures for the open
 conversation, read from the ledger rather than priced in the browser, so each

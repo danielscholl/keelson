@@ -508,9 +508,9 @@ function stringifyToolResultContent(content: ClaudeContentBlock["content"]): str
 // assistant message's per-call usage (input side only — matches the
 // convention Claude Code's statusline documents); contextWindow from the
 // result's per-model breakdown. Returns undefined when the SDK reported no
-// counts at all so callers emit nothing rather than zeros. Cache fields are
-// included only when positive — a cache-miss turn's 0 would otherwise render
-// as a "Cache read 0" row (the Copilot path applies the same gate).
+// counts at all so callers emit nothing rather than zeros. A cache field the
+// SDK reported, even as 0, is forwarded: a miss is a measurement, and only an
+// absent key means the provider has no cache accounting.
 function buildClaudeTokenUsage(
   msg: ClaudeSdkMessage,
   lastApiUsage: ClaudeApiUsage | undefined,
@@ -539,10 +539,8 @@ function buildClaudeTokenUsage(
     return undefined;
   }
   const usage: TokenUsage = { inputTokens: input ?? 0, outputTokens: output ?? 0 };
-  if (cacheRead !== undefined && cacheRead > 0) usage.cacheReadInputTokens = cacheRead;
-  if (cacheCreation !== undefined && cacheCreation > 0) {
-    usage.cacheCreationInputTokens = cacheCreation;
-  }
+  if (cacheRead !== undefined) usage.cacheReadInputTokens = cacheRead;
+  if (cacheCreation !== undefined) usage.cacheCreationInputTokens = cacheCreation;
   if (lastInput !== undefined || lastCacheRead !== undefined || lastCacheCreation !== undefined) {
     usage.contextTokens = (lastInput ?? 0) + (lastCacheRead ?? 0) + (lastCacheCreation ?? 0);
   }

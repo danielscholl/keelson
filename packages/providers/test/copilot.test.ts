@@ -3408,6 +3408,33 @@ describe("CopilotProvider — token usage (chat/workflow usage feedback)", () =>
     });
   });
 
+  it("forwards a cache key reported as 0 and omits a key no call carried", async () => {
+    const sdk = makeMockSdk({
+      scenario: (session) => {
+        session.emit("assistant.usage", {
+          model: "gpt-5",
+          inputTokens: 100,
+          outputTokens: 40,
+          cacheReadTokens: 0,
+        });
+        session.emit("assistant.usage", { model: "gpt-5", inputTokens: 60, outputTokens: 10 });
+        session.emit("session.idle");
+      },
+    });
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+    expect(chunks.filter((c) => c.type === "usage")).toEqual([
+      {
+        type: "usage",
+        usage: { inputTokens: 160, outputTokens: 50, cacheReadInputTokens: 0 },
+      },
+    ]);
+  });
+
   it("normalizes Anthropic-served usage and clamps cache-heavy calls", async () => {
     const sdk = makeMockSdk({
       scenario: (session) => {
