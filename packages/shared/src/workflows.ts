@@ -228,6 +228,10 @@ export const workflowRunSummarySchema = z
     // Null for local workflows.
     ribId: z.string().nullable().default(null),
     preflightNotice: z.string().nullable().default(null),
+    // sha256 of the canonical parsed definition the run last executed under
+    // (migration 19): stamped at start, re-stamped on resume. Null on rows
+    // persisted before the column existed.
+    definitionHash: z.string().nullable().default(null),
   })
   .strict();
 export type WorkflowRunSummary = z.infer<typeof workflowRunSummarySchema>;

@@ -44,6 +44,15 @@ describe("workflowRunDetailSchema", () => {
     ).toBe("preflight not checked: offline-catalog");
   });
 
+  it("defaults the definition hash to null and accepts a persisted hash", () => {
+    expect(workflowRunDetailSchema.parse(makeRunDetail()).definitionHash).toBeNull();
+    const hash = "0f".repeat(32);
+    expect(
+      workflowRunDetailSchema.parse(makeRunDetail({ definitionHash: hash })).definitionHash,
+    ).toBe(hash);
+    expect(() => workflowRunDetailSchema.parse(makeRunDetail({ definitionHash: 7 }))).toThrow();
+  });
+
   it("defaults old isolation payloads and validates durable isolation state", () => {
     const legacy = workflowRunDetailSchema.parse(makeRunDetail());
     expect(legacy.isolationEnabled).toBeNull();
