@@ -402,8 +402,8 @@ export function createWorkflowStore(db: Database): WorkflowStore {
        approval_json = excluded.approval_json`,
   );
   // rowid tiebreak preserves DAG insertion order when two nodes share a
-  // completed_at millisecond — the executor runs siblings in parallel and
-  // commits via the per-layer write buffer, so timestamp ties are common.
+  // completed_at millisecond — the executor runs independent nodes in
+  // parallel, so timestamp ties are common.
   const selectNodes = db.prepare(
     "SELECT node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json, provider, model, effort, approval_json FROM workflow_node_outputs WHERE run_id = ? ORDER BY rowid ASC",
   );

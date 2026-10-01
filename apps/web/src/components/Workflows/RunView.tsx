@@ -1,4 +1,4 @@
-import type { Project, TokenUsage, WorkflowDetail } from "@keelson/shared";
+import { type Project, runTiming, type TokenUsage, type WorkflowDetail } from "@keelson/shared";
 import { useEffect, useId, useMemo, useState } from "react";
 import { type NodeView, useWorkflowRun } from "../../hooks/useWorkflowRun.ts";
 import {
@@ -120,6 +120,22 @@ export function RunView({
     if (run.startedAt != null && isRunning) return Math.max(0, now - run.startedAt);
     return undefined;
   })();
+
+  // Critical path beside the elapsed time once the run has settled: how much
+  // of the wall clock was the longest dependency chain, so the gap reads as
+  // scheduling wait rather than node work.
+  const timing = useMemo(() => {
+    if (run.completedAt == null || run.startedAt == null) return null;
+    return runTiming(
+      workflow.nodes.map((n) => ({
+        id: n.id,
+        ...(n.dependsOn !== undefined ? { dependsOn: n.dependsOn } : {}),
+        startedAt: nodes[n.id]?.startedAt ?? null,
+        completedAt: nodes[n.id]?.completedAt ?? null,
+      })),
+      { startedAt: run.startedAt, completedAt: run.completedAt },
+    );
+  }, [workflow.nodes, nodes, run.startedAt, run.completedAt]);
 
   // Run-level rollup: sum across reporting nodes. Volume, not fill — no
   // percentage gauge here (a run total has no meaningful window to fill).
@@ -247,6 +263,17 @@ export function RunView({
             <>
               <StatusBadge status={statusBadgeStatus(run.status)} />
               {elapsed != null && <span className="duration">{formatDuration(elapsed)}</span>}
+              {timing && (
+                <span
+                  className="duration"
+                  title={`critical path ${formatDuration(timing.criticalPathMs)} of ${formatDuration(
+                    timing.wallClockMs,
+                  )} wall clock: the longest dependency chain by node duration`}
+                >
+                  critical path {formatDuration(timing.criticalPathMs)} ·{" "}
+                  {Math.round(timing.parallelism * 100)}%
+                </span>
+              )}
               {runUsageBreakdown && (
                 <>
                   <button

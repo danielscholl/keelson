@@ -910,6 +910,16 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     });
   }
 
+  const schedulingResult = workflowBaseSchema.shape.scheduling.safeParse(obj.scheduling);
+  const scheduling = schedulingResult.success ? schedulingResult.data : undefined;
+  if (obj.scheduling !== undefined && !schedulingResult.success) {
+    warnings.push({
+      filename,
+      kind: "invalid_field_value",
+      message: "invalid 'scheduling' value (ignored); valid: ready, layered",
+    });
+  }
+
   const additionalDirectories = Array.isArray(obj.additionalDirectories)
     ? obj.additionalDirectories.filter((d): d is string => typeof d === "string")
     : undefined;
@@ -991,6 +1001,7 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     ...(interactive !== undefined ? { interactive } : {}),
     ...(mutatesCheckout !== undefined ? { mutates_checkout: mutatesCheckout } : {}),
     ...(locking !== undefined ? { locking } : {}),
+    ...(scheduling !== undefined ? { scheduling } : {}),
     ...(requiresProject !== undefined ? { requiresProject } : {}),
     nodes,
     ...(worktreePolicy ? { worktree: worktreePolicy } : {}),

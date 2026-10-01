@@ -1316,6 +1316,150 @@ nodes:
   });
 });
 
+// A → {B (slow), C} ; D ← {B, C} ; C → E → F. Layered dispatch serializes
+// E and F behind the slow B; ready dispatch lets the C branch run alongside it.
+const READY_DAG = `
+name: t
+description: test
+nodes:
+  - id: a
+    bash: a
+  - id: b
+    bash: b
+    depends_on: [a]
+  - id: c
+    bash: c
+    depends_on: [a]
+  - id: d
+    bash: d
+    depends_on: [b, c]
+  - id: e
+    bash: e
+    depends_on: [c]
+  - id: f
+    bash: f
+    depends_on: [e]
+`;
+
+function timedHandler(delays: Record<string, number>): {
+  handler: NodeHandler;
+  startedAt: Map<string, number>;
+  doneAt: Map<string, number>;
+} {
+  const startedAt = new Map<string, number>();
+  const doneAt = new Map<string, number>();
+  const handler: NodeHandler = {
+    type: "bash",
+    async handle(node) {
+      startedAt.set(node.id, performance.now());
+      await new Promise((r) => setTimeout(r, delays[node.id] ?? 0));
+      doneAt.set(node.id, performance.now());
+      return { status: "succeeded", output: { kind: "text", text: node.id } };
+    },
+  };
+  return { handler, startedAt, doneAt };
+}
+
+const READY_DELAYS = { a: 5, b: 60, c: 5, d: 5, e: 40, f: 40 };
+const LAYERED_SUM_MS = 5 + 60 + 40 + 40;
+
+describe("runWorkflow — ready-node scheduling", () => {
+  test("a dependent starts when its own dependencies settle, not when the layer does", async () => {
+    const workflow = parseInline(READY_DAG);
+    const { handler, startedAt, doneAt } = timedHandler(READY_DELAYS);
+    const t0 = performance.now();
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+    });
+    const wallClock = performance.now() - t0;
+    const at = (map: Map<string, number>, id: string): number => {
+      const v = map.get(id);
+      if (v === undefined) throw new Error(`${id} never recorded`);
+      return v;
+    };
+    expect(summary.status).toBe("succeeded");
+    expect(at(startedAt, "e")).toBeLessThan(at(doneAt, "b"));
+    expect(at(startedAt, "d")).toBeGreaterThanOrEqual(at(doneAt, "b"));
+    expect(at(startedAt, "d")).toBeGreaterThanOrEqual(at(doneAt, "c"));
+    expect(at(startedAt, "f")).toBeGreaterThanOrEqual(at(doneAt, "e"));
+    expect(wallClock).toBeLessThan(LAYERED_SUM_MS - 15);
+  });
+
+  test("scheduling: layered keeps the layer barrier", async () => {
+    const workflow = parseInline(`${READY_DAG}scheduling: layered\n`);
+    expect(workflow.scheduling).toBe("layered");
+    const { handler, startedAt, doneAt } = timedHandler(READY_DELAYS);
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(startedAt.get("e")).toBeGreaterThanOrEqual(doneAt.get("b") as number);
+  });
+
+  test("a node sees every ancestor and no concurrent sibling in upstreamOutputs", async () => {
+    const workflow = parseInline(READY_DAG);
+    const seen = new Map<string, string[]>();
+    const handler: NodeHandler = {
+      type: "bash",
+      async handle(node, ctx) {
+        await new Promise((r) => setTimeout(r, READY_DELAYS[node.id as keyof typeof READY_DELAYS]));
+        seen.set(node.id, [...ctx.upstreamOutputs.keys()].sort());
+        return { status: "succeeded", output: { kind: "text", text: node.id } };
+      },
+    };
+    await runWorkflow({ ...baseOpts(workflow), handlers: new Map([["bash", handler]]) });
+    expect(seen.get("d")).toEqual(expect.arrayContaining(["a", "b", "c"]));
+    expect(seen.get("f")).toEqual(expect.arrayContaining(["a", "c", "e"]));
+    // e starts while b is still running and keeps that view for its lifetime.
+    expect(seen.get("e")).toEqual(["a", "c"]);
+  });
+
+  test("a resumed node's dependents wait for its re-running ancestor", async () => {
+    const workflow = parseInline(`
+name: t
+description: test
+nodes:
+  - id: a
+    bash: a
+  - id: b
+    bash: b
+    depends_on: [a]
+  - id: c
+    bash: c
+    depends_on: [b]
+`);
+    const { handler, startedAt, doneAt } = timedHandler({ a: 30 });
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      completedNodeOutputs: new Map([["b", { state: "completed", output: "seeded" }]]),
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(startedAt.has("b")).toBe(false);
+    expect(startedAt.get("c")).toBeGreaterThanOrEqual(doneAt.get("a") as number);
+  });
+
+  test("an abort stops dispatching new nodes while in-flight ones settle", async () => {
+    const workflow = parseInline(READY_DAG);
+    const controller = new AbortController();
+    const { handler, startedAt } = timedHandler({ a: 5, b: 60, c: 5, e: 40 });
+    setTimeout(() => controller.abort(), 25);
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      abortSignal: controller.signal,
+    });
+    expect(summary.status).toBe("cancelled");
+    expect(summary.nodes.a.state).toBe("completed");
+    expect(summary.nodes.c.state).toBe("completed");
+    expect(startedAt.has("f")).toBe(false);
+    expect(summary.nodes.f.state).toBe("skipped");
+    expect(summary.nodes.d.state).toBe("skipped");
+  });
+});
+
 describe("runWorkflow — malformed when:", () => {
   test("malformed when: skips the node with a run_warning", async () => {
     const workflow = parseInline(`

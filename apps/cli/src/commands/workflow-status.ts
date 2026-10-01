@@ -2,11 +2,17 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { workflowRunDetailSchema } from "@keelson/shared";
+import {
+  type RunTiming,
+  runTiming,
+  type WorkflowRunDetail,
+  workflowRunDetailSchema,
+} from "@keelson/shared";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import { formatReviewerAnswer, formatReviewLines } from "../format-approval.ts";
 import {
   getRun,
+  getWorkflow,
   HttpError,
   isServerDownError,
   listActiveRuns,
@@ -22,6 +28,26 @@ export interface WorkflowStatusOptions {
   baseUrl?: string;
   workflow?: string;
   brief?: boolean;
+}
+
+// Computed at read time from the run's node timestamps and the workflow's
+// edges; null when the DAG can no longer be fetched (workflow removed) or no
+// node has finished. Never persisted.
+async function timingFor(baseUrl: string, detail: WorkflowRunDetail): Promise<RunTiming | null> {
+  let dag: Awaited<ReturnType<typeof getWorkflow>>;
+  try {
+    dag = await getWorkflow(baseUrl, detail.workflowName, detail.projectId);
+  } catch {
+    return null;
+  }
+  const rows = new Map(detail.nodes.map((row) => [row.nodeId, row]));
+  const nodes = dag.nodes.map((node) => ({
+    id: node.id,
+    ...(node.dependsOn !== undefined ? { dependsOn: node.dependsOn } : {}),
+    startedAt: rows.get(node.id)?.startedAt ?? null,
+    completedAt: rows.get(node.id)?.completedAt ?? null,
+  }));
+  return runTiming(nodes, { startedAt: detail.startedAt, completedAt: detail.completedAt });
 }
 
 export async function runWorkflowStatus(
@@ -53,11 +79,12 @@ export async function runWorkflowStatus(
         process.exit(resolved.ambiguous ? EXIT_BAD_ARGS : EXIT_NOT_FOUND);
       }
       const response = await getRun(baseUrl, resolved.runId);
+      if (typeof response !== "object" || response === null || !("run" in response)) {
+        throw new Error("workflow run response is missing run detail");
+      }
+      const detail = workflowRunDetailSchema.parse(response.run);
+      const timing = await timingFor(baseUrl, detail);
       if (opts.brief) {
-        if (typeof response !== "object" || response === null || !("run" in response)) {
-          throw new Error("workflow run response is missing run detail");
-        }
-        const detail = workflowRunDetailSchema.parse(response.run);
         const awaitingNode = detail.nodes.find((node) => node.status === "awaiting");
         emit(
           {
@@ -89,13 +116,14 @@ export async function runWorkflowStatus(
                         : {}),
                     }
                   : null,
+              timing,
             },
           },
           { json: opts.json },
         );
         process.exit(EXIT_OK);
       }
-      emit({ data: response }, { json: opts.json });
+      emit({ data: { ...response, timing } }, { json: opts.json });
       process.exit(EXIT_OK);
     }
     if (opts.workflow) {
