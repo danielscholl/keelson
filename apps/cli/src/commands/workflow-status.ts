@@ -101,6 +101,7 @@ export async function runWorkflowStatus(
               worktreePath: detail.worktreePath,
               isolationEnabled: detail.isolationEnabled,
               worktreeEstablished: detail.worktreeEstablished,
+              definitionHash: detail.definitionHash,
               nodes: detail.nodes.map((node) => ({
                 id: node.nodeId,
                 status: node.status,

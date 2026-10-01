@@ -108,6 +108,7 @@ import {
   validateWorkflowInvariants,
   type WorkflowDefinition,
   withoutApprovalReviewers,
+  workflowDefinitionHash,
   workflowDefinitionSchema,
   worktreePathForRepoLocal,
 } from "@keelson/workflows";
@@ -1239,6 +1240,7 @@ function startRunCore(
       startedByRibId,
       providerOverride: providerOverride ?? null,
       isolationEnabled: isolationOn,
+      definitionHash: workflowDefinitionHash(workflow),
     });
   } catch (err) {
     if (lockHandle !== undefined) {
@@ -1549,10 +1551,11 @@ function resumeRunCore(
     };
   }
 
-  // Atomically claim the run: one UPDATE flips failed/cancelled → running. A
-  // succeeded (or otherwise non-interrupted) run, or one a concurrent resume
-  // already claimed, loses here — only the winner launches a background run.
-  if (!store.claimRunForResume(runId)) {
+  // Atomically claim the run: one UPDATE flips failed/cancelled → running and
+  // re-stamps the definition hash. A succeeded (or otherwise non-interrupted)
+  // run, or one a concurrent resume already claimed, loses here — only the
+  // winner launches a background run.
+  if (!store.claimRunForResume(runId, workflowDefinitionHash(workflow))) {
     if (lockHandle !== undefined) {
       releaseMutationLockNow(runId, lockHandle);
       lockHandle = undefined;

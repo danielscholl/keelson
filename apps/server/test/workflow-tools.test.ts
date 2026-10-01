@@ -829,12 +829,14 @@ nodes:
       conversationId: conversationStore.create({ providerId: "workflow" }).id,
       workingDir: cwd,
       isolationEnabled: true,
+      definitionHash: "c3".repeat(32),
     });
     const status = toolByName(tools, "workflow_status");
 
     const activeCtx = makeCtx(cwd);
     await status.execute({}, activeCtx.ctx);
     const active = lastToolResult(activeCtx.chunks).content;
+    expect(active).toContain(`Definition: ${"c3".repeat(8)}.`);
     expect(active).toContain("Isolation: required; worktree not yet established.");
     expect(active).toContain(`Requested source: "${cwd}".`);
     expect(active).not.toContain("execution directory");

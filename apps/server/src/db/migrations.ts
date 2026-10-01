@@ -374,6 +374,13 @@ const migrations: Migration[] = [
       db.exec("ALTER TABLE workflow_node_outputs ADD COLUMN approval_json TEXT;");
     },
   },
+  {
+    version: 19,
+    description: "persist the content hash of the workflow definition each run executed",
+    up: (db) => {
+      db.exec("ALTER TABLE workflow_runs ADD COLUMN definition_hash TEXT;");
+    },
+  },
 ];
 
 // The lowest version this build can apply. A database stamped below it was

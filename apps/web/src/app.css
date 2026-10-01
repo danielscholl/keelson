@@ -10784,9 +10784,10 @@ a.cvb-card-title::after {
   outline-offset: 2px;
   border-radius: 3px;
 }
-/* Run-level provider·model chip — the boxed monospace voice of the trace's
-   per-node .node-model chip, scaled to the header row. */
-.run-provenance {
+/* Run-level provider·model and definition-hash chips — the boxed monospace
+   voice of the trace's per-node .node-model chip, scaled to the header row. */
+.run-provenance,
+.run-definition {
   font-family: ui-monospace, monospace;
   font-size: 10px;
   font-weight: 600;

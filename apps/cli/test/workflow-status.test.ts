@@ -67,6 +67,7 @@ test("workflow status brief preserves run errors and isolation facts", async () 
     worktreePath: null,
     isolationEnabled: true,
     worktreeEstablished: false,
+    definitionHash: "9e".repeat(32),
     inputs: {},
     nodes: [],
   };
@@ -114,6 +115,7 @@ test("workflow status brief preserves run errors and isolation facts", async () 
       worktreePath: null,
       isolationEnabled: true,
       worktreeEstablished: false,
+      definitionHash: "9e".repeat(32),
     });
   } finally {
     server.stop(true);
