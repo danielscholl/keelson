@@ -1163,7 +1163,7 @@ nodes:
             required: [location, severity, confidence, problem, fix, repro]
             properties:
               location: { type: string }
-              severity: { type: string }
+              severity: { type: string, enum: [CRITICAL, HIGH] }
               confidence: { type: integer }
               problem: { type: string }
               fix: { type: string }

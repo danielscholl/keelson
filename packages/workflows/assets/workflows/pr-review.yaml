@@ -599,7 +599,9 @@ nodes:
       type: object
       required: [verdict, summary, findings]
       properties:
-        verdict: { type: string }
+        verdict:
+          type: string
+          enum: ["READY TO MERGE", "NEEDS NITS", "NEEDS FIXES"]
         summary: { type: string }
         findings:
           type: array
@@ -609,7 +611,9 @@ nodes:
             properties:
               path: { type: string }
               line: { type: integer }
-              severity: { type: string }
+              severity:
+                type: string
+                enum: [CRITICAL, HIGH, MEDIUM]
               confidence: { type: integer }
               what: { type: string }
               why: { type: string }

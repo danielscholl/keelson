@@ -5269,6 +5269,70 @@ describe("runWorkflow — output_schema failure inside the retry loop", () => {
     });
   });
 
+  test("a throwing final attempt still carries the usage of the earlier attempts", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 1\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    let calls = 0;
+    const handler: NodeHandler = {
+      type: "bash",
+      async handle() {
+        if (calls++ > 0) throw new Error("provider exploded");
+        return {
+          status: "succeeded",
+          output: { kind: "text", text: '{"summary":"a"}' },
+          usage: { inputTokens: 10, outputTokens: 5 },
+        };
+      },
+    };
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      onEvent,
+    });
+    expect(summary.nodes.judge).toMatchObject({ state: "failed", error: "provider exploded" });
+    const done = events.find((e) => e.type === "node_done" && e.nodeId === "judge");
+    expect(done?.type === "node_done" ? done.result.usage : undefined).toEqual({
+      inputTokens: 10,
+      outputTokens: 5,
+    });
+  });
+
+  test("unserializable structured output is a failed attempt that keeps its usage", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 1\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    let calls = 0;
+    const handler: NodeHandler = {
+      type: "bash",
+      async handle() {
+        calls++;
+        return {
+          status: "succeeded",
+          output: { kind: "structured", value: { verdict: "ok", n: 1n } },
+          usage: { inputTokens: 4, outputTokens: 2 },
+        };
+      },
+    };
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      onEvent,
+    });
+    expect(calls).toBe(2);
+    expect(summary.nodes.judge).toMatchObject({
+      state: "failed",
+      error: expect.stringContaining("not JSON-serializable"),
+    });
+    const done = events.find((e) => e.type === "node_done" && e.nodeId === "judge");
+    expect(done?.type === "node_done" ? done.result.usage : undefined).toEqual({
+      inputTokens: 8,
+      outputTokens: 4,
+    });
+  });
+
   test("without on_error: all a schema failure is not retried", async () => {
     const workflow = wf("    retry:\n      max_attempts: 1\n      delay_ms: 1000\n");
     const { handler, attempts } = sequencedHandler([

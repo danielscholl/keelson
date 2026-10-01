@@ -314,7 +314,7 @@ These apply across kinds (some only to agent nodes, as noted).
 | `different_vendor_from` | `prompt` | Ancestor prompt id that should run on a different model vendor. Emits a run warning when effective provider/model attribution proves both turns used the same vendor. |
 | `context` | `prompt`, `command` | `fresh` forces a new agent session for the node; `shared` reuses one. |
 | `allowed_tools`, `denied_tools` | `prompt`, `command` | Tool-name filters. Rib tools are default-off; opt in with `allowed_tools`. |
-| `output_schema` | all | A JSON-Schema subset the output must satisfy, or the node fails. |
+| `output_schema` | all | A JSON-Schema subset the output must satisfy, or the node fails: `type`, `required`, `properties`, `items`, and `enum` on a string. Any other keyword is rejected at load. |
 | `output_format` | `prompt`, `command` | Provider structured-output request (Claude). |
 | `retry` | all but `loop` | `{ max_attempts: 1-5, delay_ms: 1000-60000, on_error }`. `delay_ms` doubles each attempt; `on_error` is `transient` (default) or `all`. |
 | `always_run` | all | `true` re-executes the node on a resumed run even if it previously succeeded (default `false`). Its transitive descendants also re-run, including prompt nodes that make provider calls and incur their normal token cost. Use it for a gate or validation that must re-check rather than replay a prior pass: see [resume and side effects](#resume-and-side-effects). |

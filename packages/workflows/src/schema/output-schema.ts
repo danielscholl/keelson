@@ -1,6 +1,6 @@
 /**
  * Declarative per-node output schema — a JSON Schema subset (`type` / `required`
- * / `properties` / `items`) an author writes in YAML. The executor validates a
+ * / `properties` / `items` / string `enum`) an author writes in YAML. The executor validates a
  * node's captured value against it fail-closed before recording output, so a
  * producer node that emits the wrong shape fails fast instead of feeding a
  * malformed `$nodeId.output` to downstream nodes.
@@ -29,11 +29,12 @@ export interface OutputSchema {
   readonly required?: readonly string[];
   readonly properties?: Readonly<Record<string, OutputSchema>>;
   readonly items?: OutputSchema;
+  readonly enum?: readonly string[];
 }
 
 export const outputSchemaSchema: z.ZodType<OutputSchema> = z.lazy(() =>
   // `.strict()`: a fail-closed guard must reject an unknown/misspelled keyword
-  // (`enum`, `additionalProperties`, a typo) at load rather than silently
+  // (`additionalProperties`, `minLength`, a typo) at load rather than silently
   // dropping it and validating against a weaker schema than the author wrote.
   // The refine rejects keywords on an incompatible `type` (e.g. `required` on a
   // string, `items` on an object) — those constraints would be silently ignored.
@@ -43,6 +44,7 @@ export const outputSchemaSchema: z.ZodType<OutputSchema> = z.lazy(() =>
       required: z.array(z.string()).optional(),
       properties: z.record(z.string(), outputSchemaSchema).optional(),
       items: outputSchemaSchema.optional(),
+      enum: z.array(z.string()).min(1).optional(),
     })
     .strict()
     .superRefine((schema, ctx) => {
@@ -65,6 +67,13 @@ export const outputSchemaSchema: z.ZodType<OutputSchema> = z.lazy(() =>
           code: z.ZodIssueCode.custom,
           message: "'items' is only valid when type is 'array'",
           path: ["items"],
+        });
+      }
+      if (schema.type !== "string" && schema.enum !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "'enum' is only valid when type is 'string'",
+          path: ["enum"],
         });
       }
     }),
@@ -115,7 +124,11 @@ function checkValue(value: unknown, schema: OutputSchema, path: string): string 
       return null;
     }
     case "string":
-      return typeof value === "string" ? null : `${path}: expected string, got ${describe(value)}`;
+      if (typeof value !== "string") return `${path}: expected string, got ${describe(value)}`;
+      if (schema.enum !== undefined && !schema.enum.includes(value)) {
+        return `${path}: expected one of ${schema.enum.join(", ")}, got '${value}'`;
+      }
+      return null;
     case "number":
       return typeof value === "number" && Number.isFinite(value)
         ? null

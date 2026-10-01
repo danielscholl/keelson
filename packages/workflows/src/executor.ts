@@ -1108,8 +1108,16 @@ function checkNodeOutput(
 ): NodeResult {
   let result = attempt;
   if (result.status === "succeeded" && result.output.kind === "structured") {
-    if (typeof JSON.stringify(result.output.value) !== "string") {
-      const error = `handler structured output is not JSON-serializable (typeof value: ${typeof result.output.value})`;
+    let detail = `typeof value: ${typeof result.output.value}`;
+    let serialized: unknown;
+    try {
+      serialized = JSON.stringify(result.output.value);
+    } catch (err) {
+      // A cycle or a bigint throws rather than returning undefined.
+      detail = err instanceof Error ? err.message : String(err);
+    }
+    if (typeof serialized !== "string") {
+      const error = `handler structured output is not JSON-serializable (${detail})`;
       emit({ type: "run_warning", nodeId: node.id, message: error });
       result = { ...result, status: "failed", output: { kind: "text", text: "" }, error };
     }
@@ -1140,8 +1148,9 @@ function checkNodeOutput(
 
 // Runs a node's handler, retrying a retryable failure per its `retry:` config.
 // Returns the final NodeResult; rethrows if the final attempt threw, so the
-// caller's writeback-on-throw path stays intact. A returned failure on the final
-// attempt flows through unchanged. Each retry emits a run_warning. The
+// caller's writeback-on-throw path stays intact, unless an earlier attempt
+// spent tokens: the throw then returns as a failure carrying that usage. A
+// returned failure on the final attempt flows through unchanged. Each retry emits a run_warning. The
 // per-attempt output checks (serializable, output_schema) run inside the loop so
 // a malformed reply is a failed attempt the retry can re-ask, not a post-hoc
 // verdict on the last one.
@@ -1192,10 +1201,10 @@ async function runHandlerWithRetry(
         shouldRetryFailure(message, retry, abortSignal)
       ) {
         await backoff(`error: ${message}`);
-        if (abortSignal.aborted) throw err;
-        continue;
+        if (!abortSignal.aborted) continue;
       }
-      throw err;
+      if (spent === undefined) throw err;
+      return withSpent(failedResult(message));
     }
   }
 }
