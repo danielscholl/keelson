@@ -2012,22 +2012,24 @@ export function Chat({
 
   // Two distinct measures for the usage chip: the latest assistant turn's
   // usage carries the context gauge (fill, not spend — context-only reports
-  // keep it fresh), while totals/turns count only turns with real spend so
-  // zero-total reports don't inflate the session group.
+  // keep it fresh), while totals/turns count only billed turns (fresh tokens
+  // or cache traffic) so zero-total reports don't inflate the session group.
   const usageSummary = useMemo<{ latest?: TokenUsage; totals: SessionUsageTotals }>(() => {
     let inputTokens = 0;
     let outputTokens = 0;
+    let cacheReadTokens = 0;
     let turns = 0;
     let latest: TokenUsage | undefined;
     for (const m of messages) {
       if (m.role !== "assistant" || !m.usage) continue;
       latest = m.usage;
-      if (!hasSpend(m.usage)) continue;
+      if (!tokenUsageHasSpend(m.usage)) continue;
       inputTokens += m.usage.inputTokens;
       outputTokens += m.usage.outputTokens;
+      cacheReadTokens += m.usage.cacheReadInputTokens ?? 0;
       turns++;
     }
-    return { latest, totals: { inputTokens, outputTokens, turns } };
+    return { latest, totals: { inputTokens, outputTokens, cacheReadTokens, turns } };
   }, [messages]);
 
   // Cost comes from the ledger, not from pricing messages client-side: only
@@ -2035,14 +2037,7 @@ export function Chat({
   // model swap or a resolved alias would otherwise reprice history). The row
   // is written before the done frame, so a fetch once streaming ends sees it.
   const [ledgerCost, setLedgerCost] = useState<ConversationLedgerCost | null>(null);
-  // Billable turns, not the ↑/↓ render gate: a cache-only turn shows no
-  // in/out row but still has a ledger row to price.
-  const billableTurns = useMemo(
-    () =>
-      messages.filter((m) => m.role === "assistant" && m.usage && tokenUsageHasSpend(m.usage))
-        .length,
-    [messages],
-  );
+  const billableTurns = usageSummary.totals.turns;
   useEffect(() => {
     setLedgerCost(null);
     if (conversationId === null || streaming || billableTurns === 0) return;

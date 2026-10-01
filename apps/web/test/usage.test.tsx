@@ -135,7 +135,7 @@ describe("UsageChip", () => {
           contextTokens: 42_000,
           contextWindow: 200_000,
         }}
-        totals={{ inputTokens: 100, outputTokens: 20, turns: 1 }}
+        totals={{ inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, turns: 1 }}
         popoverId="usage-pop"
       />,
     );
@@ -146,7 +146,7 @@ describe("UsageChip", () => {
     render(
       <UsageChip
         latest={{ inputTokens: 1200, outputTokens: 300 }}
-        totals={{ inputTokens: 2400, outputTokens: 700, turns: 2 }}
+        totals={{ inputTokens: 2400, outputTokens: 700, cacheReadTokens: 0, turns: 2 }}
         popoverId="usage-pop-2"
       />,
     );
@@ -187,7 +187,7 @@ describe("UsagePopover", () => {
           contextTokens: 60_000,
           contextWindow: 200_000,
         }}
-        totals={{ inputTokens: 4000, outputTokens: 900, turns: 3 }}
+        totals={{ inputTokens: 4000, outputTokens: 900, cacheReadTokens: 0, turns: 3 }}
       />,
     );
     expect(screen.getByText("Context")).toBeDefined();
@@ -204,7 +204,7 @@ describe("UsagePopover", () => {
       <UsagePopover
         popoverId="usage-pop-4"
         latest={{ inputTokens: 10, outputTokens: 5 }}
-        totals={{ inputTokens: 10, outputTokens: 5, turns: 1 }}
+        totals={{ inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, turns: 1 }}
       />,
     );
     expect(screen.queryByText("Cache read")).toBeNull();
@@ -217,7 +217,7 @@ describe("UsagePopover", () => {
       <UsagePopover
         popoverId="usage-pop-7"
         latest={{ inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 1200 }}
-        totals={{ inputTokens: 0, outputTokens: 0, turns: 0 }}
+        totals={{ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, turns: 0 }}
       />,
     );
     expect(screen.getByText("Cache write")).toBeDefined();
@@ -233,7 +233,7 @@ describe("UsagePopover — cost and cache hit", () => {
       <UsagePopover
         popoverId="usage-pop-8"
         latest={{ inputTokens: 1000, outputTokens: 500, cacheReadInputTokens: 3000 }}
-        totals={{ inputTokens: 2000, outputTokens: 1000, turns: 2 }}
+        totals={{ inputTokens: 2000, outputTokens: 1000, cacheReadTokens: 0, turns: 2 }}
         ledger={{ lastTurnCostUsd: 0.0076, sessionCostUsd: 0.0153, cacheHitRatio: 0.6 }}
       />,
     );
@@ -251,7 +251,7 @@ describe("UsagePopover — cost and cache hit", () => {
       <UsagePopover
         popoverId="usage-pop-9"
         latest={{ inputTokens: 1000, outputTokens: 500 }}
-        totals={{ inputTokens: 1000, outputTokens: 500, turns: 1 }}
+        totals={{ inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, turns: 1 }}
         ledger={{ lastTurnCostUsd: null, sessionCostUsd: null, cacheHitRatio: null }}
       />,
     );
@@ -264,7 +264,7 @@ describe("UsagePopover — cost and cache hit", () => {
       <UsagePopover
         popoverId="usage-pop-10"
         latest={{ inputTokens: 1000, outputTokens: 500 }}
-        totals={{ inputTokens: 1000, outputTokens: 500, turns: 1 }}
+        totals={{ inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, turns: 1 }}
       />,
     );
     expect(screen.queryByText("Cost")).toBeNull();
@@ -282,12 +282,40 @@ describe("formatCostUsd", () => {
   });
 });
 
+describe("UsageChip — cache-only session", () => {
+  test("renders the cached total when every billed turn was served from cache", () => {
+    render(
+      <UsageChip
+        latest={{ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 12_000 }}
+        totals={{ inputTokens: 0, outputTokens: 0, cacheReadTokens: 12_000, turns: 1 }}
+        popoverId="usage-pop-11"
+      />,
+    );
+    expect(screen.getByText(/⟳ 12k/)).toBeDefined();
+  });
+
+  test("the session section lists the cache read total for a cache-only session", () => {
+    render(
+      <UsagePopover
+        popoverId="usage-pop-12"
+        latest={{ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 12_000 }}
+        totals={{ inputTokens: 0, outputTokens: 0, cacheReadTokens: 12_000, turns: 1 }}
+        ledger={{ lastTurnCostUsd: 0.0024, sessionCostUsd: 0.0024, cacheHitRatio: 1 }}
+      />,
+    );
+    expect(screen.getByText("Session")).toBeDefined();
+    expect(screen.getAllByText("Cache read")).toHaveLength(2);
+    expect(screen.getAllByText("12k")).toHaveLength(2);
+    expect(screen.getAllByText("$0.0024")).toHaveLength(2);
+  });
+});
+
 describe("UsageChip — fabricated-zero guard", () => {
   test("renders nothing when there is neither a context gauge nor session spend", () => {
     const { container } = render(
       <UsageChip
         latest={{ inputTokens: 0, outputTokens: 0, contextTokens: 900 }}
-        totals={{ inputTokens: 0, outputTokens: 0, turns: 0 }}
+        totals={{ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, turns: 0 }}
         popoverId="usage-pop-5"
       />,
     );
@@ -298,7 +326,7 @@ describe("UsageChip — fabricated-zero guard", () => {
     render(
       <UsageChip
         latest={{ inputTokens: 0, outputTokens: 0, contextTokens: 32_000, contextWindow: 64_000 }}
-        totals={{ inputTokens: 0, outputTokens: 0, turns: 0 }}
+        totals={{ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, turns: 0 }}
         popoverId="usage-pop-6"
       />,
     );

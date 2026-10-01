@@ -206,6 +206,9 @@ export function UsagePopover({ popoverId, latest, totals, ledger }: UsagePopover
           <div className="usage-popover-section-title">Session</div>
           <Row label="↑ Input" value={formatTokens(totals.inputTokens)} />
           <Row label="↓ Output" value={formatTokens(totals.outputTokens)} />
+          {totals.cacheReadTokens > 0 && (
+            <Row label="Cache read" value={formatTokens(totals.cacheReadTokens)} />
+          )}
           <Row label="Turns" value={String(totals.turns)} />
           {ledger && (
             <>

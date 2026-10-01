@@ -10,9 +10,12 @@ import {
   hasSpend,
 } from "../../lib/formatTokens.ts";
 
+// Turns and cache reads count every billable turn, including one served
+// entirely from cache; inputTokens/outputTokens stay the fresh ↑/↓ figures.
 export interface SessionUsageTotals {
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
   turns: number;
 }
 
@@ -30,17 +33,21 @@ interface UsageChipProps {
 
 // Composer chip: context-fill percentage when the provider reports a window
 // (the load-bearing number — "how close is this conversation to the edge"),
-// session ↑/↓ totals otherwise. Detail lives in the popover. Renders nothing
-// when there is neither a gauge nor spend (a context-only report without a
-// window) — never a fabricated "↑ 0 ↓ 0".
+// session ↑/↓ totals otherwise, or the cached total when every billed turn was
+// served from cache. Detail lives in the popover. Renders nothing when there is
+// neither a gauge nor a billed turn (a context-only report without a window)
+// — never a fabricated "↑ 0 ↓ 0".
 export function UsageChip({ latest, totals, popoverId }: UsageChipProps) {
   const pct = contextPercent(latest.contextTokens, latest.contextWindow);
-  if (pct === null && !hasSpend(totals)) return null;
+  if (pct === null && totals.turns === 0) return null;
+  const cacheOnly = !hasSpend(totals);
   const level = pct !== null ? contextFillLevel(pct) : "ok";
   const label =
     pct !== null
       ? `Context ${pct}% full (${formatTokens(latest.contextTokens ?? 0)} of ${formatTokens(latest.contextWindow ?? 0)} tokens). Click for details.`
-      : `Session tokens: ${formatTokens(totals.inputTokens)} in, ${formatTokens(totals.outputTokens)} out. Click for details.`;
+      : cacheOnly
+        ? `Session tokens: ${formatTokens(totals.cacheReadTokens)} served from cache. Click for details.`
+        : `Session tokens: ${formatTokens(totals.inputTokens)} in, ${formatTokens(totals.outputTokens)} out. Click for details.`;
   return (
     <button
       type="button"
@@ -56,6 +63,8 @@ export function UsageChip({ latest, totals, popoverId }: UsageChipProps) {
           </span>
           <span className="chat-usage-chip-value">{pct}%</span>
         </>
+      ) : cacheOnly ? (
+        <span className="chat-usage-chip-value">⟳ {formatTokens(totals.cacheReadTokens)}</span>
       ) : (
         <span className="chat-usage-chip-value">
           ↑ {formatTokens(totals.inputTokens)} ↓ {formatTokens(totals.outputTokens)}
