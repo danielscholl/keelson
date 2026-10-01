@@ -105,6 +105,8 @@ export interface RunView {
   projectId?: string | null;
   workingDir?: string | null;
   worktreePath?: string | null;
+  // sha256 of the definition this run executed; null for pre-column rows.
+  definitionHash?: string | null;
 }
 
 export type UseWorkflowRunStatus = "loading" | "ready" | "error";
@@ -282,6 +284,7 @@ export function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
     projectId: snapshot.projectId,
     workingDir: snapshot.workingDir,
     worktreePath: snapshot.worktreePath,
+    definitionHash: snapshot.definitionHash,
   };
   return { run, nodes };
 }

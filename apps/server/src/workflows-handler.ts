@@ -108,6 +108,7 @@ import {
   validateWorkflowInvariants,
   type WorkflowDefinition,
   withoutApprovalReviewers,
+  workflowDefinitionHash,
   workflowDefinitionSchema,
   worktreePathForRepoLocal,
 } from "@keelson/workflows";
@@ -1239,6 +1240,7 @@ function startRunCore(
       startedByRibId,
       providerOverride: providerOverride ?? null,
       isolationEnabled: isolationOn,
+      definitionHash: workflowDefinitionHash(workflow),
     });
   } catch (err) {
     if (lockHandle !== undefined) {

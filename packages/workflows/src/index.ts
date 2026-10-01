@@ -29,6 +29,12 @@ export {
 export { evaluateCondition } from "./conditions.ts";
 export { DIRECTIVE_NAMES, DIRECTIVES, resolveDirective } from "./directives.ts";
 export {
+  canonicalWorkflowJson,
+  SHORT_DEFINITION_HASH_LENGTH,
+  shortDefinitionHash,
+  workflowDefinitionHash,
+} from "./definition-hash.ts";
+export {
   ExecutorValidationError,
   type MemoryTools,
   type NodeContext,

@@ -119,6 +119,7 @@ describe("SQLite WorkflowStore", () => {
       conversationId: mintConv(db, "hello-world-conv"),
       providerOverride: "stub",
       isolationEnabled: true,
+      definitionHash: "ab".repeat(32),
     });
 
     const run = store.getRun("r1");
@@ -137,6 +138,7 @@ describe("SQLite WorkflowStore", () => {
     expect(store.getRunIsolationEnabled("missing")).toBeNull();
     expect(run!.isolationEnabled).toBe(true);
     expect(run!.worktreeEstablished).toBe(false);
+    expect(run!.definitionHash).toBe("ab".repeat(32));
   });
 
   test("persists isolation intent, establishment, and setup errors across reopen", () => {
@@ -181,6 +183,7 @@ describe("SQLite WorkflowStore", () => {
       expect(restored.getRun("legacy")).toMatchObject({
         isolationEnabled: null,
         worktreeEstablished: false,
+        definitionHash: null,
       });
     } finally {
       reopened.close();

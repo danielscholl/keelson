@@ -57,6 +57,8 @@ export interface CreateRunInput {
   // every other launch source.
   startedByRibId?: string | null;
   providerOverride?: string | null;
+  // sha256 of the canonical definition the executor ran (workflowDefinitionHash).
+  definitionHash?: string | null;
 }
 
 // Filter for the general runs feed (GET /api/workflows/runs) and bulk delete.
@@ -195,6 +197,7 @@ interface RunRow {
   rib_id: string | null;
   brief_json: string | null;
   preflight_notice: string | null;
+  definition_hash: string | null;
 }
 
 interface NodeRow {
@@ -230,6 +233,7 @@ function rowToRunSummary(row: RunRow): WorkflowRunSummary {
     origin: row.origin === "scheduled" ? "scheduled" : "manual",
     ribId: row.rib_id,
     preflightNotice: row.preflight_notice,
+    definitionHash: row.definition_hash,
   };
 }
 
@@ -324,7 +328,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   );
 
   const insertRun = db.prepare(
-    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, worktree_base, origin, rib_id, provider_override, isolation_enabled, worktree_established, started_by_rib_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, worktree_base, origin, rib_id, provider_override, isolation_enabled, worktree_established, started_by_rib_id, definition_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const updateRun = db.prepare(
     "UPDATE workflow_runs SET status = ?, completed_at = ?, error = ? WHERE id = ?",
@@ -452,6 +456,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
             : 0,
         input.worktreePath === undefined || input.worktreePath === null ? 0 : 1,
         input.startedByRibId ?? null,
+        input.definitionHash ?? null,
       );
     },
     updateRunStatus(input) {
