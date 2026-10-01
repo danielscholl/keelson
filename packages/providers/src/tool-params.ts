@@ -40,10 +40,14 @@ export function deriveToolParametersJsonSchema(
   // and silently drop the dynamic keys the rib intends to accept.
   const additional = jsonSchema.additionalProperties;
   const patternProps = jsonSchema.patternProperties as Record<string, unknown> | undefined;
-  const allowsDynamicKeys =
-    additional === true ||
-    (typeof additional === "object" && additional !== null) ||
-    (!!patternProps && Object.keys(patternProps).length > 0);
+  const hasPatternProps = !!patternProps && Object.keys(patternProps).length > 0;
+  const additionalIsSchema = typeof additional === "object" && additional !== null;
+  const allowsDynamicKeys = additional === true || additionalIsSchema || hasPatternProps;
   if (!hasNamedProps && !allowsDynamicKeys) return undefined;
+  if (additionalIsSchema && Object.keys(additional).length === 0) {
+    jsonSchema.additionalProperties = true;
+  } else if (!allowsDynamicKeys) {
+    jsonSchema.additionalProperties = false;
+  }
   return jsonSchema;
 }

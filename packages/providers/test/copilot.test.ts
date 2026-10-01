@@ -35,6 +35,7 @@ import {
   isRegisteredProvider,
   registerCopilotProvider,
 } from "../src/index.ts";
+import { deriveToolParametersJsonSchema } from "../src/tool-params.ts";
 
 // --- Mock SDK harness ---
 
@@ -3267,6 +3268,38 @@ describe("CopilotProvider — Phase 3 S2 tool wiring", () => {
     const cfg = sdk.lastSessionConfig()!;
     const tools = cfg.tools as Array<{ parameters?: unknown }>;
     expect(tools[0]!.parameters).toBeUndefined();
+  });
+
+  it("ships plain objects closed and passthrough objects open, unchanged by the factory", async () => {
+    const closedTool = {
+      name: "closed",
+      description: "Plain object",
+      inputSchema: z.object({ a: z.string() }),
+      execute: async () => {},
+    } as unknown as import("@keelson/shared").ToolDefinition;
+    const openTool = {
+      name: "open",
+      description: "Passthrough object",
+      inputSchema: z.object({ a: z.string() }).passthrough(),
+      execute: async () => {},
+    } as unknown as import("@keelson/shared").ToolDefinition;
+
+    const sdk = makeMockSdk({
+      scenario: (session) => session.emit("session.idle"),
+    });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => "real-token",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+    });
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { tools: [closedTool, openTool] }));
+
+    const cfg = sdk.lastSessionConfig()!;
+    const tools = cfg.tools as Array<{ parameters?: Record<string, unknown> }>;
+    expect(tools[0]!.parameters).toEqual(deriveToolParametersJsonSchema(closedTool));
+    expect(tools[0]!.parameters?.additionalProperties).toBe(false);
+    expect(tools[1]!.parameters).toEqual(deriveToolParametersJsonSchema(openTool));
+    expect(tools[1]!.parameters?.additionalProperties).toBe(true);
   });
 
   it("omits SessionConfig.tools when no tools are passed", async () => {
