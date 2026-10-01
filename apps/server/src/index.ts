@@ -26,6 +26,7 @@ import {
 import {
   gatewayCredentialServiceId,
   loadKeelsonConfig,
+  readKeelsonConfig,
   resolveMcpSettings,
 } from "@keelson/shared/config";
 import { keelsonPaths, resolveKeelsonHome, ribDataDir } from "@keelson/shared/paths";
@@ -380,7 +381,12 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const memoryStore = createMemoryStore(db);
   // Publish to the late-bound ref so RibContext.getMemory resolves once boot completes.
   memoryStoreRef = memoryStore;
-  const rawUsageStore = createUsageStore(db);
+  // Boot already warned about an unreadable config; per-query reads stay quiet.
+  const modelPriceOverrides = () => {
+    const result = readKeelsonConfig();
+    return result.ok ? result.config.modelPrices : undefined;
+  };
+  const rawUsageStore = createUsageStore(db, { priceOverrides: modelPriceOverrides });
   // Registered once on the base manager, mirroring RIBS_VERSION_SNAPSHOT_KEY:
   // the live pulse widget subscribes to today's totals + trailing-60-minute
   // series without polling GET /api/usage/summary.

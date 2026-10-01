@@ -54,8 +54,44 @@ describe("mapPiEvent", () => {
         },
       }),
     ).toEqual([
-      { type: "usage", usage: { inputTokens: 12, outputTokens: 7, cacheReadInputTokens: 3 } },
+      {
+        type: "usage",
+        usage: {
+          inputTokens: 12,
+          outputTokens: 7,
+          cacheReadInputTokens: 3,
+          cacheCreationInputTokens: 0,
+        },
+      },
     ]);
+  });
+
+  test("a cache key reported as 0 is forwarded as 0; an absent key is omitted", () => {
+    expect(
+      mapPiEvent({
+        type: "message_update",
+        assistantMessageEvent: {
+          type: "done",
+          message: { usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0 } },
+        },
+      }),
+    ).toEqual([
+      {
+        type: "usage",
+        usage: {
+          inputTokens: 5,
+          outputTokens: 2,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        },
+      },
+    ]);
+    expect(
+      mapPiEvent({
+        type: "message_update",
+        assistantMessageEvent: { type: "done", message: { usage: { input: 5, output: 2 } } },
+      }),
+    ).toEqual([{ type: "usage", usage: { inputTokens: 5, outputTokens: 2 } }]);
   });
 
   test("error → usage then error chunk", () => {
@@ -70,7 +106,15 @@ describe("mapPiEvent", () => {
       },
     });
     expect(out).toEqual([
-      { type: "usage", usage: { inputTokens: 1, outputTokens: 0 } },
+      {
+        type: "usage",
+        usage: {
+          inputTokens: 1,
+          outputTokens: 0,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        },
+      },
       { type: "error", message: "boom" },
     ]);
   });
@@ -93,7 +137,9 @@ describe("mapPiEvent", () => {
           message: { usage: { input: "12", output: 5, cacheRead: -3, cacheWrite: 0 } },
         },
       }),
-    ).toEqual([{ type: "usage", usage: { inputTokens: 0, outputTokens: 5 } }]);
+    ).toEqual([
+      { type: "usage", usage: { inputTokens: 0, outputTokens: 5, cacheCreationInputTokens: 0 } },
+    ]);
   });
 
   test("error without message uses a fallback string", () => {
@@ -367,7 +413,7 @@ describe("PiProvider", () => {
           type: "message_update",
           assistantMessageEvent: {
             type: "done",
-            message: { usage: { input: 4, output: 2, cacheRead: 0, cacheWrite: 0 } },
+            message: { usage: { input: 4, output: 2 } },
           },
         },
         // agent_end no longer closes the queue (pi's session agent_end carries

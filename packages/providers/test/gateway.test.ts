@@ -258,7 +258,7 @@ describe("GatewayProvider.sendQuery", () => {
     });
   });
 
-  it("omits zero cached prompt tokens from usage chunks", async () => {
+  it("forwards zero cached prompt tokens when the key is reported", async () => {
     const usageLine = JSON.stringify({
       choices: [{ delta: {} }],
       usage: {
@@ -266,6 +266,26 @@ describe("GatewayProvider.sendQuery", () => {
         completion_tokens: 7,
         prompt_tokens_details: { cached_tokens: 0 },
       },
+    });
+    const { fn } = mockFetch(() => sse(chunk({ content: "x" }), usageLine, "[DONE]"));
+    const p = new GatewayProvider({
+      id: "g",
+      baseUrl: "http://h/v1",
+      getApiKey: noKey,
+      model: "m",
+      fetchImpl: fn,
+    });
+    const chunks = await collect(p.sendQuery("q", "/tmp"));
+    expect(chunks).toContainEqual({
+      type: "usage",
+      usage: { inputTokens: 11, outputTokens: 7, cacheReadInputTokens: 0 },
+    });
+  });
+
+  it("omits the cache field when the gateway reports no prompt_tokens_details", async () => {
+    const usageLine = JSON.stringify({
+      choices: [{ delta: {} }],
+      usage: { prompt_tokens: 11, completion_tokens: 7 },
     });
     const { fn } = mockFetch(() => sse(chunk({ content: "x" }), usageLine, "[DONE]"));
     const p = new GatewayProvider({

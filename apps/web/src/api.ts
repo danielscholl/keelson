@@ -661,12 +661,18 @@ function buildUsageQuery(query: Record<string, string | number | undefined>): st
 export interface UsageSummaryQuery {
   window?: UsageWindow;
   groupBy?: UsageGroupBy;
+  // Scopes to one conversation's rows across all time; the window is ignored.
+  conversationId?: string;
 }
 
 export async function getUsageSummary(
   query: UsageSummaryQuery = {},
 ): Promise<UsageSummaryResponseWire> {
-  const qs = buildUsageQuery({ window: query.window, groupBy: query.groupBy });
+  const qs = buildUsageQuery({
+    window: query.window,
+    groupBy: query.groupBy,
+    conversationId: query.conversationId,
+  });
   return usageSummaryResponseSchema.parse(
     await apiRequest<unknown>(`/api/usage/summary${qs}`, { label: "/api/usage/summary" }),
   );
@@ -727,6 +733,7 @@ export interface UsageEventsQuery {
   source?: UsageEventSourceWire;
   model?: string;
   status?: string;
+  conversationId?: string;
 }
 
 export async function getUsageEvents(
@@ -738,6 +745,7 @@ export async function getUsageEvents(
     source: query.source,
     model: query.model,
     status: query.status,
+    conversationId: query.conversationId,
   });
   return usageEventsResponseSchema.parse(
     await apiRequest<unknown>(`/api/usage/events${qs}`, { label: "/api/usage/events" }),

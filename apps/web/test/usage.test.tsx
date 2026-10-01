@@ -10,6 +10,7 @@ import { UsageBreakdown, UsagePopover } from "../src/components/Chat/UsagePopove
 import {
   contextFillLevel,
   contextPercent,
+  formatCostUsd,
   formatTokens,
   sumTokenSpend,
 } from "../src/lib/formatTokens.ts";
@@ -31,6 +32,9 @@ let getUsageSummaryImpl: typeof realApi.getUsageSummary = async () => ({
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
+    costUsd: null,
+    unpricedEvents: 0,
+    cacheHitRatio: null,
   },
   groups: [],
 });
@@ -131,7 +135,13 @@ describe("UsageChip", () => {
           contextTokens: 42_000,
           contextWindow: 200_000,
         }}
-        totals={{ inputTokens: 100, outputTokens: 20, turns: 1 }}
+        totals={{
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          turns: 1,
+        }}
         popoverId="usage-pop"
       />,
     );
@@ -142,7 +152,13 @@ describe("UsageChip", () => {
     render(
       <UsageChip
         latest={{ inputTokens: 1200, outputTokens: 300 }}
-        totals={{ inputTokens: 2400, outputTokens: 700, turns: 2 }}
+        totals={{
+          inputTokens: 2400,
+          outputTokens: 700,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          turns: 2,
+        }}
         popoverId="usage-pop-2"
       />,
     );
@@ -183,7 +199,13 @@ describe("UsagePopover", () => {
           contextTokens: 60_000,
           contextWindow: 200_000,
         }}
-        totals={{ inputTokens: 4000, outputTokens: 900, turns: 3 }}
+        totals={{
+          inputTokens: 4000,
+          outputTokens: 900,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          turns: 3,
+        }}
       />,
     );
     expect(screen.getByText("Context")).toBeDefined();
@@ -200,7 +222,13 @@ describe("UsagePopover", () => {
       <UsagePopover
         popoverId="usage-pop-4"
         latest={{ inputTokens: 10, outputTokens: 5 }}
-        totals={{ inputTokens: 10, outputTokens: 5, turns: 1 }}
+        totals={{
+          inputTokens: 10,
+          outputTokens: 5,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          turns: 1,
+        }}
       />,
     );
     expect(screen.queryByText("Cache read")).toBeNull();
@@ -213,7 +241,13 @@ describe("UsagePopover", () => {
       <UsagePopover
         popoverId="usage-pop-7"
         latest={{ inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 1200 }}
-        totals={{ inputTokens: 0, outputTokens: 0, turns: 0 }}
+        totals={{
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          turns: 0,
+        }}
       />,
     );
     expect(screen.getByText("Cache write")).toBeDefined();
@@ -223,12 +257,166 @@ describe("UsagePopover", () => {
   });
 });
 
+describe("UsagePopover — cost and cache hit", () => {
+  test("shows the ledger's last-turn and session cost plus the session cache hit", () => {
+    render(
+      <UsagePopover
+        popoverId="usage-pop-8"
+        latest={{ inputTokens: 1000, outputTokens: 500, cacheReadInputTokens: 3000 }}
+        totals={{
+          inputTokens: 2000,
+          outputTokens: 1000,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          turns: 2,
+        }}
+        ledger={{ lastTurnCostUsd: 0.0076, sessionCostUsd: 0.0153, cacheHitRatio: 0.6 }}
+      />,
+    );
+    // Last turn's own hit ratio from its counts, the session's from the ledger.
+    expect(screen.getAllByText("Cache hit")).toHaveLength(2);
+    expect(screen.getByText("75%")).toBeDefined();
+    expect(screen.getByText("60%")).toBeDefined();
+    expect(screen.getAllByText("Cost")).toHaveLength(2);
+    expect(screen.getByText("$0.0076")).toBeDefined();
+    expect(screen.getByText("$0.0153")).toBeDefined();
+  });
+
+  test("reads unpriced, never $0, when the ledger has no price for the model", () => {
+    render(
+      <UsagePopover
+        popoverId="usage-pop-9"
+        latest={{ inputTokens: 1000, outputTokens: 500 }}
+        totals={{
+          inputTokens: 1000,
+          outputTokens: 500,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          turns: 1,
+        }}
+        ledger={{ lastTurnCostUsd: null, sessionCostUsd: null, cacheHitRatio: null }}
+      />,
+    );
+    expect(screen.getAllByText("unpriced")).toHaveLength(2);
+    expect(screen.getByText("—")).toBeDefined();
+  });
+
+  test("omits cost rows until the ledger has answered", () => {
+    render(
+      <UsagePopover
+        popoverId="usage-pop-10"
+        latest={{ inputTokens: 1000, outputTokens: 500 }}
+        totals={{
+          inputTokens: 1000,
+          outputTokens: 500,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          turns: 1,
+        }}
+      />,
+    );
+    expect(screen.queryByText("Cost")).toBeNull();
+    expect(screen.queryByText("Cache hit")).toBeNull();
+  });
+});
+
+describe("formatCostUsd", () => {
+  test("never shows a positive cost as $0.0000, and null as unpriced", () => {
+    expect(formatCostUsd(0)).toBe("$0.0000");
+    expect(formatCostUsd(0.000001)).toBe("<$0.0001");
+    expect(formatCostUsd(0.0123)).toBe("$0.0123");
+    expect(formatCostUsd(12.345)).toBe("$12.35");
+    expect(formatCostUsd(null)).toBe("unpriced");
+  });
+});
+
+describe("UsageChip — cache-only session", () => {
+  test("renders the cached total when every billed turn was served from cache", () => {
+    render(
+      <UsageChip
+        latest={{ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 12_000 }}
+        totals={{
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 12_000,
+          cacheWriteTokens: 0,
+          turns: 1,
+        }}
+        popoverId="usage-pop-11"
+      />,
+    );
+    expect(screen.getByText(/⟳ 12k/)).toBeDefined();
+  });
+
+  test("the session section lists the cache read total for a cache-only session", () => {
+    render(
+      <UsagePopover
+        popoverId="usage-pop-12"
+        latest={{ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 12_000 }}
+        totals={{
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 12_000,
+          cacheWriteTokens: 0,
+          turns: 1,
+        }}
+        ledger={{ lastTurnCostUsd: 0.0024, sessionCostUsd: 0.0024, cacheHitRatio: 1 }}
+      />,
+    );
+    expect(screen.getByText("Session")).toBeDefined();
+    expect(screen.getAllByText("Cache read")).toHaveLength(2);
+    expect(screen.getAllByText("12k")).toHaveLength(2);
+    expect(screen.getAllByText("$0.0024")).toHaveLength(2);
+  });
+});
+
+describe("UsageChip — cache-write-only session", () => {
+  test("renders the written total and lists it in the Session section", () => {
+    render(
+      <UsageChip
+        latest={{ inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 1200 }}
+        totals={{
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 1200,
+          turns: 1,
+        }}
+        popoverId="usage-pop-13"
+      />,
+    );
+    expect(screen.getByText(/⟳ 1\.2k/)).toBeDefined();
+    render(
+      <UsagePopover
+        popoverId="usage-pop-14"
+        latest={{ inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 1200 }}
+        totals={{
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 1200,
+          turns: 1,
+        }}
+      />,
+    );
+    expect(screen.getByText("Session")).toBeDefined();
+    expect(screen.getAllByText("Cache write")).toHaveLength(2);
+    expect(screen.queryByText("Cache read")).toBeNull();
+  });
+});
+
 describe("UsageChip — fabricated-zero guard", () => {
   test("renders nothing when there is neither a context gauge nor session spend", () => {
     const { container } = render(
       <UsageChip
         latest={{ inputTokens: 0, outputTokens: 0, contextTokens: 900 }}
-        totals={{ inputTokens: 0, outputTokens: 0, turns: 0 }}
+        totals={{
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          turns: 0,
+        }}
         popoverId="usage-pop-5"
       />,
     );
@@ -239,7 +427,13 @@ describe("UsageChip — fabricated-zero guard", () => {
     render(
       <UsageChip
         latest={{ inputTokens: 0, outputTokens: 0, contextTokens: 32_000, contextWindow: 64_000 }}
-        totals={{ inputTokens: 0, outputTokens: 0, turns: 0 }}
+        totals={{
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          turns: 0,
+        }}
         popoverId="usage-pop-6"
       />,
     );
@@ -286,6 +480,9 @@ describe("Usage page", () => {
           outputTokens: 40,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
+          costUsd: null,
+          unpricedEvents: 2,
+          cacheHitRatio: null,
         },
       ];
     };
@@ -309,6 +506,10 @@ describe("Usage page", () => {
         totalTokens: 1200,
         avgTokensPerRun: 400,
         p95TokensPerRun: 700,
+        totalCostUsd: null,
+        costUsdPerRun: null,
+        unpricedEvents: 0,
+        cacheHitRatio: null,
       },
     ];
 
@@ -323,6 +524,31 @@ describe("Usage page", () => {
     getUsageJobsImpl = async () => [];
   });
 
+  test("a job with unpriced runs says how many rows kept its cost null", async () => {
+    getUsageJobsImpl = async () => [
+      {
+        key: "mixed-job",
+        runs: 3,
+        totalTokens: 900,
+        avgTokensPerRun: 300,
+        p95TokensPerRun: 400,
+        totalCostUsd: null,
+        costUsdPerRun: null,
+        unpricedEvents: 2,
+        cacheHitRatio: null,
+      },
+    ];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    fireEvent.click(screen.getByLabelText("Jobs"));
+    await waitFor(() => expect(screen.getAllByText("mixed-job").length).toBeGreaterThan(0));
+    expect(screen.getAllByText("unpriced (2)")).toHaveLength(2);
+    getUsageJobsImpl = async () => [];
+  });
+
   test("leads the overview with a recommendation strip for a right-size finding", async () => {
     getUsageSummaryImpl = async () => ({
       totals: {
@@ -331,6 +557,9 @@ describe("Usage page", () => {
         outputTokens: 200,
         cacheReadTokens: 250,
         cacheWriteTokens: 0,
+        costUsd: null,
+        unpricedEvents: 1,
+        cacheHitRatio: 250 / 1250,
       },
       groups: [
         {
@@ -340,6 +569,9 @@ describe("Usage page", () => {
           outputTokens: 200,
           cacheReadTokens: 250,
           cacheWriteTokens: 0,
+          costUsd: null,
+          unpricedEvents: 1,
+          cacheHitRatio: 250 / 1250,
         },
       ],
     });
@@ -351,6 +583,10 @@ describe("Usage page", () => {
         totalTokens: 1500,
         avgTokensPerRun: 300,
         p95TokensPerRun: 400,
+        totalCostUsd: null,
+        costUsdPerRun: null,
+        unpricedEvents: 0,
+        cacheHitRatio: null,
       },
     ];
     getUsageEventsImpl = async () => [];
@@ -368,6 +604,10 @@ describe("Usage page", () => {
     // Pulse still owns the facts (cache-read share) — no longer duplicated below.
     expect(screen.getByText("250 of 1.3k input")).toBeDefined();
     expect(screen.getAllByText("20%").length).toBeGreaterThan(0);
+    // An unpriced model nulls the window's cost; the tile says so and counts it.
+    expect(screen.getByText("Cost")).toBeDefined();
+    expect(screen.getAllByText("unpriced").length).toBeGreaterThan(0);
+    expect(screen.getByText("1 unpriced turn")).toBeDefined();
 
     // The share meter still renders on the Models sub-view.
     fireEvent.click(screen.getByLabelText("Models"));
@@ -381,6 +621,9 @@ describe("Usage page", () => {
         outputTokens: 0,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        costUsd: null,
+        unpricedEvents: 0,
+        cacheHitRatio: null,
       },
       groups: [],
     });
@@ -396,6 +639,9 @@ describe("Usage page", () => {
         outputTokens: 200,
         cacheReadTokens: 250,
         cacheWriteTokens: 0,
+        costUsd: null,
+        unpricedEvents: 1,
+        cacheHitRatio: 250 / 1250,
       },
       groups: [],
     });
@@ -407,6 +653,10 @@ describe("Usage page", () => {
         totalTokens: 52,
         avgTokensPerRun: 26,
         p95TokensPerRun: 26,
+        totalCostUsd: null,
+        costUsdPerRun: null,
+        unpricedEvents: 0,
+        cacheHitRatio: null,
       },
     ];
     getUsageEventsImpl = async () => [];
@@ -427,6 +677,9 @@ describe("Usage page", () => {
         outputTokens: 0,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        costUsd: null,
+        unpricedEvents: 0,
+        cacheHitRatio: null,
       },
       groups: [],
     });
@@ -441,6 +694,10 @@ describe("Usage page", () => {
         totalTokens: 1920,
         avgTokensPerRun: 320,
         p95TokensPerRun: 400,
+        totalCostUsd: null,
+        costUsdPerRun: null,
+        unpricedEvents: 0,
+        cacheHitRatio: null,
       },
     ];
 
@@ -466,6 +723,9 @@ describe("Usage page", () => {
               outputTokens: 5,
               cacheReadTokens: 0,
               cacheWriteTokens: 0,
+              costUsd: null,
+              unpricedEvents: 1,
+              cacheHitRatio: null,
             },
             groups: [
               {
@@ -475,6 +735,9 @@ describe("Usage page", () => {
                 outputTokens: 5,
                 cacheReadTokens: 0,
                 cacheWriteTokens: 0,
+                costUsd: null,
+                unpricedEvents: 1,
+                cacheHitRatio: null,
               },
             ],
           }
@@ -485,6 +748,9 @@ describe("Usage page", () => {
               outputTokens: 5,
               cacheReadTokens: 0,
               cacheWriteTokens: 0,
+              costUsd: null,
+              unpricedEvents: 1,
+              cacheHitRatio: null,
             },
             groups: [],
           };
@@ -526,6 +792,9 @@ describe("Usage page", () => {
         outputTokens: 0,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        costUsd: null,
+        unpricedEvents: 0,
+        cacheHitRatio: null,
       },
       groups: [],
     });
@@ -543,6 +812,9 @@ describe("Usage page", () => {
               outputTokens: 5,
               cacheReadTokens: 0,
               cacheWriteTokens: 0,
+              costUsd: null,
+              unpricedEvents: 1,
+              cacheHitRatio: null,
             },
             groups: [
               {
@@ -552,6 +824,9 @@ describe("Usage page", () => {
                 outputTokens: 5,
                 cacheReadTokens: 0,
                 cacheWriteTokens: 0,
+                costUsd: null,
+                unpricedEvents: 1,
+                cacheHitRatio: null,
               },
             ],
           }
@@ -562,6 +837,9 @@ describe("Usage page", () => {
               outputTokens: 5,
               cacheReadTokens: 0,
               cacheWriteTokens: 0,
+              costUsd: null,
+              unpricedEvents: 1,
+              cacheHitRatio: null,
             },
             groups: [],
           };
@@ -599,6 +877,9 @@ describe("Usage page", () => {
         outputTokens: 0,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        costUsd: null,
+        unpricedEvents: 0,
+        cacheHitRatio: null,
       },
       groups: [],
     });

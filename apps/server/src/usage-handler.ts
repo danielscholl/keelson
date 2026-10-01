@@ -44,10 +44,13 @@ const bucketSchema: z.ZodType<UsageSeriesBucket> = z.enum(["hour", "day"]);
 
 const eventSourceSchema: z.ZodType<UsageEventSource> = z.enum(["chat", "workflow", "rib"]);
 
+// A conversationId scopes the query to that conversation's rows across all
+// time: the conversation bounds the set, so the window is not applied.
 const summaryQuerySchema = z
   .object({
     window: windowSchema,
     groupBy: groupBySchema.default("model"),
+    conversationId: z.string().min(1).optional(),
   })
   .strict();
 
@@ -80,6 +83,7 @@ const eventsQuerySchema = z
     source: eventSourceSchema.optional(),
     model: z.string().optional(),
     status: z.string().optional(),
+    conversationId: z.string().min(1).optional(),
   })
   .strict();
 
@@ -96,13 +100,18 @@ export function usageRoutes(app: Hono, deps: UsageRoutesDeps): void {
     const parsed = summaryQuerySchema.safeParse({
       window: c.req.query("window"),
       groupBy: c.req.query("groupBy"),
+      conversationId: c.req.query("conversationId"),
     });
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
     }
-    const sinceIso = windowToSinceIso(parsed.data.window);
+    const { conversationId } = parsed.data;
     const result = usageSummaryResponseSchema.parse(
-      store.summary({ sinceIso, groupBy: parsed.data.groupBy }),
+      store.summary(
+        conversationId !== undefined
+          ? { conversationId, groupBy: parsed.data.groupBy }
+          : { sinceIso: windowToSinceIso(parsed.data.window), groupBy: parsed.data.groupBy },
+      ),
     );
     return c.json(result);
   });
@@ -163,14 +172,17 @@ export function usageRoutes(app: Hono, deps: UsageRoutesDeps): void {
       source: c.req.query("source"),
       model: c.req.query("model"),
       status: c.req.query("status"),
+      conversationId: c.req.query("conversationId"),
     });
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
     }
-    const sinceIso = windowToSinceIso(parsed.data.window);
+    const { conversationId } = parsed.data;
     const result = usageEventsResponseSchema.parse(
       store.events({
-        sinceIso,
+        ...(conversationId !== undefined
+          ? { conversationId }
+          : { sinceIso: windowToSinceIso(parsed.data.window) }),
         limit: parsed.data.limit,
         source: parsed.data.source,
         model: parsed.data.model,

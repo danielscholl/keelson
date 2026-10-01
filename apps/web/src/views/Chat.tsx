@@ -9,6 +9,7 @@ import {
   type ReasoningEffortLevel,
   type RegisteredToolInfo,
   type TokenUsage,
+  tokenUsageHasSpend,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
 import type { KeyboardEvent } from "react";
@@ -24,6 +25,8 @@ import {
   fetchTools,
   getCommands,
   getConversation,
+  getUsageEvents,
+  getUsageSummary,
   invokeRibCommand,
   listProjects,
   listWorkflows,
@@ -53,7 +56,7 @@ import {
 import { ToolsChip } from "../components/Chat/ToolsChip.tsx";
 import { ToolsPopover } from "../components/Chat/ToolsPopover.tsx";
 import { type SessionUsageTotals, UsageChip } from "../components/Chat/UsageChip.tsx";
-import { UsagePopover } from "../components/Chat/UsagePopover.tsx";
+import { type ConversationLedgerCost, UsagePopover } from "../components/Chat/UsagePopover.tsx";
 import { AddToNotebookModal } from "../components/Memory/AddToNotebookModal.tsx";
 import { useRibsContext } from "../components/RibsProvider.tsx";
 import { SkeletonStack } from "../components/Skeleton.tsx";
@@ -2009,23 +2012,60 @@ export function Chat({
 
   // Two distinct measures for the usage chip: the latest assistant turn's
   // usage carries the context gauge (fill, not spend — context-only reports
-  // keep it fresh), while totals/turns count only turns with real spend so
-  // zero-total reports don't inflate the session group.
+  // keep it fresh), while totals/turns count only billed turns (fresh tokens
+  // or cache traffic) so zero-total reports don't inflate the session group.
   const usageSummary = useMemo<{ latest?: TokenUsage; totals: SessionUsageTotals }>(() => {
     let inputTokens = 0;
     let outputTokens = 0;
+    let cacheReadTokens = 0;
+    let cacheWriteTokens = 0;
     let turns = 0;
     let latest: TokenUsage | undefined;
     for (const m of messages) {
       if (m.role !== "assistant" || !m.usage) continue;
       latest = m.usage;
-      if (!hasSpend(m.usage)) continue;
+      if (!tokenUsageHasSpend(m.usage)) continue;
       inputTokens += m.usage.inputTokens;
       outputTokens += m.usage.outputTokens;
+      cacheReadTokens += m.usage.cacheReadInputTokens ?? 0;
+      cacheWriteTokens += m.usage.cacheCreationInputTokens ?? 0;
       turns++;
     }
-    return { latest, totals: { inputTokens, outputTokens, turns } };
+    return {
+      latest,
+      totals: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, turns },
+    };
   }, [messages]);
+
+  // Cost comes from the ledger, not from pricing messages client-side: only
+  // the ledger row knows the model that served each turn (a mid-conversation
+  // model swap or a resolved alias would otherwise reprice history). The row
+  // is written before the done frame, so a fetch once streaming ends sees it.
+  const [ledgerCost, setLedgerCost] = useState<ConversationLedgerCost | null>(null);
+  const billableTurns = usageSummary.totals.turns;
+  useEffect(() => {
+    setLedgerCost(null);
+    if (conversationId === null || streaming || billableTurns === 0) return;
+    let cancelled = false;
+    void Promise.all([
+      getUsageSummary({ conversationId }),
+      getUsageEvents({ conversationId, limit: 1 }),
+    ])
+      .then(([summary, events]) => {
+        if (cancelled) return;
+        setLedgerCost({
+          lastTurnCostUsd: events[0]?.costUsd ?? null,
+          sessionCostUsd: summary.totals.costUsd,
+          cacheHitRatio: summary.totals.cacheHitRatio,
+        });
+      })
+      .catch(() => {
+        // Cost rows simply stay absent; the token figures above don't depend on it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, streaming, billableTurns]);
 
   const sidebarCollapsed = settings.sidebarCollapsed ?? false;
 
@@ -2368,6 +2408,7 @@ export function Chat({
             popoverId={USAGE_POPOVER_ID}
             latest={usageSummary.latest}
             totals={usageSummary.totals}
+            ledger={ledgerCost ?? undefined}
           />
         )}
 
