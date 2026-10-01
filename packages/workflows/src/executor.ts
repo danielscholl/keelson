@@ -25,6 +25,7 @@ import type {
 } from "./schema/index.ts";
 import { validateOutput } from "./schema/index.ts";
 import { checkTriggerRule } from "./triggers.ts";
+import { addNodeUsage } from "./usage.ts";
 
 // Wire-protocol constants. Mirror the canonical values exported from
 // `@keelson/shared/memory.ts`; intentionally duplicated rather than imported
@@ -1153,6 +1154,10 @@ async function runHandlerWithRetry(
 ): Promise<NodeResult> {
   const retry = retryConfigOf(node);
   const maxRetries = retry?.max_attempts ?? 0;
+  // A rejected attempt still spent tokens; the final result carries the total.
+  let spent: NodeTokenUsage | undefined;
+  const withSpent = (r: NodeResult): NodeResult =>
+    spent === undefined ? r : { ...r, usage: spent };
   for (let attempt = 0; ; attempt++) {
     const backoff = async (reason: string): Promise<void> => {
       const delayMs = (retry?.delay_ms ?? DEFAULT_RETRY_DELAY_MS) * 2 ** attempt;
@@ -1165,6 +1170,7 @@ async function runHandlerWithRetry(
     };
     try {
       const result = checkNodeOutput(node, await handler.handle(node, nodeCtx), emit);
+      spent = addNodeUsage(spent, result.usage);
       if (
         result.status === "failed" &&
         retry !== undefined &&
@@ -1174,10 +1180,10 @@ async function runHandlerWithRetry(
         await backoff(`failure: ${result.error ?? "unknown error"}`);
         // A cancel during the backoff wait is authoritative: surface the last
         // failure rather than invoking the handler once more.
-        if (abortSignal.aborted) return result;
+        if (abortSignal.aborted) return withSpent(result);
         continue;
       }
-      return result;
+      return withSpent(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (

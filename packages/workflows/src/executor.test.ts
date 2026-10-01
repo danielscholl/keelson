@@ -9,6 +9,7 @@ import {
   ExecutorValidationError,
   type MemoryTools,
   type NodeHandler,
+  type NodeTokenUsage,
   type NotebookAdapter,
   type RecallResponseLike,
   type RunOptions,
@@ -5206,6 +5207,66 @@ describe("runWorkflow — output_schema failure inside the retry loop", () => {
       error: expect.stringContaining("output_schema validation failed"),
     });
     expect(attempts()).toBe(2);
+  });
+
+  function usageHandler(replies: { text: string; usage: NodeTokenUsage }[]): NodeHandler {
+    let calls = 0;
+    return {
+      type: "bash",
+      async handle() {
+        const r = replies[Math.min(calls, replies.length - 1)];
+        calls++;
+        return { status: "succeeded", output: { kind: "text", text: r.text }, usage: r.usage };
+      },
+    };
+  }
+
+  test("usage from a schema-rejected attempt is summed into the winning result", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 1\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    const handler = usageHandler([
+      {
+        text: '{"summary":"no verdict"}',
+        usage: { inputTokens: 10, outputTokens: 5, contextTokens: 100 },
+      },
+      { text: '{"verdict":"ok"}', usage: { inputTokens: 7, outputTokens: 3, contextTokens: 40 } },
+    ]);
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      onEvent,
+    });
+    expect(summary.status).toBe("succeeded");
+    const done = events.find((e) => e.type === "node_done" && e.nodeId === "judge");
+    expect(done?.type === "node_done" ? done.result.usage : undefined).toEqual({
+      inputTokens: 17,
+      outputTokens: 8,
+      contextTokens: 40,
+    });
+  });
+
+  test("a failed final attempt still carries the usage of every attempt", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 1\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    const handler = usageHandler([
+      { text: '{"summary":"a"}', usage: { inputTokens: 10, outputTokens: 5 } },
+      { text: '{"summary":"b"}', usage: { inputTokens: 7, outputTokens: 3 } },
+    ]);
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      onEvent,
+    });
+    expect(summary.nodes.judge.state).toBe("failed");
+    const done = events.find((e) => e.type === "node_done" && e.nodeId === "judge");
+    expect(done?.type === "node_done" ? done.result.usage : undefined).toEqual({
+      inputTokens: 17,
+      outputTokens: 8,
+    });
   });
 
   test("without on_error: all a schema failure is not retried", async () => {
