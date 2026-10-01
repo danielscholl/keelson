@@ -152,9 +152,11 @@ three independent reviewers (correctness, conventions, and coverage) read it in
 parallel (they share a DAG layer, so the panel costs about one review's
 wall-clock) under a read-only harness rail: `allowed_tools: [Read, Glob, Grep]`,
 the same rail [pr-review](../pr-review/) puts on its lanes, so a reviewer
-*cannot* edit or run shell no matter what its prompt says. Every finding
-carries a `repro`: the command, test, or input that shows the failure, or
-`none` plus the reason. The `triage` judge then holds the same tools and
+*cannot* edit or run shell no matter what its prompt says. Correctness and
+conventions findings carry a required `repro`: the command, test, or input
+that shows the failure, or `none` plus the reason. The coverage lens declares
+the field but leaves it optional, since it emits a test to add rather than a
+fix. The `triage` judge then holds the same tools and
 adversarially **refutes** each candidate against `diff.patch` and the source,
 starting from that repro (one that does not reproduce refutes the finding): a
 survivor is CONFIRMED when the failure was traced
