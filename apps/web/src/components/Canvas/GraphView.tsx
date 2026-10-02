@@ -14,11 +14,9 @@ import "@xyflow/react/dist/style.css";
 import { useMemo } from "react";
 import { type ViewGraphFlowNode, viewGraphLayout } from "../../lib/viewGraphLayout.ts";
 
-// Generic graph node — label + an optional category chip the producer baked
-// into `kind`. Colour stays neutral; the base never enumerates kinds.
 function ViewGraphNode({ data }: NodeProps<ViewGraphFlowNode>) {
   return (
-    <div className="view-graph-node">
+    <div className="view-graph-node" data-tone={data.tone}>
       <Handle
         type="target"
         position={Position.Top}

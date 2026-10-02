@@ -1,5 +1,5 @@
 import dagre from "@dagrejs/dagre";
-import type { CanvasGraphView } from "@keelson/shared";
+import type { CanvasGraphView, CanvasTone } from "@keelson/shared";
 import type { Edge, Node as RFNode } from "@xyflow/react";
 
 // Generic node-link layout for `kind: "view"` graph payloads. Mirrors the
@@ -11,6 +11,7 @@ export const VIEW_NODE_HEIGHT = 56;
 export interface ViewGraphNodeData {
   label: string;
   kind?: string;
+  tone?: CanvasTone;
   [key: string]: unknown;
 }
 export type ViewGraphFlowNode = RFNode<ViewGraphNodeData, "viewGraphNode">;
@@ -29,7 +30,7 @@ export function viewGraphLayout(view: CanvasGraphView): {
     id: n.id,
     type: "viewGraphNode",
     position: { x: 0, y: i * 90 },
-    data: { label: n.label ?? n.id, kind: n.kind },
+    data: { label: n.label ?? n.id, kind: n.kind, tone: n.tone },
   }));
   const edges: Edge[] = liveEdges.map((e, i) => ({
     id: `${e.source}->${e.target}#${i}`,
