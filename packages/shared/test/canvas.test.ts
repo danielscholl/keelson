@@ -8,7 +8,55 @@ import {
   canvasViewSchema,
   getRunArtifactResponseSchema,
 } from "../src/canvas.ts";
-import { type CanvasPlacement, canvasPlacementSchema } from "../src/index.ts";
+import {
+  type CanvasGraphSection,
+  type CanvasPlacement,
+  canvasPlacementSchema,
+} from "../src/index.ts";
+
+describe("graph board section", () => {
+  it("parses a minimal graph through the public view schema", () => {
+    const section: CanvasGraphSection = {
+      kind: "graph",
+      nodes: [{ id: "a", label: "A" }],
+      edges: [],
+    };
+    expect(canvasViewSchema.parse({ view: "board", sections: [section] })).toEqual({
+      view: "board",
+      sections: [section],
+    });
+  });
+
+  it("rejects duplicate nodes and dangling edges", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "graph",
+            nodes: [
+              { id: "a", label: "A" },
+              { id: "a", label: "Again" },
+            ],
+            edges: [],
+          },
+        ],
+      }),
+    ).toThrow(/unique/);
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "graph",
+            nodes: [{ id: "a", label: "A" }],
+            edges: [{ source: "a", target: "missing" }],
+          },
+        ],
+      }),
+    ).toThrow(/names no node/);
+  });
+});
 
 describe("canvasPlacementSchema", () => {
   it("exports both supported placements through the package entry point", () => {

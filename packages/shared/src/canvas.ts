@@ -183,6 +183,7 @@ export const canvasGraphViewSchema = z
             id: z.string().min(1),
             label: z.string().optional(),
             kind: z.string().optional(),
+            tone: canvasToneSchema.optional(),
           })
           .strict(),
       )
@@ -934,6 +935,49 @@ const journeySectionSchema = z
   .strict();
 export type CanvasJourneySection = z.infer<typeof journeySectionSchema>;
 
+const graphSectionSchema = z
+  .object({
+    kind: z.literal("graph"),
+    title: z.string().optional(),
+    columns: z.array(z.string()).optional(),
+    nodes: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            label: z.string().min(1),
+            sublabel: z.string().min(1).optional(),
+            tone: canvasToneSchema.optional(),
+            kind: z.string().optional(),
+            rank: z.number().int().min(0).optional(),
+            badges: z.array(canvasCellBadgeSchema).optional(),
+            action: canvasCardActionSchema.optional(),
+            selected: z.boolean().optional(),
+          })
+          .strict()
+          .refine((node) => !node.selected || node.action !== undefined, {
+            message: "a selected node requires an action",
+          }),
+      )
+      .min(1)
+      .max(48),
+    edges: z
+      .array(
+        z
+          .object({
+            source: z.string().min(1),
+            target: z.string().min(1),
+            label: z.string().optional(),
+            tone: canvasToneSchema.optional(),
+            dashed: z.boolean().optional(),
+          })
+          .strict(),
+      )
+      .max(200),
+  })
+  .strict();
+export type CanvasGraphSection = z.infer<typeof graphSectionSchema>;
+
 const leafBoardSectionSchema = z.discriminatedUnion("kind", [
   statsSectionSchema,
   segmentsSectionSchema,
@@ -946,6 +990,7 @@ const leafBoardSectionSchema = z.discriminatedUnion("kind", [
   chartSectionSchema,
   seatsSectionSchema,
   journeySectionSchema,
+  graphSectionSchema,
 ]);
 
 // `columns` lays leaf sections side by side (a two-column Lifecycle | Actions
@@ -981,6 +1026,7 @@ const canvasBoardSectionSchema = z.discriminatedUnion("kind", [
   chartSectionSchema,
   seatsSectionSchema,
   journeySectionSchema,
+  graphSectionSchema,
   columnsBoardSectionSchema,
 ]);
 
@@ -1058,6 +1104,27 @@ function assertLeafSectionUniqueness(
         path: [...path, "baseline"],
       });
     }
+  } else if (leaf.kind === "graph") {
+    const ids = new Set(leaf.nodes.map((node) => node.id));
+    if (ids.size !== leaf.nodes.length) {
+      ctx.addIssue({
+        code: "custom",
+        message: "node ids must be unique",
+        path: [...path, "nodes"],
+      });
+    }
+    // Reject dangling edges at publish time rather than hiding a producer bug.
+    leaf.edges.forEach((edge, i) => {
+      for (const end of ["source", "target"] as const) {
+        if (!ids.has(edge[end])) {
+          ctx.addIssue({
+            code: "custom",
+            message: `edge ${end} "${edge[end]}" names no node`,
+            path: [...path, "edges", i, end],
+          });
+        }
+      }
+    });
   }
 }
 
