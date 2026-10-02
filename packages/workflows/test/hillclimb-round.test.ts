@@ -638,6 +638,52 @@ shimDescribe("hillclimb round decisions", () => {
     expect(readFileSync(join(fx.repo, "other.txt"), "utf8")).toBe("changed by the proposer\n");
   });
 
+  test("an edit to a file that was already dirty or untracked is a scope violation", () => {
+    for (const name of ["other.txt", "notes.txt"]) {
+      const previousBranch = git(fx, "branch", "--show-current");
+      git(fx, "checkout", "-q", "main");
+      git(fx, "branch", "-D", previousBranch);
+      rmSync(fx.artifacts, { recursive: true, force: true });
+      mkdirSync(fx.artifacts);
+      writeFileSync(join(fx.repo, name), "operator work in progress\n");
+      const statusBefore = git(fx, "status", "--porcelain", "--", name);
+      const stagedBefore = git(fx, "diff", "--cached", "--name-only");
+      setUp(fx);
+      propose(fx, "Always greet in English.");
+      writeFileSync(join(fx.repo, name), "rewritten by the proposer\n");
+      expect(git(fx, "status", "--porcelain", "--", name)).toBe(statusBefore);
+      const evalsBefore = calls(fx).filter((c) => c.includes("eval run")).length;
+      const out = round(fx);
+      expect(out).toMatchObject({ decision: "scope-violation", changed: false, continue: false });
+      expect(readFileSync(fx.target, "utf8")).toBe(TARGET_SOURCE);
+      expect(calls(fx).filter((c) => c.includes("eval run"))).toHaveLength(evalsBefore);
+      expect(git(fx, "diff", "--cached", "--name-only")).toBe(stagedBefore);
+    }
+  });
+
+  test("untouched dirty and untracked files do not trip the scope check", () => {
+    const previousBranch = git(fx, "branch", "--show-current");
+    git(fx, "checkout", "-q", "main");
+    git(fx, "branch", "-D", previousBranch);
+    writeFileSync(join(fx.repo, "other.txt"), "operator work in progress\n");
+    writeFileSync(join(fx.repo, "notes.txt"), "operator notes\n");
+    setUp(fx);
+    propose(fx, "Always greet in English.");
+    writeFileSync(
+      join(fx.fake, "next-eval.json"),
+      results(fx, { a: "pass", b: "pass", c: "fail" }),
+    );
+    writeFileSync(join(fx.fake, "next-compare.json"), compare("keep", "improved", "improved"));
+    expect(round(fx)).toMatchObject({ decision: "keep", committed: true, continue: true });
+    propose(fx, "Always greet in English and stop.");
+    writeFileSync(
+      join(fx.fake, "next-eval.json"),
+      results(fx, { a: "pass", b: "pass", c: "pass" }),
+    );
+    expect(round(fx)).toMatchObject({ decision: "keep", committed: true });
+    expect(git(fx, "status", "--porcelain")).toBe("M other.txt\n?? notes.txt");
+  });
+
   test("a similarly named file is not mistaken for the editable target", () => {
     propose(fx, "Always greet in English.");
     writeFileSync(`${fx.target}.backup`, "out of scope\n");
@@ -721,6 +767,34 @@ shimDescribe("hillclimb round decisions", () => {
     expect(view.summary.passed).toBe(1);
     expect(git(fx, "status", "--porcelain")).toBe("");
     expect(git(fx, "log", "--oneline").split("\n")).toHaveLength(1);
+  });
+
+  test("a hook that rewrites the target is rolled back without advancing kept state", () => {
+    const hooks = {
+      "pre-commit":
+        '#!/bin/sh\nprintf "# formatted by a hook\\n" >> .keelson/workflows/demo.yaml\ngit add .keelson/workflows/demo.yaml\n',
+      "post-commit": '#!/bin/sh\nprintf "# stamped by a hook\\n" >> .keelson/workflows/demo.yaml\n',
+    };
+    for (const [hook, script] of Object.entries(hooks)) {
+      const hookPath = join(fx.repo, ".git", "hooks", hook);
+      writeFileSync(hookPath, script, { mode: 0o755 });
+      propose(fx, "Always greet in English.");
+      writeFileSync(
+        join(fx.fake, "next-eval.json"),
+        results(fx, { a: "pass", b: "pass", c: "pass" }),
+      );
+      writeFileSync(join(fx.fake, "next-compare.json"), compare("keep", "improved", "improved"));
+      const out = round(fx);
+      expect(out).toMatchObject({ decision: "error", continue: false, committed: false });
+      expect(String(out.reason)).toContain("differs from the evaluated candidate");
+      expect(readFileSync(fx.target, "utf8")).toBe(TARGET_SOURCE);
+      expect(readFileSync(join(fx.artifacts, "target.kept.yaml"), "utf8")).toBe(TARGET_SOURCE);
+      const kept = JSON.parse(readFileSync(join(fx.artifacts, "kept.json"), "utf8"));
+      expect(kept.summary.overall.passed).toBe(1);
+      expect(git(fx, "status", "--porcelain")).toBe("");
+      expect(git(fx, "log", "--oneline").split("\n")).toHaveLength(1);
+      rmSync(hookPath);
+    }
   });
 
   test("a later failed commit restores the previously committed improvement", () => {

@@ -169,6 +169,30 @@ nodes:
         exit 1
       fi
 
+      cat > "$BIN/hc-snapshot" <<'EOF'
+      #!/usr/bin/env bash
+      # hc-snapshot <repo> <target-rel> <out>: fingerprint everything but the
+      # target, by status and by content, so an edit to an already-dirty or
+      # untracked file still changes the snapshot.
+      set -euo pipefail
+      REPO="$1" REL="$2" OUT="$3"
+      EXCLUDE=":(top,literal,exclude)$REL"
+      git -C "$REPO" status --porcelain -z --untracked-files=all -- . "$EXCLUDE" > "$OUT.tmp"
+      # A scratch index and object store keep the operator's index and odb untouched.
+      ODB="$ARTIFACTS_DIR/scope-objects"
+      mkdir -p "$ODB"
+      REAL_ODB=$(git -C "$REPO" rev-parse --path-format=absolute --git-path objects)
+      export GIT_INDEX_FILE="$ARTIFACTS_DIR/scope.index"
+      export GIT_OBJECT_DIRECTORY="$ODB"
+      export GIT_ALTERNATE_OBJECT_DIRECTORIES="$REAL_ODB"
+      git -C "$REPO" read-tree HEAD
+      git -C "$REPO" rm -q --cached --ignore-unmatch -- ":(top,literal)$REL"
+      git -C "$REPO" add -A -- . "$EXCLUDE"
+      git -C "$REPO" write-tree >> "$OUT.tmp"
+      mv "$OUT.tmp" "$OUT"
+      EOF
+      chmod +x "$BIN/hc-snapshot"
+
       REPO=""
       BRANCH=""
       ORIG_REF=""
@@ -182,7 +206,7 @@ nodes:
         ORIG_REF=$(git -C "$REPO" symbolic-ref --quiet --short HEAD || git -C "$REPO" rev-parse HEAD)
         BRANCH="keelson/hillclimb/$WORKFLOW-$(date -u +%Y%m%dT%H%M%SZ)"
         git -C "$REPO" checkout -q -b "$BRANCH"
-        git -C "$REPO" status --porcelain -z --untracked-files=all -- . ":(top,literal,exclude)${TARGET#"$REPO"/}" > "$A/status.before"
+        "$BIN/hc-snapshot" "$REPO" "${TARGET#"$REPO"/}" "$A/scope.before"
       fi
 
       cp "$TARGET" "$A/target.orig.yaml"
@@ -477,11 +501,11 @@ nodes:
 
       if [ -n "$REPO" ]; then
         REL="${TARGET#"$REPO"/}"
-        if ! git -C "$REPO" status --porcelain -z --untracked-files=all -- . ":(top,literal,exclude)$REL" > "$A/status.now"; then
+        if ! "$A/bin/hc-snapshot" "$REPO" "$REL" "$A/scope.now" 2>"$A/round-$N-snapshot.stderr"; then
           revert
-          finish "error" "git status failed; cannot verify the proposer's editing scope" false
+          finish "error" "could not snapshot the repository (see round-$N-snapshot.stderr); cannot verify the proposer's editing scope" false
         fi
-        if ! cmp -s "$A/status.before" "$A/status.now"; then
+        if ! cmp -s "$A/scope.before" "$A/scope.now"; then
           revert
           CHANGED=false
           finish "scope-violation" "the proposer changed files other than the target; review \`git status\` and discard them" false
@@ -517,6 +541,8 @@ nodes:
         CHANGED=false
         finish "$SCOPE_DECISION" "$(jq -r .reason <<<"$SCOPE")" false
       fi
+      CANDIDATE="$A/round-$N-candidate.yaml"
+      cp "$TARGET" "$CANDIDATE"
       RUN=$("$A/bin/hc-eval" "round-$N")
       if [ "$(jq -r .ok <<<"$RUN")" != "true" ]; then
         revert
@@ -541,12 +567,23 @@ nodes:
       fi
       if [ -n "$REPO" ]; then
         SUBJECT="feat($WORKFLOW): ${SUMMARY:0:60}"
-        if git -C "$REPO" commit -q --only -m "$SUBJECT" -m "Root cause: $ROOT" -m "Hillclimb round $N: $REASON" -- "$TARGET" >/dev/null 2>"$A/round-$N-commit.stderr"; then
-          COMMITTED=true
-        else
+        PRE=$(git -C "$REPO" rev-parse HEAD)
+        if ! git -C "$REPO" commit -q --only -m "$SUBJECT" -m "Root cause: $ROOT" -m "Hillclimb round $N: $REASON" -- "$TARGET" >/dev/null 2>"$A/round-$N-commit.stderr"; then
           revert
           finish "error" "git commit failed (see round-$N-commit.stderr); restored the last kept target without advancing the results" false
         fi
+        # A hook can exit 0 after rewriting the target, so the commit must be
+        # proven to hold the bytes the eval ran.
+        WANT=$(git -C "$REPO" hash-object --path "$REL" "$CANDIDATE" 2>/dev/null || true)
+        GOT=$(git -C "$REPO" rev-parse --verify -q "HEAD:$REL" 2>/dev/null || true)
+        if [ -z "$WANT" ] || [ "$WANT" != "$GOT" ] || ! cmp -s "$CANDIDATE" "$TARGET"; then
+          cp "$TARGET" "$A/round-$N-rejected.yaml"
+          git -C "$REPO" reset -q --soft "$PRE"
+          git -C "$REPO" reset -q "$PRE" -- "$REL"
+          revert
+          finish "error" "the committed or working target differs from the evaluated candidate (a git hook or the eval rewrote it; see round-$N-rejected.yaml); undid the commit and restored the last kept target" false
+        fi
+        COMMITTED=true
       fi
       cp "$TARGET" "$KEPT"
       cp "$A/round-$N.json" "$A/kept.json"

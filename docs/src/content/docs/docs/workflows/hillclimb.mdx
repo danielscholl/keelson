@@ -57,8 +57,14 @@ round on a fresh branch; a target outside a repository is edited in place and
 restored from a snapshot on revert. Commits include only the target file,
 preserving any unrelated staged changes. If a commit fails, the round restores
 the last kept target, leaves the kept results and train view unchanged, and
-stops. An uncommitted round in a git repository never earns a merge
-recommendation.
+stops. Git hooks still run, so a round also stops when the committed file or
+the working copy no longer matches the bytes the eval ran: the commit is undone
+and the last kept target restored. An uncommitted round in a git repository
+never earns a merge recommendation.
+
+Every other file in the repository is fingerprinted by content at preflight,
+uncommitted and untracked work included. A round that finds any of them
+changed, even a file that was already dirty, is a scope violation.
 
 <Aside type="caution" title="It runs the eval many times">
 Every round re-runs the whole case set, both splits. The baseline plus three
@@ -82,10 +88,10 @@ runs only when something still fails, and `report` writes the verdict.
 
 | Node | Kind | What it does |
 | --- | --- | --- |
-| `preflight` | bash | Parses the case file, resolves and validates the target, refuses a dirty target, creates the branch, snapshots the file, and writes the eval, scope-check, and train-view helpers. |
+| `preflight` | bash | Parses the case file, resolves and validates the target, refuses a dirty target, creates the branch, snapshots the file and the rest of the repository, and writes the eval, scope-check, snapshot, and train-view helpers. |
 | `baseline` | bash | Runs the case set, fails on any errored case or mixed workflow definitions, copies the results beside the run, and builds the train-only view. |
 | `propose-1..3` | prompt (`deep`) | Reads the train view and makes one root-cause change to the target. Emits `{changed, root_cause, change_summary}`. |
-| `round-1..3` | bash | Validates the YAML, checks protected fields against the last kept target, rejects out-of-scope or comment-only edits before evaluating, then evaluates and compares. Advances kept state only after a successful commit when git is used. |
+| `round-1..3` | bash | Validates the YAML, checks protected fields against the last kept target, rejects out-of-scope or comment-only edits before evaluating, then evaluates and compares. Advances kept state only after a commit that holds the evaluated bytes when git is used. |
 | `collect` | bash | Assembles the ledger: before/after table per split, the rounds and their reasons, cost delta, remaining failures. Copies the ledger and each round's change and decision to `hillclimb-<run id>/` beside the eval results, so they outlive the run. Returns to the original branch when nothing was kept. |
 | `bucket` | prompt (`deep`) | Groups the remaining failures by root cause, flags ambiguous cases and grader contradictions, and recommends more reps or cases where the interval is wide. |
 | `report` | prompt (`balanced`) | Formats the ledger and the buckets, and ends with the one-line merge recommendation `collect` computed. |
