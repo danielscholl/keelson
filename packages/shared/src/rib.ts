@@ -933,10 +933,13 @@ export type OpenChatSeed = z.infer<typeof openChatSeedSchema>;
 // the same launch path the slash-command run-workflow effect takes. `workflow` is
 // an open string (the catalog name / `:name` path segment) — rib-contributed
 // names aren't known here; `args` maps onto the run API's `inputs`. `open-canvas`
-// opens the item's snapshot board (`key`) in the canvas drawer — the View verb an
+// opens the item's snapshot (`key`) in the canvas drawer — the View verb an
 // index card's "Open" uses. `open-surface` switches the active rib surface tab,
 // optionally focusing one region after navigation. `open-run` opens an existing
 // run in the run drawer beside the surface, approval composer included.
+// A rib handling an action stamped `origin: "canvas-html"` may return `open-canvas`
+// for its own snapshot; frame markup cannot request effects directly, and other
+// client effects are not wired for frame actions.
 export const ribClientEffectSchema = z.discriminatedUnion("effect", [
   z.object({ effect: z.literal("open-chat"), seed: openChatSeedSchema }).strict(),
   z

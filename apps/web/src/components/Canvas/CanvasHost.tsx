@@ -190,7 +190,15 @@ function CanvasBody({
         />
       );
     case "html":
-      return <HtmlCanvas key={sourceKey(doc.source)} source={doc.source} />;
+      return (
+        <HtmlCanvas
+          key={sourceKey(doc.source)}
+          source={doc.source}
+          onOpenChat={onOpenChat}
+          onLaunchWorkflow={onLaunchWorkflow}
+          onOpenRun={onOpenRun}
+        />
+      );
     case "log":
       return <LogBody source={doc.source} />;
     default: {
@@ -447,9 +455,42 @@ function SnapshotBody({
 // Actions the frame posts dispatch to the rib that owns the source's snapshot key
 // (derived host-side, like ViewCanvas); inline/artifact html has no owning rib, so
 // its actions are a silent no-op rather than reaching an arbitrary one.
-function HtmlCanvas({ source }: { source: CanvasSource }) {
+function HtmlCanvas({
+  source,
+  onOpenChat,
+  onLaunchWorkflow,
+  onOpenRun,
+}: {
+  source: CanvasSource;
+  onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
+  onLaunchWorkflow?: (
+    workflow: string,
+    args: Record<string, string>,
+    stay?: boolean,
+  ) => void | Promise<void>;
+  onOpenRun?: (workflowName: string, runId: string) => void;
+}) {
   const ribId = source.type === "snapshot" ? ribIdFromKey(source.key) : null;
-  const onAction = useHtmlFrameAction(ribId);
+  const { openCanvas } = useCanvas();
+  const resolveCanvasKind = useCanvasKindForKey();
+  // openCanvas drops any handler it isn't handed, so forward the drawer's own.
+  const onOpenCanvas = useCallback(
+    (key: string, title?: string) =>
+      openCanvas(
+        {
+          kind: resolveCanvasKind(key),
+          source: { type: "snapshot", key },
+          ...(title ? { title } : {}),
+        },
+        {
+          ...(onOpenChat ? { onOpenChat } : {}),
+          ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
+          ...(onOpenRun ? { onOpenRun } : {}),
+        },
+      ),
+    [openCanvas, onOpenChat, onLaunchWorkflow, onOpenRun, resolveCanvasKind],
+  );
+  const onAction = useHtmlFrameAction(ribId, { onOpenCanvas });
   return <HtmlBody source={source} onAction={onAction} />;
 }
 
