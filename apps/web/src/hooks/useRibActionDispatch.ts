@@ -1,5 +1,6 @@
 import {
   type CanvasHtmlAction,
+  type CanvasPlacement,
   type OpenChatSeed,
   type RibAction,
   type RibActionResult,
@@ -37,7 +38,7 @@ export function useRibActionDispatch(
     // A successful action may instead carry an `open-canvas` directive; the host
     // opens that snapshot's board in the canvas drawer (the View verb). Sync: it's
     // a setState that opens a drawer, not a paid/duplicable action — no await.
-    onOpenCanvas?: (key: string, title?: string) => void;
+    onOpenCanvas?: (key: string, title?: string, placement?: CanvasPlacement) => void;
     onOpenSurface?: (surfaceId: string, regionKey?: string) => void;
     // An `open-run` directive opens that run in the host's run drawer.
     onOpenRun?: (workflowName: string, runId: string) => void;
@@ -116,7 +117,7 @@ export function useRibActionDispatch(
           if (onOpenCanvas && isOpenCanvasShaped(result.data)) {
             const parsed = ribClientEffectSchema.safeParse(result.data);
             if (parsed.success && parsed.data.effect === "open-canvas") {
-              onOpenCanvas(parsed.data.key, parsed.data.title);
+              onOpenCanvas(parsed.data.key, parsed.data.title, parsed.data.placement);
               return result;
             }
             const error = `${action.type}: invalid open-canvas directive`;
@@ -199,7 +200,9 @@ export function useRibActionDispatch(
 // stamp would silently give untrusted frame markup board-level trust.
 export function useHtmlFrameAction(
   ribId: string | null,
-  opts?: { onOpenCanvas?: (key: string, title?: string) => void },
+  opts?: {
+    onOpenCanvas?: (key: string, title?: string, placement?: CanvasPlacement) => void;
+  },
 ): (action: CanvasHtmlAction) => void {
   const { run } = useRibActionDispatch(ribId, { onOpenCanvas: opts?.onOpenCanvas });
   return useCallback(

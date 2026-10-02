@@ -347,6 +347,21 @@ describe("useRibActionDispatch — open-chat regressions", () => {
 });
 
 describe("useRibActionDispatch — open-canvas directive", () => {
+  test("forwards side placement as the third callback argument", async () => {
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "open-canvas", key: "rib:demo:x", title: "T", placement: "side" },
+    });
+    const onOpenCanvas = mock(() => {});
+    const { result } = renderHook(
+      () => useRibActionDispatch("demo", { onOpenCanvas }),
+      { wrapper },
+    );
+    await runAct(result.current.run, ACTION);
+    expect(onOpenCanvas).toHaveBeenCalledWith("rib:demo:x", "T", "side");
+    expect(toastCount()).toBe(0);
+  });
+
   test("opens the snapshot canvas with key + title, no success toast", async () => {
     postRibActionImpl = async () => ({
       ok: true,
