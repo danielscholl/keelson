@@ -96,6 +96,14 @@ describe("board graph layout", () => {
     expect([...ranks.values()]).toEqual([0, 1, 1, 2]);
   });
 
+  test("a self-loop does not hold its node out of the ranking", () => {
+    const ranks = computeRanks(nodes, [{ source: "a", target: "a" }, ...edges]);
+    expect([...ranks]).toEqual([
+      ["a", 0],
+      ["b", 1],
+    ]);
+  });
+
   test("terminates on cycles and preserves processed predecessor depths", () => {
     const cycle = ["a", "b", "c", "d"].map((id) => ({ id, label: id }));
     const ranks = computeRanks(cycle, [

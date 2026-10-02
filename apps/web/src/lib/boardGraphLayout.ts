@@ -10,6 +10,7 @@ export function computeRanks(nodes: GraphNode[], edges: GraphEdge[]): Map<string
   const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]));
   for (const edge of edges) {
     if (!ranks.has(edge.source) || !ranks.has(edge.target)) continue;
+    if (edge.source === edge.target) continue;
     incoming.set(edge.target, incoming.get(edge.target)! + 1);
     outgoing.get(edge.source)!.push(edge.target);
   }
