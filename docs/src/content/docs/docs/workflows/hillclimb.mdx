@@ -17,9 +17,12 @@ revert means the file is restored byte for byte. After two flat rounds it stops,
 a **bucket** node groups what still fails by root cause, and a **report** says
 whether to merge.
 
-It optimizes prompt text only. Node ids, edges, gates, bash bodies, models, and
-tools stay as they are, so a kept change is attributable to one wording change
-and nothing else.
+It optimizes existing node `prompt`, `loop.prompt`, and `description` text only.
+A structural check rejects changes to every other YAML field, including unknown
+fields. Node ids, order, edges, gates, bash bodies, models, and tools stay as they
+are. Adding or removing a node or an editable field is also out of scope. The
+proposer is instructed to make one logical wording change; the structural check
+enforces the editing surface, not the number of ideas in the rewrite.
 
 ## Invoke it
 
@@ -51,12 +54,23 @@ The run needs `keelson` on `PATH` (it falls back to `bun apps/cli/bin/keelson.ts
 inside a keelson checkout), plus `git`, `jq`, and `bun`. When the target is
 tracked by git it must be clean, and the kept changes land as one commit per
 round on a fresh branch; a target outside a repository is edited in place and
-restored from a snapshot on revert.
+restored from a snapshot on revert. Commits include only the target file,
+preserving any unrelated staged changes. If a commit fails, the round restores
+the last kept target, leaves the kept results and train view unchanged, and
+stops. Git hooks still run, so a round also stops when the committed file or
+the working copy no longer matches the bytes the eval ran: the commit is undone
+and the last kept target restored. An uncommitted round in a git repository
+never earns a merge recommendation.
+
+Every other file in the repository is fingerprinted by content at preflight,
+uncommitted and untracked work included. A round that finds any of them
+changed, even a file that was already dirty, is a scope violation.
 
 <Aside type="caution" title="It runs the eval many times">
-Every round re-runs the whole case set, both splits. With a paid provider the
-cost is the baseline eval times the number of rounds plus one; the report
-prints the cost delta when the server priced every run. Run
+Every round re-runs the whole case set, both splits. The baseline plus three
+rounds means four evaluations of every case and rep, before proposer, judge,
+bucket, and report turns. The report's cost delta compares baseline and kept
+target executions, not the total experiment spend. Run
 `keelson eval run` once by hand first and read its `POWER`, `NOISE`, and
 `HEADROOM` warnings: a set that cannot show improvement wastes every round. The
 case set must put cases in both the train and the test split.
@@ -74,29 +88,36 @@ runs only when something still fails, and `report` writes the verdict.
 
 | Node | Kind | What it does |
 | --- | --- | --- |
-| `preflight` | bash | Parses the case file, resolves and validates the target, refuses a dirty target, creates the branch, snapshots the file, and writes the `hc-eval` and `hc-view` helpers the rounds share. |
-| `baseline` | bash | Runs the case set, fails the run on any errored case with the count, copies the results beside the run, and builds the train-only view. |
+| `preflight` | bash | Parses the case file, resolves and validates the target, refuses a dirty target, creates the branch, snapshots the file and the rest of the repository, and writes the eval, scope-check, snapshot, and train-view helpers. |
+| `baseline` | bash | Runs the case set, fails on any errored case or mixed workflow definitions, copies the results beside the run, and builds the train-only view. |
 | `propose-1..3` | prompt (`deep`) | Reads the train view and makes one root-cause change to the target. Emits `{changed, root_cause, change_summary}`. |
-| `round-1..3` | bash | Reverts any out-of-scope edits, validates the YAML, re-runs the eval, runs `eval compare`, then commits or restores. Emits the decision and whether to continue. |
+| `round-1..3` | bash | Validates the YAML, checks protected fields against the last kept target, rejects out-of-scope or comment-only edits before evaluating, then evaluates and compares. Advances kept state only after a commit that holds the evaluated bytes when git is used. |
 | `collect` | bash | Assembles the ledger: before/after table per split, the rounds and their reasons, cost delta, remaining failures. Copies the ledger and each round's change and decision to `hillclimb-<run id>/` beside the eval results, so they outlive the run. Returns to the original branch when nothing was kept. |
 | `bucket` | prompt (`deep`) | Groups the remaining failures by root cause, flags ambiguous cases and grader contradictions, and recommends more reps or cases where the interval is wide. |
 | `report` | prompt (`balanced`) | Formats the ledger and the buckets, and ends with the one-line merge recommendation `collect` computed. |
 
 ### The parts worth a second look
 
-**The proposer never sees the test split.** `baseline` and every kept round
+**Train-only evidence is materialized.** `baseline` and every kept round
 build `train-view/` from the results file: the train rows, their output files,
 and the train cases' inputs and expectations, nothing else. The prompt names
 that directory as the only evidence it may read and forbids opening the case
-file or the home's `evals/` directory. Overfitting then shows up where it
-should, in the compare verdict, as train improving while test does not.
+file or the home's `evals/` directory. This is a prompt-level read restriction,
+not a filesystem sandbox. The test split participates in every keep/revert
+decision, so it is a reusable validation set rather than an untouched final
+holdout. Confirm the selected candidate on fresh acceptance cases before
+claiming generalization.
 
 **One change, never a quote.** The proposer is told to find the one root cause
 shared by the most failures and fix it with a general rule. Pasting an output,
 an expected string, or a case id into the prompt is forbidden outright: a prompt
 that quotes its own eval passes that eval and measures nothing. The round node
 stores the diff in `round-N-change.md` so the operator can check the rule reads
-as a rule.
+as a rule. It compares parsed YAML against the last kept target with only the
+existing editable text masked. A protected-field change is saved as
+`round-N-rejected.yaml`, restored, and stops the loop without an eval. An edit
+that changes only YAML formatting or comments is restored and stops as
+`no-change`.
 
 **Keep is the compare decision, not the agent's opinion.** The round node is
 deterministic bash. It runs `keelson eval compare <kept> <round>` and keeps only
@@ -105,7 +126,10 @@ calls the pooled result improved and train and test each moved up. Within-noise,
 a regression on either split, a flat test split, or any errored case run all
 restore the file. So does a round whose eval ran the same definition as the
 kept results: the edit never reached the copy the catalog runs, usually because
-another copy of the workflow shadows the target.
+another copy of the workflow shadows the target. Multiple definition hashes
+within the baseline stop the run before proposing; within a candidate they
+restore the target and stop the loop. A measurement that mixes definitions
+cannot justify keeping a change.
 
 **Flat rounds end the loop.** Two consecutive non-keep rounds, a proposer that
 declines to change anything, a scope violation, or an eval error sets
@@ -129,8 +153,10 @@ project at once.
 - **More rounds.** Copy the file and add a `propose-4` / `round-4` pair; the
   round body is a YAML anchor, so the new pair is six lines.
 - **A different surface.** The proposer's "only file you may edit" and "edit
-  prompt text only" rules are the attributable surface. Loosen them to let it
-  touch a command file or a skill, and keep the scope guard in the round node.
+  prompt text only" rules and the deterministic scope check must agree.
+  Changing a model, a command file, or a skill needs a separate experiment
+  with an explicit editing boundary; changing the proposer instructions alone
+  does not allow those edits.
 - **Reps per round.** Pass `reps` higher than the case file's default when
   cases flip between runs of an unchanged workflow. Reps steady each case; they
   do not replace cases, and the compare needs six cases to move before it can

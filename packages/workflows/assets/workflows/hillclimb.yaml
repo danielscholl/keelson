@@ -169,6 +169,30 @@ nodes:
         exit 1
       fi
 
+      cat > "$BIN/hc-snapshot" <<'EOF'
+      #!/usr/bin/env bash
+      # hc-snapshot <repo> <target-rel> <out>: fingerprint everything but the
+      # target, by status and by content, so an edit to an already-dirty or
+      # untracked file still changes the snapshot.
+      set -euo pipefail
+      REPO="$1" REL="$2" OUT="$3"
+      EXCLUDE=":(top,literal,exclude)$REL"
+      git -C "$REPO" status --porcelain -z --untracked-files=all -- . "$EXCLUDE" > "$OUT.tmp"
+      # A scratch index and object store keep the operator's index and odb untouched.
+      ODB="$ARTIFACTS_DIR/scope-objects"
+      mkdir -p "$ODB"
+      REAL_ODB=$(git -C "$REPO" rev-parse --path-format=absolute --git-path objects)
+      export GIT_INDEX_FILE="$ARTIFACTS_DIR/scope.index"
+      export GIT_OBJECT_DIRECTORY="$ODB"
+      export GIT_ALTERNATE_OBJECT_DIRECTORIES="$REAL_ODB"
+      git -C "$REPO" read-tree HEAD
+      git -C "$REPO" rm -q --cached --ignore-unmatch -- ":(top,literal)$REL"
+      git -C "$REPO" add -A -- . "$EXCLUDE"
+      git -C "$REPO" write-tree >> "$OUT.tmp"
+      mv "$OUT.tmp" "$OUT"
+      EOF
+      chmod +x "$BIN/hc-snapshot"
+
       REPO=""
       BRANCH=""
       ORIG_REF=""
@@ -182,7 +206,7 @@ nodes:
         ORIG_REF=$(git -C "$REPO" symbolic-ref --quiet --short HEAD || git -C "$REPO" rev-parse HEAD)
         BRANCH="keelson/hillclimb/$WORKFLOW-$(date -u +%Y%m%dT%H%M%SZ)"
         git -C "$REPO" checkout -q -b "$BRANCH"
-        git -C "$REPO" status --porcelain > "$A/status.before"
+        "$BIN/hc-snapshot" "$REPO" "${TARGET#"$REPO"/}" "$A/scope.before"
       fi
 
       cp "$TARGET" "$A/target.orig.yaml"
@@ -217,10 +241,13 @@ nodes:
       [ -d "${STEM}.outputs" ] && cp -R "${STEM}.outputs" "$A/${LABEL}.outputs"
       jq -c --arg label "$LABEL" --arg home "$RESULTS" --arg copy "$A/$LABEL.json" '{
         label: $label,
-        ok: (.summary.errors == 0),
+        ok: (.summary.errors == 0 and (.summary.definitionHashes | length) <= 1),
         results: $copy,
         home_results: $home,
         errors: .summary.errors,
+        error: (if (.summary.definitionHashes | length) > 1 then
+          "multiple workflow definitions observed; rerun against one fixed definition"
+          else null end),
         warnings: .summary.warnings,
         train: .summary.splits.train | {passRate, interval},
         test: .summary.splits.test | {passRate, interval},
@@ -228,6 +255,35 @@ nodes:
       }' "$A/$LABEL.json"
       EOF
       chmod +x "$BIN/hc-eval"
+
+      cat > "$BIN/hc-scope.js" <<'EOF'
+      const fs = require("node:fs");
+      const { isDeepStrictEqual } = require("node:util");
+      const before = Bun.YAML.parse(fs.readFileSync(process.argv[2], "utf8"));
+      const after = Bun.YAML.parse(fs.readFileSync(process.argv[3], "utf8"));
+      function protectedFields(doc) {
+        return {
+          ...doc,
+          nodes: doc.nodes.map((node) => {
+            const fields = { ...node };
+            for (const key of ["prompt", "description"]) {
+              if (typeof fields[key] === "string") fields[key] = "";
+            }
+            if (node.loop && typeof node.loop.prompt === "string") {
+              fields.loop = { ...node.loop, prompt: "" };
+            }
+            return fields;
+          }),
+        };
+      }
+      if (!isDeepStrictEqual(protectedFields(before), protectedFields(after))) {
+        console.log(JSON.stringify({ decision: "scope-violation", reason: "the proposer changed protected workflow fields; only existing node prompt, loop.prompt, and description text may change" }));
+      } else if (isDeepStrictEqual(before, after)) {
+        console.log(JSON.stringify({ decision: "no-change", reason: "no prompt text changed; only YAML formatting or comments changed" }));
+      } else {
+        console.log(JSON.stringify({ decision: "allowed" }));
+      }
+      EOF
 
       cat > "$BIN/hc-view" <<'EOF'
       #!/usr/bin/env bash
@@ -283,9 +339,8 @@ nodes:
       set -euo pipefail
       A="$ARTIFACTS_DIR"
       RUN=$("$A/bin/hc-eval" baseline)
-      ERRORS=$(jq -r .errors <<<"$RUN")
-      if [ "$ERRORS" != "0" ]; then
-        echo "baseline eval failed: $(jq -r 'if .errors < 0 then .error else "\(.errors) case run(s) errored (see baseline.md)" end' <<<"$RUN")" >&2
+      if [ "$(jq -r .ok <<<"$RUN")" != "true" ]; then
+        echo "baseline eval failed: $(jq -r 'if .errors <= 0 then .error else "\(.errors) case run(s) errored (see baseline.md)" end' <<<"$RUN")" >&2
         exit 1
       fi
       if [ "$(jq '[.summary.splits.train.cases, .summary.splits.test.cases] | min' "$A/baseline.json")" = "0" ]; then
@@ -446,9 +501,11 @@ nodes:
 
       if [ -n "$REPO" ]; then
         REL="${TARGET#"$REPO"/}"
-        git -C "$REPO" status --porcelain | grep -vF -- " $REL" > "$A/status.now" || true
-        grep -vF -- " $REL" "$A/status.before" > "$A/status.before.other" || true
-        if ! cmp -s "$A/status.before.other" "$A/status.now"; then
+        if ! "$A/bin/hc-snapshot" "$REPO" "$REL" "$A/scope.now" 2>"$A/round-$N-snapshot.stderr"; then
+          revert
+          finish "error" "could not snapshot the repository (see round-$N-snapshot.stderr); cannot verify the proposer's editing scope" false
+        fi
+        if ! cmp -s "$A/scope.before" "$A/scope.now"; then
           revert
           CHANGED=false
           finish "scope-violation" "the proposer changed files other than the target; review \`git status\` and discard them" false
@@ -473,10 +530,23 @@ nodes:
         revert
         flat "invalid" "the edited target failed workflow validate (kept as round-$N-rejected.yaml): $(jq -r '.data.results[0].error // .error // "see round-'"$N"'-validate.json"' "$A/round-$N-validate.json" 2>/dev/null)"
       fi
-      RUN=$("$A/bin/hc-eval" "round-$N")
-      if [ "$(jq -r .errors <<<"$RUN")" != "0" ]; then
+      if ! SCOPE=$(bun "$A/bin/hc-scope.js" "$KEPT" "$TARGET" 2>"$A/round-$N-scope.stderr"); then
         revert
-        finish "error" "eval run failed: $(jq -r 'if .errors < 0 then .error else "\(.errors) case run(s) errored (see round-'"$N"'.md)" end' <<<"$RUN")" false
+        finish "error" "prompt scope check failed (see round-$N-scope.stderr)" false
+      fi
+      SCOPE_DECISION=$(jq -r .decision <<<"$SCOPE")
+      if [ "$SCOPE_DECISION" != "allowed" ]; then
+        cp "$TARGET" "$A/round-$N-rejected.yaml"
+        revert
+        CHANGED=false
+        finish "$SCOPE_DECISION" "$(jq -r .reason <<<"$SCOPE")" false
+      fi
+      CANDIDATE="$A/round-$N-candidate.yaml"
+      cp "$TARGET" "$CANDIDATE"
+      RUN=$("$A/bin/hc-eval" "round-$N")
+      if [ "$(jq -r .ok <<<"$RUN")" != "true" ]; then
+        revert
+        finish "error" "eval run failed: $(jq -r 'if .errors <= 0 then .error else "\(.errors) case run(s) errored (see round-'"$N"'.md)" end' <<<"$RUN")" false
       fi
       if ! CMP=$("$KEELSON" --json eval compare "$A/kept.json" "$A/round-$N.json" 2>&1); then
         revert
@@ -495,17 +565,30 @@ nodes:
         revert
         flat "revert" "$REASON"
       fi
-      cp "$TARGET" "$KEPT"
-      cp "$A/round-$N.json" "$A/kept.json"
-      "$A/bin/hc-view" "$A/kept.json" "$A/train-view" train
       if [ -n "$REPO" ]; then
         SUBJECT="feat($WORKFLOW): ${SUMMARY:0:60}"
-        if git -C "$REPO" add -- "$TARGET" && git -C "$REPO" commit -q -m "$SUBJECT" -m "Root cause: $ROOT" -m "Hillclimb round $N: $REASON" >/dev/null 2>"$A/round-$N-commit.stderr"; then
-          COMMITTED=true
-        else
-          REASON="$REASON; git commit failed ($(tail -n 1 "$A/round-$N-commit.stderr")), the kept change is only in the working tree"
+        PRE=$(git -C "$REPO" rev-parse HEAD)
+        if ! git -C "$REPO" commit -q --only -m "$SUBJECT" -m "Root cause: $ROOT" -m "Hillclimb round $N: $REASON" -- "$TARGET" >/dev/null 2>"$A/round-$N-commit.stderr"; then
+          revert
+          finish "error" "git commit failed (see round-$N-commit.stderr); restored the last kept target without advancing the results" false
         fi
+        # A hook can exit 0 after rewriting the target, so the commit must be
+        # proven to hold the bytes the eval ran.
+        WANT=$(git -C "$REPO" hash-object --path "$REL" "$CANDIDATE" 2>/dev/null || true)
+        GOT=$(git -C "$REPO" rev-parse --verify -q "HEAD:$REL" 2>/dev/null || true)
+        if [ -z "$WANT" ] || [ "$WANT" != "$GOT" ] || ! cmp -s "$CANDIDATE" "$TARGET"; then
+          cp "$TARGET" "$A/round-$N-rejected.yaml"
+          git -C "$REPO" reset -q --soft "$PRE"
+          git -C "$REPO" reset -q "$PRE" -- "$REL"
+          revert
+          finish "error" "the committed or working target differs from the evaluated candidate (a git hook or the eval rewrote it; see round-$N-rejected.yaml); undid the commit and restored the last kept target" false
+        fi
+        COMMITTED=true
       fi
+      cp "$CANDIDATE" "$TARGET"
+      cp "$CANDIDATE" "$KEPT"
+      cp "$A/round-$N.json" "$A/kept.json"
+      "$A/bin/hc-view" "$A/kept.json" "$A/train-view" train
       STREAK=0
       if [ "$N" -lt "$ROUNDS" ]; then finish "keep" "$REASON" true; fi
       finish "keep" "$REASON" false
@@ -601,7 +684,10 @@ nodes:
         fi
       fi
 
-      if [ "$KEPT" -gt 0 ]; then
+      UNCOMMITTED=$(jq '[.[] | select(.decision == "keep" and .committed != true)] | length' <<<"$ROUNDS_JSON")
+      if [ -n "$REPO" ] && [ "$UNCOMMITTED" -gt 0 ]; then
+        RECOMMENDATION="Do not merge: $UNCOMMITTED kept round(s) are uncommitted; review the target and commit state before publishing."
+      elif [ "$KEPT" -gt 0 ]; then
         if [ -n "$BRANCH" ]; then
           RECOMMENDATION="Merge $BRANCH: $KEPT kept round(s), each improved the pooled result with train and test both moving up."
         else

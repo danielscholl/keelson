@@ -425,6 +425,28 @@ describe("keelson eval (CLI)", () => {
     expect(JSON.parse(ghost.stdout.trim()).code).toBe("WORKFLOW_NOT_FOUND");
   });
 
+  test("compare rejects mixed definitions with the existing NOT_COMPARABLE exit code", async () => {
+    const out = join(home, "first.json");
+    const run = await runCli(["--json", "eval", "run", "smoke-bash.eval.yaml", "--out", out], home);
+    expect(run.exitCode).toBe(0);
+    const original = JSON.parse(readFileSync(out, "utf8"));
+    const mixed = {
+      ...original,
+      cases: original.cases.map((c: Record<string, unknown>, i: number) => ({
+        ...c,
+        definitionHash: i === 0 ? "other" : c.definitionHash,
+      })),
+    };
+    const candidate = join(home, "mixed.json");
+    writeFileSync(candidate, JSON.stringify(mixed));
+    const compared = await runCli(["--json", "eval", "compare", out, candidate], home);
+    expect(compared.exitCode).toBe(2);
+    const envelope = JSON.parse(compared.stdout.trim());
+    expect(envelope.ok).toBe(false);
+    expect(envelope.code).toBe("NOT_COMPARABLE");
+    expect(envelope.error).toContain("after contains multiple workflow definitions");
+  });
+
   test("eval init scaffolds once and refuses to overwrite", async () => {
     const first = await runCli(["--json", "eval", "init", "smoke-bash"], home);
     expect(first.exitCode).toBe(0);
