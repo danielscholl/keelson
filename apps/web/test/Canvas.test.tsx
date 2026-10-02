@@ -591,6 +591,70 @@ describe("CanvasProvider / useCanvas", () => {
     });
   }
 
+  test("a board drilled into from an html frame keeps the drawer's launch handler", async () => {
+    const source = "rib:demo:html-panel";
+    const target = "rib:demo:inspector";
+    const originalPost = postRibActionImpl;
+    snapshotsByKey[source] = {
+      status: "live",
+      data: "<button data-canvas-action='inspect'>Inspect source</button>",
+      version: 1,
+      composedAt: null,
+    };
+    snapshotsByKey[target] = {
+      status: "live",
+      data: {
+        view: "board",
+        sections: [{ kind: "actions", items: [{ type: "launch", label: "Launch" }] }],
+      },
+      version: 1,
+      composedAt: null,
+    };
+    postRibActionImpl = async (_ribId, action) =>
+      (action as { type: string }).type === "inspect"
+        ? { ok: true, data: { effect: "open-canvas", key: target, title: "Inspector" } }
+        : { ok: true, data: { effect: "run-workflow", workflow: "chamber-genesis" } };
+    const launches: string[] = [];
+    function HtmlOpener() {
+      const { openCanvas } = useCanvas();
+      return (
+        <button
+          type="button"
+          onClick={() =>
+            openCanvas(
+              { kind: "html", source: { type: "snapshot", key: source }, title: "Source" },
+              { onLaunchWorkflow: (workflow) => void launches.push(workflow) },
+            )
+          }
+        >
+          open-html
+        </button>
+      );
+    }
+    try {
+      render(
+        <ToastHost>
+          <CanvasProvider>
+            <HtmlOpener />
+          </CanvasProvider>
+        </ToastHost>,
+      );
+      fireEvent.click(screen.getByText("open-html"));
+      const frame = screen
+        .getByRole("dialog", { name: "Source" })
+        .querySelector("iframe.canvas-html-frame") as HTMLIFrameElement;
+      await sendFrameAction(frame, "inspect");
+      await waitFor(() => expect(screen.getByRole("dialog", { name: "Inspector" })).toBeDefined());
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Launch" }));
+      await waitFor(() => expect(launches).toEqual(["chamber-genesis"]));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    } finally {
+      delete snapshotsByKey[source];
+      delete snapshotsByKey[target];
+      postRibActionImpl = originalPost;
+    }
+  });
+
   test("a drawer board action's run-workflow directive fires the handler and closes the drawer", async () => {
     snapshotImpl = {
       status: "live",
