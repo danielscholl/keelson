@@ -692,6 +692,56 @@ describe("compareResults", () => {
     expect(cmp.reason).toContain("errored");
   });
 
+  test("mixed workflow definitions on either side cannot be kept despite a quality gain", () => {
+    const before = file(
+      [...batch("train", 5, 5), ...batch("test", 7, 3)].map((c) => ({
+        ...c,
+        definitionHash: "aaa",
+      })),
+    );
+    const after = file(
+      [...batch("train", 9, 1), ...batch("test", 9, 1)].map((c) => ({
+        ...c,
+        definitionHash: "bbb",
+      })),
+    );
+    expect(compareResults(before, after).decision).toBe("keep");
+    for (const side of ["before", "after"] as const) {
+      const original = side === "before" ? before : after;
+      const mixed = file(
+        original.cases.map((c, i) => ({
+          ...c,
+          definitionHash: i === 0 ? "ccc" : c.definitionHash,
+        })),
+      );
+      const cmp = compareResults(
+        side === "before" ? mixed : before,
+        side === "after" ? mixed : after,
+      );
+      expect(cmp.splits[0]?.verdict).toBe("improved");
+      expect(cmp.comparable).toBe(false);
+      expect(cmp.decision).toBe("revert");
+      expect(cmp.definitionChanged).toBeNull();
+      expect(cmp.reason).toContain(`${side} contains multiple workflow definitions`);
+      expect(renderComparisonText(cmp)).toContain("not comparable");
+    }
+  });
+
+  test("a stale summary cannot conceal mixed per-case workflow definitions", () => {
+    const before = file(batch("test", 0, 10).map((c) => ({ ...c, definitionHash: "aaa" })));
+    const after = file(
+      batch("test", 10, 0).map((c, i) => ({ ...c, definitionHash: i === 0 ? "ccc" : "bbb" })),
+    );
+    const cmp = compareResults(before, {
+      ...after,
+      summary: { ...after.summary, definitionHashes: ["bbb"] },
+    });
+    expect(cmp.comparable).toBe(false);
+    expect(cmp.decision).toBe("revert");
+    expect(cmp.definitionChanged).toBeNull();
+    expect(cmp.reason).toContain("after contains multiple workflow definitions");
+  });
+
   test("says when both runs executed one definition, or differ in provider or version", () => {
     const cases = (hash: string | null) =>
       batch("test", 5, 5).map((c) => ({ ...c, definitionHash: hash }));

@@ -138,6 +138,10 @@ case at a time, exactly as `workflow run` does. `--watch` streams node events
 per case (the default on a TTY). `--provider`, `--base-url`, and
 `--no-preflight` mean what they mean on `workflow run`.
 
+Every case executes the entire workflow. `node` selects which output to grade,
+not which nodes run. Use a replayable, side-effect-safe copy before evaluating
+workflows that change a backlog, edit a checkout, create PRs, or publish reviews.
+
 | Exit code | Means |
 | --- | --- |
 | `0` | The eval ran and every case graded. |
@@ -159,7 +163,7 @@ output (the JSON inlines the first 16 KiB). `--out <path>` relocates all three.
 | Grader noise | The share of judged outputs where the judge's reps disagreed. A high rate means the rubric, not the workflow, needs work. |
 | Duration mean and p95 | What a change cost in wall time. |
 | Cost | Summed from the server's usage ledger when it prices every event of a run, `null` otherwise. A zero is a real zero, never a placeholder for unpriced. |
-| Definition hash | The workflow definition each run executed. Two hashes in one eval means the workflow changed mid-run. |
+| Definition hash | The workflow definition each run executed. Two hashes in one eval means the workflow changed mid-run; compare refuses that eval. |
 
 The warnings line names what to fix next: `HEADROOM` when the test split passes
 above 95%, `NOISE` when an interval is wider than 20 points, `POWER` when the
@@ -195,8 +199,20 @@ overall  60.0% [38.7%, 78.1%] → 90.0% [69.9%, 97.2%]  +30.0 pts  improved  (6/
 
 Compare refuses two files that did not run the same cases, project, reps, and
 split filter (the results file carries a fingerprint of the case set), and reverts
-when either side errored: an infrastructure failure is not a measurement. It
-warns when both runs executed the same workflow definition, since any difference
+when either side errored: an infrastructure failure is not a measurement.
+Multiple workflow definition hashes in either file also make the comparison
+invalid, even when the pooled quality improved. The CLI exits 2 with
+`NOT_COMPARABLE`, the same error as mismatched case sets. The check reads both
+the summary and per-case hashes, so a stale summary cannot
+hide mixed definitions. A different single definition on each side is expected
+for a workflow edit; missing hashes in older files make no claim about the
+executed definition.
+
+For comparable files, the command exits 0 for both keep and revert decisions.
+Automation must inspect `decision`, not treat exit 0 as permission to keep a
+candidate. Cost and duration are descriptive metrics, not acceptance gates.
+
+It warns when both runs executed the same workflow definition, since any difference
 then came from outside the workflow or from run-to-run variation, and when the
 two runs used a different `--provider` or, for in-process runs, a different
 keelson version. Comparing a results

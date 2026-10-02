@@ -215,7 +215,7 @@ export interface EvalComparison {
   // filter; the decision is then forced to revert and `reason` says why.
   readonly comparable: boolean;
   // False when both sides ran one identical workflow definition, so any
-  // difference came from outside it; null when either side lacks a hash.
+  // difference came from outside it; null when either side lacks a single hash.
   readonly definitionChanged: boolean | null;
   readonly splits: readonly SplitComparison[];
   readonly decision: CompareDecision;
@@ -296,11 +296,13 @@ export function compareSplit(
   return { split, before, after, delta, paired, verdict };
 }
 
-function definitionChanged(a: EvalResultsFile, b: EvalResultsFile): boolean | null {
-  const before = a.summary.definitionHashes;
-  const after = b.summary.definitionHashes;
-  if (before.length === 0 || after.length === 0) return null;
-  return !(before.length === 1 && after.length === 1 && before[0] === after[0]);
+function definitionHashes(file: EvalResultsFile): string[] {
+  return [
+    ...new Set([
+      ...file.summary.definitionHashes,
+      ...file.cases.flatMap((c) => (c.definitionHash === null ? [] : [c.definitionHash])),
+    ]),
+  ];
 }
 
 export function compareResults(a: EvalResultsFile, b: EvalResultsFile): EvalComparison {
@@ -325,6 +327,18 @@ export function compareResults(a: EvalResultsFile, b: EvalResultsFile): EvalComp
   if (a.reps !== b.reps) {
     incomparable.push(`reps differ: ${a.reps} vs ${b.reps}`);
   }
+  const beforeHashes = definitionHashes(a);
+  const afterHashes = definitionHashes(b);
+  for (const [side, hashes] of [
+    ["before", beforeHashes],
+    ["after", afterHashes],
+  ] as const) {
+    if (hashes.length > 1) {
+      incomparable.push(
+        `${side} contains multiple workflow definitions (${hashes.length} hashes); rerun against one fixed definition`,
+      );
+    }
+  }
   const splitOf = (split: EvalSplit | "overall") =>
     compareSplit(
       split,
@@ -336,7 +350,10 @@ export function compareResults(a: EvalResultsFile, b: EvalResultsFile): EvalComp
   const train = splitOf("train");
   const test = splitOf("test");
   const splits: SplitComparison[] = [overall, train, test];
-  const changed = definitionChanged(a, b);
+  const changed =
+    beforeHashes.length === 1 && afterHashes.length === 1
+      ? beforeHashes[0] !== afterHashes[0]
+      : null;
   if (changed === false) {
     warnings.push(
       "both runs executed the same workflow definition: any difference came from outside it (provider, model, a command file, rib code) or is run-to-run noise",
