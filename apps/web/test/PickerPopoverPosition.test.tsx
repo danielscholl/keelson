@@ -3,6 +3,8 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { pickerPopoverPosition } from "../src/lib/pickerPopoverPosition.ts";
 
 describe("pickerPopoverPosition", () => {
@@ -25,6 +27,13 @@ describe("pickerPopoverPosition", () => {
       right: "24px",
       minWidth: "280px",
     });
+  });
+
+  test("picker CSS keeps the 460px maximum and two 6px viewport gutters", () => {
+    const css = readFileSync(join(import.meta.dir, "../src/app.css"), "utf8");
+    const rule = css.match(/\.model-picker-popover \{([^}]+)\}/)?.[1];
+    expect(rule).toContain("width: max-content;");
+    expect(rule).toContain("max-width: min(460px, calc(100vw - 12px));");
   });
 
   test("switches alignment only once the maximum-width panel no longer fits", () => {

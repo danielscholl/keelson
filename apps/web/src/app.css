@@ -2453,7 +2453,7 @@ button.tab:focus-visible {
   padding: 0;
   max-height: min(60vh, 480px);
   width: max-content;
-  max-width: 460px;
+  max-width: min(460px, calc(100vw - 12px));
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
