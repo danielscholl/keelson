@@ -665,11 +665,27 @@ nodes:
       fi
 
       echo "=== PROJECT CHECKS ==="
+      LOG="$KEELSON_ARTIFACTS_DIR/validate.log"
+      echo "Full log: $LOG"
       # Force fail-fast so we never trust the agent-written script to aggregate
       # statuses: a plain `cmd1; cmd2` would exit with cmd2's status, masking a
       # cmd1 failure. With -e the first failing check makes the gate FAIL.
-      bash -e -o pipefail "$VERIFY" 2>&1
-      STATUS=$?
+      STATUS=0
+      bash -e -o pipefail "$VERIFY" > "$LOG" 2>&1 || STATUS=$?
+      echo "Full log: $LOG ($(wc -l < "$LOG" | tr -d ' ') lines, $(wc -c < "$LOG" | tr -d ' ') bytes)"
+      echo "Exit code: $STATUS"
+      if [ "$STATUS" -ne 0 ]; then
+        echo "--- Failure lines (first 100) ---"
+        awk '/\(fail\)|[Ee]rror:|Exited with code [1-9]/ {
+          line = substr(NR ":" $0, 1, 400) "\n"
+          printf "%s", substr(line, 1, 12000 - bytes)
+          bytes += length(line)
+          if (++matches == 100 || bytes >= 12000) exit
+        }' "$LOG"
+        echo ""
+      fi
+      echo "--- Last 200 lines ---"
+      tail -n 200 "$LOG" | cut -c1-400 | tail -c 16000
 
       echo ""
       echo "Checks: $([ $STATUS -eq 0 ] && echo PASS || echo FAIL)"
@@ -692,6 +708,9 @@ nodes:
       ## Validation
 
       $validate.output
+
+      The full log is at `$ARTIFACTS_DIR/validate.log`; read it when the failure
+      lines and tail above are not enough.
 
       ## Instructions
 
@@ -725,11 +744,28 @@ nodes:
       fi
 
       echo "=== PROJECT CHECKS ==="
+      LOG="$KEELSON_ARTIFACTS_DIR/revalidate.log"
+      echo "Full log: $LOG"
       # Force fail-fast so we never trust the agent-written script to aggregate
       # statuses: a plain `cmd1; cmd2` would exit with cmd2's status, masking a
       # cmd1 failure. With -e the first failing check makes the gate FAIL.
-      bash -e -o pipefail "$VERIFY" 2>&1
-      STATUS=$?
+      STATUS=0
+      bash -e -o pipefail "$VERIFY" > "$LOG" 2>&1 || STATUS=$?
+      echo "Full log: $LOG ($(wc -l < "$LOG" | tr -d ' ') lines, $(wc -c < "$LOG" | tr -d ' ') bytes)"
+      echo "Exit code: $STATUS"
+      if [ "$STATUS" -ne 0 ]; then
+        echo "--- Failure lines (first 100) ---"
+        awk '/\(fail\)|[Ee]rror:|Exited with code [1-9]/ {
+          line = substr(NR ":" $0, 1, 400) "\n"
+          printf "%s", substr(line, 1, 12000 - bytes)
+          bytes += length(line)
+          if (++matches == 100 || bytes >= 12000) exit
+        }' "$LOG"
+        echo ""
+      fi
+      echo "--- Last 200 lines ---"
+      tail -n 200 "$LOG" | cut -c1-400 | tail -c 16000
+      echo ""
 
       if [ $STATUS -ne 0 ]; then
         echo "VALIDATION_STATUS: FAIL — refusing to create PR with broken checks"
@@ -754,6 +790,7 @@ nodes:
       - Plan path: `$ARTIFACTS_DIR/plan.md`
       - Brief path: `$ARTIFACTS_DIR/brief.json`
       - Revalidation: $revalidate.output
+      - Full revalidation log: `$ARTIFACTS_DIR/revalidate.log`
 
       ## Instructions
 
@@ -1297,8 +1334,25 @@ nodes:
         exit 0
       fi
       echo "=== PROJECT CHECKS (after review loop) ==="
-      bash -e -o pipefail "$VERIFY" 2>&1
-      STATUS=$?
+      LOG="$KEELSON_ARTIFACTS_DIR/post-fix-validate.log"
+      echo "Full log: $LOG"
+      STATUS=0
+      bash -e -o pipefail "$VERIFY" > "$LOG" 2>&1 || STATUS=$?
+      echo "Full log: $LOG ($(wc -l < "$LOG" | tr -d ' ') lines, $(wc -c < "$LOG" | tr -d ' ') bytes)"
+      echo "Exit code: $STATUS"
+      if [ "$STATUS" -ne 0 ]; then
+        echo "--- Failure lines (first 100) ---"
+        awk '/\(fail\)|[Ee]rror:|Exited with code [1-9]/ {
+          line = substr(NR ":" $0, 1, 400) "\n"
+          printf "%s", substr(line, 1, 12000 - bytes)
+          bytes += length(line)
+          if (++matches == 100 || bytes >= 12000) exit
+        }' "$LOG"
+        echo ""
+      fi
+      echo "--- Last 200 lines ---"
+      tail -n 200 "$LOG" | cut -c1-400 | tail -c 16000
+      echo ""
       if [ $STATUS -eq 0 ]; then
         echo "VALIDATION_STATUS: PASS"
       else
@@ -1794,6 +1848,7 @@ nodes:
         | sed -n 's/^PR_STATE: *//p' | tail -1)
       echo "STATUS_HEADER: $HEADER"
       echo "VALIDATION: ${VALIDATION:-UNKNOWN}"
+      echo "VALIDATION_LOG: $A/post-fix-validate.log"
       echo "PR_STATE: ${PR_STATE:-UNKNOWN}"
 
   - id: report
@@ -1810,7 +1865,8 @@ nodes:
       - Issue: $fetch-issue.output
       - Classification: $classify.output
       - Plan summary: see `$ARTIFACTS_DIR/plan.md`
-      - Validation (after the review loop): $post-fix-validate.output
+      - Validation (after the review loop): the VALIDATION value in the computed
+        status below; full log at `$ARTIFACTS_DIR/post-fix-validate.log`.
       - Review triage (confirmed must-fix issues): $triage.output
       - Review follow-up: $re-review.output
       - PR (from create-pr): $create-pr.output
