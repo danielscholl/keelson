@@ -794,6 +794,16 @@ describe("rib client effect schema", () => {
     expect(ribClientEffectSchema.parse(effect)).toEqual(effect);
   });
 
+  it("round-trips an open-canvas effect with side placement", () => {
+    const effect = {
+      effect: "open-canvas" as const,
+      key: "rib:demo:session-7",
+      title: "Session 7",
+      placement: "side" as const,
+    };
+    expect(ribClientEffectSchema.parse(effect)).toEqual(effect);
+  });
+
   it("parses an open-canvas effect with title omitted", () => {
     const parsed = ribClientEffectSchema.parse({
       effect: "open-canvas",
