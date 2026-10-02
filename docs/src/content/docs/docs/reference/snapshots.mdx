@@ -115,11 +115,12 @@ anchor. Other schemes fall back to plain text.
 
 ```ts
 { view: "graph",
-  nodes: [{ id, label?, kind? }],      // ids must be unique
+  nodes: [{ id, label?, kind?, tone? }], // ids must be unique
   edges: [{ source, target, label? }] }
 ```
 
-`kind` is a generic category string a rib colors by, never a base-side enum.
+`kind` is a generic category string, never a base-side enum. Optional `tone`
+colors the node's left rule using the [tone vocabulary](#tones).
 
 ### board
 
@@ -142,7 +143,7 @@ toggle wins after, and emptying the board re-arms it.
 
 ## Board sections
 
-Each section is discriminated on `kind`. Eleven are leaf sections; `columns` is a
+Each section is discriminated on `kind`. Twelve are leaf sections; `columns` is a
 one-level layout wrapper that nests leaf sections side by side.
 
 | `kind` | Shape | For |
@@ -158,7 +159,39 @@ one-level layout wrapper that nests leaf sections side by side.
 | `chart` | `yLabel?`, `series: [{ label, points: [{ x, y }] }]` (1 to 6 series, unique labels, unique `x` per series) | A deterministic line/timeseries plot. Series wear the fixed-order categorical palette by index, never cycled: fold a seventh series into an "other" bucket. All-numeric `x` scales linearly; any string `x` renders as ordered categories in first-appearance order. Endpoint dots always mark line ends; direct endpoint labels appear up to 4 series, a legend appears for 2+, and hovering shows a crosshair with per-series values. Single y-axis by construction; pair the chart with a `table` section when exact values matter. |
 | `seats` | `items: [{ tone?, filled?, label? }]` | A fixed-capacity identity row an actor roster fills. A dashed empty seat becomes solid when `filled`; a `label` (the actor's name) becomes the seat's tooltip and accessible name, and an unlabelled seat is decorative (`aria-hidden`). Identity colour never renders without a name (see [Tones](#tones)). |
 | `journey` | `items: [{ title, text? }]` | A numbered step strip (numbers derive from order) that says what will happen next. Replaces stacks of "nothing here yet" placeholder chrome on first-run surfaces. |
+| `graph` | `title?`, `columns?: string[]`, `nodes: [{ id, label, sublabel?, tone?, kind?, rank?, badges?: [{ text, tone? }], action?: { type, payload? }, selected? }]`, `edges: [{ source, target, label?, tone?, dashed? }]` | A ranked dependency, lineage, or parent-child map. Accepts 1 to 48 nodes and at most 200 edges. Node ids must be unique, both edge ends must name nodes, `selected: true` requires an action, and rank must be an integer at least zero. Section, node, and edge objects reject unknown keys. |
 | `columns` | `columns: [{ weight?, sections: LeafSection[] }]` | Lays leaf sections side by side. One level deep only. |
+
+**Graph layout.** Nodes occupy left-to-right rank columns and keep input order
+within each column. `columns[rank]` supplies the heading; unused ranks are
+compacted away. Explicit ranks are honored. Unranked nodes derive their rank from
+the longest dependency path from a source, including explicitly ranked
+predecessors. Cycles are accepted: remaining unranked nodes use the deepest
+processed predecessor plus one, or zero if none exists. Self-loops are not drawn;
+backward and same-column edges use a simple curve that may cross nodes. Forward
+edges that skip columns route through node gaps. Edge `label` is a tooltip, not
+text drawn on the curve.
+
+**Graph interaction.** Hover or keyboard focus lights the node's upstream and
+downstream chain and dims unrelated nodes and edges. With neither active,
+selected nodes keep their chains lit. A node with an `action` is a native button:
+click or Enter dispatches `{ type, payload? }` to the owning rib without an
+`origin` stamp, just like a card action. It is disabled without a dispatcher or
+while pending. A reply `{ effect: "open-canvas", key, placement: "side" }` opens an
+inspector without hiding the map. Other nodes remain keyboard-focusable for
+chain highlighting.
+
+**Graph fallback.** Below 720px of section width, columns stack, the SVG edge
+layer is omitted, and each dependent node lists the source labels it waits on.
+The host remeasures edges on resize. Prefer this section over an `html` region
+for node-link maps: the host owns layout, theme, highlighting, the narrow
+fallback, and trusted action dispatch. Keep `html` for bespoke drawings, and
+prefer `journey` or `table` when relationships are not the story. For larger
+graphs, publish the relevant slice and put "showing N of M" in `title`.
+
+Graph sections require a harness that supports this board-section kind. An older
+harness may support the top-level `view: "graph"` while rejecting a graph inside
+a board; check support before a rib adopts the section.
 
 A card `field` is `{ label?, value, tone?, href?, copyable?, copyAction? }`,
 or `{ label?, people: [{ name, tone? }] }`, which renders identity-toned names
