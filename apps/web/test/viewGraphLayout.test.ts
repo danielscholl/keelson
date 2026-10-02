@@ -9,12 +9,25 @@ describe("viewGraphLayout", () => {
       edges: [{ source: "a", target: "b" }],
     });
     expect(nodes.map((n) => n.id)).toEqual(["a", "b"]);
-    expect(nodes[0]?.data).toEqual({ label: "Alpha", kind: "service" });
+    expect(nodes[0]?.data).toEqual({ label: "Alpha", kind: "service", tone: undefined });
     // label defaults to the id when omitted
     expect(nodes[1]?.data.label).toBe("b");
     // dagre populated finite positions
     expect(Number.isFinite(nodes[0]?.position.x)).toBe(true);
     expect(Number.isFinite(nodes[0]?.position.y)).toBe(true);
+  });
+
+  test("passes optional tones through without deriving them from kind", () => {
+    const { nodes } = viewGraphLayout({
+      view: "graph",
+      nodes: [
+        { id: "a", tone: "id-blue", kind: "actor" },
+        { id: "b", kind: "actor" },
+      ],
+      edges: [],
+    });
+    expect(nodes[0]?.data.tone).toBe("id-blue");
+    expect(nodes[1]?.data.tone).toBeUndefined();
   });
 
   test("drops edges that reference an unknown node id", () => {

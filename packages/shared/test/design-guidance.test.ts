@@ -60,6 +60,18 @@ describe("design guide placement", () => {
     expect(CANVAS_DESIGN_GUIDE_SECTIONS.marks).toContain("title?, placement?");
     expect(CANVAS_DESIGN_GUIDE_SECTIONS.marks).toContain("html docs always open centered");
   });
+
+  test("guides node-link maps toward graph sections and bounded slices", () => {
+    const board = CANVAS_DESIGN_GUIDE_SECTIONS.board;
+    expect(board).toContain("nodes in rank columns");
+    expect(board).toContain("Cap 48 nodes / 200 edges");
+    expect(board).toContain('say "showing N of M" in title');
+    expect(board).toContain("Prefer it over an html region for any node-link map");
+    expect(board).toContain("chain highlighting, the narrow fallback, and trusted dispatch");
+    expect(board).toContain(
+      "a graph whose edges carry the story better told as a journey or table",
+    );
+  });
 });
 
 describe("design guide voice", () => {

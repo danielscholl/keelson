@@ -990,74 +990,100 @@ describe("Surface", () => {
     expect(btn).toHaveProperty("disabled", false);
   });
 
-  test("side replies keep surface actions clickable and replace the same inspector", async () => {
-    live("rib:demo:items", {
-      view: "board",
-      title: "Items",
-      sections: [
-        {
-          kind: "actions",
-          items: [
-            { type: "inspect", label: "Inspect item" },
-            { type: "inspect-next", label: "Inspect next item" },
-            { type: "refresh", label: "Refresh items" },
-          ],
+  for (const kind of ["actions", "graph"] as const) {
+    test(`side replies from ${kind} keep surface actions clickable and replace the same inspector`, async () => {
+      live("rib:demo:items", {
+        view: "board",
+        title: "Items",
+        sections: [
+          kind === "graph"
+            ? {
+                kind: "graph",
+                nodes: [
+                  {
+                    id: "a",
+                    label: "Inspect item",
+                    action: { type: "inspect", payload: { id: "a" } },
+                  },
+                  {
+                    id: "b",
+                    label: "Inspect next item",
+                    action: { type: "inspect-next", payload: { id: "b" } },
+                  },
+                ],
+                edges: [{ source: "a", target: "b" }],
+              }
+            : {
+                kind: "actions",
+                items: [
+                  { type: "inspect", label: "Inspect item" },
+                  { type: "inspect-next", label: "Inspect next item" },
+                ],
+              },
+          { kind: "actions", items: [{ type: "refresh", label: "Refresh items" }] },
+        ],
+      });
+      live("rib:demo:detail", board("Item detail", "Detail metric", 42));
+      live("rib:demo:next-detail", board("Next detail", "Next metric", 99));
+      postRibActionResult = {
+        ok: true,
+        data: {
+          effect: "open-canvas",
+          key: "rib:demo:detail",
+          title: "Inspector",
+          placement: "side",
         },
-      ],
-    });
-    live("rib:demo:detail", board("Item detail", "Detail metric", 42));
-    live("rib:demo:next-detail", board("Next detail", "Next metric", 99));
-    postRibActionResult = {
-      ok: true,
-      data: {
-        effect: "open-canvas",
-        key: "rib:demo:detail",
-        title: "Inspector",
-        placement: "side",
-      },
-    };
-    renderSurface({
-      id: "demo",
-      title: "Demo",
-      layout: { rows: [{ columns: [{ key: "rib:demo:items" }] }] },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Inspect item" }));
-    const dialog = await screen.findByRole("dialog", { name: "Inspector" });
-    expect(dialog.classList.contains("canvas-drawer-side")).toBe(true);
-    expect(dialog.textContent).toContain("Detail metric");
-    expect(document.querySelector(".canvas-backdrop")).toBeNull();
+      };
+      renderSurface({
+        id: "demo",
+        title: "Demo",
+        layout: { rows: [{ columns: [{ key: "rib:demo:items" }] }] },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Inspect item" }));
+      const dialog = await screen.findByRole("dialog", { name: "Inspector" });
+      expect(dialog.classList.contains("canvas-drawer-side")).toBe(true);
+      expect(dialog.textContent).toContain("Detail metric");
+      expect(document.querySelector(".canvas-backdrop")).toBeNull();
+      expect(postRibActionCalls[0]).toEqual({
+        ribId: "demo",
+        action: kind === "graph" ? { type: "inspect", payload: { id: "a" } } : { type: "inspect" },
+      });
 
-    postRibActionResult = { ok: true };
-    fireEvent.click(screen.getByRole("button", { name: "Refresh items" }));
-    await waitFor(() => expect(reloadCalls["rib:demo:items"]).toBe(1));
-    expect(postRibActionCalls.at(-1)).toEqual({ ribId: "demo", action: { type: "refresh" } });
-    expect(screen.getByRole("dialog")).toBe(dialog);
+      postRibActionResult = { ok: true };
+      fireEvent.click(screen.getByRole("button", { name: "Refresh items" }));
+      await waitFor(() => expect(reloadCalls["rib:demo:items"]).toBe(1));
+      expect(postRibActionCalls.at(-1)).toEqual({ ribId: "demo", action: { type: "refresh" } });
+      expect(screen.getByRole("dialog")).toBe(dialog);
 
-    postRibActionResult = {
-      ok: true,
-      data: {
-        effect: "open-canvas",
-        key: "rib:demo:next-detail",
-        title: "Next inspector",
-        placement: "side",
-      },
-    };
-    const next = screen.getByRole("button", { name: "Inspect next item" });
-    next.focus();
-    fireEvent.click(next);
-    await waitFor(() =>
-      expect(screen.getByRole("dialog", { name: "Next inspector" })).toBe(dialog),
-    );
-    expect(dialog.textContent).toContain("Next metric");
-    expect(dialog.textContent).not.toContain("Detail metric");
-    expect(dialog.classList.contains("canvas-drawer-side")).toBe(true);
-    expect(document.activeElement).toBe(next);
-    expect(reloadCalls["rib:demo:items"]).toBe(1);
-    expect(postRibActionCalls.at(-1)).toEqual({
-      ribId: "demo",
-      action: { type: "inspect-next" },
+      postRibActionResult = {
+        ok: true,
+        data: {
+          effect: "open-canvas",
+          key: "rib:demo:next-detail",
+          title: "Next inspector",
+          placement: "side",
+        },
+      };
+      const next = screen.getByRole("button", { name: "Inspect next item" });
+      next.focus();
+      fireEvent.click(next);
+      await waitFor(() =>
+        expect(screen.getByRole("dialog", { name: "Next inspector" })).toBe(dialog),
+      );
+      expect(dialog.textContent).toContain("Next metric");
+      expect(dialog.textContent).not.toContain("Detail metric");
+      expect(dialog.classList.contains("canvas-drawer-side")).toBe(true);
+      expect(document.activeElement).toBe(next);
+      expect(reloadCalls["rib:demo:items"]).toBe(1);
+      expect(postRibActionCalls.at(-1)).toEqual({
+        ribId: "demo",
+        action:
+          kind === "graph"
+            ? { type: "inspect-next", payload: { id: "b" } }
+            : { type: "inspect-next" },
+      });
     });
-  });
+  }
 
   test("a region board action can open another surface and carries its region key", async () => {
     live("rib:demo:cluster", {

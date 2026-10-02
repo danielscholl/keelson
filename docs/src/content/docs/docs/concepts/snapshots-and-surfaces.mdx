@@ -82,7 +82,10 @@ the browser either has a renderer for that shape or refuses politely.
 The `board` is the workhorse: a dashboard composed from a fixed section
 vocabulary, stats, segments, bars, tables, cards, rows, actions, a grid, a chart
 (a deterministic line or timeseries plot), seats (a fixed-capacity identity row),
-and a journey (a numbered next-steps strip), with one level of columns for layout. Sections carry **tones**, a small
+journey (a numbered next-steps strip), and graph (a ranked dependency map), with
+one level of columns for layout. Prefer graph over an `html` region for node-link
+maps: the host owns layout, theme, chain highlighting, the narrow fallback, and
+trusted node actions. Sections carry **tones**, a small
 closed palette: a semantic core (`ok`, `warn`, `error`, `neutral`), a few
 decorative accents, and five reserved identity hues. The identity hues are not
 decorative. A rib that renders the same actors repeatedly assigns one per actor
