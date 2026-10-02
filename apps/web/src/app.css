@@ -2437,9 +2437,6 @@ button.tab:focus-visible {
 /* --------------------------------------------------------------------- */
 /* Model picker popover                                                   */
 /* --------------------------------------------------------------------- */
-/* Native <div popover="auto"> — the browser handles light-dismiss and    */
-/* top-layer rendering. JS measures the chip and sets inline top/left     */
-/* in the toggle handler; we reset the default centering margins here.    */
 
 .model-picker-popover {
   position: fixed;

@@ -5,9 +5,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { act, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
+import { ModelCatalogPopover } from "../src/components/Canvas/ModelFieldPicker.tsx";
 import { ModelPickerPopover } from "../src/components/Chat/ModelPickerPopover.tsx";
 import { ProjectPickerPopover } from "../src/components/Chat/ProjectPickerPopover.tsx";
+import { configureModelCatalog } from "../src/lib/modelCatalog.ts";
 import { pickerPopoverPosition } from "../src/lib/pickerPopoverPosition.ts";
 
 describe("pickerPopoverPosition", () => {
@@ -26,13 +28,21 @@ describe("pickerPopoverPosition", () => {
     afterEach(() => {
       window.innerWidth = viewportWidth;
       window.innerHeight = viewportHeight;
+      cleanup();
+      configureModelCatalog();
     });
 
-    function mount(kind: "project" | "chat" = "project") {
+    function mount(kind: "project" | "chat" | "canvas" = "project") {
       let rect = { left: 1449, top: 96, width: 127 };
+      if (kind === "canvas") {
+        configureModelCatalog({
+          fetchProviders: async () => ({ providers: [], defaultProvider: null }),
+          fetchProviderModels: async () => [],
+        });
+      }
       render(
         <>
-          <button type="button" popoverTarget="test-picker">
+          <button id="test-trigger" type="button" popoverTarget="test-picker">
             Projects
           </button>
           {kind === "project" ? (
@@ -44,7 +54,7 @@ describe("pickerPopoverPosition", () => {
               onProjectUpdated={() => {}}
               onProjectDeleted={() => {}}
             />
-          ) : (
+          ) : kind === "chat" ? (
             <ModelPickerPopover
               popoverId="test-picker"
               providers={[]}
@@ -54,6 +64,16 @@ describe("pickerPopoverPosition", () => {
               lockedProviderId={null}
               onSelect={() => {}}
               onToggleFavorite={() => {}}
+            />
+          ) : (
+            <ModelCatalogPopover
+              popoverId="test-picker"
+              anchorId="test-trigger"
+              value=""
+              providerValue=""
+              emptyLabel="default"
+              required={true}
+              onPick={() => {}}
             />
           )}
         </>,
@@ -165,6 +185,39 @@ describe("pickerPopoverPosition", () => {
 
       parent.appendChild(trigger);
       trigger.getBoundingClientRect = () => new DOMRect(32, 96, 127, 30);
+      dispatch(popover, "toggle");
+      expect(popover.style.left).toBe("32px");
+      expect(popover.style.right).toBe("auto");
+      expect(popover.style.transform).toBe("none");
+    });
+
+    test("canvas model catalog uses the trigger ID and remains anchored after resizing", () => {
+      window.innerWidth = 1600;
+      window.innerHeight = 900;
+      const { trigger, popover, setRect } = mount("canvas");
+      expect(popover.offsetWidth).toBe(0);
+
+      dispatch(popover, "beforetoggle");
+      dispatch(popover, "toggle");
+      expect(popover.style.left).toBe("auto");
+      expect(popover.style.right).toBe("24px");
+      expect(popover.style.minWidth).toBe("280px");
+
+      popover.matches = (selector) => selector === ":popover-open";
+      window.innerWidth = 1024;
+      setRect({ left: 873, top: 96, width: 127 });
+      act(() => window.dispatchEvent(new Event("resize")));
+      expect(popover.style.right).toBe("24px");
+
+      const parent = trigger.parentElement;
+      if (!parent) throw new Error("canvas trigger has no parent");
+      trigger.remove();
+      dispatch(popover, "beforetoggle");
+      expect(popover.style.left).toBe("50%");
+      expect(popover.style.right).toBe("auto");
+
+      parent.appendChild(trigger);
+      setRect({ left: 32, top: 96, width: 127 });
       dispatch(popover, "toggle");
       expect(popover.style.left).toBe("32px");
       expect(popover.style.right).toBe("auto");
