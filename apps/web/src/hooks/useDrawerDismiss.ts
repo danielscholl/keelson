@@ -47,6 +47,10 @@ export function useDrawerDismiss(
     return () => opener?.focus();
   }, []);
 
+  useEffect(() => {
+    if (trapFocus) closeRef.current?.focus();
+  }, [trapFocus]);
+
   // Both keys are handled at document scope rather than on the dialog: the page
   // beneath isn't inert, so once focus escapes the dialog the keydown is
   // dispatched from a background element and never reaches a dialog-scoped

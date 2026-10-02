@@ -84,7 +84,7 @@ describe("useDrawerDismiss", () => {
     expect(closed).toBe(1);
   });
 
-  test("changing trapping in place updates Tab handling without refocusing", () => {
+  test("changing trapping in place focuses the dialog when trapping is enabled", () => {
     const onClose = () => {};
     const view = render(<Drawer name="changing" onClose={onClose} />);
     const outside = document.createElement("button");
@@ -95,7 +95,7 @@ describe("useDrawerDismiss", () => {
       expect(document.activeElement).toBe(outside);
       expect(fireEvent.keyDown(outside, { key: "Tab" })).toBe(true);
       view.rerender(<Drawer name="changing" onClose={onClose} trapFocus />);
-      expect(document.activeElement).toBe(outside);
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "close changing" }));
       expect(fireEvent.keyDown(outside, { key: "Tab" })).toBe(false);
       expect(document.activeElement).toBe(screen.getByRole("button", { name: "close changing" }));
     } finally {
