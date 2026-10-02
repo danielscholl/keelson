@@ -1851,7 +1851,8 @@ nodes:
         | sed -n '/^--- Failure lines (first 100) ---$/,/^--- Last 200 lines ---$/{ /^--- Last 200 lines ---$/!p; }' \
         | head -c 10000)
       VALIDATION_TAIL=$(printf '%s\n' "$VALIDATION_OUTPUT" \
-        | sed -n '/^--- Last 200 lines ---$/,$p' | tail -c 8000)
+        | sed -n '/^--- Last 200 lines ---$/,$p' \
+        | grep -v '^(pass) ' | tail -c 8000)
       PR_STATE=$(printf '%s\n' "${KEELSON_NODE_finalize_pr_OUTPUT:-}" \
         | sed -n 's/^PR_STATE: *//p' | tail -1)
       echo "STATUS_HEADER: $HEADER"
