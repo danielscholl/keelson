@@ -990,6 +990,34 @@ describe("Surface", () => {
     expect(btn).toHaveProperty("disabled", false);
   });
 
+  test("a region board action forwards side placement to the canvas", async () => {
+    live("rib:demo:items", {
+      view: "board",
+      title: "Items",
+      sections: [{ kind: "actions", items: [{ type: "inspect", label: "Inspect item" }] }],
+    });
+    live("rib:demo:detail", board("Item detail", "Detail metric", 42));
+    postRibActionResult = {
+      ok: true,
+      data: {
+        effect: "open-canvas",
+        key: "rib:demo:detail",
+        title: "Inspector",
+        placement: "side",
+      },
+    };
+    renderSurface({
+      id: "demo",
+      title: "Demo",
+      layout: { rows: [{ columns: [{ key: "rib:demo:items" }] }] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Inspect item" }));
+    const dialog = await screen.findByRole("dialog", { name: "Inspector" });
+    expect(dialog.classList.contains("canvas-drawer-side")).toBe(true);
+    expect(dialog.textContent).toContain("Detail metric");
+    expect(document.querySelector(".canvas-backdrop")).toBeNull();
+  });
+
   test("a region board action can open another surface and carries its region key", async () => {
     live("rib:demo:cluster", {
       view: "board",
