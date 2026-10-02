@@ -39,6 +39,7 @@ describe("board graph layout", () => {
     expect(chainOf("b", edges)).toEqual({ up: new Set(["a"]), down: new Set() });
     expect(litSet(["b"], edges)).toEqual(new Set(["a", "b"]));
     expect(waitsOn("b", nodes, edges)).toEqual(["Alpha"]);
+    expect(waitsOn("b", [{ ...nodes[0]!, sublabel: ".1" }, nodes[1]!], edges)).toEqual([".1"]);
   });
 
   test("routes adjacent columns and skips unmeasured or unsupported edges", () => {

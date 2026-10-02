@@ -10,7 +10,7 @@ describe("board graph styles", () => {
     expect(css).toMatch(
       /\.cvb-graph\[data-narrow\] \.cvb-graph-columns\s*\{\s*grid-template-columns: minmax\(0, 1fr\);/,
     );
-    expect(css).toMatch(/\.cvb-graph-label\s*\{[^}]*text-overflow: ellipsis;/);
+    expect(css).toMatch(/\.cvb-graph-label\s*\{[^}]*-webkit-line-clamp: 2;/);
     expect(css).toMatch(/\.cvb-graph-badges\s*\{[^}]*flex-wrap: wrap;/);
   });
 

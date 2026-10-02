@@ -76,7 +76,7 @@ export function litSet(activeIds: string[], edges: GraphEdge[]): Set<string> {
 }
 
 export function waitsOn(nodeId: string, nodes: GraphNode[], edges: GraphEdge[]): string[] {
-  const labels = new Map(nodes.map((node) => [node.id, node.label]));
+  const labels = new Map(nodes.map((node) => [node.id, node.sublabel ?? node.label]));
   return edges
     .filter((edge) => edge.target === nodeId && labels.has(edge.source))
     .map((edge) => labels.get(edge.source)!);

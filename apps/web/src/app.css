@@ -4603,8 +4603,10 @@ button.cvb-graph-node:not(:disabled) {
 .cvb-graph-label {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
   font-size: 12px;
   font-weight: 600;
   color: var(--fg-strong);
