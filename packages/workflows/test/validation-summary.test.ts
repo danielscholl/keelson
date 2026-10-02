@@ -14,6 +14,9 @@ const documents = {
   "fix-issue": parse(readFileSync(join(bundledWorkflowsDir(), "fix-issue.yaml"), "utf8")) as {
     nodes: WorkflowNode[];
   },
+  "resolve-pr": parse(readFileSync(join(bundledWorkflowsDir(), "resolve-pr.yaml"), "utf8")) as {
+    nodes: WorkflowNode[];
+  },
 };
 type Workflow = keyof typeof documents;
 const tmps: string[] = [];
@@ -93,6 +96,16 @@ const validationNodes = [
     failureTrailer:
       "VALIDATION_STATUS: FAIL — the review loop left checks broken; the pushed PR needs attention",
   },
+  {
+    workflow: "resolve-pr",
+    nodeId: "validate",
+    failureTrailer: "VALIDATION_STATUS: FAIL",
+  },
+  {
+    workflow: "resolve-pr",
+    nodeId: "revalidate",
+    failureTrailer: "VALIDATION_STATUS: FAIL - refusing to push with broken checks",
+  },
 ] as const;
 
 const shellDescribe = Bun.which("bash") ? describe : describe.skip;
@@ -147,6 +160,14 @@ describe("fix-issue validation log references", () => {
     expect(prompt).toContain("$ARTIFACTS_DIR/post-fix-validate.log");
     expect(workflowNode("fix-issue", "report-status").bash).toContain(
       'echo "VALIDATION_LOG: $A/post-fix-validate.log"',
+    );
+  });
+});
+
+describe("resolve-pr validation log references", () => {
+  test("fix-validation names the full log", () => {
+    expect(workflowNode("resolve-pr", "fix-validation").prompt).toContain(
+      "$ARTIFACTS_DIR/validate.log",
     );
   });
 });
