@@ -131,7 +131,7 @@ for (const { workflow, nodeId, failureTrailer } of validationNodes) {
       expect(result.stderr).toBe("");
       expect(result.stdout.length).toBeLessThan(30_000);
       expect(result.stdout).toContain("=== PROJECT CHECKS");
-      expect(result.stdout).toContain(`Full log: ${join(artifacts, `${nodeId}.log`)}`);
+      expect(result.stdout).toContain(`Full log: ${artifacts}/${nodeId}.log`);
       expect(result.stdout).toContain(`Exit code: ${failed ? 1 : 0}`);
       expect(result.stdout.trimEnd().split("\n").at(-1)).toBe(
         failed ? failureTrailer : "VALIDATION_STATUS: PASS",
