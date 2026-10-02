@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import type { OpenChatSeed, RibAction, RibActionResult } from "@keelson/shared";
-import { act, renderHook, screen } from "@testing-library/react";
+import type { CanvasHtmlAction, OpenChatSeed, RibAction, RibActionResult } from "@keelson/shared";
+import { act, renderHook, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import * as realApi from "../src/api.ts";
 import { ToastHost } from "../src/components/Toast.tsx";
@@ -19,13 +19,16 @@ mock.module("../src/api.ts", () => ({
   postRibAction: (ribId: string, action: unknown) => postRibActionImpl(ribId, action),
 }));
 
-const { useRibActionDispatch } = await import("../src/hooks/useRibActionDispatch.ts");
+const { useHtmlFrameAction, useRibActionDispatch } = await import(
+  "../src/hooks/useRibActionDispatch.ts"
+);
 
 function wrapper({ children }: { children: ReactNode }) {
   return <ToastHost>{children}</ToastHost>;
 }
 
 const ACTION: RibAction = { type: "convene" };
+const FRAME_ACTION: CanvasHtmlAction = { type: "inspect", payload: { id: "bead-1" } };
 
 // Records every effect-callback invocation so a test can assert the dispatcher
 // routed to the right handler with the right payload.
@@ -74,6 +77,13 @@ async function runAct(
     res = await run(action);
   });
   return res;
+}
+
+async function frameAct(dispatch: (action: CanvasHtmlAction) => void): Promise<void> {
+  await act(async () => {
+    dispatch(FRAME_ACTION);
+    await Promise.resolve();
+  });
 }
 
 const SEED: OpenChatSeed = { systemPrompt: "Be helpful.", name: "Helper" };
@@ -403,6 +413,120 @@ describe("useRibActionDispatch — open-canvas directive", () => {
     // Not intercepted: the success toast fires and onSuccess runs (not swallowed).
     expect(toastText()).toContain("convene ✓");
     expect(onSuccessCalls).toEqual([ACTION]);
+  });
+});
+
+describe("useHtmlFrameAction — frame effects", () => {
+  for (const data of [
+    { effect: "open-canvas", key: "rib:demo:inspector", title: "Inspector" },
+    { effect: "open-canvas", key: "rib:demo:inspector" },
+  ]) {
+    test(`opens a canvas with ${"title" in data ? "a title" : "no title"} without a toast`, async () => {
+      const calls: Array<{ ribId: string; action: unknown }> = [];
+      postRibActionImpl = async (ribId, action) => {
+        calls.push({ ribId, action });
+        return { ok: true, data };
+      };
+      const rec = recorders();
+      const { result } = renderHook(
+        () => useHtmlFrameAction("demo", { onOpenCanvas: rec.onOpenCanvas }),
+        { wrapper },
+      );
+      await frameAct(result.current);
+      await waitFor(() => expect(rec.canvases).toEqual([{ key: data.key, title: data.title }]));
+      expect(calls).toEqual([
+        {
+          ribId: "demo",
+          action: { type: "inspect", payload: { id: "bead-1" }, origin: "canvas-html" },
+        },
+      ]);
+      expect(toastCount()).toBe(0);
+    });
+  }
+
+  for (const data of [
+    { effect: "open-chat", seed: SEED },
+    { effect: "run-workflow", workflow: "ship" },
+    { effect: "open-surface", surfaceId: "surface:demo:rooms" },
+    { effect: "open-run", runId: "run-1", workflow: "ship" },
+  ]) {
+    test(`does not forward ${data.effect} or unrelated options`, async () => {
+      postRibActionImpl = async () => ({ ok: true, data });
+      const rec = recorders();
+      const runs: string[] = [];
+      const successes: RibAction[] = [];
+      const widerOptions = {
+        onOpenCanvas: rec.onOpenCanvas,
+        onOpenChat: rec.onOpenChat,
+        onLaunchWorkflow: rec.onLaunchWorkflow,
+        onOpenSurface: rec.onOpenSurface,
+        onOpenRun: (_workflow: string, runId: string) => runs.push(runId),
+        onSuccess: (action: RibAction) => successes.push(action),
+      };
+      const { result } = renderHook(() => useHtmlFrameAction("demo", widerOptions), { wrapper });
+      await frameAct(result.current);
+      await waitFor(() => expect(toastText()).toContain("inspect ✓"));
+      expect(rec.canvases).toEqual([]);
+      expect(rec.chats).toEqual([]);
+      expect(rec.launches).toEqual([]);
+      expect(rec.surfaces).toEqual([]);
+      expect(runs).toEqual([]);
+      expect(successes).toEqual([]);
+      expect(okToastCount()).toBe(1);
+    });
+  }
+
+  test("without options an open-canvas response retains the success toast", async () => {
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "open-canvas", key: "rib:demo:inspector" },
+    });
+    const { result } = renderHook(() => useHtmlFrameAction("demo"), { wrapper });
+    await frameAct(result.current);
+    await waitFor(() => expect(toastText()).toContain("inspect ✓"));
+  });
+
+  test("a null rib id never posts an action", async () => {
+    const calls: unknown[] = [];
+    postRibActionImpl = async (...args) => {
+      calls.push(args);
+      return { ok: true };
+    };
+    const rec = recorders();
+    const { result } = renderHook(
+      () => useHtmlFrameAction(null, { onOpenCanvas: rec.onOpenCanvas }),
+      { wrapper },
+    );
+    await frameAct(result.current);
+    expect(calls).toEqual([]);
+    expect(rec.canvases).toEqual([]);
+    expect(toastCount()).toBe(0);
+  });
+
+  test("a malformed canvas response reports an error instead of opening", async () => {
+    postRibActionImpl = async () => ({ ok: true, data: { effect: "open-canvas", key: "" } });
+    const rec = recorders();
+    const { result } = renderHook(
+      () => useHtmlFrameAction("demo", { onOpenCanvas: rec.onOpenCanvas }),
+      { wrapper },
+    );
+    await frameAct(result.current);
+    await waitFor(() => expect(toastText()).toContain("invalid open-canvas directive"));
+    expect(rec.canvases).toEqual([]);
+    expect(okToastCount()).toBe(0);
+  });
+
+  test("an unsuccessful response reports its error without opening", async () => {
+    postRibActionImpl = async () => ({ ok: false, error: "not allowed" });
+    const rec = recorders();
+    const { result } = renderHook(
+      () => useHtmlFrameAction("demo", { onOpenCanvas: rec.onOpenCanvas }),
+      { wrapper },
+    );
+    await frameAct(result.current);
+    await waitFor(() => expect(toastText()).toContain("inspect: not allowed"));
+    expect(rec.canvases).toEqual([]);
+    expect(okToastCount()).toBe(0);
   });
 });
 

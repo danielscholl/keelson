@@ -607,7 +607,10 @@ describe("deleteBranch", () => {
 
     const result = await deleteBranch({ repoPath: tmp, branch: "keelson/test/feature" });
     expect(result.deleted).toBe(false);
-    expect(result.warning).toMatch(/git show-ref failed \(exit 128\): .+/);
+    expect(result.warning).toContain("git show-ref failed (exit 128)");
+    expect(result.warning).toMatch(
+      /not a git repository|gitfile does not point to a valid repository/,
+    );
   });
 
   test("warns with details when the working directory does not exist", async () => {

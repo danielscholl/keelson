@@ -371,7 +371,7 @@ function SurfaceRegion({
   const regionKind = resolveCanvasKind(region.key);
   const isHtml = regionKind === "html";
   const isLog = regionKind === "log";
-  const onFrameAction = useHtmlFrameAction(ribId);
+  const onFrameAction = useHtmlFrameAction(ribId, { onOpenCanvas });
 
   const parsed =
     !isHtml && !isLog && snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
