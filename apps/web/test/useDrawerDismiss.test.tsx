@@ -6,8 +6,18 @@ import { describe, expect, test } from "bun:test";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useDrawerDismiss } from "../src/hooks/useDrawerDismiss.ts";
 
-function Drawer({ name, onClose, extra }: { name: string; onClose: () => void; extra?: boolean }) {
-  const { dialogRef, closeRef } = useDrawerDismiss(onClose);
+function Drawer({
+  name,
+  onClose,
+  extra,
+  trapFocus,
+}: {
+  name: string;
+  onClose: () => void;
+  extra?: boolean;
+  trapFocus?: boolean;
+}) {
+  const { dialogRef, closeRef } = useDrawerDismiss(onClose, { trapFocus });
   return (
     <aside ref={dialogRef} role="dialog" aria-label={name}>
       <button ref={closeRef} type="button">
@@ -55,6 +65,42 @@ describe("useDrawerDismiss", () => {
   test("focus lands on the close button when the drawer opens", () => {
     render(<Drawer name="focus" onClose={() => {}} />);
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "close focus" }));
+  });
+
+  test("non-modal drawers leave Tab alone but still close on Escape", () => {
+    let closed = 0;
+    render(
+      <>
+        <button type="button">outside</button>
+        <Drawer name="side" onClose={() => closed++} trapFocus={false} />
+      </>,
+    );
+    const outside = screen.getByRole("button", { name: "outside" });
+    outside.focus();
+    expect(fireEvent.keyDown(outside, { key: "Tab" })).toBe(true);
+    expect(fireEvent.keyDown(outside, { key: "Tab", shiftKey: true })).toBe(true);
+    expect(document.activeElement).toBe(outside);
+    fireEvent.keyDown(outside, { key: "Escape" });
+    expect(closed).toBe(1);
+  });
+
+  test("changing trapping in place focuses the dialog when trapping is enabled", () => {
+    const onClose = () => {};
+    const view = render(<Drawer name="changing" onClose={onClose} />);
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    try {
+      outside.focus();
+      view.rerender(<Drawer name="changing" onClose={onClose} trapFocus={false} />);
+      expect(document.activeElement).toBe(outside);
+      expect(fireEvent.keyDown(outside, { key: "Tab" })).toBe(true);
+      view.rerender(<Drawer name="changing" onClose={onClose} trapFocus />);
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "close changing" }));
+      expect(fireEvent.keyDown(outside, { key: "Tab" })).toBe(false);
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "close changing" }));
+    } finally {
+      outside.remove();
+    }
   });
 
   // The page beneath isn't inert, so a programmatic focus move out (or an

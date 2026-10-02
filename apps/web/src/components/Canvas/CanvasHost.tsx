@@ -1,4 +1,10 @@
-import type { CanvasDocument, CanvasHtmlAction, CanvasSource, OpenChatSeed } from "@keelson/shared";
+import type {
+  CanvasDocument,
+  CanvasHtmlAction,
+  CanvasPlacement,
+  CanvasSource,
+  OpenChatSeed,
+} from "@keelson/shared";
 import { ribIdFromKey } from "@keelson/shared";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
@@ -19,6 +25,7 @@ import { ViewBody } from "./ViewBody.tsx";
 // the contract stays a pure data shape — the drawer just renders whatever it's
 // handed in a docked footer below the scrollable body.
 interface CanvasOpenOptions {
+  placement?: CanvasPlacement;
   footer?: ReactNode;
   // A board action rendered in the drawer may return an open-chat directive; the
   // opener (e.g. a surface region) supplies the handler so the drawer's Enter
@@ -41,6 +48,7 @@ interface CanvasApi {
 
 interface CanvasState {
   doc: CanvasDocument;
+  placement: CanvasPlacement;
   footer: ReactNode;
   onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
   onLaunchWorkflow?: (
@@ -63,8 +71,8 @@ export function useCanvas(): CanvasApi {
   return ctx;
 }
 
-// App-level canvas surface: a full-width sheet that presents a CanvasDocument
-// at comfortable reading width and, optionally, a docked footer (e.g. the
+// App-level canvas surface: a reading sheet or docked view inspector that presents
+// a CanvasDocument and, optionally, a docked footer (e.g. the
 // approval composer for a paused workflow plan). Escape and the close button
 // dismiss it; dismissing never runs a footer action — only the footer's own
 // controls do.
@@ -74,6 +82,7 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
     (doc: CanvasDocument, opts?: CanvasOpenOptions) =>
       setState({
         doc,
+        placement: doc.kind === "view" && opts?.placement === "side" ? "side" : "center",
         footer: opts?.footer ?? null,
         onOpenChat: opts?.onOpenChat,
         onLaunchWorkflow: opts?.onLaunchWorkflow,
@@ -89,6 +98,7 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
       {state && (
         <CanvasDrawer
           doc={state.doc}
+          placement={state.placement}
           footer={state.footer}
           {...(state.onOpenChat ? { onOpenChat: state.onOpenChat } : {})}
           {...(state.onLaunchWorkflow ? { onLaunchWorkflow: state.onLaunchWorkflow } : {})}
@@ -102,6 +112,7 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
 
 function CanvasDrawer({
   doc,
+  placement,
   footer,
   onOpenChat,
   onLaunchWorkflow,
@@ -109,6 +120,7 @@ function CanvasDrawer({
   onClose,
 }: {
   doc: CanvasDocument;
+  placement: CanvasPlacement;
   footer: ReactNode;
   onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
   onLaunchWorkflow?: (
@@ -120,16 +132,17 @@ function CanvasDrawer({
   onClose: () => void;
 }) {
   const title = doc.title ?? "Canvas";
-  const { dialogRef, closeRef } = useDrawerDismiss(onClose);
+  const side = placement === "side";
+  const { dialogRef, closeRef } = useDrawerDismiss(onClose, { trapFocus: !side });
 
   return (
     <>
-      <div className="canvas-backdrop" onClick={onClose} aria-hidden="true" />
+      {!side && <div className="canvas-backdrop" onClick={onClose} aria-hidden="true" />}
       <aside
         ref={dialogRef}
-        className={`canvas-drawer canvas-drawer-${doc.kind}`}
+        className={`canvas-drawer canvas-drawer-${doc.kind}${side ? " canvas-drawer-side" : ""}`}
         role="dialog"
-        aria-modal="true"
+        aria-modal={!side}
         aria-label={title}
       >
         <header className="canvas-drawer-header">
@@ -269,7 +282,7 @@ function ViewCanvas({
   // (the key difference from onOpenChat/onLaunchWorkflow). Pass the drawer's own
   // effect handlers into the replacement doc's opts so its board acts like inline.
   const onOpenCanvas = useCallback(
-    (key: string, title?: string) =>
+    (key: string, title?: string, placement?: CanvasPlacement) =>
       openCanvas(
         {
           kind: resolveCanvasKind(key),
@@ -277,6 +290,7 @@ function ViewCanvas({
           ...(title ? { title } : {}),
         },
         {
+          ...(placement ? { placement } : {}),
           ...(onOpenChat ? { onOpenChat } : {}),
           ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
           ...(onOpenRun ? { onOpenRun } : {}),
@@ -475,7 +489,7 @@ function HtmlCanvas({
   const resolveCanvasKind = useCanvasKindForKey();
   // openCanvas drops any handler it isn't handed, so forward the drawer's own.
   const onOpenCanvas = useCallback(
-    (key: string, title?: string) =>
+    (key: string, title?: string, placement?: CanvasPlacement) =>
       openCanvas(
         {
           kind: resolveCanvasKind(key),
@@ -483,6 +497,7 @@ function HtmlCanvas({
           ...(title ? { title } : {}),
         },
         {
+          ...(placement ? { placement } : {}),
           ...(onOpenChat ? { onOpenChat } : {}),
           ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
           ...(onOpenRun ? { onOpenRun } : {}),

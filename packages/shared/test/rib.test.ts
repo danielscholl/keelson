@@ -794,12 +794,41 @@ describe("rib client effect schema", () => {
     expect(ribClientEffectSchema.parse(effect)).toEqual(effect);
   });
 
-  it("parses an open-canvas effect with title omitted", () => {
+  it("round-trips an open-canvas effect with side placement", () => {
+    const effect = {
+      effect: "open-canvas" as const,
+      key: "rib:demo:session-7",
+      title: "Session 7",
+      placement: "side" as const,
+    };
+    expect(ribClientEffectSchema.parse(effect)).toEqual(effect);
+  });
+
+  it("round-trips an open-canvas effect with center placement", () => {
+    const effect = {
+      effect: "open-canvas" as const,
+      key: "rib:demo:session-7",
+      placement: "center" as const,
+    };
+    expect(ribClientEffectSchema.parse(effect)).toEqual(effect);
+  });
+
+  it("parses an open-canvas effect without adding omitted title or placement", () => {
     const parsed = ribClientEffectSchema.parse({
       effect: "open-canvas",
       key: "rib:demo:session-7",
     });
     expect(parsed).toEqual({ effect: "open-canvas", key: "rib:demo:session-7" });
+  });
+
+  it("rejects an open-canvas effect with unsupported placement", () => {
+    expect(
+      ribClientEffectSchema.safeParse({
+        effect: "open-canvas",
+        key: "rib:demo:x",
+        placement: "left",
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects an open-canvas effect with an empty key", () => {
@@ -808,8 +837,12 @@ describe("rib client effect schema", () => {
 
   it("rejects an open-canvas effect with an unknown extra field", () => {
     expect(
-      ribClientEffectSchema.safeParse({ effect: "open-canvas", key: "rib:demo:x", extra: 1 })
-        .success,
+      ribClientEffectSchema.safeParse({
+        effect: "open-canvas",
+        key: "rib:demo:x",
+        placement: "side",
+        extra: 1,
+      }).success,
     ).toBe(false);
   });
 

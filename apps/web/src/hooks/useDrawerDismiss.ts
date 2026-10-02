@@ -22,12 +22,16 @@ export interface DrawerDismiss {
 
 // The dismiss + focus contract every app drawer shares: Escape closes, focus
 // moves to the close button on open and returns to the opener on unmount, and
-// Tab cycles within the dialog. Callers must only mount the hook's host while
+// Tab cycles within the dialog unless trapping is disabled. Callers must only mount the hook's host while
 // the drawer is open — mount/unmount is what brackets the focus restore.
-export function useDrawerDismiss(onClose: () => void): DrawerDismiss {
+export function useDrawerDismiss(
+  onClose: () => void,
+  opts?: { trapFocus?: boolean },
+): DrawerDismiss {
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const token = useId();
+  const trapFocus = opts?.trapFocus ?? true;
 
   useEffect(() => {
     openDrawers.push(token);
@@ -43,6 +47,10 @@ export function useDrawerDismiss(onClose: () => void): DrawerDismiss {
     return () => opener?.focus();
   }, []);
 
+  useEffect(() => {
+    if (trapFocus) closeRef.current?.focus();
+  }, [trapFocus]);
+
   // Both keys are handled at document scope rather than on the dialog: the page
   // beneath isn't inert, so once focus escapes the dialog the keydown is
   // dispatched from a background element and never reaches a dialog-scoped
@@ -54,7 +62,7 @@ export function useDrawerDismiss(onClose: () => void): DrawerDismiss {
         onClose();
         return;
       }
-      if (e.key !== "Tab") return;
+      if (!trapFocus || e.key !== "Tab") return;
       const root = dialogRef.current;
       if (!root) return;
       const focusable = root.querySelectorAll<HTMLElement>(FOCUSABLE);
@@ -74,7 +82,7 @@ export function useDrawerDismiss(onClose: () => void): DrawerDismiss {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose, token]);
+  }, [onClose, token, trapFocus]);
 
   return { dialogRef, closeRef };
 }

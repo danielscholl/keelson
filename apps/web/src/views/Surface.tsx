@@ -4,6 +4,7 @@
 
 import {
   type CanvasBoardView,
+  type CanvasPlacement,
   canvasViewSchema,
   columnRegions,
   type OpenChatSeed,
@@ -324,7 +325,7 @@ function SurfaceRegion({
   // doc expand() builds. Pass the effect handlers into the OPENED doc's opts so a
   // board action inside the opened canvas behaves like inline (as expand() does).
   const onOpenCanvas = useCallback(
-    (key: string, title?: string) =>
+    (key: string, title?: string, placement?: CanvasPlacement) =>
       openCanvas(
         {
           kind: resolveCanvasKind(key),
@@ -332,6 +333,7 @@ function SurfaceRegion({
           ...(title ? { title } : {}),
         },
         {
+          ...(placement ? { placement } : {}),
           onOpenChat,
           ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
           ...(onOpenSurface ? { onOpenSurface } : {}),

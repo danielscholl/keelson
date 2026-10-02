@@ -3015,10 +3015,7 @@ button.tab:focus-visible {
   padding: 4px 8px;
 }
 
-/* Canvas drawer — right-side reading surface for CanvasDocument content.
-   Non-modal (no backdrop) so the trace + approval composer stay usable.
-   Wider than the credentials drawer for comfortable markdown line length.
-   Reuses the credentials-slide-in / credentials-fade-in keyframes below. */
+/* Centered canvases are modal; side inspectors leave the surface interactive. */
 .canvas-backdrop {
   position: fixed;
   inset: 0;
@@ -3049,6 +3046,25 @@ button.tab:focus-visible {
 
 .canvas-drawer-html {
   max-width: none;
+}
+
+.canvas-drawer-side {
+  left: auto;
+  right: 0;
+  width: 520px;
+  max-width: 100%;
+  margin-inline: 0;
+  border-inline-end: none;
+}
+
+.canvas-drawer-side .canvas-drawer-body {
+  container-type: inline-size;
+}
+
+@media (max-width: 720px) {
+  .canvas-drawer-side {
+    width: 100%;
+  }
 }
 
 /* Run drawer. Stays below the canvas pair (1000/1001): its trace can open a
@@ -3446,6 +3462,9 @@ button.tab:focus-visible {
   grid-template-columns: var(--cvb-cols, 1fr);
   gap: 16px;
   align-items: start;
+}
+.canvas-drawer-side .cvb-columns {
+  grid-template-columns: 1fr;
 }
 .cvb-column {
   display: flex;

@@ -18,6 +18,9 @@ import { z } from "zod";
 export const canvasKindSchema = z.enum(["markdown", "view", "html", "log"]);
 export type CanvasKind = z.infer<typeof canvasKindSchema>;
 
+export const canvasPlacementSchema = z.enum(["center", "side"]);
+export type CanvasPlacement = z.infer<typeof canvasPlacementSchema>;
+
 // Discriminated on `type`. `snapshot` rides the existing SnapshotManager and
 // is wired in a later stage; v1 never emits it.
 export const canvasSourceSchema = z.discriminatedUnion("type", [

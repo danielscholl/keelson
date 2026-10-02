@@ -8,7 +8,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Rib, RibActionResult, RibAuthStatus, RibContext } from "@keelson/shared";
+import type {
+  CanvasPlacement,
+  Rib,
+  RibActionResult,
+  RibAuthStatus,
+  RibContext,
+} from "@keelson/shared";
 import type { CrossRibGrants } from "@keelson/shared/config";
 import { Hono } from "hono";
 import { bootstrapRibs, bootstrapWorkflows, prepareRibWorkflows } from "../src/bootstrap.ts";
@@ -455,11 +461,14 @@ describe("POST /api/ribs/:id/action", () => {
   // actions to. A rib may only open its OWN board — the route mirrors the
   // activation-time namespace gate so a rib can't make the SPA render/act on
   // another rib's namespace.
-  function canvasRib(id: string, key: string): Rib {
+  function canvasRib(id: string, key: string, placement?: CanvasPlacement): Rib {
     return {
       id,
       displayName: id,
-      onAction: () => ({ ok: true, data: { effect: "open-canvas", key } }),
+      onAction: () => ({
+        ok: true,
+        data: { effect: "open-canvas", key, ...(placement ? { placement } : {}) },
+      }),
     };
   }
 
@@ -482,6 +491,30 @@ describe("POST /api/ribs/:id/action", () => {
     const res = await app.fetch(post("/api/ribs/mine/action", { type: "open" }));
     expect(res.status).toBe(500);
     expect((await res.json()) as { ok: boolean; error: string }).toEqual({
+      ok: false,
+      error: "open-canvas key is outside the rib namespace",
+    });
+  });
+
+  test("an own-namespace side canvas effect preserves placement", async () => {
+    const { app } = await makeRig({
+      available: { mine: canvasRib("mine", "rib:mine:board", "side") },
+    });
+    const res = await app.fetch(post("/api/ribs/mine/action", { type: "open" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      data: { effect: "open-canvas", key: "rib:mine:board", placement: "side" },
+    });
+  });
+
+  test("side placement cannot open a foreign-namespace canvas", async () => {
+    const { app } = await makeRig({
+      available: { mine: canvasRib("mine", "rib:other:board", "side") },
+    });
+    const res = await app.fetch(post("/api/ribs/mine/action", { type: "open" }));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({
       ok: false,
       error: "open-canvas key is outside the rib namespace",
     });

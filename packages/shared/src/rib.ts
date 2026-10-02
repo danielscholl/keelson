@@ -7,7 +7,12 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { z } from "zod";
-import { canvasActionItemSchema, canvasKindSchema, canvasToneSchema } from "./canvas.ts";
+import {
+  canvasActionItemSchema,
+  canvasKindSchema,
+  canvasPlacementSchema,
+  canvasToneSchema,
+} from "./canvas.ts";
 import type {
   MessageChunk,
   ModelClass,
@@ -934,7 +939,10 @@ export type OpenChatSeed = z.infer<typeof openChatSeedSchema>;
 // an open string (the catalog name / `:name` path segment) — rib-contributed
 // names aren't known here; `args` maps onto the run API's `inputs`. `open-canvas`
 // opens the item's snapshot (`key`) in the canvas drawer — the View verb an
-// index card's "Open" uses. `open-surface` switches the active rib surface tab,
+// index card's "Open" uses. Placement defaults to `center`; `side` docks view docs
+// in a non-modal right-edge inspector, keeping the surface interactive and swapping
+// later replies in place. HTML docs always open centered.
+// `open-surface` switches the active rib surface tab,
 // optionally focusing one region after navigation. `open-run` opens an existing
 // run in the run drawer beside the surface, approval composer included.
 // A rib handling an action stamped `origin: "canvas-html"` may return `open-canvas`
@@ -958,6 +966,7 @@ export const ribClientEffectSchema = z.discriminatedUnion("effect", [
       effect: z.literal("open-canvas"),
       key: z.string().min(1),
       title: z.string().optional(),
+      placement: canvasPlacementSchema.optional(),
     })
     .strict(),
   z
