@@ -194,8 +194,8 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-6-astra
-    effort: high
+      copilot: claude-opus-5.5
+    effort: medium
     # Bug investigation has the same chunk-sparse, single-turn shape as planning.
     idle_timeout: 1800000
     prompt: |
@@ -269,8 +269,8 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-6-astra
-    effort: high
+      copilot: claude-opus-5.5
+    effort: medium
     # Single-turn large-codebase planning can sit >600s between provider chunks.
     # Match the heavy edit nodes' idle budget so chunk-sparse work can finish.
     idle_timeout: 1800000
@@ -549,7 +549,8 @@ nodes:
         when: "$gate-mode.output == 'true'"
         model: deep
         model_by_provider:
-          copilot: gpt-6-astra
+          copilot: claude-opus-5.5
+        effort: medium
         allowed_tools: [Read, Glob, Grep]
         min_confidence: 85
         prompt: |
@@ -579,7 +580,7 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-6-sol
+      copilot: gpt-6.1-sol
     effort: xhigh
     # Large changes run many edit+check cycles; a tight cap kills a run mid-task
     # and loses uncommitted work. Generous here; the per-task checks stay scoped
@@ -683,7 +684,7 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-6-sol
+      copilot: gpt-6.1-sol
     effort: high
     prompt: |
       Review the validation output below.
@@ -873,8 +874,8 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-6-astra
-    effort: xhigh
+      copilot: claude-opus-5.5
+    effort: medium
     allowed_tools: [Read, Glob, Grep]
     output_format:
       type: object
@@ -1217,7 +1218,7 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-6-sol
+      copilot: gpt-6.1-sol
     effort: high
     prompt: |
       Apply ONLY the confirmed must-fix issues from triage below. If the list is
@@ -1561,7 +1562,7 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-6-sol
+      copilot: gpt-6.1-sol
     effort: high
     idle_timeout: 1800000
     prompt: |
