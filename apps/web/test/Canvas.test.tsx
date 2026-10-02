@@ -4,12 +4,15 @@ import {
   CANVAS_HTML_SIZE_CHANNEL,
   type CanvasBoardView,
   type CanvasDocument,
+  type RibSummary,
   type WorkflowNodeSummary,
 } from "@keelson/shared";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import * as realApi from "../src/api.ts";
+import { ToastHost } from "../src/components/Toast.tsx";
 import type { SnapshotState } from "../src/hooks/useSnapshot.ts";
 import type { NodeView } from "../src/hooks/useWorkflowRun.ts";
+import { ribFixture } from "./ribsFixture.ts";
 
 // Render markdown as raw text so assertions don't depend on Streamdown under
 // happy-dom; the drawer's dispatch + the trace affordances are what's tested.
@@ -25,11 +28,13 @@ let artifactImpl: (
 let postRibActionImpl: (ribId: string, action: unknown) => Promise<unknown> = async () => ({
   ok: true,
 });
+let getRibsImpl = realApi.getRibs;
 
 mock.module("../src/api.ts", () => ({
   ...realApi,
   getRunArtifact: (runId: string, path: string) => artifactImpl(runId, path),
   postRibAction: (ribId: string, action: unknown) => postRibActionImpl(ribId, action),
+  getRibs: () => getRibsImpl(),
 }));
 
 // HTML-canvas snapshot source resolves through useSnapshot; default to loading so
@@ -40,7 +45,10 @@ let snapshotImpl: SnapshotState = {
   version: null,
   composedAt: null,
 };
-mock.module("../src/hooks/useSnapshot.ts", () => ({ useSnapshot: () => snapshotImpl }));
+const snapshotsByKey: Record<string, SnapshotState> = {};
+mock.module("../src/hooks/useSnapshot.ts", () => ({
+  useSnapshot: (key: string | null) => (key ? snapshotsByKey[key] : undefined) ?? snapshotImpl,
+}));
 
 // Stub the graph renderer so the dispatch is testable without mounting
 // ReactFlow under happy-dom; the layout itself is covered in viewGraphLayout.test.ts.
@@ -51,6 +59,7 @@ mock.module("../src/components/Canvas/GraphView.tsx", () => ({
 }));
 
 const { CanvasProvider, useCanvas } = await import("../src/components/Canvas/CanvasHost.tsx");
+const { RibsProvider, useRibsContext } = await import("../src/components/RibsProvider.tsx");
 const { SandboxedHtml, composeCanvasHtmlDoc } = await import(
   "../src/components/Canvas/SandboxedHtml.tsx"
 );
@@ -86,6 +95,18 @@ function postMessageTo(data: unknown, source: unknown) {
   const e = new MessageEvent("message", { data });
   Object.defineProperty(e, "source", { value: source, configurable: true });
   window.dispatchEvent(e);
+}
+
+async function sendFrameAction(frame: HTMLIFrameElement, type: string) {
+  const win = {} as Window;
+  Object.defineProperty(frame, "contentWindow", { value: win, configurable: true });
+  await act(async () => {
+    postMessageTo(
+      { channel: CANVAS_HTML_ACTION_CHANNEL, type, payload: { id: "bead-1" } },
+      frame.contentWindow,
+    );
+    await Promise.resolve();
+  });
 }
 
 describe("CanvasProvider / useCanvas — log kind", () => {
@@ -353,6 +374,222 @@ describe("CanvasProvider / useCanvas", () => {
       action: { type: "suspend", payload: { cluster: "demo" }, origin: "canvas-html" },
     });
   });
+
+  for (const kind of ["view", "html"] as const) {
+    test(`a snapshot HTML frame drills into a ${kind} target in the same drawer`, async () => {
+      const source = "rib:demo:html-panel";
+      const target = "rib:demo:inspector";
+      const originalGetRibs = getRibsImpl;
+      const originalPost = postRibActionImpl;
+      const originalRibs = ribFixture.ribs;
+      snapshotsByKey[source] = {
+        status: "live",
+        data: "<button data-canvas-action='inspect'>Inspect source</button>",
+        version: 1,
+        composedAt: null,
+      };
+      snapshotsByKey[target] = {
+        status: "live",
+        data:
+          kind === "html"
+            ? "<p>Inspector HTML content</p>"
+            : {
+                view: "board",
+                sections: [{ kind: "stats", items: [{ label: "Target", value: 42 }] }],
+              },
+        version: 1,
+        composedAt: null,
+      };
+      const rib: RibSummary = {
+        id: "demo",
+        displayName: "Demo",
+        registered: [],
+        views: [
+          { key: source, canvasKind: "html" },
+          ...(kind === "html" ? [{ key: target, canvasKind: "html" as const }] : []),
+        ],
+        surfaces: [],
+        hasOnAction: true,
+      };
+      ribFixture.ribs = [rib];
+      getRibsImpl = async () => [rib];
+      const calls: Array<{ ribId: string; action: unknown }> = [];
+      postRibActionImpl = async (ribId, action) => {
+        calls.push({ ribId, action });
+        return { ok: true, data: { effect: "open-canvas", key: target, title: "Inspector" } };
+      };
+      function ManifestStatus() {
+        const { status } = useRibsContext();
+        return <span data-testid="manifest-status">{status}</span>;
+      }
+      try {
+        render(
+          <ToastHost>
+            <RibsProvider>
+              <ManifestStatus />
+              <CanvasProvider>
+                <Opener
+                  doc={{ kind: "html", source: { type: "snapshot", key: source }, title: "Source" }}
+                />
+              </CanvasProvider>
+            </RibsProvider>
+          </ToastHost>,
+        );
+        await waitFor(() =>
+          expect(screen.getByTestId("manifest-status").textContent).toBe("ready"),
+        );
+        fireEvent.click(screen.getByText("open"));
+        const frame = screen
+          .getByRole("dialog", { name: "Source" })
+          .querySelector("iframe.canvas-html-frame") as HTMLIFrameElement;
+        await sendFrameAction(frame, "inspect");
+        await waitFor(() =>
+          expect(screen.getByRole("dialog", { name: "Inspector" })).toBeDefined(),
+        );
+        const dialog = screen.getByRole("dialog", { name: "Inspector" });
+        expect(screen.getAllByRole("dialog")).toHaveLength(1);
+        expect(dialog.classList.contains(`canvas-drawer-${kind}`)).toBe(true);
+        if (kind === "html") {
+          expect(
+            dialog.querySelector("iframe.canvas-html-frame")?.getAttribute("srcdoc"),
+          ).toContain("Inspector HTML content");
+        } else {
+          expect(dialog.textContent).toContain("Target");
+          expect(dialog.textContent).toContain("42");
+        }
+        expect(calls).toEqual([
+          {
+            ribId: "demo",
+            action: { type: "inspect", payload: { id: "bead-1" }, origin: "canvas-html" },
+          },
+        ]);
+        expect(document.querySelector(".keelson-toast")).toBeNull();
+      } finally {
+        delete snapshotsByKey[source];
+        delete snapshotsByKey[target];
+        ribFixture.ribs = originalRibs;
+        getRibsImpl = originalGetRibs;
+        postRibActionImpl = originalPost;
+      }
+    });
+  }
+
+  for (const data of [
+    { effect: "open-chat", seed: { systemPrompt: "Be helpful.", name: "Helper" } },
+    { effect: "run-workflow", workflow: "ship" },
+  ]) {
+    test(`a snapshot HTML frame does not invoke the ${data.effect} opener or close`, async () => {
+      const source = "rib:demo:html-panel";
+      const originalPost = postRibActionImpl;
+      snapshotsByKey[source] = {
+        status: "live",
+        data: "<button data-canvas-action='navigate'>Navigate</button>",
+        version: 1,
+        composedAt: null,
+      };
+      const calls: unknown[] = [];
+      postRibActionImpl = async (_ribId, action) => {
+        calls.push(action);
+        return { ok: true, data };
+      };
+      const chats: string[] = [];
+      const launches: string[] = [];
+      function EffectOpener() {
+        const { openCanvas } = useCanvas();
+        return (
+          <button
+            type="button"
+            onClick={() =>
+              openCanvas(
+                { kind: "html", source: { type: "snapshot", key: source }, title: "Source" },
+                {
+                  onOpenChat: (seed) => chats.push(seed.name ?? ""),
+                  onLaunchWorkflow: (workflow) => launches.push(workflow),
+                },
+              )
+            }
+          >
+            open-effects
+          </button>
+        );
+      }
+      try {
+        render(
+          <ToastHost>
+            <CanvasProvider>
+              <EffectOpener />
+            </CanvasProvider>
+          </ToastHost>,
+        );
+        fireEvent.click(screen.getByText("open-effects"));
+        const frame = screen
+          .getByRole("dialog", { name: "Source" })
+          .querySelector("iframe.canvas-html-frame") as HTMLIFrameElement;
+        await sendFrameAction(frame, "navigate");
+        await waitFor(() => expect(document.querySelector(".keelson-toast-ok")).not.toBeNull());
+        expect(calls).toEqual([
+          { type: "navigate", payload: { id: "bead-1" }, origin: "canvas-html" },
+        ]);
+        expect(chats).toEqual([]);
+        expect(launches).toEqual([]);
+        expect(screen.getByRole("dialog", { name: "Source" })).toBeDefined();
+        expect(screen.getAllByRole("dialog")).toHaveLength(1);
+      } finally {
+        delete snapshotsByKey[source];
+        postRibActionImpl = originalPost;
+      }
+    });
+  }
+
+  for (const source of [
+    { type: "inline", text: "<p>Unowned inline</p>" },
+    { type: "artifact", runId: "run-1", path: "panel.html" },
+    { type: "snapshot", key: "other:panel" },
+  ] as const) {
+    test(`${source.type} HTML without a rib owner does not dispatch`, async () => {
+      const originalPost = postRibActionImpl;
+      const originalArtifact = artifactImpl;
+      const calls: unknown[] = [];
+      postRibActionImpl = async (...args) => {
+        calls.push(args);
+        return { ok: true };
+      };
+      artifactImpl = async (_runId, path) => ({ path, content: "<p>Unowned artifact</p>" });
+      snapshotsByKey["other:panel"] = {
+        status: "live",
+        data: "<p>Unowned snapshot</p>",
+        version: 1,
+        composedAt: null,
+      };
+      try {
+        render(
+          <ToastHost>
+            <CanvasProvider>
+              <Opener doc={{ kind: "html", source, title: "Unowned" }} />
+            </CanvasProvider>
+          </ToastHost>,
+        );
+        fireEvent.click(screen.getByText("open"));
+        await waitFor(() =>
+          expect(
+            screen
+              .getByRole("dialog", { name: "Unowned" })
+              .querySelector("iframe.canvas-html-frame"),
+          ).not.toBeNull(),
+        );
+        const readyFrame = screen
+          .getByRole("dialog")
+          .querySelector("iframe.canvas-html-frame") as HTMLIFrameElement;
+        await sendFrameAction(readyFrame, "inspect");
+        expect(calls).toEqual([]);
+        expect(document.querySelector(".keelson-toast")).toBeNull();
+      } finally {
+        delete snapshotsByKey["other:panel"];
+        postRibActionImpl = originalPost;
+        artifactImpl = originalArtifact;
+      }
+    });
+  }
 
   test("a drawer board action's run-workflow directive fires the handler and closes the drawer", async () => {
     snapshotImpl = {

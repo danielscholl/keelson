@@ -11,6 +11,7 @@ import * as realApi from "../src/api.ts";
 import { ToastHost } from "../src/components/Toast.tsx";
 import type { RegionAction } from "../src/hooks/useSettings.ts";
 import { type ChatSeed, OPENING_PROMPT } from "../src/lib/exploreSeed.ts";
+import { ribFixture } from "./ribsFixture.ts";
 
 // Stub the snapshot hook (not api.ts/ws.ts) so this file's mocks don't collide
 // with Canvas.test.tsx's api.ts mock under bun's process-global mock.module.
@@ -69,9 +70,8 @@ mock.module("../src/api.ts", () => ({
   },
 }));
 
-let ribSummaries: RibSummary[] = [];
 mock.module("../src/hooks/useRibs.ts", () => ({
-  useRibs: () => ({ status: "ready", ribs: ribSummaries, error: null, refresh: () => {} }),
+  useRibs: () => ({ status: "ready", ribs: ribFixture.ribs, error: null, refresh: () => {} }),
 }));
 
 const { CanvasProvider } = await import("../src/components/Canvas/CanvasHost.tsx");
@@ -148,7 +148,7 @@ beforeEach(() => {
   triggerError = null;
   postRibActionCalls.length = 0;
   postRibActionResult = { ok: true };
-  ribSummaries = [];
+  ribFixture.ribs = [];
   // Seeding an explicit empty list (rather than clearing) opts these tests into all
   // three controls: select and expand are hidden by default, and most cases here
   // exercise the controls themselves rather than that default.
@@ -505,7 +505,7 @@ describe("Surface", () => {
   test("Expand opens html-declared keys as html and view-declared keys as view", () => {
     live("rib:demo:html-panel", "<p>hi from html lens</p>");
     live("rib:demo:view-panel", board("View Panel", "Services", 23));
-    ribSummaries = [
+    ribFixture.ribs = [
       {
         id: "demo",
         displayName: "Demo",
@@ -553,7 +553,7 @@ describe("Surface", () => {
 
   test("an html-declared region renders its markup inline, not the view-parse error", () => {
     live("rib:demo:html-panel", "<p>hi from html lens</p>");
-    ribSummaries = [htmlRib("rib:demo:html-panel")];
+    ribFixture.ribs = [htmlRib("rib:demo:html-panel")];
     const { container } = renderSurface({
       id: "cimpl",
       title: "CIMPL",
@@ -571,7 +571,7 @@ describe("Surface", () => {
   test("hideWhenEmpty omits an html region whose markup is blank, and keeps one with content", () => {
     live("rib:demo:blank", "   \n  ");
     live("rib:demo:filled", "<p>real page</p>");
-    ribSummaries = [
+    ribFixture.ribs = [
       {
         ...htmlRib("rib:demo:blank"),
         views: [
@@ -602,7 +602,7 @@ describe("Surface", () => {
 
   test("a log-declared region renders its live payload as ANSI terminal output inline, not the view-parse error", () => {
     live("rib:demo:log-panel", "Building `pkg`\n[32mOK[0m");
-    ribSummaries = [logRib("rib:demo:log-panel")];
+    ribFixture.ribs = [logRib("rib:demo:log-panel")];
     const { container } = renderSurface({
       id: "cimpl",
       title: "CIMPL",
@@ -624,7 +624,7 @@ describe("Surface", () => {
   test("hideWhenEmpty omits a log region whose output is blank, and keeps one with content", () => {
     live("rib:demo:log-blank", "   \n  ");
     live("rib:demo:log-filled", "hello world");
-    ribSummaries = [
+    ribFixture.ribs = [
       {
         ...logRib("rib:demo:log-blank"),
         views: [
@@ -655,7 +655,7 @@ describe("Surface", () => {
 
   test("an html region's frame action is dispatched with origin canvas-html", async () => {
     live("rib:demo:html-panel", "<p>hi</p>");
-    ribSummaries = [htmlRib("rib:demo:html-panel")];
+    ribFixture.ribs = [htmlRib("rib:demo:html-panel")];
     const { container } = renderSurface({
       id: "cimpl",
       title: "CIMPL",
@@ -690,7 +690,7 @@ describe("Surface", () => {
           ? board("Inspector board", "Unique metric", 42)
           : "<p>Inspector HTML content</p>",
       );
-      ribSummaries = [
+      ribFixture.ribs = [
         {
           ...htmlRib(source),
           views: [
