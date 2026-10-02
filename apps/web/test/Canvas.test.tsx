@@ -4,6 +4,7 @@ import {
   CANVAS_HTML_SIZE_CHANNEL,
   type CanvasBoardView,
   type CanvasDocument,
+  type CanvasPlacement,
   type RibSummary,
   type WorkflowNodeSummary,
 } from "@keelson/shared";
@@ -68,11 +69,11 @@ const { ToolCallsBlock } = await import("../src/components/Chat/ToolCallsBlock.t
 const { BoardView, Segments } = await import("../src/components/Canvas/BoardView.tsx");
 const { BoardActionProvider } = await import("../src/components/Canvas/BoardActionContext.tsx");
 
-function Opener({ doc }: { doc: CanvasDocument }) {
+function Opener({ doc, placement }: { doc: CanvasDocument; placement?: CanvasPlacement }) {
   const { openCanvas, close } = useCanvas();
   return (
     <div>
-      <button type="button" onClick={() => openCanvas(doc)}>
+      <button type="button" onClick={() => openCanvas(doc, { placement })}>
         open
       </button>
       <button type="button" onClick={close}>
@@ -158,6 +159,61 @@ describe("CanvasProvider / useCanvas — log kind", () => {
     } finally {
       snapshotImpl = priorSnapshot;
     }
+  });
+});
+
+describe("CanvasProvider — side placement", () => {
+  const VIEW: CanvasDocument = {
+    kind: "view",
+    source: {
+      type: "inline",
+      text: JSON.stringify({
+        view: "table",
+        columns: [{ key: "name" }],
+        rows: [{ name: "first" }],
+      }),
+    },
+    title: "First item",
+  };
+
+  test("opens a non-modal drawer while sibling controls remain clickable", () => {
+    const onClick = mock(() => {});
+    render(
+      <CanvasProvider>
+        <Opener doc={VIEW} placement="side" />
+        <button type="button" onClick={onClick}>
+          surface action
+        </button>
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.classList.contains("canvas-drawer-side")).toBe(true);
+    expect(dialog.getAttribute("aria-modal")).toBe("false");
+    expect(document.querySelector(".canvas-backdrop")).toBeNull();
+    fireEvent.click(screen.getByText("surface action"));
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("dialog")).toBe(dialog);
+  });
+
+  test("swaps side documents without remounting or taking focus from the surface", () => {
+    const view = render(
+      <CanvasProvider>
+        <Opener doc={VIEW} placement="side" />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    const opener = screen.getByText("open");
+    opener.focus();
+    view.rerender(
+      <CanvasProvider>
+        <Opener doc={{ ...VIEW, title: "Second item" }} placement="side" />
+      </CanvasProvider>,
+    );
+    fireEvent.click(opener);
+    expect(screen.getByRole("dialog", { name: "Second item" })).toBe(dialog);
+    expect(document.activeElement).toBe(opener);
   });
 });
 
