@@ -69,7 +69,7 @@ describe("graph section", () => {
     ]);
     expect(
       columns.map((column) => column.querySelector(".cvb-graph-col-title")?.textContent),
-    ).toEqual(graphFixture.columns);
+    ).toEqual(graphFixture.columns!);
   });
 
   test("dispatches trusted node actions and conveys selection", async () => {
@@ -247,7 +247,7 @@ describe("graph section", () => {
     fireEvent.click(button);
     expect(calls).toBe(1);
     expect(button.hasAttribute("disabled")).toBe(true);
-    await act(async () => resolve({ ok: false, error: { code: "FAILED", message: "Failed" } }));
+    await act(async () => resolve({ ok: false, error: "Failed" }));
     expect(button.hasAttribute("disabled")).toBe(false);
   });
 
