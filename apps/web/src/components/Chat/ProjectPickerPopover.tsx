@@ -5,6 +5,7 @@
 import { DEFAULT_PROJECT_NAME, type Project } from "@keelson/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { deleteProject, updateProject } from "../../api.ts";
+import { pickerPopoverPosition } from "../../lib/pickerPopoverPosition.ts";
 import { ConfirmModal } from "../ConfirmModal.tsx";
 
 interface ProjectPickerPopoverProps {
@@ -40,6 +41,7 @@ export function ProjectPickerPopover({
       // Transform-centre (not width math): on `beforetoggle` the panel is still
       // display:none, so offsetWidth is 0 and width math would mis-centre a frame.
       popoverEl.style.left = "50%";
+      popoverEl.style.right = "auto";
       popoverEl.style.transform = "translateX(-50%)";
       // Clear the anchored path's inline sizing so a prior anchored open doesn't
       // clip or mis-size this centred fallback.
@@ -47,8 +49,7 @@ export function ProjectPickerPopover({
       popoverEl.style.minWidth = "";
       return;
     }
-    // Anchored placement sets an explicit left; clear any centring transform a
-    // prior anchor-less frame left behind, or it would shift this by half.
+    // Clear any centring transform a prior anchor-less frame left behind.
     popoverEl.style.transform = "none";
     const rect = trigger.getBoundingClientRect();
     const viewportH = window.innerHeight;
@@ -65,8 +66,10 @@ export function ProjectPickerPopover({
       popoverEl.style.top = "auto";
       popoverEl.style.maxHeight = `${Math.max(180, Math.round(spaceAbove - margin * 2))}px`;
     }
-    popoverEl.style.left = `${Math.round(rect.left)}px`;
-    popoverEl.style.minWidth = `${Math.max(320, Math.round(rect.width))}px`;
+    const position = pickerPopoverPosition(rect, window.innerWidth, 320);
+    popoverEl.style.left = position.left;
+    popoverEl.style.right = position.right;
+    popoverEl.style.minWidth = position.minWidth;
   }, [popoverId]);
 
   useEffect(() => {
