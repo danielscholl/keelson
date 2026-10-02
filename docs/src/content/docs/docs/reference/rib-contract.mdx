@@ -226,7 +226,7 @@ coordination path.
    affordance would be unreachable; default off); `headActions` (1–8 items) are
    rib-supplied verbs on the region head itself, rendered as a ⋯ menu and
    dispatched to the rib's `onAction` exactly like board actions. Destructive
-   ones confirm first, the menu renders even when the surface sets
+   ones, and any that set `confirm`, ask first, the menu renders even when the surface sets
    `hideRegionActions` (that flag suppresses the host's explore/select/expand
    chrome, not the rib's own verbs) and while the region is collapsed, and the
    board-card affordances `fields`/`expanded`/`inline`/`selected` are rejected

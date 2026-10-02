@@ -241,9 +241,9 @@ ActionItem = {
   label,
   subtitle?,            // a second muted line under the label, rendered only by the tabs layout
   glyph?, tone?,
-  destructive?,         // marks the action dangerous: a simple confirm
+  destructive?,         // marks the action dangerous: danger styling and a confirm
   inline?,              // surface a destructive card action as a visible button, not the overflow menu
-  confirm?: Confirm,    // typed/irreversible confirm-dialog metadata, distinct from the boolean destructive
+  confirm?: Confirm,    // confirm before dispatch, destructive or not; simple or typed dialog wording
   hint?,                // descriptive hover tooltip (WHAT it does), any state; joins with reason when disabled
   disabled?, reason?,   // gate the button (dim + seal); reason is the tooltip WHY, only with disabled: true
   selected?,            // a toggle's ON state (brand ring + aria-pressed). Absent ≠ false: absent is a plain verb action with no pressed semantics, false is an off toggle. Only on a click-dispatching action, and each exclusion for its own reason: no fields (an expanded action draws no trigger, a solo picker's opens a popover), not destructive (a one-shot verb, and non-inline on a card it becomes a menu item), not inside a tabs strip (which owns its own active state), never a headAction (always a menu item)
@@ -305,12 +305,16 @@ single picker field.
 button on the card instead of hiding it in the card's overflow (⋯) menu. It is
 inert on a non-destructive action, which always renders inline.
 
-`confirm` is typed confirmation-dialog metadata,
-`{ irreversible?, subject?, title?, body?, label?, confirmLabel?, cancelLabel? }`,
-distinct from the boolean `destructive`. `destructive` still marks the action
-dangerous; `confirm` only controls whether the confirm dialog is simple or typed,
-and an `irreversible` confirm requires a `subject` the operator types before
-confirm enables.
+`confirm` is confirmation-dialog metadata,
+`{ irreversible?, subject?, title?, body?, label?, confirmLabel?, cancelLabel? }`.
+An action that sets `confirm` or `destructive` asks before it dispatches; with
+`fields` the dialog opens after the form submits and dispatches the collected
+values on confirm. An action with neither dispatches immediately. `destructive`
+alone decides the styling: a destructive action's confirm button is danger red,
+a non-destructive one's is the normal brand style, so a weighty but safe verb
+(apply a reviewed plan) can ask "Apply 4 changes?" without reading as a deletion
+or moving into a card's overflow menu. An `irreversible` confirm requires a
+`subject` the operator types before confirm enables.
 
 `disabled` renders the button non-interactive, dimmed and its form sealed, when a
 precondition the state cannot satisfy fails (a capability-gated tab whose current

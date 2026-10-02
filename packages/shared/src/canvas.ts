@@ -517,8 +517,9 @@ export const canvasActionItemSchema = z
     // the form's submit, whichever dispatched. Absent keeps the label and adds a
     // busy marker.
     pendingLabel: z.string().min(1).max(40).optional(),
-    // Confirmation presentation metadata. `destructive` still marks dangerous
-    // actions; this only controls whether the confirm dialog is simple or typed.
+    // Setting `confirm` (or `destructive`) asks before dispatch, after a fields
+    // form submits. `destructive` alone decides the danger styling; this decides
+    // the dialog's wording and whether it is simple or typed.
     confirm: canvasActionConfirmSchema.optional(),
     // A short descriptive hover tooltip — what the action does — surfaced
     // regardless of enabled/disabled state, so a producer can remind the operator

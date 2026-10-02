@@ -256,6 +256,10 @@ function hiddenFieldKeys(fields: readonly ActionField[], values: Record<string, 
   return keys;
 }
 
+function actionNeedsConfirm(item: ActionItem): boolean {
+  return item.destructive === true || item.confirm !== undefined;
+}
+
 function actionConfirmMode(item: ActionItem): ConfirmModalMode {
   if (item.confirm?.irreversible && item.confirm.subject) {
     return {
@@ -286,7 +290,7 @@ function actionTooltip(item: ActionItem): string | undefined {
 }
 
 // One action button. With no `fields` it dispatches on click (confirming first
-// when destructive). With `fields` it toggles an inline form and dispatches the
+// when destructive or `confirm` is set). With `fields` it toggles an inline form and dispatches the
 // collected values on submit, so a payload-carrying action can gather its input —
 // except when the only field is a model picker, which opens straight off the
 // button and dispatches on pick (see `soloPicker`).
@@ -389,7 +393,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
   };
 
   const requestDispatch = (collected?: Record<string, string>) => {
-    if (!item.destructive) {
+    if (!actionNeedsConfirm(item)) {
       void dispatch(collected);
       return;
     }
@@ -469,7 +473,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
           mode={actionConfirmMode(item)}
           confirmLabel={item.confirm?.confirmLabel ?? item.label}
           cancelLabel={item.confirm?.cancelLabel}
-          danger
+          danger={item.destructive === true}
           onConfirm={() => {
             setConfirmOpen(false);
             void dispatch(confirmValues);
@@ -651,7 +655,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
         mode={actionConfirmMode(item)}
         confirmLabel={item.confirm?.confirmLabel ?? item.label}
         cancelLabel={item.confirm?.cancelLabel}
-        danger
+        danger={item.destructive === true}
         onConfirm={() => {
           setConfirmOpen(false);
           void dispatch(confirmValues);
@@ -732,7 +736,7 @@ export function CardOverflowActions({
 
   const triggerAction = (item: ActionItem) => {
     if (item.disabled === true) return;
-    if (item.destructive) {
+    if (actionNeedsConfirm(item)) {
       setOpen(false);
       setConfirming(item);
       return;
@@ -866,7 +870,7 @@ export function CardOverflowActions({
           (confirming ?? fallbackAction).label
         }
         cancelLabel={(confirming ?? fallbackAction).confirm?.cancelLabel}
-        danger
+        danger={(confirming ?? fallbackAction).destructive === true}
         onConfirm={() => {
           if (!confirming) return;
           setConfirming(null);
