@@ -370,7 +370,7 @@ nodes:
     expect(reviewer?.when).toBe("$gate-mode.output == 'true'");
     expect(reviewer?.min_confidence).toBe(85);
     expect(reviewer?.allowed_tools).toEqual(["Read", "Glob", "Grep"]);
-    expect(reviewer?.model_by_provider).toEqual({ copilot: "gpt-6-astra" });
+    expect(reviewer?.model_by_provider).toEqual({ copilot: "claude-opus-5.5" });
     expect(gate?.depends_on).toContain("gate-mode");
     const mode = result.workflow?.nodes.find((node) => node.id === "gate-mode");
     expect(mode && "bash" in mode ? mode.bash : "").toContain("KEELSON_INPUTS_auto_approve");
