@@ -305,10 +305,18 @@ coordination path.
    A successful action may place a recognized client effect in `data`:
    `open-chat` opens a fresh seeded conversation, `run-workflow` launches a
    catalog workflow (its optional `stay` flag keeps the operator on the current
-   surface instead of focusing the Workflows tab — the run streams into a
+   surface instead of focusing the Workflows tab: the run streams into a
    slide-over drawer beside the board that launched it, and the board's own
-   snapshot key updates in place when the workflow publishes), `open-canvas` opens
-   a snapshot in the canvas drawer, and
+   snapshot key updates in place when the workflow publishes), and `open-canvas`
+   opens a snapshot with `{ effect: "open-canvas", key, title?, placement? }`.
+   Placement defaults to `"center"`, the full reading sheet. Set `"side"` for
+   a structured `view` document to dock a non-modal, 520px inspector at the
+   right edge. The surface stays scrollable and clickable; a later side reply
+   swaps the document in place. Inspector columns stack to one, and the drawer
+   fills the viewport below 720px. Omitting placement on a later reply opens
+   centered again. `html`, `markdown`, and `log` documents always open centered,
+   even when `"side"` is requested.
+
    `open-surface` switches the active surface tab. The `open-surface` shape is
    `{ effect: "open-surface", surfaceId, regionKey? }`, where `surfaceId` is the
    browser tab id (`surface:<ribId>:<surfaceId>`) and `regionKey` optionally
