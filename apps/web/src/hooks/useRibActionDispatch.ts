@@ -197,8 +197,11 @@ export function useRibActionDispatch(
 // One stamp site for `origin: "canvas-html"`: `run` takes origin from its caller
 // and an omitted origin means a trusted board dispatch, so a second hand-rolled
 // stamp would silently give untrusted frame markup board-level trust.
-export function useHtmlFrameAction(ribId: string | null): (action: CanvasHtmlAction) => void {
-  const { run } = useRibActionDispatch(ribId);
+export function useHtmlFrameAction(
+  ribId: string | null,
+  opts?: { onOpenCanvas?: (key: string, title?: string) => void },
+): (action: CanvasHtmlAction) => void {
+  const { run } = useRibActionDispatch(ribId, { onOpenCanvas: opts?.onOpenCanvas });
   return useCallback(
     (action: CanvasHtmlAction) => {
       if (ribId) void run({ type: action.type, payload: action.payload, origin: "canvas-html" });

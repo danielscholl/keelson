@@ -6,10 +6,12 @@ import {
   type RibSummary,
   type RibSurfaceDescriptor,
 } from "@keelson/shared";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import * as realApi from "../src/api.ts";
+import { ToastHost } from "../src/components/Toast.tsx";
 import type { RegionAction } from "../src/hooks/useSettings.ts";
 import { type ChatSeed, OPENING_PROMPT } from "../src/lib/exploreSeed.ts";
+import { ribFixture } from "./ribsFixture.ts";
 
 // Stub the snapshot hook (not api.ts/ws.ts) so this file's mocks don't collide
 // with Canvas.test.tsx's api.ts mock under bun's process-global mock.module.
@@ -68,9 +70,8 @@ mock.module("../src/api.ts", () => ({
   },
 }));
 
-let ribSummaries: RibSummary[] = [];
 mock.module("../src/hooks/useRibs.ts", () => ({
-  useRibs: () => ({ status: "ready", ribs: ribSummaries, error: null, refresh: () => {} }),
+  useRibs: () => ({ status: "ready", ribs: ribFixture.ribs, error: null, refresh: () => {} }),
 }));
 
 const { CanvasProvider } = await import("../src/components/Canvas/CanvasHost.tsx");
@@ -127,11 +128,13 @@ function renderSurface(
   opts?: { onOpenSurface?: (surfaceId: string, regionKey?: string) => void },
 ) {
   return render(
-    <RibsProvider>
-      <CanvasProvider>
-        <Surface descriptor={descriptor} onOpenSurface={opts?.onOpenSurface} />
-      </CanvasProvider>
-    </RibsProvider>,
+    <ToastHost>
+      <RibsProvider>
+        <CanvasProvider>
+          <Surface descriptor={descriptor} onOpenSurface={opts?.onOpenSurface} />
+        </CanvasProvider>
+      </RibsProvider>
+    </ToastHost>,
   );
 }
 
@@ -145,7 +148,7 @@ beforeEach(() => {
   triggerError = null;
   postRibActionCalls.length = 0;
   postRibActionResult = { ok: true };
-  ribSummaries = [];
+  ribFixture.ribs = [];
   // Seeding an explicit empty list (rather than clearing) opts these tests into all
   // three controls: select and expand are hidden by default, and most cases here
   // exercise the controls themselves rather than that default.
@@ -502,7 +505,7 @@ describe("Surface", () => {
   test("Expand opens html-declared keys as html and view-declared keys as view", () => {
     live("rib:demo:html-panel", "<p>hi from html lens</p>");
     live("rib:demo:view-panel", board("View Panel", "Services", 23));
-    ribSummaries = [
+    ribFixture.ribs = [
       {
         id: "demo",
         displayName: "Demo",
@@ -550,7 +553,7 @@ describe("Surface", () => {
 
   test("an html-declared region renders its markup inline, not the view-parse error", () => {
     live("rib:demo:html-panel", "<p>hi from html lens</p>");
-    ribSummaries = [htmlRib("rib:demo:html-panel")];
+    ribFixture.ribs = [htmlRib("rib:demo:html-panel")];
     const { container } = renderSurface({
       id: "cimpl",
       title: "CIMPL",
@@ -568,7 +571,7 @@ describe("Surface", () => {
   test("hideWhenEmpty omits an html region whose markup is blank, and keeps one with content", () => {
     live("rib:demo:blank", "   \n  ");
     live("rib:demo:filled", "<p>real page</p>");
-    ribSummaries = [
+    ribFixture.ribs = [
       {
         ...htmlRib("rib:demo:blank"),
         views: [
@@ -599,7 +602,7 @@ describe("Surface", () => {
 
   test("a log-declared region renders its live payload as ANSI terminal output inline, not the view-parse error", () => {
     live("rib:demo:log-panel", "Building `pkg`\n[32mOK[0m");
-    ribSummaries = [logRib("rib:demo:log-panel")];
+    ribFixture.ribs = [logRib("rib:demo:log-panel")];
     const { container } = renderSurface({
       id: "cimpl",
       title: "CIMPL",
@@ -621,7 +624,7 @@ describe("Surface", () => {
   test("hideWhenEmpty omits a log region whose output is blank, and keeps one with content", () => {
     live("rib:demo:log-blank", "   \n  ");
     live("rib:demo:log-filled", "hello world");
-    ribSummaries = [
+    ribFixture.ribs = [
       {
         ...logRib("rib:demo:log-blank"),
         views: [
@@ -652,7 +655,7 @@ describe("Surface", () => {
 
   test("an html region's frame action is dispatched with origin canvas-html", async () => {
     live("rib:demo:html-panel", "<p>hi</p>");
-    ribSummaries = [htmlRib("rib:demo:html-panel")];
+    ribFixture.ribs = [htmlRib("rib:demo:html-panel")];
     const { container } = renderSurface({
       id: "cimpl",
       title: "CIMPL",
@@ -675,6 +678,74 @@ describe("Surface", () => {
       action: { type: "suspend", payload: { cluster: "demo" }, origin: "canvas-html" },
     });
   });
+
+  for (const kind of ["view", "html"] as const) {
+    test(`an inline html action opens a ${kind} snapshot without refreshing or toasting`, async () => {
+      const source = "rib:demo:html-panel";
+      const target = "rib:demo:inspector";
+      live(source, "<button data-canvas-action='inspect'>Inspect</button>");
+      live(
+        target,
+        kind === "view"
+          ? board("Inspector board", "Unique metric", 42)
+          : "<p>Inspector HTML content</p>",
+      );
+      ribFixture.ribs = [
+        {
+          ...htmlRib(source),
+          views: [
+            { key: source, canvasKind: "html" },
+            ...(kind === "html" ? [{ key: target, canvasKind: "html" as const }] : []),
+          ],
+        },
+      ];
+      postRibActionResult = {
+        ok: true,
+        data: { effect: "open-canvas", key: target, title: "Inspector" },
+      };
+      const { container } = renderSurface({
+        id: "demo",
+        title: "Demo",
+        layout: {
+          rows: [{ columns: [{ key: source, title: "HTML Lens", workflow: "refresh-panel" }] }],
+        },
+      });
+      const frame = container.querySelector("iframe.canvas-html-frame") as HTMLIFrameElement;
+      const win = {} as Window;
+      Object.defineProperty(frame, "contentWindow", { value: win, configurable: true });
+      await act(async () => {
+        postMessageTo(
+          {
+            channel: CANVAS_HTML_ACTION_CHANNEL,
+            type: "inspect",
+            payload: { id: "bead-1" },
+          },
+          frame.contentWindow,
+        );
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(screen.getByRole("dialog", { name: "Inspector" })).toBeDefined());
+      const dialog = screen.getByRole("dialog", { name: "Inspector" });
+      expect(dialog.classList.contains(`canvas-drawer-${kind}`)).toBe(true);
+      if (kind === "html") {
+        expect(dialog.querySelector("iframe.canvas-html-frame")?.getAttribute("srcdoc")).toContain(
+          "Inspector HTML content",
+        );
+      } else {
+        expect(dialog.textContent).toContain("Unique metric");
+      }
+      expect(postRibActionCalls).toEqual([
+        {
+          ribId: "demo",
+          action: { type: "inspect", payload: { id: "bead-1" }, origin: "canvas-html" },
+        },
+      ]);
+      expect(triggerCalls).toEqual([]);
+      expect(reloadCalls[source] ?? 0).toBe(0);
+      expect(document.querySelector(".keelson-toast-ok")).toBeNull();
+    });
+  }
 
   test("no Explore control renders when onExplore is absent", () => {
     live("rib:demo:quality", board("Quality", "Services", 23));
