@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { z } from "zod";
+import { type CanvasPlacement, canvasPlacementSchema } from "../src/index.ts";
 import {
   CANVAS_HTML_ACTION_CHANNEL,
   canvasDocumentSchema,
@@ -8,6 +9,19 @@ import {
   canvasViewSchema,
   getRunArtifactResponseSchema,
 } from "../src/canvas.ts";
+
+describe("canvasPlacementSchema", () => {
+  it("exports both supported placements through the package entry point", () => {
+    const placements: CanvasPlacement[] = ["center", "side"];
+    for (const placement of placements) {
+      expect(canvasPlacementSchema.parse(placement)).toBe(placement);
+    }
+  });
+
+  it("rejects unsupported placements", () => {
+    expect(() => canvasPlacementSchema.parse("left")).toThrow();
+  });
+});
 
 describe("canvasDocumentSchema", () => {
   it("round-trips an inline markdown document", () => {
