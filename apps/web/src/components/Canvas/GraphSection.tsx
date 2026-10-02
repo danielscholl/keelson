@@ -8,7 +8,7 @@ import {
   routeEdge,
   waitsOn,
 } from "../../lib/boardGraphLayout.ts";
-import { useBoardActions } from "./BoardActionContext.tsx";
+import { useCardActionDispatch } from "./BoardActionContext.tsx";
 
 function GraphNode({
   node,
@@ -25,9 +25,7 @@ function GraphNode({
   onHover: (id: string | null) => void;
   onFocus: (id: string | null) => void;
 }) {
-  const ctx = useBoardActions();
-  const [pending, setPending] = useState(false);
-  const pendingRef = useRef(false);
+  const { disabled, dispatch } = useCardActionDispatch(node.action);
   const badgeCounts = new Map<string, number>();
   const props = {
     className: `cvb-graph-node${node.selected ? " is-selected" : ""}`,
@@ -75,29 +73,14 @@ function GraphNode({
         {body}
       </div>
     );
-  const action = node.action;
   return (
     <button
       {...props}
       type="button"
       aria-label={node.label}
       aria-pressed={node.selected ?? false}
-      disabled={!ctx || pending}
-      onClick={() => {
-        if (!ctx || pendingRef.current) return;
-        pendingRef.current = true;
-        setPending(true);
-        void ctx
-          .run(
-            action.payload !== undefined
-              ? { type: action.type, payload: action.payload }
-              : { type: action.type },
-          )
-          .finally(() => {
-            pendingRef.current = false;
-            setPending(false);
-          });
-      }}
+      disabled={disabled}
+      onClick={dispatch}
     >
       {body}
     </button>

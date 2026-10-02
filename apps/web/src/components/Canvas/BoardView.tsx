@@ -19,8 +19,9 @@ import {
 import { formatClock, useClockNow } from "../../lib/relativeClock.ts";
 import { isSafeLinkScheme } from "../../lib/safeLink.ts";
 import { ConfirmModal, type ConfirmModalMode } from "../ConfirmModal.tsx";
-import { useBoardActions } from "./BoardActionContext.tsx";
+import { useBoardActions, useCardActionDispatch } from "./BoardActionContext.tsx";
 import { ChartSection } from "./ChartSection.tsx";
+import { GraphSection } from "./GraphSection.tsx";
 import { ModelCatalogPopover, ModelFieldPicker } from "./ModelFieldPicker.tsx";
 import { TableView } from "./TableView.tsx";
 
@@ -1033,26 +1034,15 @@ function CardSelectButton({
   selected: boolean;
   label: string;
 }) {
-  const ctx = useBoardActions();
-  const [pending, setPending] = useState(false);
+  const { disabled, dispatch } = useCardActionDispatch(action);
   return (
     <button
       type="button"
       className="cvb-card-select"
       aria-pressed={selected}
       aria-label={label}
-      disabled={!ctx || pending}
-      onClick={() => {
-        if (!ctx || pending) return;
-        setPending(true);
-        void ctx
-          .run(
-            action.payload !== undefined
-              ? { type: action.type, payload: action.payload }
-              : { type: action.type },
-          )
-          .finally(() => setPending(false));
-      }}
+      disabled={disabled}
+      onClick={dispatch}
     />
   );
 }
@@ -1426,6 +1416,8 @@ function Section({ section }: { section: BoardSection }) {
       return <ActionsSection section={section} />;
     case "chart":
       return <ChartSection section={section} />;
+    case "graph":
+      return <GraphSection section={section} />;
     case "seats": {
       const key = makeKeyer();
       return (

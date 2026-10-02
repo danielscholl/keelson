@@ -2,12 +2,13 @@ import { describe, expect, test } from "bun:test";
 import type { CanvasGraphSection, RibAction, RibActionResult } from "@keelson/shared";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { BoardActionProvider } from "../src/components/Canvas/BoardActionContext.tsx";
-import { GraphSection } from "../src/components/Canvas/GraphSection.tsx";
+import { BoardView } from "../src/components/Canvas/BoardView.tsx";
 import { graphFixture } from "./fixtures/boardGraph.ts";
 
 describe("graph section", () => {
   test("renders ranked columns in input order", () => {
-    const { container } = render(<GraphSection section={graphFixture} />);
+    const { container } = render(<BoardView view={{ view: "board", sections: [graphFixture] }} />);
+    expect(container.querySelector(".cvb-section-title")?.textContent).toBe("Dependencies");
     const columns = [...container.querySelectorAll(".cvb-graph-col")];
     expect(
       columns.map((column) =>
@@ -42,7 +43,7 @@ describe("graph section", () => {
     };
     const { container } = render(
       <BoardActionProvider run={run} reveal={run}>
-        <GraphSection section={section} />
+        <BoardView view={{ view: "board", sections: [section] }} />
       </BoardActionProvider>,
     );
     const button = screen.getByRole("button", { name: "A" });
@@ -55,11 +56,16 @@ describe("graph section", () => {
 
   test("disables action nodes without a dispatcher", () => {
     render(
-      <GraphSection
-        section={{
-          kind: "graph",
-          nodes: [{ id: "a", label: "A", action: { type: "inspect" } }],
-          edges: [],
+      <BoardView
+        view={{
+          view: "board",
+          sections: [
+            {
+              kind: "graph",
+              nodes: [{ id: "a", label: "A", action: { type: "inspect" } }],
+              edges: [],
+            },
+          ],
         }}
       />,
     );
