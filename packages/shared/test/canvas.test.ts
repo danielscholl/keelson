@@ -15,6 +15,15 @@ import {
 } from "../src/index.ts";
 
 describe("graph board section", () => {
+  const minimal = { kind: "graph", nodes: [{ id: "a", label: "A" }], edges: [] };
+  const parse = (section: unknown) =>
+    canvasViewSchema.parse({ view: "board", sections: [section] });
+  const nested = (section: unknown) =>
+    canvasViewSchema.parse({
+      view: "board",
+      sections: [{ kind: "columns", columns: [{ sections: [section] }] }],
+    });
+
   it("parses a minimal graph through the public view schema", () => {
     const section: CanvasGraphSection = {
       kind: "graph",
@@ -55,6 +64,116 @@ describe("graph board section", () => {
         ],
       }),
     ).toThrow(/names no node/);
+  });
+
+  it("parses every graph field, top-level and nested in columns", () => {
+    const section: CanvasGraphSection = {
+      kind: "graph",
+      title: "Dependencies",
+      columns: ["Ready", "Review"],
+      nodes: [
+        {
+          id: "a",
+          label: "A",
+          sublabel: "owner",
+          kind: "task",
+          rank: 0,
+          tone: "id-blue",
+          badges: [{ text: "P1", tone: "warn" }],
+          action: { type: "inspect", payload: { id: "a" } },
+          selected: true,
+        },
+        { id: "b", label: "B", rank: 1, selected: false },
+      ],
+      edges: [{ source: "a", target: "b", label: "blocks", tone: "ramp-2", dashed: true }],
+    };
+    expect(parse(section)).toEqual({ view: "board", sections: [section] });
+    expect(nested(section).view).toBe("board");
+  });
+
+  it("enforces the node count bounds", () => {
+    const nodes = Array.from({ length: 49 }, (_, i) => ({ id: `${i}`, label: `${i}` }));
+    expect(parse({ ...minimal, nodes: nodes.slice(0, 48) }).view).toBe("board");
+    expect(() => parse({ ...minimal, nodes })).toThrow();
+    expect(() => parse({ ...minimal, nodes: [] })).toThrow();
+  });
+
+  it("enforces the edge count bound", () => {
+    const edges = Array.from({ length: 201 }, () => ({ source: "a", target: "a" }));
+    expect(parse({ ...minimal, edges: edges.slice(0, 200) }).view).toBe("board");
+    expect(() => parse({ ...minimal, edges })).toThrow();
+  });
+
+  it("rejects duplicate ids in nested graphs", () => {
+    expect(() => nested({ ...minimal, nodes: [...minimal.nodes, ...minimal.nodes] })).toThrow(
+      /unique/,
+    );
+  });
+
+  it.each(["source", "target"] as const)(
+    "rejects an unknown edge %s, including nested graphs",
+    (end) => {
+      const section = { ...minimal, edges: [{ source: "a", target: "a", [end]: "missing" }] };
+      for (const run of [parse, nested]) {
+        const result = canvasViewSchema.safeParse(
+          run === parse
+            ? { view: "board", sections: [section] }
+            : {
+                view: "board",
+                sections: [{ kind: "columns", columns: [{ sections: [section] }] }],
+              },
+        );
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.issues[0]?.path.at(-1)).toBe(end);
+          expect(result.error.issues[0]?.message).toBe(`edge ${end} "missing" names no node`);
+        }
+      }
+    },
+  );
+
+  it("requires an action for a selected node", () => {
+    const node = { id: "a", label: "A", selected: true };
+    expect(() => parse({ ...minimal, nodes: [node] })).toThrow(/selected node requires an action/);
+    expect(parse({ ...minimal, nodes: [{ ...node, action: { type: "inspect" } }] }).view).toBe(
+      "board",
+    );
+  });
+
+  it.each([-1, 1.5, "1"])("rejects invalid rank %s", (rank) => {
+    expect(() => parse({ ...minimal, nodes: [{ id: "a", label: "A", rank }] })).toThrow();
+  });
+
+  it("accepts zero rank", () => {
+    expect(parse({ ...minimal, nodes: [{ id: "a", label: "A", rank: 0 }] }).view).toBe("board");
+  });
+
+  it("rejects unknown section, node and edge keys", () => {
+    expect(() => parse({ ...minimal, extra: true })).toThrow();
+    expect(() => parse({ ...minimal, nodes: [{ id: "a", label: "A", extra: true }] })).toThrow();
+    expect(() =>
+      parse({
+        ...minimal,
+        edges: [{ source: "a", target: "a", extra: true }],
+      }),
+    ).toThrow();
+  });
+
+  it("accepts graph view tone and rejects an unknown tone", () => {
+    expect(
+      canvasViewSchema.parse({
+        view: "graph",
+        nodes: [{ id: "a", tone: "ok" }],
+        edges: [],
+      }),
+    ).toEqual({ view: "graph", nodes: [{ id: "a", tone: "ok" }], edges: [] });
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "graph",
+        nodes: [{ id: "a", tone: "bogus" }],
+        edges: [],
+      }),
+    ).toThrow();
   });
 });
 
