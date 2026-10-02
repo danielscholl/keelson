@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { CanvasBoardView, RibAction, RibActionResult } from "@keelson/shared";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { BoardActionProvider } from "../src/components/Canvas/BoardActionContext.tsx";
-import { BoardView } from "../src/components/Canvas/BoardView.tsx";
+import { BoardView, CardOverflowActions } from "../src/components/Canvas/BoardView.tsx";
 import { configureModelCatalog } from "../src/lib/modelCatalog.ts";
 
 // Dispatch is injected at the provider, so these tests never touch api.ts —
@@ -1965,5 +1965,184 @@ describe("conditional action fields", () => {
     fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
     expect(screen.getByText("Branch is required")).toBeDefined();
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("action confirm contract", () => {
+  function recorder() {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    return { calls, run };
+  }
+
+  function board(items: Record<string, unknown>[]): CanvasBoardView {
+    return { view: "board", sections: [{ kind: "actions", items }] } as CanvasBoardView;
+  }
+
+  const applyConfirm = {
+    title: "Apply 4 changes?",
+    body: "1 invitation email is sent. 3 membership writes.",
+    confirmLabel: "Apply",
+  };
+
+  test("a non-destructive action with confirm asks first, in brand styling", async () => {
+    const { calls, run } = recorder();
+    render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={board([{ type: "apply", label: "Apply plan", confirm: applyConfirm }])} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply plan" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Apply 4 changes?")).not.toBeNull();
+    expect(within(dialog).getByText(applyConfirm.body)).not.toBeNull();
+    const confirm = within(dialog).getByRole("button", { name: "Apply" });
+    expect(confirm.classList.contains("danger")).toBe(false);
+    expect(calls).toHaveLength(0);
+
+    fireEvent.click(dialog.querySelector(".confirm-modal-cancel") as HTMLButtonElement);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(calls).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply plan" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(calls).toEqual([{ type: "apply" }]));
+  });
+
+  test("a destructive action's confirm button keeps the danger styling", () => {
+    render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={board([{ type: "delete", label: "Delete", destructive: true }])} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const confirm = within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" });
+    expect(confirm.classList.contains("danger")).toBe(true);
+  });
+
+  test("a typed confirm on a non-destructive action gates on the subject without danger", async () => {
+    const { calls, run } = recorder();
+    render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView
+          view={board([
+            {
+              type: "apply",
+              label: "Apply plan",
+              confirm: { irreversible: true, subject: "contoso", confirmLabel: "Apply" },
+            },
+          ])}
+        />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply plan" }));
+    const dialog = screen.getByRole("dialog");
+    const confirm = within(dialog).getByRole("button", { name: "Apply" });
+    expect(confirm.classList.contains("danger")).toBe(false);
+    expect(confirm).toHaveProperty("disabled", true);
+    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "contoso" } });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(calls).toEqual([{ type: "apply" }]));
+  });
+
+  test("an action with neither destructive nor confirm dispatches with no dialog", async () => {
+    const { calls, run } = recorder();
+    render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={board([{ type: "refresh", label: "Refresh" }])} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(calls).toEqual([{ type: "refresh" }]));
+  });
+
+  test("a fields action with confirm asks after submit and dispatches the collected values", async () => {
+    const { calls, run } = recorder();
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView
+          view={board([
+            {
+              type: "invite",
+              label: "Invite",
+              fields: [{ name: "email", label: "Email" }],
+              confirm: { title: "Send invitation?", confirmLabel: "Send" },
+            },
+          ])}
+        />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+    fireEvent.change(container.querySelector(".cvb-action-field-input") as HTMLInputElement, {
+      target: { value: "pilot@contoso.com" },
+    });
+    fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+    const dialog = screen.getByRole("dialog");
+    expect(calls).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(calls).toEqual([{ type: "invite", payload: { email: "pilot@contoso.com" } }]),
+    );
+  });
+
+  test("a non-destructive card action with confirm stays inline and asks first", async () => {
+    const { calls, run } = recorder();
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [
+            {
+              title: "Plan",
+              actions: [{ type: "apply", label: "Apply plan", confirm: applyConfirm }],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    expect(screen.queryByRole("button", { name: "Plan actions" })).toBeNull();
+    const row = container.querySelector(".cvb-card-actions") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Apply plan" }));
+    const confirm = within(screen.getByRole("dialog")).getByRole("button", { name: "Apply" });
+    expect(confirm.classList.contains("danger")).toBe(false);
+    fireEvent.click(confirm);
+    await waitFor(() => expect(calls).toEqual([{ type: "apply" }]));
+  });
+
+  test("an overflow (head) menu item with confirm asks first, without danger", async () => {
+    const { calls, run } = recorder();
+    render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <CardOverflowActions
+          cardTitle="Access"
+          actions={[
+            { type: "apply", label: "Apply plan", confirm: applyConfirm },
+            { type: "reload", label: "Reload" },
+          ]}
+        />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Access actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Apply plan" }));
+    const confirm = within(screen.getByRole("dialog")).getByRole("button", { name: "Apply" });
+    expect(confirm.classList.contains("danger")).toBe(false);
+    expect(calls).toHaveLength(0);
+    fireEvent.click(confirm);
+    await waitFor(() => expect(calls).toEqual([{ type: "apply" }]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Access actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reload" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(calls).toEqual([{ type: "apply" }, { type: "reload" }]));
   });
 });

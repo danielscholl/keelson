@@ -586,7 +586,7 @@ export const surfaceRegionSchema = z
     hideWhenEmpty: z.boolean().optional(),
     // Rib-supplied verbs on the region head itself, rendered as a ⋯ menu and
     // dispatched through POST /api/ribs/:id/action exactly like board actions
-    // (destructive ones confirm first). Menu-only presentation: the board-card
+    // (destructive ones, or any with `confirm`, ask first). Menu-only presentation: the board-card
     // affordances `fields`/`expanded`/`inline`/`selected` are REJECTED here — a
     // menu has no form, so a field-collecting action would dispatch with its
     // fields silently absent, and its items are menu buttons with no pressed
