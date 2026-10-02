@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
 import { z } from "zod";
-import { type CanvasPlacement, canvasPlacementSchema } from "../src/index.ts";
 import {
   CANVAS_HTML_ACTION_CHANNEL,
   canvasDocumentSchema,
@@ -9,6 +8,7 @@ import {
   canvasViewSchema,
   getRunArtifactResponseSchema,
 } from "../src/canvas.ts";
+import { type CanvasPlacement, canvasPlacementSchema } from "../src/index.ts";
 
 describe("canvasPlacementSchema", () => {
   it("exports both supported placements through the package entry point", () => {
