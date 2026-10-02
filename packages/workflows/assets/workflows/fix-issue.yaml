@@ -1842,12 +1842,25 @@ nodes:
       else
         HEADER="CI UNVERIFIED"
       fi
-      VALIDATION=$(printf '%s\n' "${KEELSON_NODE_post_fix_validate_OUTPUT:-}" \
+      VALIDATION_OUTPUT="${KEELSON_NODE_post_fix_validate_OUTPUT:-}"
+      VALIDATION=$(printf '%s\n' "$VALIDATION_OUTPUT" \
         | sed -n 's/^VALIDATION_STATUS: *\([A-Z]*\).*/\1/p' | tail -1)
+      VALIDATION_EXIT_CODE=$(printf '%s\n' "$VALIDATION_OUTPUT" \
+        | sed -n 's/^Exit code: *//p' | tail -1)
+      VALIDATION_FAILURES=$(printf '%s\n' "$VALIDATION_OUTPUT" \
+        | sed -n '/^--- Failure lines (first 100) ---$/,/^--- Last 200 lines ---$/{ /^--- Last 200 lines ---$/!p; }' \
+        | head -c 10000)
+      VALIDATION_TAIL=$(printf '%s\n' "$VALIDATION_OUTPUT" \
+        | sed -n '/^--- Last 200 lines ---$/,$p' | tail -c 8000)
       PR_STATE=$(printf '%s\n' "${KEELSON_NODE_finalize_pr_OUTPUT:-}" \
         | sed -n 's/^PR_STATE: *//p' | tail -1)
       echo "STATUS_HEADER: $HEADER"
       echo "VALIDATION: ${VALIDATION:-UNKNOWN}"
+      echo "VALIDATION_EXIT_CODE: ${VALIDATION_EXIT_CODE:-UNKNOWN}"
+      echo "VALIDATION_FAILURES:"
+      printf '%s\n' "$VALIDATION_FAILURES"
+      echo "VALIDATION_TAIL:"
+      printf '%s\n' "$VALIDATION_TAIL"
       echo "VALIDATION_LOG: $A/post-fix-validate.log"
       echo "PR_STATE: ${PR_STATE:-UNKNOWN}"
 

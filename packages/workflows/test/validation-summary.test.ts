@@ -263,6 +263,12 @@ reportDescribe("fix-issue bounded validation report", () => {
     expect(status.exitCode).toBe(0);
     expect(status.stderr).toBe("");
     expect(status.stdout).toContain(`VALIDATION: ${failed ? "FAIL" : "PASS"}\n`);
+    expect(status.stdout).toContain(`VALIDATION_EXIT_CODE: ${failed ? 1 : 0}\n`);
+    expect(status.stdout).toContain("VALIDATION_TAIL:");
+    if (failed) {
+      expect(status.stdout).toContain("VALIDATION_FAILURES:");
+      expect(status.stdout).toContain(failureLines[1]);
+    }
     expect(status.stdout).toContain(`VALIDATION_LOG: ${artifacts}/post-fix-validate.log`);
     upstream.set("report-status", { state: "completed", output: status.stdout });
     for (const id of ["fetch-issue", "classify", "triage", "re-review", "create-pr"]) {
@@ -275,6 +281,9 @@ reportDescribe("fix-issue bounded validation report", () => {
     expect(rendered.length).toBeLessThan(30_000);
     expect(rendered).toContain(`${artifacts}/post-fix-validate.log`);
     expect(rendered).toContain(`VALIDATION: ${failed ? "FAIL" : "PASS"}`);
+    expect(rendered).toContain(`VALIDATION_EXIT_CODE: ${failed ? 1 : 0}`);
+    expect(rendered).toContain("VALIDATION_TAIL:");
+    if (failed) expect(rendered).toContain(failureLines[1]);
     expect(rendered).not.toContain("(pass) suite > case");
     expect(rendered).not.toContain("=== PROJECT CHECKS");
     expect(rendered).not.toMatch(/\$[\w-]+\.output/);
