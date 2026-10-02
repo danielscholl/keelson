@@ -2,9 +2,11 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { act, render } from "@testing-library/react";
+import { ProjectPickerPopover } from "../src/components/Chat/ProjectPickerPopover.tsx";
 import { pickerPopoverPosition } from "../src/lib/pickerPopoverPosition.ts";
 
 describe("pickerPopoverPosition", () => {
@@ -13,6 +15,117 @@ describe("pickerPopoverPosition", () => {
       left: "32px",
       right: "auto",
       minWidth: "320px",
+    });
+  });
+
+  describe("ProjectPickerPopover placement", () => {
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    afterEach(() => {
+      window.innerWidth = viewportWidth;
+      window.innerHeight = viewportHeight;
+    });
+
+    function mount() {
+      let rect = { left: 1449, top: 96, width: 127 };
+      render(
+        <>
+          <button type="button" popoverTarget="test-picker">
+            Projects
+          </button>
+          <ProjectPickerPopover
+            popoverId="test-picker"
+            projects={[]}
+            activeProjectId={null}
+            onSelect={() => {}}
+            onProjectUpdated={() => {}}
+            onProjectDeleted={() => {}}
+          />
+        </>,
+      );
+      const trigger = document.querySelector<HTMLElement>('[popovertarget="test-picker"]');
+      const popover = document.getElementById("test-picker");
+      if (!trigger || !popover) throw new Error("project picker fixture did not render");
+      trigger.getBoundingClientRect = () => new DOMRect(rect.left, rect.top, rect.width, 30);
+
+      return {
+        trigger,
+        popover,
+        setRect(next: typeof rect) {
+          rect = next;
+        },
+      };
+    }
+
+    function dispatch(popover: HTMLElement, type: "beforetoggle" | "toggle") {
+      const event = new Event(type);
+      Object.defineProperty(event, "newState", { value: "open" });
+      act(() => {
+        popover.dispatchEvent(event);
+      });
+    }
+
+    test("positions at the trigger right edge before first paint and on toggle", () => {
+      window.innerWidth = 1600;
+      window.innerHeight = 900;
+      const { popover } = mount();
+      expect(popover.offsetWidth).toBe(0);
+
+      for (const type of ["beforetoggle", "toggle"] as const) {
+        dispatch(popover, type);
+        expect(popover.style.left).toBe("auto");
+        expect(popover.style.right).toBe("24px");
+        expect(popover.style.minWidth).toBe("320px");
+        expect(popover.style.top).toBe("132px");
+        expect(popover.style.maxHeight).toBe("762px");
+      }
+    });
+
+    test("tracks an open resize and leaves closed placement unchanged", () => {
+      window.innerWidth = 1600;
+      window.innerHeight = 900;
+      const { trigger, popover, setRect } = mount();
+      dispatch(popover, "beforetoggle");
+      popover.matches = (selector) => selector === ":popover-open";
+
+      window.innerWidth = 1024;
+      setRect({ left: 873, top: 850, width: 127 });
+      act(() => window.dispatchEvent(new Event("resize")));
+      expect(popover.style.right).toBe("24px");
+      expect(popover.style.bottom).toBe("56px");
+      expect(popover.style.top).toBe("auto");
+      expect(popover.style.maxHeight).toBe("838px");
+
+      popover.matches = () => false;
+      window.innerWidth = 1600;
+      trigger.getBoundingClientRect = () => new DOMRect(32, 96, 127, 30);
+      act(() => window.dispatchEvent(new Event("resize")));
+      expect(popover.style.right).toBe("24px");
+    });
+
+    test("clears the right inset in the centered fallback and on left re-anchor", () => {
+      window.innerWidth = 1600;
+      window.innerHeight = 900;
+      const { trigger, popover, setRect } = mount();
+      dispatch(popover, "beforetoggle");
+      const parent = trigger.parentElement;
+      if (!parent) throw new Error("project trigger has no parent");
+      trigger.remove();
+
+      dispatch(popover, "toggle");
+      expect(popover.style.left).toBe("50%");
+      expect(popover.style.right).toBe("auto");
+      expect(popover.style.transform).toBe("translateX(-50%)");
+      expect(popover.style.minWidth).toBe("");
+      expect(popover.style.maxHeight).toBe("");
+
+      setRect({ left: 32, top: 96, width: 127 });
+      parent.appendChild(trigger);
+      dispatch(popover, "beforetoggle");
+      expect(popover.style.left).toBe("32px");
+      expect(popover.style.right).toBe("auto");
+      expect(popover.style.transform).toBe("none");
     });
   });
 
