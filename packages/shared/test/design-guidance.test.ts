@@ -51,6 +51,17 @@ describe("design guide kit", () => {
   });
 });
 
+describe("design guide placement", () => {
+  test("describes side inspectors and centered HTML frames", () => {
+    expect(CANVAS_DESIGN_GUIDE_SECTIONS.board).toContain(
+      '{ effect: "open-canvas", key, placement: "side" }',
+    );
+    expect(CANVAS_DESIGN_GUIDE_SECTIONS.board).toContain("520px; columns stack to one");
+    expect(CANVAS_DESIGN_GUIDE_SECTIONS.marks).toContain("title?, placement?");
+    expect(CANVAS_DESIGN_GUIDE_SECTIONS.marks).toContain("html docs always open centered");
+  });
+});
+
 describe("design guide voice", () => {
   test("the guidance itself uses no em or en dashes", () => {
     const texts = {
