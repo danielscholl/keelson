@@ -6,8 +6,9 @@ import {
   type RibSummary,
   type RibSurfaceDescriptor,
 } from "@keelson/shared";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import * as realApi from "../src/api.ts";
+import { ToastHost } from "../src/components/Toast.tsx";
 import type { RegionAction } from "../src/hooks/useSettings.ts";
 import { type ChatSeed, OPENING_PROMPT } from "../src/lib/exploreSeed.ts";
 
@@ -127,11 +128,13 @@ function renderSurface(
   opts?: { onOpenSurface?: (surfaceId: string, regionKey?: string) => void },
 ) {
   return render(
-    <RibsProvider>
-      <CanvasProvider>
-        <Surface descriptor={descriptor} onOpenSurface={opts?.onOpenSurface} />
-      </CanvasProvider>
-    </RibsProvider>,
+    <ToastHost>
+      <RibsProvider>
+        <CanvasProvider>
+          <Surface descriptor={descriptor} onOpenSurface={opts?.onOpenSurface} />
+        </CanvasProvider>
+      </RibsProvider>
+    </ToastHost>,
   );
 }
 
@@ -675,6 +678,74 @@ describe("Surface", () => {
       action: { type: "suspend", payload: { cluster: "demo" }, origin: "canvas-html" },
     });
   });
+
+  for (const kind of ["view", "html"] as const) {
+    test(`an inline html action opens a ${kind} snapshot without refreshing or toasting`, async () => {
+      const source = "rib:demo:html-panel";
+      const target = "rib:demo:inspector";
+      live(source, "<button data-canvas-action='inspect'>Inspect</button>");
+      live(
+        target,
+        kind === "view"
+          ? board("Inspector board", "Unique metric", 42)
+          : "<p>Inspector HTML content</p>",
+      );
+      ribSummaries = [
+        {
+          ...htmlRib(source),
+          views: [
+            { key: source, canvasKind: "html" },
+            ...(kind === "html" ? [{ key: target, canvasKind: "html" as const }] : []),
+          ],
+        },
+      ];
+      postRibActionResult = {
+        ok: true,
+        data: { effect: "open-canvas", key: target, title: "Inspector" },
+      };
+      const { container } = renderSurface({
+        id: "demo",
+        title: "Demo",
+        layout: {
+          rows: [{ columns: [{ key: source, title: "HTML Lens", workflow: "refresh-panel" }] }],
+        },
+      });
+      const frame = container.querySelector("iframe.canvas-html-frame") as HTMLIFrameElement;
+      const win = {} as Window;
+      Object.defineProperty(frame, "contentWindow", { value: win, configurable: true });
+      await act(async () => {
+        postMessageTo(
+          {
+            channel: CANVAS_HTML_ACTION_CHANNEL,
+            type: "inspect",
+            payload: { id: "bead-1" },
+          },
+          frame.contentWindow,
+        );
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(screen.getByRole("dialog", { name: "Inspector" })).toBeDefined());
+      const dialog = screen.getByRole("dialog", { name: "Inspector" });
+      expect(dialog.classList.contains(`canvas-drawer-${kind}`)).toBe(true);
+      if (kind === "html") {
+        expect(dialog.querySelector("iframe.canvas-html-frame")?.getAttribute("srcdoc")).toContain(
+          "Inspector HTML content",
+        );
+      } else {
+        expect(dialog.textContent).toContain("Unique metric");
+      }
+      expect(postRibActionCalls).toEqual([
+        {
+          ribId: "demo",
+          action: { type: "inspect", payload: { id: "bead-1" }, origin: "canvas-html" },
+        },
+      ]);
+      expect(triggerCalls).toEqual([]);
+      expect(reloadCalls[source] ?? 0).toBe(0);
+      expect(document.querySelector(".keelson-toast-ok")).toBeNull();
+    });
+  }
 
   test("no Explore control renders when onExplore is absent", () => {
     live("rib:demo:quality", board("Quality", "Services", 23));
