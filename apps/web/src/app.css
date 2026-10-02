@@ -3364,7 +3364,7 @@ button.tab:focus-visible {
   max-width: 180px;
   padding: 8px 12px;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--g-tone, var(--accent));
   border-radius: 6px;
   background: var(--card);
   box-shadow: var(--shadow-card);
@@ -4535,6 +4535,150 @@ button.cvb-action-field-model:disabled {
 }
 .cvb-card[data-edge="ramp-5"] {
   --cvb-edge: var(--ramp-5);
+}
+.cvb-graph {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  padding-block: 16px;
+}
+.cvb-graph-columns {
+  display: grid;
+  grid-template-columns: repeat(var(--cvb-graph-cols), minmax(0, 1fr));
+  column-gap: 56px;
+  align-items: start;
+}
+.cvb-graph-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.cvb-graph-col-title {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.cvb-graph-node {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--g-tone, var(--border));
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  transition: opacity 0.12s ease;
+}
+button.cvb-graph-node:not(:disabled) {
+  cursor: pointer;
+}
+.cvb-graph-node.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--card));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.cvb-graph-node[data-tone][data-tone] {
+  border-left-color: var(--g-tone);
+}
+.cvb-graph-node:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.cvb-graph-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--g-tone, var(--muted));
+}
+.cvb-graph-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-strong);
+}
+.cvb-graph-sublabel,
+.cvb-graph-waits {
+  grid-column: 2;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.cvb-graph-sublabel {
+  font-family: ui-monospace, monospace;
+}
+.cvb-graph-badges {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+.cvb-graph-badges .canvas-cell-badge {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.cvb-graph-edges {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+.cvb-graph-edge {
+  stroke: var(--g-tone, var(--muted));
+  fill: none;
+  stroke-width: 1.5;
+  transition: opacity 0.12s ease;
+}
+.cvb-graph-edge[data-dashed] {
+  stroke-dasharray: 4 4;
+}
+:is(.cvb-graph-node, .cvb-graph-edge)[data-dim] {
+  opacity: 0.28;
+}
+.cvb-graph[data-narrow] .cvb-graph-columns {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 20px;
+}
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="ok"] { --g-tone: var(--green); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="warn"] { --g-tone: var(--yellow); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="error"] { --g-tone: var(--red); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="neutral"] { --g-tone: var(--muted); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="info"] { --g-tone: var(--cyan); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="caution"] { --g-tone: var(--orange); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="brand"] { --g-tone: var(--magenta); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="accent"] { --g-tone: var(--accent); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="id-blue"] { --g-tone: var(--id-blue); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="id-amber"] { --g-tone: var(--id-amber); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="id-teal"] { --g-tone: var(--id-teal); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="id-rose"] { --g-tone: var(--id-rose); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="id-olive"] { --g-tone: var(--id-olive); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="ramp-1"] { --g-tone: var(--ramp-1); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="ramp-2"] { --g-tone: var(--ramp-2); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="ramp-3"] { --g-tone: var(--ramp-3); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="ramp-4"] { --g-tone: var(--ramp-4); }
+:is(.cvb-graph-node, .cvb-graph-edge, .view-graph-node)[data-tone="ramp-5"] { --g-tone: var(--ramp-5); }
+@media (prefers-reduced-motion: reduce) {
+  .cvb-graph-node,
+  .cvb-graph-edge {
+    transition: none;
+  }
 }
 .cvb-card--ghost {
   border-style: dashed;
