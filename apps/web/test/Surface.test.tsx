@@ -990,13 +990,23 @@ describe("Surface", () => {
     expect(btn).toHaveProperty("disabled", false);
   });
 
-  test("a region board action forwards side placement to the canvas", async () => {
+  test("side replies keep surface actions clickable and replace the same inspector", async () => {
     live("rib:demo:items", {
       view: "board",
       title: "Items",
-      sections: [{ kind: "actions", items: [{ type: "inspect", label: "Inspect item" }] }],
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            { type: "inspect", label: "Inspect item" },
+            { type: "inspect-next", label: "Inspect next item" },
+            { type: "refresh", label: "Refresh items" },
+          ],
+        },
+      ],
     });
     live("rib:demo:detail", board("Item detail", "Detail metric", 42));
+    live("rib:demo:next-detail", board("Next detail", "Next metric", 99));
     postRibActionResult = {
       ok: true,
       data: {
@@ -1016,6 +1026,37 @@ describe("Surface", () => {
     expect(dialog.classList.contains("canvas-drawer-side")).toBe(true);
     expect(dialog.textContent).toContain("Detail metric");
     expect(document.querySelector(".canvas-backdrop")).toBeNull();
+
+    postRibActionResult = { ok: true };
+    fireEvent.click(screen.getByRole("button", { name: "Refresh items" }));
+    await waitFor(() => expect(reloadCalls["rib:demo:items"]).toBe(1));
+    expect(postRibActionCalls.at(-1)).toEqual({ ribId: "demo", action: { type: "refresh" } });
+    expect(screen.getByRole("dialog")).toBe(dialog);
+
+    postRibActionResult = {
+      ok: true,
+      data: {
+        effect: "open-canvas",
+        key: "rib:demo:next-detail",
+        title: "Next inspector",
+        placement: "side",
+      },
+    };
+    const next = screen.getByRole("button", { name: "Inspect next item" });
+    next.focus();
+    fireEvent.click(next);
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: "Next inspector" })).toBe(dialog),
+    );
+    expect(dialog.textContent).toContain("Next metric");
+    expect(dialog.textContent).not.toContain("Detail metric");
+    expect(dialog.classList.contains("canvas-drawer-side")).toBe(true);
+    expect(document.activeElement).toBe(next);
+    expect(reloadCalls["rib:demo:items"]).toBe(1);
+    expect(postRibActionCalls.at(-1)).toEqual({
+      ribId: "demo",
+      action: { type: "inspect-next" },
+    });
   });
 
   test("a region board action can open another surface and carries its region key", async () => {
