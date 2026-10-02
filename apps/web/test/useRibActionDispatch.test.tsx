@@ -361,6 +361,42 @@ describe("useRibActionDispatch — open-canvas directive", () => {
     expect(toastCount()).toBe(0);
   });
 
+  for (const placement of [undefined, "center"] as const) {
+    test(`forwards ${placement ?? "omitted"} placement without inventing a default`, async () => {
+      postRibActionImpl = async () => ({
+        ok: true,
+        data: {
+          effect: "open-canvas",
+          key: "rib:demo:x",
+          title: "T",
+          ...(placement ? { placement } : {}),
+        },
+      });
+      const onOpenCanvas = mock(() => {});
+      const { result } = renderHook(() => useRibActionDispatch("demo", { onOpenCanvas }), {
+        wrapper,
+      });
+      await runAct(result.current.run, ACTION);
+      expect(onOpenCanvas).toHaveBeenCalledWith("rib:demo:x", "T", placement);
+    });
+  }
+
+  test("rejects unsupported placement and toasts without opening", async () => {
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "open-canvas", key: "rib:demo:x", placement: "left" },
+    });
+    const onOpenCanvas = mock(() => {});
+    const { result } = renderHook(() => useRibActionDispatch("demo", { onOpenCanvas }), {
+      wrapper,
+    });
+    const res = await runAct(result.current.run, ACTION);
+    expect(res).toEqual({ ok: false, error: "convene: invalid open-canvas directive" });
+    expect(onOpenCanvas).not.toHaveBeenCalled();
+    expect(toastText()).toContain("invalid open-canvas directive");
+    expect(okToastCount()).toBe(0);
+  });
+
   test("opens the snapshot canvas with key + title, no success toast", async () => {
     postRibActionImpl = async () => ({
       ok: true,
@@ -431,6 +467,30 @@ describe("useRibActionDispatch — open-canvas directive", () => {
 });
 
 describe("useHtmlFrameAction — frame effects", () => {
+  test("forwards side placement from the owning rib's frame action reply", async () => {
+    const calls: Array<{ ribId: string; action: unknown }> = [];
+    postRibActionImpl = async (ribId, action) => {
+      calls.push({ ribId, action });
+      return {
+        ok: true,
+        data: { effect: "open-canvas", key: "rib:demo:x", title: "T", placement: "side" },
+      };
+    };
+    const onOpenCanvas = mock(() => {});
+    const { result } = renderHook(() => useHtmlFrameAction("demo", { onOpenCanvas }), {
+      wrapper,
+    });
+    await frameAct(result.current);
+    await waitFor(() => expect(onOpenCanvas).toHaveBeenCalledWith("rib:demo:x", "T", "side"));
+    expect(calls).toEqual([
+      {
+        ribId: "demo",
+        action: { type: "inspect", payload: { id: "bead-1" }, origin: "canvas-html" },
+      },
+    ]);
+    expect(toastCount()).toBe(0);
+  });
+
   for (const data of [
     { effect: "open-canvas", key: "rib:demo:inspector", title: "Inspector" },
     { effect: "open-canvas", key: "rib:demo:inspector" },
