@@ -1,0 +1,36 @@
+import type { CanvasGraphSection } from "@keelson/shared";
+
+export const graphFixture: CanvasGraphSection = {
+  kind: "graph",
+  title: "Dependencies",
+  columns: ["Sources", "Build", "Review", "Ship"],
+  nodes: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"].map((id, i) => ({
+    id,
+    label: id.toUpperCase(),
+    rank: i < 3 ? 0 : i < 7 ? 1 : i < 10 ? 2 : 3,
+  })),
+  edges: [
+    ["a", "d"],
+    ["a", "e"],
+    ["b", "e"],
+    ["b", "f"],
+    ["c", "g"],
+    ["d", "h"],
+    ["e", "h"],
+    ["e", "i"],
+    ["f", "i"],
+    ["g", "j"],
+    ["h", "k"],
+    ["h", "l"],
+    ["i", "l"],
+    ["i", "m"],
+    ["j", "m"],
+    ["a", "h"],
+    ["b", "i"],
+    ["c", "j"],
+    ["a", "k"],
+    ["b", "l"],
+    ["c", "m"],
+    ["d", "m"],
+  ].map(([source, target]) => ({ source: source!, target: target! })),
+};
