@@ -353,10 +353,9 @@ describe("useRibActionDispatch — open-canvas directive", () => {
       data: { effect: "open-canvas", key: "rib:demo:x", title: "T", placement: "side" },
     });
     const onOpenCanvas = mock(() => {});
-    const { result } = renderHook(
-      () => useRibActionDispatch("demo", { onOpenCanvas }),
-      { wrapper },
-    );
+    const { result } = renderHook(() => useRibActionDispatch("demo", { onOpenCanvas }), {
+      wrapper,
+    });
     await runAct(result.current.run, ACTION);
     expect(onOpenCanvas).toHaveBeenCalledWith("rib:demo:x", "T", "side");
     expect(toastCount()).toBe(0);
