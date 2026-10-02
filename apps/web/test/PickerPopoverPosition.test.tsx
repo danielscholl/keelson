@@ -32,7 +32,7 @@ describe("pickerPopoverPosition", () => {
       configureModelCatalog();
     });
 
-    function mount(kind: "project" | "chat" | "canvas" = "project") {
+    async function mount(kind: "project" | "chat" | "canvas") {
       let rect = { left: 1449, top: 96, width: 127 };
       if (kind === "canvas") {
         configureModelCatalog({
@@ -78,6 +78,9 @@ describe("pickerPopoverPosition", () => {
           )}
         </>,
       );
+      await act(async () => {
+        await Promise.resolve();
+      });
       const trigger = document.querySelector<HTMLElement>('[popovertarget="test-picker"]');
       const popover = document.getElementById("test-picker");
       if (!trigger || !popover) throw new Error("picker fixture did not render");
@@ -100,129 +103,139 @@ describe("pickerPopoverPosition", () => {
       });
     }
 
-    test("positions at the trigger right edge before first paint and on toggle", () => {
-      window.innerWidth = 1600;
-      window.innerHeight = 900;
-      const { popover } = mount();
-      expect(popover.offsetWidth).toBe(0);
+    for (const kind of ["project", "chat", "canvas"] as const) {
+      describe(kind, () => {
+        const preferredMinWidth = kind === "project" ? 320 : 280;
 
-      for (const type of ["beforetoggle", "toggle"] as const) {
-        dispatch(popover, type);
-        expect(popover.style.left).toBe("auto");
-        expect(popover.style.right).toBe("24px");
-        expect(popover.style.minWidth).toBe("320px");
-        expect(popover.style.top).toBe("132px");
-        expect(popover.style.maxHeight).toBe("762px");
-      }
-    });
+        test("right-aligns at 1600px and 1024px before paint and after toggle", async () => {
+          window.innerWidth = 1600;
+          window.innerHeight = 900;
+          const { popover, setRect } = await mount(kind);
+          expect(popover.offsetWidth).toBe(0);
+          Object.defineProperty(popover, "offsetWidth", {
+            get() {
+              throw new Error("hidden popover must not be measured");
+            },
+          });
 
-    test("tracks an open resize and leaves closed placement unchanged", () => {
-      window.innerWidth = 1600;
-      window.innerHeight = 900;
-      const { trigger, popover, setRect } = mount();
-      dispatch(popover, "beforetoggle");
-      popover.matches = (selector) => selector === ":popover-open";
+          for (const width of [1600, 1024]) {
+            window.innerWidth = width;
+            setRect({ left: width - 151, top: 96, width: 127 });
+            for (const type of ["beforetoggle", "toggle"] as const) {
+              dispatch(popover, type);
+              expect(popover.style.left).toBe("auto");
+              expect(popover.style.right).toBe("24px");
+              expect(popover.style.minWidth).toBe(`${preferredMinWidth}px`);
+              expect(popover.style.top).toBe("132px");
+              expect(popover.style.maxHeight).toBe("762px");
+            }
+          }
+        });
 
-      window.innerWidth = 1024;
-      setRect({ left: 873, top: 850, width: 127 });
-      act(() => window.dispatchEvent(new Event("resize")));
-      expect(popover.style.right).toBe("24px");
-      expect(popover.style.bottom).toBe("56px");
-      expect(popover.style.top).toBe("auto");
-      expect(popover.style.maxHeight).toBe("838px");
+        test("keeps fitting chat anchors and both viewport gutters", async () => {
+          window.innerWidth = 1024;
+          window.innerHeight = 900;
+          const { popover, setRect } = await mount(kind);
 
-      popover.matches = () => false;
-      window.innerWidth = 1600;
-      trigger.getBoundingClientRect = () => new DOMRect(32, 96, 127, 30);
-      act(() => window.dispatchEvent(new Event("resize")));
-      expect(popover.style.right).toBe("24px");
-    });
+          setRect({ left: 32, top: 850, width: 127 });
+          dispatch(popover, "beforetoggle");
+          expect(popover.style.left).toBe("32px");
+          expect(popover.style.right).toBe("auto");
+          expect(popover.style.bottom).toBe("56px");
+          expect(popover.style.top).toBe("auto");
+          expect(popover.style.maxHeight).toBe("838px");
 
-    test("clears the right inset in the centered fallback and on left re-anchor", () => {
-      window.innerWidth = 1600;
-      window.innerHeight = 900;
-      const { trigger, popover, setRect } = mount();
-      dispatch(popover, "beforetoggle");
-      const parent = trigger.parentElement;
-      if (!parent) throw new Error("project trigger has no parent");
-      trigger.remove();
+          setRect({ left: -20, top: 96, width: 127 });
+          dispatch(popover, "toggle");
+          expect(popover.style.left).toBe("6px");
+          expect(popover.style.right).toBe("auto");
 
-      dispatch(popover, "toggle");
-      expect(popover.style.left).toBe("50%");
-      expect(popover.style.right).toBe("auto");
-      expect(popover.style.transform).toBe("translateX(-50%)");
-      expect(popover.style.minWidth).toBe("");
-      expect(popover.style.maxHeight).toBe("");
+          setRect({ left: 1000, top: 96, width: 127 });
+          dispatch(popover, "beforetoggle");
+          expect(popover.style.left).toBe("auto");
+          expect(popover.style.right).toBe("6px");
 
-      setRect({ left: 32, top: 96, width: 127 });
-      parent.appendChild(trigger);
-      dispatch(popover, "beforetoggle");
-      expect(popover.style.left).toBe("32px");
-      expect(popover.style.right).toBe("auto");
-      expect(popover.style.transform).toBe("none");
-    });
+          setRect({ left: 558, top: 96, width: 100 });
+          dispatch(popover, "toggle");
+          expect(popover.style.left).toBe("558px");
+          setRect({ left: 559, top: 96, width: 100 });
+          dispatch(popover, "beforetoggle");
+          expect(popover.style.left).toBe("auto");
+          expect(popover.style.right).toBe("365px");
+        });
 
-    test("chat model picker uses its 280px minimum and resets the centered fallback", () => {
-      window.innerWidth = 1600;
-      window.innerHeight = 900;
-      const { trigger, popover } = mount("chat");
-      expect(popover.offsetWidth).toBe(0);
+        test("switches left to right to left on open resize, but not while closed", async () => {
+          window.innerWidth = 1600;
+          window.innerHeight = 900;
+          const { popover, setRect } = await mount(kind);
+          setRect({ left: 32, top: 96, width: 127 });
+          dispatch(popover, "toggle");
+          expect(popover.style.left).toBe("32px");
+          expect(popover.style.right).toBe("auto");
+          popover.matches = (selector) => selector === ":popover-open";
 
-      dispatch(popover, "beforetoggle");
-      expect(popover.style.left).toBe("auto");
-      expect(popover.style.right).toBe("24px");
-      expect(popover.style.minWidth).toBe("280px");
-      dispatch(popover, "toggle");
-      expect(popover.style.right).toBe("24px");
+          window.innerWidth = 1024;
+          setRect({ left: 873, top: 850, width: 127 });
+          act(() => window.dispatchEvent(new Event("resize")));
+          expect(popover.style.left).toBe("auto");
+          expect(popover.style.right).toBe("24px");
+          expect(popover.style.bottom).toBe("56px");
 
-      const parent = trigger.parentElement;
-      if (!parent) throw new Error("model trigger has no parent");
-      trigger.remove();
-      dispatch(popover, "beforetoggle");
-      expect(popover.style.left).toBe("50%");
-      expect(popover.style.right).toBe("auto");
-      expect(popover.style.transform).toBe("translateX(-50%)");
+          window.innerWidth = 1600;
+          setRect({ left: 32, top: 96, width: 127 });
+          act(() => window.dispatchEvent(new Event("resize")));
+          expect(popover.style.left).toBe("32px");
+          expect(popover.style.right).toBe("auto");
+          expect(popover.style.bottom).toBe("auto");
 
-      parent.appendChild(trigger);
-      trigger.getBoundingClientRect = () => new DOMRect(32, 96, 127, 30);
-      dispatch(popover, "toggle");
-      expect(popover.style.left).toBe("32px");
-      expect(popover.style.right).toBe("auto");
-      expect(popover.style.transform).toBe("none");
-    });
+          popover.matches = () => false;
+          window.innerWidth = 1024;
+          setRect({ left: 873, top: 850, width: 127 });
+          act(() => window.dispatchEvent(new Event("resize")));
+          expect(popover.style.left).toBe("32px");
+          expect(popover.style.right).toBe("auto");
+        });
 
-    test("canvas model catalog uses the trigger ID and remains anchored after resizing", () => {
-      window.innerWidth = 1600;
-      window.innerHeight = 900;
-      const { trigger, popover, setRect } = mount("canvas");
-      expect(popover.offsetWidth).toBe(0);
+        test("resets centering and opposing insets when the anchor disappears and returns", async () => {
+          window.innerWidth = 1600;
+          window.innerHeight = 900;
+          const { trigger, popover, setRect } = await mount(kind);
+          dispatch(popover, "beforetoggle");
+          const parent = trigger.parentElement;
+          if (!parent) throw new Error("picker trigger has no parent");
+          trigger.remove();
 
-      dispatch(popover, "beforetoggle");
-      dispatch(popover, "toggle");
-      expect(popover.style.left).toBe("auto");
-      expect(popover.style.right).toBe("24px");
-      expect(popover.style.minWidth).toBe("280px");
+          dispatch(popover, "toggle");
+          expect(popover.style.left).toBe("50%");
+          expect(popover.style.right).toBe("auto");
+          expect(popover.style.transform).toBe("translateX(-50%)");
+          expect(popover.style.minWidth).toBe("");
+          expect(popover.style.maxHeight).toBe("");
 
-      popover.matches = (selector) => selector === ":popover-open";
-      window.innerWidth = 1024;
-      setRect({ left: 873, top: 96, width: 127 });
-      act(() => window.dispatchEvent(new Event("resize")));
-      expect(popover.style.right).toBe("24px");
+          parent.appendChild(trigger);
+          setRect({ left: 32, top: 96, width: 127 });
+          dispatch(popover, "beforetoggle");
+          expect(popover.style.left).toBe("32px");
+          expect(popover.style.right).toBe("auto");
+          expect(popover.style.transform).toBe("none");
+          setRect({ left: 1449, top: 96, width: 127 });
+          dispatch(popover, "toggle");
+          expect(popover.style.left).toBe("auto");
+          expect(popover.style.right).toBe("24px");
+        });
 
-      const parent = trigger.parentElement;
-      if (!parent) throw new Error("canvas trigger has no parent");
-      trigger.remove();
-      dispatch(popover, "beforetoggle");
-      expect(popover.style.left).toBe("50%");
-      expect(popover.style.right).toBe("auto");
-
-      parent.appendChild(trigger);
-      setRect({ left: 32, top: 96, width: 127 });
-      dispatch(popover, "toggle");
-      expect(popover.style.left).toBe("32px");
-      expect(popover.style.right).toBe("auto");
-      expect(popover.style.transform).toBe("none");
-    });
+        test("caps the minimum width in a narrow viewport even for a wide trigger", async () => {
+          window.innerWidth = 375;
+          window.innerHeight = 900;
+          const { popover, setRect } = await mount(kind);
+          setRect({ left: 370, top: 96, width: 500 });
+          dispatch(popover, "beforetoggle");
+          expect(popover.style.left).toBe("auto");
+          expect(popover.style.right).toBe("6px");
+          expect(popover.style.minWidth).toBe("363px");
+        });
+      });
+    }
   });
 
   test("aligns a right-edge trigger to its right edge at both desktop widths", () => {
