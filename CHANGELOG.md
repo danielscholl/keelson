@@ -12,6 +12,7 @@ notes live on the [releases page](https://github.com/danielscholl/keelson/releas
 
 * **web:** an open-canvas reply to an html frame action is dropped ([#990](https://github.com/danielscholl/keelson/issues/990)) ([a63e6ff](https://github.com/danielscholl/keelson/commit/a63e6ffb229ead20bb73e0c0056bfb145883db8d))
 * **web:** project picker popover runs off the right edge of the window ([#991](https://github.com/danielscholl/keelson/issues/991)) ([de21e88](https://github.com/danielscholl/keelson/commit/de21e887b7d79e0ca7003da287c6f8da854d1aa5))
+* **workflows:** retarget model pins for issue workflow ([#995](https://github.com/danielscholl/keelson/issues/995)) ([28d823d](https://github.com/danielscholl/keelson/commit/28d823d8ea2f9d3c71a17364cc696a6138ac13ca))
 
 ## [0.114.1](https://github.com/danielscholl/keelson/compare/v0.114.0...v0.114.1) (2026-10-02)
 
