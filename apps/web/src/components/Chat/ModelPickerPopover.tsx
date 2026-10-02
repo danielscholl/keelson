@@ -6,6 +6,7 @@ import type { ModelInfo, ProviderInfo } from "@keelson/shared";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelRef } from "../../hooks/useSettings.ts";
 import { COST_LABEL, groupByVendor, prettyVendor } from "../../lib/modelCatalog.ts";
+import { pickerPopoverPosition } from "../../lib/pickerPopoverPosition.ts";
 
 interface ModelPickerPopoverProps {
   // Element id the chip's popoverTarget attribute references. Anchoring
@@ -88,7 +89,7 @@ export function ModelPickerPopover({
   // Anchor the popover relative to the chip on open. The browser
   // positions a popover in the top layer with `margin: auto` by default
   // (centers it on the viewport); we override that via inline top OR
-  // bottom + left set from the trigger's bounding rect. Opens upward
+  // bottom + a horizontal inset set from the trigger's bounding rect. Opens upward
   // when there's more headroom above the chip than below — the chip
   // lives in the composer at the bottom of the layout, so the upward
   // path is the common case.
@@ -105,6 +106,7 @@ export function ModelPickerPopover({
       // Transform-centre (not width math): on `beforetoggle` the panel is still
       // display:none, so offsetWidth is 0 and width math would mis-centre a frame.
       popoverEl.style.left = "50%";
+      popoverEl.style.right = "auto";
       popoverEl.style.transform = "translateX(-50%)";
       // Clear the anchored path's inline sizing so a prior anchored open doesn't
       // clip or mis-size this centred fallback.
@@ -112,8 +114,7 @@ export function ModelPickerPopover({
       popoverEl.style.minWidth = "";
       return;
     }
-    // Anchored placement sets an explicit left; clear any centring transform a
-    // prior anchor-less frame left behind, or it would shift this by half.
+    // Clear any centring transform a prior anchor-less frame left behind.
     popoverEl.style.transform = "none";
     const rect = trigger.getBoundingClientRect();
     const viewportH = window.innerHeight;
@@ -130,8 +131,10 @@ export function ModelPickerPopover({
       popoverEl.style.top = "auto";
       popoverEl.style.maxHeight = `${Math.max(180, Math.round(spaceAbove - margin * 2))}px`;
     }
-    popoverEl.style.left = `${Math.round(rect.left)}px`;
-    popoverEl.style.minWidth = `${Math.max(280, Math.round(rect.width))}px`;
+    const position = pickerPopoverPosition(rect, window.innerWidth, 280);
+    popoverEl.style.left = position.left;
+    popoverEl.style.right = position.right;
+    popoverEl.style.minWidth = position.minWidth;
   }, [popoverId]);
 
   useEffect(() => {

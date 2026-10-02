@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, render } from "@testing-library/react";
+import { ModelPickerPopover } from "../src/components/Chat/ModelPickerPopover.tsx";
 import { ProjectPickerPopover } from "../src/components/Chat/ProjectPickerPopover.tsx";
 import { pickerPopoverPosition } from "../src/lib/pickerPopoverPosition.ts";
 
@@ -18,7 +19,7 @@ describe("pickerPopoverPosition", () => {
     });
   });
 
-  describe("ProjectPickerPopover placement", () => {
+  describe("picker component placement", () => {
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
 
@@ -27,26 +28,39 @@ describe("pickerPopoverPosition", () => {
       window.innerHeight = viewportHeight;
     });
 
-    function mount() {
+    function mount(kind: "project" | "chat" = "project") {
       let rect = { left: 1449, top: 96, width: 127 };
       render(
         <>
           <button type="button" popoverTarget="test-picker">
             Projects
           </button>
-          <ProjectPickerPopover
-            popoverId="test-picker"
-            projects={[]}
-            activeProjectId={null}
-            onSelect={() => {}}
-            onProjectUpdated={() => {}}
-            onProjectDeleted={() => {}}
-          />
+          {kind === "project" ? (
+            <ProjectPickerPopover
+              popoverId="test-picker"
+              projects={[]}
+              activeProjectId={null}
+              onSelect={() => {}}
+              onProjectUpdated={() => {}}
+              onProjectDeleted={() => {}}
+            />
+          ) : (
+            <ModelPickerPopover
+              popoverId="test-picker"
+              providers={[]}
+              modelsByProvider={{}}
+              activeRef={null}
+              favorites={[]}
+              lockedProviderId={null}
+              onSelect={() => {}}
+              onToggleFavorite={() => {}}
+            />
+          )}
         </>,
       );
       const trigger = document.querySelector<HTMLElement>('[popovertarget="test-picker"]');
       const popover = document.getElementById("test-picker");
-      if (!trigger || !popover) throw new Error("project picker fixture did not render");
+      if (!trigger || !popover) throw new Error("picker fixture did not render");
       trigger.getBoundingClientRect = () => new DOMRect(rect.left, rect.top, rect.width, 30);
 
       return {
@@ -123,6 +137,35 @@ describe("pickerPopoverPosition", () => {
       setRect({ left: 32, top: 96, width: 127 });
       parent.appendChild(trigger);
       dispatch(popover, "beforetoggle");
+      expect(popover.style.left).toBe("32px");
+      expect(popover.style.right).toBe("auto");
+      expect(popover.style.transform).toBe("none");
+    });
+
+    test("chat model picker uses its 280px minimum and resets the centered fallback", () => {
+      window.innerWidth = 1600;
+      window.innerHeight = 900;
+      const { trigger, popover } = mount("chat");
+      expect(popover.offsetWidth).toBe(0);
+
+      dispatch(popover, "beforetoggle");
+      expect(popover.style.left).toBe("auto");
+      expect(popover.style.right).toBe("24px");
+      expect(popover.style.minWidth).toBe("280px");
+      dispatch(popover, "toggle");
+      expect(popover.style.right).toBe("24px");
+
+      const parent = trigger.parentElement;
+      if (!parent) throw new Error("model trigger has no parent");
+      trigger.remove();
+      dispatch(popover, "beforetoggle");
+      expect(popover.style.left).toBe("50%");
+      expect(popover.style.right).toBe("auto");
+      expect(popover.style.transform).toBe("translateX(-50%)");
+
+      parent.appendChild(trigger);
+      trigger.getBoundingClientRect = () => new DOMRect(32, 96, 127, 30);
+      dispatch(popover, "toggle");
       expect(popover.style.left).toBe("32px");
       expect(popover.style.right).toBe("auto");
       expect(popover.style.transform).toBe("none");
