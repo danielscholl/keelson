@@ -449,7 +449,18 @@ function SnapshotBody({
 // its actions are a silent no-op rather than reaching an arbitrary one.
 function HtmlCanvas({ source }: { source: CanvasSource }) {
   const ribId = source.type === "snapshot" ? ribIdFromKey(source.key) : null;
-  const onAction = useHtmlFrameAction(ribId);
+  const { openCanvas } = useCanvas();
+  const resolveCanvasKind = useCanvasKindForKey();
+  const onOpenCanvas = useCallback(
+    (key: string, title?: string) =>
+      openCanvas({
+        kind: resolveCanvasKind(key),
+        source: { type: "snapshot", key },
+        ...(title ? { title } : {}),
+      }),
+    [openCanvas, resolveCanvasKind],
+  );
+  const onAction = useHtmlFrameAction(ribId, { onOpenCanvas });
   return <HtmlBody source={source} onAction={onAction} />;
 }
 
