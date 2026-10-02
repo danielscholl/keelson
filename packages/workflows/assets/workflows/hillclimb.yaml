@@ -585,7 +585,8 @@ nodes:
         fi
         COMMITTED=true
       fi
-      cp "$TARGET" "$KEPT"
+      cp "$CANDIDATE" "$TARGET"
+      cp "$CANDIDATE" "$KEPT"
       cp "$A/round-$N.json" "$A/kept.json"
       "$A/bin/hc-view" "$A/kept.json" "$A/train-view" train
       STREAK=0
