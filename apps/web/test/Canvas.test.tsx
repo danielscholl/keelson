@@ -208,13 +208,256 @@ describe("CanvasProvider — side placement", () => {
     opener.focus();
     view.rerender(
       <CanvasProvider>
-        <Opener doc={{ ...VIEW, title: "Second item" }} placement="side" />
+        <Opener
+          doc={{
+            ...VIEW,
+            title: "Second item",
+            source: {
+              type: "inline",
+              text: JSON.stringify({
+                view: "table",
+                columns: [{ key: "name" }],
+                rows: [{ name: "second" }],
+              }),
+            },
+          }}
+          placement="side"
+        />
       </CanvasProvider>,
     );
     fireEvent.click(opener);
     expect(screen.getByRole("dialog", { name: "Second item" })).toBe(dialog);
+    expect(dialog.textContent).toContain("second");
+    expect(dialog.textContent).not.toContain("first");
     expect(document.activeElement).toBe(opener);
   });
+
+  for (const dismiss of ["Escape", "close button"]) {
+    test(`${dismiss} closes a side drawer and restores focus`, () => {
+      render(
+        <CanvasProvider>
+          <Opener doc={VIEW} placement="side" />
+        </CanvasProvider>,
+      );
+      const opener = screen.getByText("open");
+      opener.focus();
+      fireEvent.click(opener);
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close canvas" }));
+      if (dismiss === "Escape") {
+        fireEvent.keyDown(document, { key: "Escape" });
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Close canvas" }));
+      }
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(document.activeElement).toBe(opener);
+    });
+  }
+
+  for (const kind of ["html", "markdown", "log"] as const) {
+    test(`${kind} documents stay centered even when side placement is requested`, () => {
+      render(
+        <CanvasProvider>
+          <Opener
+            doc={{ kind, source: { type: "inline", text: "content" }, title: kind }}
+            placement="side"
+          />
+        </CanvasProvider>,
+      );
+      fireEvent.click(screen.getByText("open"));
+      const dialog = screen.getByRole("dialog");
+      expect(dialog.classList.contains("canvas-drawer-side")).toBe(false);
+      expect(dialog.getAttribute("aria-modal")).toBe("true");
+      expect(document.querySelector(".canvas-backdrop")).not.toBeNull();
+    });
+  }
+
+  test("explicit center placement keeps view documents modal", () => {
+    render(
+      <CanvasProvider>
+        <Opener doc={VIEW} placement="center" />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    expect(screen.getByRole("dialog").classList.contains("canvas-drawer-side")).toBe(false);
+    expect(screen.getByRole("dialog").getAttribute("aria-modal")).toBe("true");
+    expect(document.querySelector(".canvas-backdrop")).not.toBeNull();
+  });
+
+  test("Tab outside a side drawer is not trapped in either direction", () => {
+    render(
+      <CanvasProvider>
+        <Opener doc={VIEW} placement="side" />
+      </CanvasProvider>,
+    );
+    const opener = screen.getByText("open");
+    fireEvent.click(opener);
+    opener.focus();
+    expect(fireEvent.keyDown(opener, { key: "Tab" })).toBe(true);
+    expect(fireEvent.keyDown(opener, { key: "Tab", shiftKey: true })).toBe(true);
+    expect(document.activeElement).toBe(opener);
+  });
+
+  test("renders board columns inside the side drawer's layout scope", () => {
+    const board: CanvasBoardView = {
+      view: "board",
+      sections: [
+        {
+          kind: "columns",
+          columns: [
+            { sections: [{ kind: "rows", items: [{ text: "Left detail" }] }] },
+            { sections: [{ kind: "rows", items: [{ text: "Right detail" }] }] },
+          ],
+        },
+      ],
+    };
+    render(
+      <CanvasProvider>
+        <Opener
+          doc={{ kind: "view", source: { type: "inline", text: JSON.stringify(board) } }}
+          placement="side"
+        />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const columns = document.querySelector(".canvas-drawer-side .cvb-columns");
+    expect(columns).not.toBeNull();
+    expect(columns?.querySelectorAll(".cvb-column")).toHaveLength(2);
+    expect(columns?.textContent).toContain("Left detail");
+    expect(columns?.textContent).toContain("Right detail");
+  });
+
+  for (const placement of ["side", "center", undefined] as const) {
+    test(`an in-drawer reply uses its own ${placement ?? "omitted"} placement`, async () => {
+      const source = "rib:demo:side-source";
+      const target = "rib:demo:side-target";
+      const priorPost = postRibActionImpl;
+      snapshotsByKey[source] = {
+        status: "live",
+        data: {
+          view: "board",
+          sections: [{ kind: "actions", items: [{ type: "drill", label: "Drill" }] }],
+        },
+        version: 1,
+        composedAt: null,
+      };
+      snapshotsByKey[target] = {
+        status: "live",
+        data: { view: "board", sections: [{ kind: "rows", items: [{ text: "New detail" }] }] },
+        version: 1,
+        composedAt: null,
+      };
+      postRibActionImpl = async () => ({
+        ok: true,
+        data: {
+          effect: "open-canvas",
+          key: target,
+          title: "New inspector",
+          ...(placement ? { placement } : {}),
+        },
+      });
+      try {
+        render(
+          <ToastHost>
+            <CanvasProvider>
+              <Opener
+                doc={{ kind: "view", source: { type: "snapshot", key: source } }}
+                placement="side"
+              />
+            </CanvasProvider>
+          </ToastHost>,
+        );
+        fireEvent.click(screen.getByText("open"));
+        const dialog = screen.getByRole("dialog");
+        fireEvent.click(within(dialog).getByRole("button", { name: "Drill" }));
+        await waitFor(() =>
+          expect(screen.getByRole("dialog", { name: "New inspector" })).toBe(dialog),
+        );
+        expect(dialog.textContent).toContain("New detail");
+        expect(dialog.classList.contains("canvas-drawer-side")).toBe(placement === "side");
+        expect(dialog.getAttribute("aria-modal")).toBe(placement === "side" ? "false" : "true");
+        expect(document.querySelector(".canvas-backdrop") === null).toBe(placement === "side");
+        const opener = screen.getByText("open");
+        opener.focus();
+        expect(fireEvent.keyDown(opener, { key: "Tab" })).toBe(placement === "side");
+        expect(document.querySelector(".keelson-toast")).toBeNull();
+      } finally {
+        delete snapshotsByKey[source];
+        delete snapshotsByKey[target];
+        postRibActionImpl = priorPost;
+      }
+    });
+  }
+
+  for (const data of [
+    { effect: "open-chat", seed: { systemPrompt: "Be helpful.", name: "Helper" } },
+    { effect: "run-workflow", workflow: "ship", args: { target: "demo" }, stay: true },
+    { effect: "open-run", workflow: "ship", runId: "run-7" },
+  ] as const) {
+    test(`${data.effect} hands off and closes the side drawer`, async () => {
+      const source = "rib:demo:side-handoff";
+      const priorPost = postRibActionImpl;
+      snapshotsByKey[source] = {
+        status: "live",
+        data: {
+          view: "board",
+          sections: [{ kind: "actions", items: [{ type: "handoff", label: "Handoff" }] }],
+        },
+        version: 1,
+        composedAt: null,
+      };
+      postRibActionImpl = async () => ({ ok: true, data });
+      const onOpenChat = mock(() => {});
+      const onLaunchWorkflow = mock(() => {});
+      const onOpenRun = mock(() => {});
+      function HandoffOpener() {
+        const { openCanvas } = useCanvas();
+        return (
+          <button
+            type="button"
+            onClick={() =>
+              openCanvas(
+                { kind: "view", source: { type: "snapshot", key: source } },
+                { placement: "side", onOpenChat, onLaunchWorkflow, onOpenRun },
+              )
+            }
+          >
+            open-handoff
+          </button>
+        );
+      }
+      try {
+        render(
+          <ToastHost>
+            <CanvasProvider>
+              <HandoffOpener />
+            </CanvasProvider>
+          </ToastHost>,
+        );
+        fireEvent.click(screen.getByText("open-handoff"));
+        fireEvent.click(
+          within(screen.getByRole("dialog")).getByRole("button", { name: "Handoff" }),
+        );
+        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+        if (data.effect === "open-chat") {
+          expect(onOpenChat).toHaveBeenCalledWith(data.seed);
+          expect(onLaunchWorkflow).not.toHaveBeenCalled();
+          expect(onOpenRun).not.toHaveBeenCalled();
+        } else if (data.effect === "run-workflow") {
+          expect(onLaunchWorkflow).toHaveBeenCalledWith(data.workflow, data.args, data.stay);
+          expect(onOpenChat).not.toHaveBeenCalled();
+          expect(onOpenRun).not.toHaveBeenCalled();
+        } else {
+          expect(onOpenRun).toHaveBeenCalledWith(data.workflow, data.runId);
+          expect(onOpenChat).not.toHaveBeenCalled();
+          expect(onLaunchWorkflow).not.toHaveBeenCalled();
+        }
+        expect(document.querySelector(".keelson-toast")).toBeNull();
+      } finally {
+        delete snapshotsByKey[source];
+        postRibActionImpl = priorPost;
+      }
+    });
+  }
 });
 
 describe("CanvasProvider / useCanvas", () => {
@@ -432,7 +675,7 @@ describe("CanvasProvider / useCanvas", () => {
   });
 
   for (const kind of ["view", "html"] as const) {
-    test(`a snapshot HTML frame drills into a ${kind} target in the same drawer`, async () => {
+    test(`a snapshot HTML frame forwards side placement to a ${kind} target in the same drawer`, async () => {
       const source = "rib:demo:html-panel";
       const target = "rib:demo:inspector";
       const originalGetRibs = getRibsImpl;
@@ -472,7 +715,10 @@ describe("CanvasProvider / useCanvas", () => {
       const calls: Array<{ ribId: string; action: unknown }> = [];
       postRibActionImpl = async (ribId, action) => {
         calls.push({ ribId, action });
-        return { ok: true, data: { effect: "open-canvas", key: target, title: "Inspector" } };
+        return {
+          ok: true,
+          data: { effect: "open-canvas", key: target, title: "Inspector", placement: "side" },
+        };
       };
       function ManifestStatus() {
         const { status } = useRibsContext();
@@ -495,6 +741,7 @@ describe("CanvasProvider / useCanvas", () => {
           expect(screen.getByTestId("manifest-status").textContent).toBe("ready"),
         );
         fireEvent.click(screen.getByText("open"));
+        const originalDialog = screen.getByRole("dialog", { name: "Source" });
         const frame = screen
           .getByRole("dialog", { name: "Source" })
           .querySelector("iframe.canvas-html-frame") as HTMLIFrameElement;
@@ -503,6 +750,9 @@ describe("CanvasProvider / useCanvas", () => {
           expect(screen.getByRole("dialog", { name: "Inspector" })).toBeDefined(),
         );
         const dialog = screen.getByRole("dialog", { name: "Inspector" });
+        expect(dialog).toBe(originalDialog);
+        expect(dialog.classList.contains("canvas-drawer-side")).toBe(kind === "view");
+        expect(document.querySelector(".canvas-backdrop") === null).toBe(kind === "view");
         expect(screen.getAllByRole("dialog")).toHaveLength(1);
         expect(dialog.classList.contains(`canvas-drawer-${kind}`)).toBe(true);
         if (kind === "html") {
