@@ -537,8 +537,24 @@ nodes:
       fi
 
       echo "=== PROJECT CHECKS ==="
-      bash -e -o pipefail "$VERIFY" 2>&1
-      STATUS=$?
+      LOG="$KEELSON_ARTIFACTS_DIR/validate.log"
+      echo "Full log: $LOG"
+      STATUS=0
+      bash -e -o pipefail "$VERIFY" > "$LOG" 2>&1 || STATUS=$?
+      echo "Full log: $LOG ($(wc -l < "$LOG" | tr -d ' ') lines, $(wc -c < "$LOG" | tr -d ' ') bytes)"
+      echo "Exit code: $STATUS"
+      if [ "$STATUS" -ne 0 ]; then
+        echo "--- Failure lines (first 100) ---"
+        awk '/\(fail\)|[Ee]rror:|Exited with code [1-9]/ {
+          line = substr(NR ":" $0, 1, 400) "\n"
+          printf "%s", substr(line, 1, 12000 - bytes)
+          bytes += length(line)
+          if (++matches == 100 || bytes >= 12000) exit
+        }' "$LOG"
+        echo ""
+      fi
+      echo "--- Last 200 lines ---"
+      tail -n 200 "$LOG" | cut -c1-400 | tail -c 16000
 
       echo ""
       if [ $STATUS -eq 0 ]; then
@@ -562,6 +578,9 @@ nodes:
       ## Validation
 
       $validate.output
+
+      The full log is at `$ARTIFACTS_DIR/validate.log`; read it when the failure
+      lines and tail above are not enough.
 
       ## Instructions
 
@@ -736,7 +755,29 @@ nodes:
       fi
 
       echo "=== PROJECT CHECKS ==="
-      bash -e -o pipefail "$VERIFY" 2>&1
+      LOG="$KEELSON_ARTIFACTS_DIR/revalidate.log"
+      echo "Full log: $LOG"
+      STATUS=0
+      bash -e -o pipefail "$VERIFY" > "$LOG" 2>&1 || STATUS=$?
+      echo "Full log: $LOG ($(wc -l < "$LOG" | tr -d ' ') lines, $(wc -c < "$LOG" | tr -d ' ') bytes)"
+      echo "Exit code: $STATUS"
+      if [ "$STATUS" -ne 0 ]; then
+        echo "--- Failure lines (first 100) ---"
+        awk '/\(fail\)|[Ee]rror:|Exited with code [1-9]/ {
+          line = substr(NR ":" $0, 1, 400) "\n"
+          printf "%s", substr(line, 1, 12000 - bytes)
+          bytes += length(line)
+          if (++matches == 100 || bytes >= 12000) exit
+        }' "$LOG"
+        echo ""
+      fi
+      echo "--- Last 200 lines ---"
+      tail -n 200 "$LOG" | cut -c1-400 | tail -c 16000
+      echo ""
+      if [ "$STATUS" -ne 0 ]; then
+        echo "VALIDATION_STATUS: FAIL - refusing to push with broken checks"
+        exit 1
+      fi
       echo "VALIDATION_STATUS: PASS"
 
   - id: push
