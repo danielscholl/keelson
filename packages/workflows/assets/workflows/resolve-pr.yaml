@@ -208,8 +208,7 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: claude-opus-4.8
-    effort: xhigh
+      copilot: mai-code-1.1-flash
     output_format:
       type: object
       required: [threads]
@@ -403,8 +402,8 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-6-sol
-    effort: xhigh
+      copilot: gpt-6.1-sol
+    effort: high
     idle_timeout: 1800000
     prompt: |
       You are fixing the round $converge.round actionable PR review threads.
@@ -619,8 +618,8 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-6-astra
-    effort: xhigh
+      copilot: claude-opus-5.5
+    effort: high
     idle_timeout: 1800000
     allowed_tools: [Read, Glob, Grep]
     output_format:
@@ -709,7 +708,7 @@ nodes:
     context: fresh
     model: deep
     model_by_provider:
-      copilot: gpt-6-sol
+      copilot: gpt-6.1-sol
     effort: high
     idle_timeout: 1800000
     prompt: |
