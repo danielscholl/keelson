@@ -243,12 +243,10 @@ nodes:
     when: "$classify.output.run_code_review == 'true'"
     context: fresh
     # The always-on finder is the recall ceiling — triage can only filter what
-    # it surfaces. Use the strongest coding tier at full effort, from a
-    # different family than the opus triage judge so finder and judge don't
-    # share blind spots.
+    # it surfaces. Use the strongest coding tier at full effort.
     model: deep
     model_by_provider:
-      copilot: gpt-6-sol
+      copilot: claude-opus-5.5
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
     output_format:
@@ -340,6 +338,8 @@ nodes:
     depends_on: [classify]
     when: "$classify.output.run_error_handling == 'true'"
     context: fresh
+    model_by_provider:
+      copilot: gpt-6-sol
     allowed_tools: [Read, Glob, Grep]
     output_format:
       type: object
@@ -412,6 +412,8 @@ nodes:
     depends_on: [classify]
     when: "$classify.output.run_test_coverage == 'true'"
     context: fresh
+    model_by_provider:
+      copilot: gpt-6-sol
     allowed_tools: [Read, Glob, Grep]
     output_format:
       type: object
@@ -484,6 +486,8 @@ nodes:
     depends_on: [classify]
     when: "$classify.output.run_docs_impact == 'true'"
     model: balanced
+    model_by_provider:
+      copilot: mai-code-1.1-flash
     context: fresh
     allowed_tools: [Read, Glob, Grep]
     output_format:
