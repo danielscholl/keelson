@@ -442,6 +442,7 @@ interface StackBucket {
   iso: string;
   values: number[];
   total: number;
+  folded: Array<{ key: string; value: number }>;
 }
 
 export interface ChartSeries {
@@ -490,8 +491,12 @@ export function pivotSeries(rows: UsageSeriesResponseWire): {
   const buckets = [...bucketTotals.keys()].sort().map((iso) => {
     const valueAt = (model: string) => totalsByModel.get(model)?.get(iso) ?? 0;
     const values = palette.named.map(valueAt);
-    if (hasOther) values.push(palette.folded.reduce((sum, model) => sum + valueAt(model), 0));
-    return { iso, values, total: bucketTotals.get(iso) ?? 0 };
+    const folded = palette.folded
+      .map((key) => ({ key, value: valueAt(key) }))
+      .filter((m) => m.value > 0)
+      .sort((a, b) => b.value - a.value);
+    if (hasOther) values.push(folded.reduce((sum, m) => sum + m.value, 0));
+    return { iso, values, total: bucketTotals.get(iso) ?? 0, folded };
   });
   return { series, buckets };
 }
@@ -619,13 +624,17 @@ function StackChart({
     return { value, y };
   });
 
+  const [hover, setHover] = useState<{ bucket: number; series: number | null } | null>(null);
+  const hovered = hover ? buckets[hover.bucket] : undefined;
+
   return (
-    <>
+    <div className="usage-stack-chart">
       <svg
         className="usage-stack-svg"
         viewBox={`0 0 ${width} ${height}`}
         role="img"
         aria-label={`Tokens over time by model, bucketed by ${bucket}`}
+        onPointerLeave={() => setHover(null)}
       >
         {gridLines.map(({ value, y }) => (
           <g key={value}>
@@ -642,8 +651,18 @@ function StackChart({
           b.values.forEach((v, j) => {
             if (v > 0) topIdx = j;
           });
+          const segmentHover = (j: number | null) => () => setHover({ bucket: d, series: j });
           return (
-            <g key={b.iso}>
+            <g key={b.iso} data-active={hover?.bucket === d || undefined}>
+              <rect
+                className="usage-stack-hit"
+                data-testid={`usage-stack-hit-${b.iso}`}
+                x={padL + groupW * d}
+                y={padT}
+                width={groupW}
+                height={plotH}
+                onPointerEnter={segmentHover(null)}
+              />
               {b.values.map((v, j) => {
                 if (v <= 0) return null;
                 const h = (v / ymax) * plotH;
@@ -656,12 +675,21 @@ function StackChart({
                   const x = xc - barW / 2;
                   const w = barW;
                   const path = `M ${x} ${yTop + gh} L ${x} ${yTop + r} Q ${x} ${yTop} ${x + r} ${yTop} L ${x + w - r} ${yTop} Q ${x + w} ${yTop} ${x + w} ${yTop + r} L ${x + w} ${yTop + gh} Z`;
-                  return <path key={key} className="usage-seg-rect" d={path} fill={color} />;
+                  return (
+                    <path
+                      key={key}
+                      className="usage-seg-rect"
+                      d={path}
+                      fill={color}
+                      onPointerEnter={segmentHover(j)}
+                    />
+                  );
                 }
                 return (
                   <rect
                     key={key}
                     className="usage-seg-rect"
+                    onPointerEnter={segmentHover(j)}
                     x={xc - barW / 2}
                     y={yTop}
                     width={barW}
@@ -679,6 +707,15 @@ function StackChart({
           );
         })}
       </svg>
+      {hover && hovered && (
+        <StackTooltip
+          series={series}
+          bucket={hovered}
+          activeSeries={hover.series}
+          title={formatBucketLabel(hovered.iso, bucket)}
+          anchorPct={((padL + groupW * hover.bucket + groupW / 2) / width) * 100}
+        />
+      )}
       <div className="usage-legend">
         {series.map((s) => (
           <span className="usage-legend-item" key={s.key}>
@@ -687,7 +724,63 @@ function StackChart({
           </span>
         ))}
       </div>
-    </>
+    </div>
+  );
+}
+
+// Lists the stack top-down so rows line up with the bar, and opens the Other
+// segment into the models it folds, which its shared gray cannot name.
+function StackTooltip({
+  series,
+  bucket,
+  activeSeries,
+  title,
+  anchorPct,
+}: {
+  series: ChartSeries[];
+  bucket: StackBucket;
+  activeSeries: number | null;
+  title: string;
+  anchorPct: number;
+}) {
+  const share = (v: number) => (bucket.total > 0 ? `${Math.round((v / bucket.total) * 100)}%` : "");
+  const rows = series
+    .map((s, j) => ({ s, j, value: bucket.values[j] ?? 0 }))
+    .filter((r) => r.value > 0)
+    .reverse();
+  const flipLeft = anchorPct > 50;
+  return (
+    <div
+      className="usage-stack-tooltip"
+      role="tooltip"
+      style={flipLeft ? { right: `${100 - anchorPct}%` } : { left: `${anchorPct}%` }}
+      data-side={flipLeft ? "left" : "right"}
+    >
+      <div className="usage-stack-tooltip-title">
+        <span>{title}</span>
+        <span className="usage-mono">{formatTokens(bucket.total)}</span>
+      </div>
+      {rows.map(({ s, j, value }) => (
+        <div key={s.key}>
+          <div className="usage-stack-tooltip-row" data-active={activeSeries === j || undefined}>
+            <span className="usage-sdot" style={{ background: s.color }} />
+            <span className="usage-stack-tooltip-label">
+              {s.key === OTHER_SERIES_KEY ? "Other" : formatModelLabel(s.label)}
+            </span>
+            <span className="usage-stack-tooltip-value">{formatTokens(value)}</span>
+            <span className="usage-stack-tooltip-share">{share(value)}</span>
+          </div>
+          {s.key === OTHER_SERIES_KEY &&
+            bucket.folded.map((m) => (
+              <div key={m.key} className="usage-stack-tooltip-row usage-stack-tooltip-row--sub">
+                <span className="usage-stack-tooltip-label">{formatModelLabel(m.key)}</span>
+                <span className="usage-stack-tooltip-value">{formatTokens(m.value)}</span>
+                <span className="usage-stack-tooltip-share">{share(m.value)}</span>
+              </div>
+            ))}
+        </div>
+      ))}
+    </div>
   );
 }
 

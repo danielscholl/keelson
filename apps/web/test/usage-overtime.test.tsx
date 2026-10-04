@@ -4,7 +4,7 @@
 
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { UsageSeriesResponseWire, UsageSeriesRowWire } from "@keelson/shared";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import * as realApi from "../src/api.ts";
 
 // Stub the snapshot hook so the Pulse section's live sparkline never touches
@@ -247,6 +247,29 @@ describe("Usage — Over time stacked chart", () => {
     expect(screen.getByText("claude-sonnet-5")).toBeDefined();
     expect(screen.getByText("gpt-5.5")).toBeDefined();
     expect(screen.getByText("Jul 2")).toBeDefined();
+  });
+
+  test("hovering a bar names every model in its stack and opens the Other tail", async () => {
+    seriesRows = NINE_MODELS.map((m, i) => seriesRow(m, { input: (i + 1) * 1000, output: 0 }));
+
+    await act(async () => {
+      await renderUsage();
+    });
+
+    await waitFor(() => expect(screen.getByLabelText(/Tokens over time by model/)).toBeDefined());
+    expect(screen.queryByRole("tooltip")).toBeNull();
+
+    fireEvent.pointerEnter(screen.getByTestId("usage-stack-hit-2026-07-01T00:00:00.000Z"));
+    const tooltip = within(screen.getByRole("tooltip"));
+    expect(tooltip.getByText("Jul 1")).toBeDefined();
+    expect(tooltip.getByText("45k")).toBeDefined();
+    expect(tooltip.getByText("i-model")).toBeDefined();
+    expect(tooltip.getByText("Other")).toBeDefined();
+    expect(tooltip.getByText("a-model")).toBeDefined();
+    expect(tooltip.getByText("d-model")).toBeDefined();
+
+    fireEvent.pointerLeave(screen.getByLabelText(/Tokens over time by model/));
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   test("shows a quiet placeholder line instead of a broken chart when the series is empty", async () => {
