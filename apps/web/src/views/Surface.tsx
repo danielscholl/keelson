@@ -592,7 +592,7 @@ function SurfaceRegion({
   const body = idle ? (
     <RegionIdle onLoad={runRefresh.trigger} error={runRefresh.error} />
   ) : isHtml ? (
-    <HtmlStateView snapshot={snap} busy={busy} onAction={onFrameAction} />
+    <HtmlStateView snapshot={snap} viewKey={region.key} busy={busy} onAction={onFrameAction} />
   ) : isLog ? (
     <LogStateView snapshot={snap} busy={busy} />
   ) : board ? (
