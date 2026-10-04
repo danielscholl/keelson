@@ -354,6 +354,15 @@ describe("createProject", () => {
     expect(await git(["rev-parse", "--verify", "HEAD"], rootPath)).not.toBe("");
   });
 
+  test("create rejects a rootPath that passes through a file as bad input", async () => {
+    const file = join(temp, "plain.txt");
+    writeFileSync(file, "operator data");
+    await expect(
+      service().createProject({ name: "through-file", rootPath: join(file, "child") }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(readFileSync(file, "utf8")).toBe("operator data");
+  });
+
   test("create registers populated non-Git and hidden-file folders untouched", async () => {
     const rootPath = join(temp, "files");
     mkdirSync(rootPath);

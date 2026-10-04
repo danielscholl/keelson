@@ -32,6 +32,9 @@ function pathStat(path: string): Stats | undefined {
     return lstatSync(path);
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
+    if (error instanceof Error && "code" in error && error.code === "ENOTDIR") {
+      throw new ProjectOperationError(400, `rootPath passes through a file: ${path}`);
+    }
     throw error;
   }
 }
