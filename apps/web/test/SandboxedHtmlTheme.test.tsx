@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { CANVAS_HTML_THEME_CHANNEL } from "@keelson/shared";
-import { render, waitFor } from "@testing-library/react";
+import { CANVAS_HTML_STATE_CHANNEL, CANVAS_HTML_THEME_CHANNEL } from "@keelson/shared";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { composeCanvasHtmlDoc, SandboxedHtml } from "../src/components/Canvas/SandboxedHtml.tsx";
 
 afterEach(() => {
@@ -30,6 +30,42 @@ describe("composeCanvasHtmlDoc theme stamp", () => {
 });
 
 describe("SandboxedHtml theme forwarding", () => {
+  test("theme changes preserve the frame and srcDoc without replaying restored state", async () => {
+    document.documentElement.setAttribute("data-theme", "light");
+    const view = render(<SandboxedHtml html="<p>first</p>" />);
+    const frame = view.container.querySelector("iframe")!;
+    const posts: any[] = [];
+    const source = { postMessage: (message: unknown) => posts.push(message) };
+    Object.defineProperty(frame, "contentWindow", { value: source, configurable: true });
+    const event = new MessageEvent("message", {
+      data: { channel: CANVAS_HTML_STATE_CHANNEL, type: "save", state: { task: "x" } },
+    });
+    Object.defineProperty(event, "source", { value: source });
+    window.dispatchEvent(event);
+    view.rerender(<SandboxedHtml html="<p>second</p>" />);
+    fireEvent.load(frame);
+    expect(posts.filter((message) => message.type === "restore")).toHaveLength(1);
+    const srcDoc = frame.getAttribute("srcdoc");
+    document.documentElement.setAttribute("data-theme", "dark");
+    await waitFor(() =>
+      expect(posts).toContainEqual({
+        channel: CANVAS_HTML_THEME_CHANNEL,
+        theme: "dark",
+      }),
+    );
+    view.rerender(<SandboxedHtml html="<p>second</p>" />);
+    expect(view.container.querySelector("iframe")).toBe(frame);
+    expect(frame.getAttribute("srcdoc")).toBe(srcDoc);
+    expect(posts.filter((message) => message.type === "restore")).toHaveLength(1);
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    view.rerender(<SandboxedHtml html="<p>third</p>" />);
+    expect(frame.getAttribute("srcdoc")).toContain('data-theme="dark"');
+    fireEvent.load(frame);
+    expect(posts.filter((message) => message.type === "restore")).toHaveLength(2);
+    expect(posts.at(-2)).toEqual({ channel: CANVAS_HTML_THEME_CHANNEL, theme: "dark" });
+    view.unmount();
+  });
+
   test("stamps the SPA's resolved theme into srcDoc", () => {
     document.documentElement.setAttribute("data-theme", "light");
     const { container, unmount } = render(<SandboxedHtml html="<p>x</p>" />);
