@@ -138,15 +138,15 @@ export function RunView({
   // Run-level rollup: sum across reporting nodes. Volume, not fill — no
   // percentage gauge here (a run total has no meaningful window to fill).
   const runUsage = useMemo(() => sumTokenSpend(Object.values(nodes).map((v) => v.usage)), [nodes]);
-  const runTotalTokens = runUsage ? runUsage.inputTokens + runUsage.outputTokens : 0;
+  const runTotalTokens = runUsage
+    ? runUsage.inputTokens + (runUsage.cacheCreationInputTokens ?? 0) + runUsage.outputTokens
+    : 0;
   const runUsagePopoverId = `workflow-run-usage-${generatedRunUsageId.replace(/:/g, "")}`;
   const runUsageTooltip =
     runUsage != null
-      ? `${runTotalTokens} tokens total across nodes · ${runUsage.inputTokens} in · ${runUsage.outputTokens} out`
+      ? `${runTotalTokens} fresh tokens across nodes · ${runUsage.inputTokens} in · ${runUsage.cacheCreationInputTokens ?? 0} cache write · ${runUsage.outputTokens} out`
       : "";
-  const runUsageBreakdown: TokenUsage | null = runUsage
-    ? { inputTokens: runUsage.inputTokens, outputTokens: runUsage.outputTokens }
-    : null;
+  const runUsageBreakdown: TokenUsage | null = runUsage;
 
   // Run-level provenance chip: collapse to one `provider · model` label only
   // when every node that reported one agrees. Nodes can pin different

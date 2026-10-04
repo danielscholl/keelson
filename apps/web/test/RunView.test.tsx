@@ -90,7 +90,7 @@ const workflow: WorkflowDetail = {
 };
 
 describe("RunView usage header", () => {
-  test("shows a run-level input/output popover without rolling up cache or context", () => {
+  test("shows a run-level popover that rolls up cache counts but not context", () => {
     runResult = result({
       collect: node({
         nodeId: "collect",
@@ -116,7 +116,9 @@ describe("RunView usage header", () => {
       name: "300 input tokens, 50 output tokens across nodes",
     });
     expect(trigger.textContent).toBe("↑300 ↓50");
-    expect(trigger.getAttribute("title")).toBe("350 tokens total across nodes · 300 in · 50 out");
+    expect(trigger.getAttribute("title")).toBe(
+      "1550 fresh tokens across nodes · 300 in · 1200 cache write · 50 out",
+    );
     expect(trigger.getAttribute("popovertarget")).toContain("workflow-run-usage-");
     expect(screen.getByText("Run")).toBeDefined();
     expect(screen.getByText("↑ Input")).toBeDefined();
@@ -124,8 +126,10 @@ describe("RunView usage header", () => {
     expect(screen.getByText("↓ Output")).toBeDefined();
     expect(screen.getByText("50")).toBeDefined();
     expect(screen.queryByText("Context")).toBeNull();
-    expect(screen.queryByText("Cache read")).toBeNull();
-    expect(screen.queryByText("Cache write")).toBeNull();
+    expect(screen.getByText("Cache read")).toBeDefined();
+    expect(screen.getByText("9k")).toBeDefined();
+    expect(screen.getByText("Cache write")).toBeDefined();
+    expect(screen.getByText("1.2k")).toBeDefined();
   });
 
   test("hides the run-level usage chip when no node reported spend", () => {
