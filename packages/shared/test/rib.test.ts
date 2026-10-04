@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import type { CloneProjectBody, CreateProjectBody, Project } from "../src/projects.ts";
 import type { Rib, RibContext, RibSurfaceRegion } from "../src/rib.ts";
 import {
   columnRegions,
@@ -666,10 +667,50 @@ describe("rib contract backward-compatibility", () => {
       }),
     };
     expect(ctx.getCredential).toBeUndefined();
+    expect(ctx.createProject).toBeUndefined();
+    expect(ctx.cloneProject).toBeUndefined();
     // The agent-turn seam is optional too — a minimal context omits it (rooms fail closed).
     expect(ctx.runAgentTurn).toBeUndefined();
     // refreshWorkflow is optional — a rib on an older harness degrades to cadence-only.
     expect(ctx.refreshWorkflow).toBeUndefined();
+  });
+
+  it("accepts independently optional project mutation methods and callable fakes", async () => {
+    const minimal: RibContext = {
+      getExec: () => ({
+        runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+        runText: async () => ({ ok: true as const, data: "" }),
+      }),
+    };
+    const project: Project = {
+      id: "project-1",
+      name: "demo",
+      rootPath: "/workspace/demo",
+      createdAt: "2026-10-04T00:00:00Z",
+    };
+    const creates: CreateProjectBody[] = [];
+    const clones: CloneProjectBody[] = [];
+    const creator: RibContext = {
+      ...minimal,
+      createProject: async (body) => {
+        creates.push(body);
+        return project;
+      },
+    };
+    const cloner: RibContext = {
+      ...minimal,
+      cloneProject: async (body) => {
+        clones.push(body);
+        return project;
+      },
+    };
+    expect(creator.cloneProject).toBeUndefined();
+    expect(cloner.createProject).toBeUndefined();
+    const both: RibContext = { ...creator, cloneProject: cloner.cloneProject };
+    expect(await both.createProject?.({ name: "demo" })).toEqual(project);
+    expect(await both.cloneProject?.({ url: "/source/demo.git" })).toEqual(project);
+    expect(creates).toEqual([{ name: "demo" }]);
+    expect(clones).toEqual([{ url: "/source/demo.git" }]);
   });
 
   it("accepts a context with the refreshWorkflow seam and resolves it", async () => {
