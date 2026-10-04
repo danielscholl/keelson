@@ -5,7 +5,9 @@
 import {
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
+  renameSync,
   rmdirSync,
   rmSync,
   type Stats,
@@ -166,31 +168,54 @@ export function createProjectsService(opts: {
       const dest = resolve(workspaceRoot, name);
       const release = reserve(name, dest);
       const owned = new Map<string, Stats>();
+      let staging: string | undefined;
+      let project: Project | undefined;
       try {
         if (pathStat(dest)) {
           throw new ProjectOperationError(409, `destination already exists: ${dest}`);
         }
         createDirectories(workspaceRoot, owned);
+        staging = mkdtempSync(join(workspaceRoot, ".keelson-clone-"));
+        owned.set(staging, lstatSync(staging));
+        const result = await git(["clone", "--", parsed.data.url, staging], workspaceRoot);
+        if (!result.ok) {
+          throw new ProjectOperationError(502, `git clone failed: ${result.error}`);
+        }
+        if (pathStat(dest)) {
+          throw new ProjectOperationError(409, `destination already exists: ${dest}`);
+        }
+        project = register(name, dest);
         try {
-          mkdirSync(dest);
+          if (pathStat(dest)) {
+            throw new ProjectOperationError(409, `destination already exists: ${dest}`);
+          }
+          renameSync(staging, dest);
         } catch (error) {
-          if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+          if (
+            error instanceof Error &&
+            "code" in error &&
+            (error.code === "EEXIST" || error.code === "ENOTEMPTY")
+          ) {
             throw new ProjectOperationError(409, `destination already exists: ${dest}`);
           }
           throw error;
         }
-        owned.set(dest, lstatSync(dest));
-        const result = await git(["clone", "--", parsed.data.url, dest], workspaceRoot);
-        if (!result.ok) {
-          throw new ProjectOperationError(502, `git clone failed: ${result.error}`);
-        }
-        return register(name, dest);
+        owned.delete(staging);
+        return project;
       } catch (error) {
         const failure =
           error instanceof ProjectOperationError
             ? error
             : new ProjectOperationError(502, `git clone failed: ${message(error)}`);
-        const failures = cleanup(owned, dest);
+        const failures: string[] = [];
+        if (project) {
+          try {
+            store.delete(project.id);
+          } catch (rollbackError) {
+            failures.push(`project registration rollback failed: ${message(rollbackError)}`);
+          }
+        }
+        failures.push(...cleanup(owned, staging));
         if (failures.length) {
           throw new ProjectOperationError(
             failure.status,

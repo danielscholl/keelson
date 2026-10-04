@@ -8,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -46,6 +47,11 @@ describe("cloneProject", () => {
 
   test("clones local repositories with derived and explicit names, preserving HEAD", async () => {
     const url = await source();
+    const create = store.create;
+    store.create = (input) => {
+      expect(existsSync(input.rootPath)).toBe(false);
+      return create(input);
+    };
     const svc = service();
     const derived = await svc.cloneProject({ url: `${url}/` });
     const explicit = await svc.cloneProject({ url, name: "explicit" });
@@ -131,6 +137,79 @@ describe("cloneProject", () => {
     expect(existsSync(workspace)).toBe(false);
   });
 
+  test("preserves files added to the public destination during a failed clone", async () => {
+    const dest = join(workspace, "demo");
+    const failing: typeof runText = async (_cmd, args) => {
+      const staging = args.at(-1);
+      if (!staging) throw new Error("missing destination");
+      expect(staging).not.toBe(dest);
+      expect(existsSync(dest)).toBe(false);
+      if (process.platform !== "win32") expect(statSync(staging).mode & 0o777).toBe(0o700);
+      writeFileSync(join(staging, "user-data"), "partial clone");
+      mkdirSync(dest);
+      writeFileSync(join(dest, "user-data"), "keep");
+      return { ok: false, error: "clone failed", code: 1 };
+    };
+    await expect(
+      service(failing).cloneProject({ url: "/missing", name: "demo" }),
+    ).rejects.toMatchObject({ status: 502 });
+    expect(readFileSync(join(dest, "user-data"), "utf8")).toBe("keep");
+    expect(readdirSync(workspace)).toEqual(["demo"]);
+    expect(store.list()).toEqual([]);
+  });
+
+  test("preserves concurrent destinations rather than publishing over them", async () => {
+    const url = await source();
+    const dest = join(workspace, "demo");
+    const concurrent: typeof runText = async (cmd, args, opts) => {
+      const result = await testGit(cmd, args, opts);
+      mkdirSync(dest);
+      writeFileSync(join(dest, "user-data"), "keep");
+      return result;
+    };
+    await expect(service(concurrent).cloneProject({ url, name: "demo" })).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(readFileSync(join(dest, "user-data"), "utf8")).toBe("keep");
+    expect(readdirSync(workspace)).toEqual(["demo"]);
+    expect(store.list()).toEqual([]);
+  });
+
+  test("preserves concurrent files when registration fails", async () => {
+    const url = await source();
+    const dest = join(workspace, "demo");
+    store.create = () => {
+      mkdirSync(dest);
+      writeFileSync(join(dest, "user-data"), "keep");
+      throw new Error("insert failed");
+    };
+    await expect(service().cloneProject({ url, name: "demo" })).rejects.toMatchObject({
+      status: 500,
+      message: expect.stringContaining("project registration failed: insert failed"),
+    });
+    expect(readFileSync(join(dest, "user-data"), "utf8")).toBe("keep");
+    expect(readdirSync(workspace)).toEqual(["demo"]);
+    expect(store.list()).toEqual([]);
+  });
+
+  test("rolls back registration when a concurrent destination prevents publication", async () => {
+    const url = await source();
+    const dest = join(workspace, "demo");
+    const create = store.create;
+    store.create = (input) => {
+      const project = create(input);
+      mkdirSync(dest);
+      writeFileSync(join(dest, "user-data"), "keep");
+      return project;
+    };
+    await expect(service().cloneProject({ url, name: "demo" })).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(readFileSync(join(dest, "user-data"), "utf8")).toBe("keep");
+    expect(readdirSync(workspace)).toEqual(["demo"]);
+    expect(store.list()).toEqual([]);
+  });
+
   test("rolls back successful clones when registration fails and rechecks final conflicts", async () => {
     const url = await source();
     const create = store.create;
@@ -154,9 +233,11 @@ describe("cloneProject", () => {
   });
 
   test("preserves replacement directories and reports cleanup errors with the original failure", async () => {
+    let staging = "";
     const replacement: typeof runText = async (_cmd, args) => {
       const dest = args.at(-1);
       if (!dest) throw new Error("missing destination");
+      staging = dest;
       renameSync(dest, join(temp, "moved"));
       mkdirSync(dest);
       writeFileSync(join(dest, "operator-file"), "keep");
@@ -168,7 +249,8 @@ describe("cloneProject", () => {
       status: 502,
       message: expect.stringContaining("git clone failed: clone failed; cleanup failed:"),
     });
-    expect(readFileSync(join(workspace, "replaced", "operator-file"), "utf8")).toBe("keep");
+    expect(readFileSync(join(staging, "operator-file"), "utf8")).toBe("keep");
+    expect(existsSync(join(workspace, "replaced"))).toBe(false);
   });
 
   test("shares reservations across create and clone requests", async () => {
@@ -191,7 +273,9 @@ describe("cloneProject", () => {
   test("uses argv separation, noninteractive Git, and a bounded timeout", async () => {
     const fake: typeof runText = async (cmd, args, opts) => {
       expect(cmd).toBe("git");
-      expect(args).toEqual(["clone", "--", "git@example.test:Repo.git/", join(workspace, "repo")]);
+      expect(args).toHaveLength(4);
+      expect(args.slice(0, 3)).toEqual(["clone", "--", "git@example.test:Repo.git/"]);
+      expect(args[3]?.startsWith(join(workspace, ".keelson-clone-"))).toBe(true);
       expect(opts?.timeoutMs).toBe(60_000);
       expect(opts?.env?.GIT_TERMINAL_PROMPT).toBe("0");
       expect(opts?.env?.GIT_SSH_COMMAND).toBe("ssh -o BatchMode=yes");
