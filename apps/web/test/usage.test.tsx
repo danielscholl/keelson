@@ -272,7 +272,14 @@ describe("UsagePopover — cost and cache hit", () => {
           cacheWriteTokens: 0,
           turns: 2,
         }}
-        ledger={{ lastTurnCostUsd: 0.0076, sessionCostUsd: 0.0153, cacheHitRatio: 0.6 }}
+        ledger={{
+          lastTurnCostUsd: 0.0076,
+          sessionCostUsd: 0.0153,
+          sessionPricedCostUsd: 0.0153,
+          sessionPricedEvents: 2,
+          sessionUnpricedEvents: 0,
+          cacheHitRatio: 0.6,
+        }}
       />,
     );
     // Last turn's own hit ratio from its counts, the session's from the ledger.
@@ -282,6 +289,37 @@ describe("UsagePopover — cost and cache hit", () => {
     expect(screen.getAllByText("Cost")).toHaveLength(2);
     expect(screen.getByText("$0.0076")).toBeDefined();
     expect(screen.getByText("$0.0153")).toBeDefined();
+    expect(screen.queryByText("Unpriced turns")).toBeNull();
+  });
+
+  test.each([
+    { pricedCostUsd: 155.03, expected: "≥ $155.03" },
+    { pricedCostUsd: 0, expected: "≥ $0.0000" },
+  ])("shows the session floor $expected and unpriced-turn count", ({ pricedCostUsd, expected }) => {
+    render(
+      <UsagePopover
+        popoverId="usage-pop-mixed"
+        latest={{ inputTokens: 1000, outputTokens: 500 }}
+        totals={{
+          inputTokens: 1000,
+          outputTokens: 500,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          turns: 1,
+        }}
+        ledger={{
+          lastTurnCostUsd: null,
+          sessionCostUsd: null,
+          sessionPricedCostUsd: pricedCostUsd,
+          sessionPricedEvents: 2,
+          sessionUnpricedEvents: 8,
+          cacheHitRatio: null,
+        }}
+      />,
+    );
+    expect(screen.getByText(expected)).toBeDefined();
+    const count = screen.getByText("Unpriced turns").parentElement;
+    expect(count?.textContent).toBe("Unpriced turns8");
   });
 
   test("the last turn's cache hit counts cache writes in the prompt-token denominator", () => {
@@ -310,11 +348,19 @@ describe("UsagePopover — cost and cache hit", () => {
           cacheWriteTokens: 0,
           turns: 1,
         }}
-        ledger={{ lastTurnCostUsd: null, sessionCostUsd: null, cacheHitRatio: null }}
+        ledger={{
+          lastTurnCostUsd: null,
+          sessionCostUsd: null,
+          sessionPricedCostUsd: 0,
+          sessionPricedEvents: 0,
+          sessionUnpricedEvents: 1,
+          cacheHitRatio: null,
+        }}
       />,
     );
     expect(screen.getAllByText("unpriced")).toHaveLength(2);
     expect(screen.getByText("—")).toBeDefined();
+    expect(screen.getByText("Unpriced turns").parentElement?.textContent).toBe("Unpriced turns1");
   });
 
   test("omits cost rows until the ledger has answered", () => {
@@ -333,6 +379,7 @@ describe("UsagePopover — cost and cache hit", () => {
     );
     expect(screen.queryByText("Cost")).toBeNull();
     expect(screen.queryByText("Cache hit")).toBeNull();
+    expect(screen.queryByText("Unpriced turns")).toBeNull();
   });
 });
 
@@ -348,9 +395,16 @@ describe("formatCostUsd", () => {
 
 describe("formatAggregateCostUsd", () => {
   test("shows the priced part as a floor when some turns have no price", () => {
-    expect(formatAggregateCostUsd(155.03, 155.03, 0)).toBe("$155.03");
-    expect(formatAggregateCostUsd(null, 155.03, 8)).toBe("≥ $155.03");
-    expect(formatAggregateCostUsd(null, 0, 8)).toBe("unpriced");
+    expect(formatAggregateCostUsd(155.03, 155.03, 0, 2)).toBe("$155.03");
+    expect(formatAggregateCostUsd(null, 155.03, 8, 2)).toBe("≥ $155.03");
+    expect(formatAggregateCostUsd(null, 0, 8, 0)).toBe("unpriced");
+  });
+
+  test("zero-cost priced events still establish a floor in a mixed aggregate", () => {
+    expect(formatAggregateCostUsd(null, 0, 8, 2)).toBe("≥ $0.0000");
+    expect(formatAggregateCostUsd(0, 0, 0, 2)).toBe("$0.0000");
+    expect(formatAggregateCostUsd(0, 0, 0, 0)).toBe("$0.0000");
+    expect(formatAggregateCostUsd(null, 0, 0, 0)).toBe("unpriced");
   });
 });
 
@@ -384,7 +438,14 @@ describe("UsageChip — cache-only session", () => {
           cacheWriteTokens: 0,
           turns: 1,
         }}
-        ledger={{ lastTurnCostUsd: 0.0024, sessionCostUsd: 0.0024, cacheHitRatio: 1 }}
+        ledger={{
+          lastTurnCostUsd: 0.0024,
+          sessionCostUsd: 0.0024,
+          sessionPricedCostUsd: 0.0024,
+          sessionPricedEvents: 1,
+          sessionUnpricedEvents: 0,
+          cacheHitRatio: 1,
+        }}
       />,
     );
     expect(screen.getByText("Session")).toBeDefined();
@@ -534,6 +595,7 @@ describe("Usage page", () => {
         totalCostUsd: null,
         pricedTotalCostUsd: 0,
         costUsdPerRun: null,
+        pricedEvents: 0,
         unpricedEvents: 0,
         cacheHitRatio: null,
       },
@@ -550,7 +612,7 @@ describe("Usage page", () => {
     getUsageJobsImpl = async () => [];
   });
 
-  test("a job with unpriced runs says how many rows kept its cost null", async () => {
+  test("a fully unpriced job says how many rows kept its cost null", async () => {
     getUsageJobsImpl = async () => [
       {
         key: "mixed-job",
@@ -561,6 +623,7 @@ describe("Usage page", () => {
         totalCostUsd: null,
         pricedTotalCostUsd: 0,
         costUsdPerRun: null,
+        pricedEvents: 0,
         unpricedEvents: 2,
         cacheHitRatio: null,
       },
@@ -575,6 +638,81 @@ describe("Usage page", () => {
     expect(screen.getAllByText("unpriced (2)")).toHaveLength(2);
     getUsageJobsImpl = async () => [];
   });
+
+  test.each([
+    { pricedCostUsd: 155.03, perRun: "≥ $77.52 (8)", window: "≥ $155.03 (8)" },
+    { pricedCostUsd: 0, perRun: "≥ $0.0000 (8)", window: "≥ $0.0000 (8)" },
+  ])("mixed jobs preserve counts with $window", async ({ pricedCostUsd, perRun, window }) => {
+    getUsageJobsImpl = async () => [
+      {
+        key: "mixed-job",
+        runs: 2,
+        totalTokens: 900,
+        avgTokensPerRun: 450,
+        p95TokensPerRun: 500,
+        totalCostUsd: null,
+        pricedTotalCostUsd: pricedCostUsd,
+        costUsdPerRun: null,
+        pricedEvents: 1,
+        unpricedEvents: 8,
+        cacheHitRatio: null,
+      },
+    ];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    fireEvent.click(screen.getByLabelText("Jobs"));
+    await waitFor(() => expect(screen.getAllByText(window).length).toBeGreaterThan(0));
+    expect(screen.getAllByText(perRun).length).toBeGreaterThan(0);
+    expect(screen.queryByText("unpriced (8)")).toBeNull();
+    getUsageJobsImpl = async () => [];
+  });
+
+  test.each([
+    { pricedCostUsd: 155.03, expected: "≥ $155.03" },
+    { pricedCostUsd: 0, expected: "≥ $0.0000" },
+  ])(
+    "overview and model costs preserve the floor $expected and count",
+    async ({ pricedCostUsd, expected }) => {
+      const totals = {
+        events: 10,
+        inputTokens: 1000,
+        outputTokens: 200,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: null,
+        pricedCostUsd,
+        unpricedEvents: 8,
+        cacheHitRatio: null,
+      };
+      getUsageSummaryImpl = async () => ({
+        totals,
+        groups: [{ ...totals, key: "shared-model" }],
+      });
+
+      await act(async () => {
+        await renderUsagePage();
+      });
+
+      await waitFor(() => expect(screen.getByText(expected)).toBeDefined());
+      expect(screen.getByText("8 unpriced turns")).toBeDefined();
+      fireEvent.click(screen.getByLabelText("Models"));
+      await waitFor(() => expect(screen.getByText(`${expected} (8)`)).toBeDefined());
+      getUsageSummaryImpl = async () => ({
+        totals: {
+          ...totals,
+          events: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          pricedCostUsd: 0,
+          unpricedEvents: 0,
+        },
+        groups: [],
+      });
+    },
+  );
 
   test("leads the overview with a recommendation strip for a right-size finding", async () => {
     getUsageSummaryImpl = async () => ({
@@ -615,6 +753,7 @@ describe("Usage page", () => {
         totalCostUsd: null,
         pricedTotalCostUsd: 0,
         costUsdPerRun: null,
+        pricedEvents: 0,
         unpricedEvents: 0,
         cacheHitRatio: null,
       },
@@ -643,6 +782,7 @@ describe("Usage page", () => {
     fireEvent.click(screen.getByLabelText("Models"));
     await waitFor(() => expect(screen.getByText("claude-sonnet-5")).toBeDefined());
     expect(screen.getByText("20%")).toBeDefined();
+    expect(screen.getByText("unpriced (1)")).toBeDefined();
 
     getUsageSummaryImpl = async () => ({
       totals: {
@@ -688,6 +828,7 @@ describe("Usage page", () => {
         totalCostUsd: null,
         pricedTotalCostUsd: 0,
         costUsdPerRun: null,
+        pricedEvents: 0,
         unpricedEvents: 0,
         cacheHitRatio: null,
       },
@@ -731,6 +872,7 @@ describe("Usage page", () => {
         totalCostUsd: null,
         pricedTotalCostUsd: 0,
         costUsdPerRun: null,
+        pricedEvents: 0,
         unpricedEvents: 0,
         cacheHitRatio: null,
       },

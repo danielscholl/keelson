@@ -76,30 +76,40 @@ describe("getUsageBreakdown", () => {
   });
 });
 
+const validJob = {
+  key: "smoke-test",
+  runs: 2,
+  totalTokens: 100,
+  avgTokensPerRun: 50,
+  p95TokensPerRun: 75,
+  totalCostUsd: 0.0123,
+  pricedTotalCostUsd: 0.0123,
+  costUsdPerRun: 0.00615,
+  pricedEvents: 2,
+  unpricedEvents: 0,
+  cacheHitRatio: null,
+};
+
 describe("getUsageJobs", () => {
   test("parses a valid usage jobs payload", async () => {
-    stubFetch([
-      {
-        key: "smoke-test",
-        runs: 2,
-        totalTokens: 100,
-        avgTokensPerRun: 50,
-        p95TokensPerRun: 75,
-        totalCostUsd: 0.0123,
-        pricedTotalCostUsd: 0.0123,
-        costUsdPerRun: 0.00615,
-        unpricedEvents: 0,
-        cacheHitRatio: null,
-      },
-    ]);
+    stubFetch([validJob]);
     const result = await getUsageJobs();
     expect(result[0]?.key).toBe("smoke-test");
+    expect(result[0]?.pricedEvents).toBe(2);
   });
 
   test("rejects a malformed usage jobs payload", async () => {
     stubFetch([{ key: "smoke-test", runs: -1 }]);
     await expect(getUsageJobs()).rejects.toThrow();
   });
+
+  test.each([undefined, -1, 0.5])(
+    "rejects an invalid priced-event count: %s",
+    async (pricedEvents) => {
+      stubFetch([{ ...validJob, pricedEvents }]);
+      await expect(getUsageJobs()).rejects.toThrow();
+    },
+  );
 });
 
 const validEventRow = {

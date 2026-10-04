@@ -75,8 +75,9 @@ export function formatAggregateCostUsd(
   costUsd: number | null,
   pricedCostUsd: number,
   unpricedEvents: number,
+  pricedEvents: number,
 ): string {
-  if (costUsd !== null || unpricedEvents === 0 || !(pricedCostUsd > 0)) {
+  if (costUsd !== null || unpricedEvents === 0 || pricedEvents === 0) {
     return formatCostUsd(costUsd);
   }
   return `≥ ${formatCostUsd(pricedCostUsd)}`;

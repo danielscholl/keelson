@@ -2057,6 +2057,7 @@ export function Chat({
           lastTurnCostUsd: events[0]?.costUsd ?? null,
           sessionCostUsd: summary.totals.costUsd,
           sessionPricedCostUsd: summary.totals.pricedCostUsd,
+          sessionPricedEvents: summary.totals.events - summary.totals.unpricedEvents,
           sessionUnpricedEvents: summary.totals.unpricedEvents,
           cacheHitRatio: summary.totals.cacheHitRatio,
         });

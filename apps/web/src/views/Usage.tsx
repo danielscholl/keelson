@@ -41,10 +41,12 @@ function formatAggregateCost(
   costUsd: number | null,
   pricedCostUsd: number,
   unpricedEvents: number,
+  pricedEvents: number,
 ): string {
-  return costUsd === null && unpricedEvents > 0 && !(pricedCostUsd > 0)
-    ? `unpriced (${unpricedEvents.toLocaleString()})`
-    : formatAggregateCostUsd(costUsd, pricedCostUsd, unpricedEvents);
+  const cost = formatAggregateCostUsd(costUsd, pricedCostUsd, unpricedEvents, pricedEvents);
+  return costUsd === null && unpricedEvents > 0
+    ? `${cost} (${unpricedEvents.toLocaleString()})`
+    : cost;
 }
 const WINDOW_LABEL: Record<UsageWindow, string> = { "24h": "24h", "7d": "7d", "30d": "30d" };
 type UsageSubView = "overview" | "models" | "jobs" | "ledger";
@@ -341,7 +343,12 @@ function PulseStats({
       </div>
       <div className="usage-stat">
         <div className="usage-stat-value">
-          {formatAggregateCostUsd(totals.costUsd, totals.pricedCostUsd, totals.unpricedEvents)}
+          {formatAggregateCostUsd(
+            totals.costUsd,
+            totals.pricedCostUsd,
+            totals.unpricedEvents,
+            totals.events - totals.unpricedEvents,
+          )}
         </div>
         <div className="usage-stat-label">Cost</div>
         <div className="usage-stat-sub">
@@ -814,7 +821,14 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                     <td>↑ {formatTokens(r.inputTokens)}</td>
                     <td>↓ {formatTokens(r.outputTokens)}</td>
                     <td>{formatCacheHit(r.cacheHitRatio)}</td>
-                    <td>{formatAggregateCost(r.costUsd, r.pricedCostUsd, r.unpricedEvents)}</td>
+                    <td>
+                      {formatAggregateCost(
+                        r.costUsd,
+                        r.pricedCostUsd,
+                        r.unpricedEvents,
+                        r.turns - r.unpricedEvents,
+                      )}
+                    </td>
                     <td>{formatTokens(r.avgPerTurn)}</td>
                     <td>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -1076,6 +1090,7 @@ function JobsSection({ range }: { range: UsageWindow }) {
                           job.costUsdPerRun,
                           job.runs > 0 ? job.pricedTotalCostUsd / job.runs : 0,
                           job.unpricedEvents,
+                          job.pricedEvents,
                         )}
                       </td>
                       <td>
@@ -1083,6 +1098,7 @@ function JobsSection({ range }: { range: UsageWindow }) {
                           job.totalCostUsd,
                           job.pricedTotalCostUsd,
                           job.unpricedEvents,
+                          job.pricedEvents,
                         )}
                       </td>
                       <td>{formatCacheHit(job.cacheHitRatio)}</td>

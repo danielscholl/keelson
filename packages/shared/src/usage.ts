@@ -120,6 +120,7 @@ export const usageJobsRowSchema = z
     totalCostUsd: z.number().nonnegative().nullable(),
     pricedTotalCostUsd: z.number().nonnegative(),
     costUsdPerRun: z.number().nonnegative().nullable(),
+    pricedEvents: z.number().int().nonnegative(),
     unpricedEvents: z.number().int().nonnegative(),
     cacheHitRatio: z.number().min(0).max(1).nullable(),
   })

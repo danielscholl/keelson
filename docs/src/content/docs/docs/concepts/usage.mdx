@@ -109,11 +109,15 @@ an aggregate ran on a model with no price, the whole aggregate's cost is null an
 its `unpricedEvents` count says how many rows kept it that way. `pricedCostUsd`
 (`pricedTotalCostUsd` on a job) still carries the cost of the rows that were
 priced, so the tab renders a mixed window as a floor such as `≥ $155.03` with the
-unpriced count beneath it, and a window with no priced rows at all as
-`unpriced`. A window that reads `$0.0000` really did cost nothing, and a window on
-an unpriced model never looks free. The same rule holds for a job: one unpriced
-run nulls both its cost per run and its window cost, and both show as floors. A Copilot turn that never resolved past the `auto` alias is
-unpriced, since the served model is unknown.
+unpriced count still visible, and a window with no priced rows at all as
+`unpriced`. Zero-cost priced rows still count as priced, so a mixed window whose
+priced subtotal is zero reads `≥ $0.0000`. A fully priced window that reads
+`$0.0000` really did cost nothing, and a window on an unpriced model never looks
+free. The same rule holds for a job: one unpriced row nulls both its cost per run
+and its window cost. Both show floors with the unpriced count when any rows were
+priced, or `unpriced (N)` when none were. Jobs report `pricedEvents` separately
+from runs because one run can contain multiple ledger rows. A Copilot turn that
+never resolved past the `auto` alias is unpriced, since the served model is unknown.
 
 **Cache hit ratio** is cache-read tokens divided by fresh input plus cache-read
 tokens, the share of a turn's prompt the provider served from its prompt cache.

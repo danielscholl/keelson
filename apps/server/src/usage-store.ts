@@ -585,6 +585,7 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
             totalCostUsd: priced.costUsd,
             pricedTotalCostUsd: priced.pricedCostUsd,
             costUsdPerRun: priced.costUsd === null || runs === 0 ? null : priced.costUsd / runs,
+            pricedEvents: priced.events - priced.unpricedEvents,
             unpricedEvents: priced.unpricedEvents,
             cacheHitRatio: priced.cacheHitRatio,
           };

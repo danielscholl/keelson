@@ -30,6 +30,7 @@ export interface ConversationLedgerCost {
   lastTurnCostUsd: number | null;
   sessionCostUsd: number | null;
   sessionPricedCostUsd: number;
+  sessionPricedEvents: number;
   sessionUnpricedEvents: number;
   cacheHitRatio: number | null;
 }
@@ -231,8 +232,12 @@ export function UsagePopover({ popoverId, latest, totals, ledger }: UsagePopover
                   ledger.sessionCostUsd,
                   ledger.sessionPricedCostUsd,
                   ledger.sessionUnpricedEvents,
+                  ledger.sessionPricedEvents,
                 )}
               />
+              {ledger.sessionUnpricedEvents > 0 && (
+                <Row label="Unpriced turns" value={ledger.sessionUnpricedEvents.toLocaleString()} />
+              )}
             </>
           )}
         </section>
