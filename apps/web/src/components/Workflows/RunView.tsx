@@ -10,7 +10,7 @@ import {
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
 import { formatDuration } from "../../lib/formatDuration.ts";
 import { formatProviderModel } from "../../lib/formatProvenance.ts";
-import { formatTokens, sumTokenSpend } from "../../lib/formatTokens.ts";
+import { formatTokens, hasSpend, sumTokenSpend } from "../../lib/formatTokens.ts";
 import { useCanvas } from "../Canvas/CanvasHost.tsx";
 import { ProjectChip } from "../Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../Chat/ProjectPickerPopover.tsx";
@@ -144,8 +144,18 @@ export function RunView({
   const runUsagePopoverId = `workflow-run-usage-${generatedRunUsageId.replace(/:/g, "")}`;
   const runUsageTooltip =
     runUsage != null
-      ? `${runTotalTokens} fresh tokens across nodes · ${runUsage.inputTokens} in · ${runUsage.cacheCreationInputTokens ?? 0} cache write · ${runUsage.outputTokens} out`
+      ? [
+          `${runTotalTokens} fresh tokens across nodes`,
+          `${runUsage.inputTokens} in`,
+          ...(runUsage.cacheCreationInputTokens !== undefined
+            ? [`${runUsage.cacheCreationInputTokens} cache write`]
+            : []),
+          `${runUsage.outputTokens} out`,
+        ].join(" · ")
       : "";
+  const runCacheOnly = runUsage != null && !hasSpend(runUsage);
+  const runCachedTokens =
+    (runUsage?.cacheReadInputTokens ?? 0) + (runUsage?.cacheCreationInputTokens ?? 0);
   const runUsageBreakdown: TokenUsage | null = runUsage;
 
   // Run-level provenance chip: collapse to one `provider · model` label only
@@ -279,12 +289,22 @@ export function RunView({
                     className="run-usage"
                     popoverTarget={runUsagePopoverId}
                     title={runUsageTooltip}
-                    aria-label={`${formatTokens(runUsageBreakdown.inputTokens)} input tokens, ${formatTokens(
-                      runUsageBreakdown.outputTokens,
-                    )} output tokens across nodes`}
+                    aria-label={
+                      runCacheOnly
+                        ? `${formatTokens(runCachedTokens)} cached tokens across nodes`
+                        : `${formatTokens(runUsageBreakdown.inputTokens)} input tokens, ${formatTokens(
+                            runUsageBreakdown.outputTokens,
+                          )} output tokens across nodes`
+                    }
                   >
-                    ↑{formatTokens(runUsageBreakdown.inputTokens)} ↓
-                    {formatTokens(runUsageBreakdown.outputTokens)}
+                    {runCacheOnly ? (
+                      `⟳ ${formatTokens(runCachedTokens)}`
+                    ) : (
+                      <>
+                        ↑{formatTokens(runUsageBreakdown.inputTokens)} ↓
+                        {formatTokens(runUsageBreakdown.outputTokens)}
+                      </>
+                    )}
                   </button>
                   <UsagePopoverPanel popoverId={runUsagePopoverId} ariaLabel="Run token usage">
                     <UsageBreakdown usage={runUsageBreakdown} spendTitle="Run" />

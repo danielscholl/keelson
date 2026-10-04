@@ -113,6 +113,12 @@ describe("sumTokenSpend", () => {
     expect(sumTokenSpend([undefined, null])).toBeNull();
     expect(sumTokenSpend([{ inputTokens: 0, outputTokens: 0 }])).toBeNull();
   });
+
+  test("keeps a run whose only spend was cache reads or writes", () => {
+    expect(
+      sumTokenSpend([{ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 5000 }]),
+    ).toEqual({ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 5000 });
+  });
 });
 
 describe("contextPercent / contextFillLevel", () => {

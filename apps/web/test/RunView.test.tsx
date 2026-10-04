@@ -132,6 +132,39 @@ describe("RunView usage header", () => {
     expect(screen.getByText("1.2k")).toBeDefined();
   });
 
+  test("omits the cache-write tooltip segment when no node reported one", () => {
+    runResult = result({
+      collect: node({
+        nodeId: "collect",
+        type: "prompt",
+        usage: { inputTokens: 100, outputTokens: 20 },
+      }),
+    });
+
+    render(<RunView workflow={workflow} runId="run-12345678" onBack={() => {}} />);
+
+    const trigger = screen.getByRole("button", {
+      name: "100 input tokens, 20 output tokens across nodes",
+    });
+    expect(trigger.getAttribute("title")).toBe("120 fresh tokens across nodes · 100 in · 20 out");
+  });
+
+  test("shows the cached total when every node was served from cache", () => {
+    runResult = result({
+      collect: node({
+        nodeId: "collect",
+        type: "prompt",
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 9000 },
+      }),
+    });
+
+    render(<RunView workflow={workflow} runId="run-12345678" onBack={() => {}} />);
+
+    const trigger = screen.getByRole("button", { name: "9k cached tokens across nodes" });
+    expect(trigger.textContent).toBe("⟳ 9k");
+    expect(screen.getByText("Cache read")).toBeDefined();
+  });
+
   test("hides the run-level usage chip when no node reported spend", () => {
     runResult = result({
       collect: node({
