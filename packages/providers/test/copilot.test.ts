@@ -2393,6 +2393,91 @@ describe("CopilotProvider — defaultModel + listModels", () => {
     expect(sdk.lastClient()!.stopped).toBe(true);
   });
 
+  it("listModels() reads tier and per-token price from the token-priced catalog", async () => {
+    const sdk = makeMockSdk({
+      models: [
+        { id: "auto", billing: {} },
+        {
+          id: "gpt-6-sol",
+          modelPickerPriceCategory: "medium",
+          billing: {
+            tokenPrices: {
+              inputPrice: 200,
+              outputPrice: 1000,
+              cachePrice: 20,
+              cacheReadPrice: 20,
+              cacheWritePrice: 250,
+              batchSize: 1_000_000,
+            },
+          },
+        },
+        { id: "gpt-6-astra", modelPickerPriceCategory: "very_high" },
+        {
+          id: "gemini-3.8-flash",
+          modelPickerPriceCategory: "low",
+          billing: { tokenPrices: { inputPrice: 75, outputPrice: 375, cachePrice: 7 } },
+        },
+        {
+          id: "odd",
+          modelPickerPriceCategory: "premium",
+          billing: { tokenPrices: { inputPrice: 5 } },
+        },
+      ],
+    });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => "real-token",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+    });
+    const byId = new Map((await provider.listModels()).map((m) => [m.id, m]));
+    expect(byId.get("auto")!.costTier).toBeUndefined();
+    expect(byId.get("auto")!.price).toBeUndefined();
+    expect(byId.get("gpt-6-sol")!.costTier).toBe("mid");
+    expect(byId.get("gpt-6-sol")!.price).toEqual({
+      inputPerMTok: 2,
+      outputPerMTok: 10,
+      cacheReadPerMTok: 0.2,
+      cacheWritePerMTok: 2.5,
+    });
+    expect(byId.get("gpt-6-astra")!.costTier).toBe("high");
+    expect(byId.get("gpt-6-astra")!.price).toBeUndefined();
+    // No cacheReadPrice: the generic cache rate stands in; no write rate: input rate.
+    expect(byId.get("gemini-3.8-flash")!.price).toEqual({
+      inputPerMTok: 0.75,
+      outputPerMTok: 3.75,
+      cacheReadPerMTok: 0.07,
+      cacheWritePerMTok: 0.75,
+    });
+    expect(byId.get("odd")!.costTier).toBeUndefined();
+    expect(byId.get("odd")!.price).toBeUndefined();
+    expect(provider.modelPrices()).toEqual({
+      "gpt-6-sol": byId.get("gpt-6-sol")!.price!,
+      "gemini-3.8-flash": byId.get("gemini-3.8-flash")!.price!,
+    });
+  });
+
+  it("derives distinct model classes from price categories", async () => {
+    const sdk = makeMockSdk({
+      models: [
+        { id: "auto" },
+        { id: "mid-model", modelPickerPriceCategory: "medium" },
+        { id: "cheap-model", modelPickerPriceCategory: "low" },
+        { id: "big-model", modelPickerPriceCategory: "high" },
+      ],
+    });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => "real-token",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+    });
+    await provider.listModels();
+    expect(provider.getCapabilities().modelClasses).toEqual({
+      fast: "cheap-model",
+      balanced: "mid-model",
+      deep: "big-model",
+    });
+  });
+
   it("listModels() falls back to bare-id projections of capabilities.models when the SDK errors", async () => {
     const sdk = makeMockSdk({ startError: new Error("ECONNREFUSED") });
     const loader = loaderFor(sdk);

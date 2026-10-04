@@ -51,6 +51,7 @@ export function registerCopilotProvider(
       displayName: "GitHub Copilot",
       factory: () => provider,
       capabilities: provider.getCapabilities(),
+      modelPrices: () => provider.modelPrices(),
       builtIn: true,
       credentialServiceId: COPILOT_CREDENTIAL_SERVICE_ID,
     });

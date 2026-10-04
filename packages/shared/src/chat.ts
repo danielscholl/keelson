@@ -7,6 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { z } from "zod";
+import { modelPriceSchema } from "./model-prices.ts";
 
 export const WIRE_PROTOCOL_VERSION = "1.0" as const;
 
@@ -295,6 +296,7 @@ export const modelInfoSchema = z
     displayName: z.string().optional(),
     description: z.string().optional(),
     costTier: z.enum(["free", "low", "mid", "high"]).optional(),
+    price: modelPriceSchema.optional(),
     // How the underlying turn is billed. "metered" = a per-token API key;
     // "subscription" = a flat-rate OAuth login. Undefined = unknown — the
     // picker shows a mark only for "metered". Driven by pi's per-vendor auth

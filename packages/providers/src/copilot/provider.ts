@@ -6,7 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import type { TokenUsage, ToolContext } from "@keelson/shared";
+import type { ModelPrices, TokenUsage, ToolContext } from "@keelson/shared";
 import { ChunkQueue } from "../chunk-queue.ts";
 import { deriveModelClasses } from "../model-classes.ts";
 import { toTokenCount } from "../token-count.ts";
@@ -134,6 +134,7 @@ export class CopilotProvider implements IAgentProvider {
   };
   // Process-lifetime cache; CLI spawn for listModels costs ~1s.
   private modelListCache: Promise<ModelInfo[]> | null = null;
+  private catalogPrices: ModelPrices | undefined;
   // Tracks the latest catalog fetch; stays settled after a failure so class waits never retry.
   private modelClassReady: Promise<void> | null = null;
   // The single warm client reused across turns, or null when none is resident.
@@ -212,6 +213,9 @@ export class CopilotProvider implements IAgentProvider {
       return COPILOT_CAPABILITIES.models.map((id) => ({ id }));
     }
     const concrete = live.filter((model) => model.id.trim() !== "" && model.id !== "auto");
+    const prices: ModelPrices = {};
+    for (const model of concrete) if (model.price) prices[model.id] = model.price;
+    this.catalogPrices = prices;
     const classes = deriveModelClasses(concrete, COPILOT_DEFAULT_MODEL);
     if (classes === undefined) {
       this.modelListCache = null;
@@ -226,6 +230,11 @@ export class CopilotProvider implements IAgentProvider {
       );
     }
     return live;
+  }
+
+  // Prices from the last live catalog; undefined until one has loaded.
+  modelPrices(): ModelPrices | undefined {
+    return this.catalogPrices;
   }
 
   async listModelsLive(signal?: AbortSignal): Promise<ModelInfo[] | null> {

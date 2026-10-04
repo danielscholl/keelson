@@ -124,6 +124,9 @@ export interface UsageStoreOptions {
   // Read once per query so an edited config.json reprices history without a
   // restart; cost is never persisted.
   priceOverrides?: () => ModelPrices | undefined;
+  // Live provider catalog prices, consulted after overrides and before the
+  // bundled table.
+  catalogPrices?: () => Record<string, ModelPrices> | undefined;
 }
 
 export interface UsageStore {
@@ -221,6 +224,7 @@ const TOTALS_SELECT = `
 // that reported cache reads at all: a SUM over all-null cache columns is 0,
 // which must read as "unreported", never as a 0% hit rate.
 const MODEL_TOTALS_SELECT = `
+  provider,
   model,
   ${TOTALS_SELECT},
   COUNT(cache_read_tokens) AS cacheReadReported
@@ -235,6 +239,7 @@ interface TotalsRow {
 }
 
 interface ModelTotalsRow extends TotalsRow {
+  provider: string;
   model: string;
   cacheReadReported: number;
 }
@@ -262,13 +267,23 @@ interface MinuteRow extends Omit<TotalsRow, "events"> {
   minuteIso: string;
 }
 
-type Pricer = (model: string) => ModelPrice | undefined;
+type Pricer = (provider: string, model: string) => ModelPrice | undefined;
 
-function createPricer(overrides: ModelPrices | undefined): Pricer {
-  const cache = new Map<string, ModelPrice | undefined>();
-  return (model) => {
-    if (!cache.has(model)) cache.set(model, resolveModelPrice(model, overrides));
-    return cache.get(model);
+function createPricer(
+  overrides: ModelPrices | undefined,
+  catalogs: Record<string, ModelPrices> | undefined,
+): Pricer {
+  const cache = new Map<string, Map<string, ModelPrice | undefined>>();
+  return (provider, model) => {
+    let byModel = cache.get(provider);
+    if (!byModel) {
+      byModel = new Map();
+      cache.set(provider, byModel);
+    }
+    if (!byModel.has(model)) {
+      byModel.set(model, resolveModelPrice(model, overrides, catalogs?.[provider]));
+    }
+    return byModel.get(model);
   };
 }
 
@@ -298,7 +313,7 @@ function accumulate(acc: PricedAccumulator, row: ModelTotalsRow, pricer: Pricer)
   acc.cacheReadTokens += row.cacheReadTokens;
   acc.cacheWriteTokens += row.cacheWriteTokens;
   acc.cacheReadReported += row.cacheReadReported;
-  const price = pricer(row.model);
+  const price = pricer(row.provider, row.model);
   if (price) acc.costUsd += estimateCostUsd(row, price);
   else acc.unpricedEvents += row.events;
 }
@@ -360,7 +375,7 @@ function percentile(sorted: number[], pct: number): number {
 }
 
 export function createUsageStore(db: Database, options: UsageStoreOptions = {}): UsageStore {
-  const pricerForQuery = () => createPricer(options.priceOverrides?.());
+  const pricerForQuery = () => createPricer(options.priceOverrides?.(), options.catalogPrices?.());
   const insertEvent = db.prepare(
     `INSERT INTO usage_events(
        ts, source, provider, model, input_tokens, output_tokens,
@@ -443,7 +458,7 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
         .query(
           `SELECT COALESCE(${column}, '${UNGROUPED_KEY}') AS key, ${MODEL_TOTALS_SELECT}
              FROM usage_events ${where}
-             GROUP BY key, model
+             GROUP BY key, provider, model
              ORDER BY key ASC`,
         )
         .all(...params) as GroupRow[];
@@ -472,7 +487,7 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
           `SELECT strftime('${strftimeFormat}', ts) AS bucketIso,
                   COALESCE(${column}, '${UNGROUPED_KEY}') AS key, ${MODEL_TOTALS_SELECT}
              FROM usage_events ${where}
-             GROUP BY bucketIso, key, model
+             GROUP BY bucketIso, key, provider, model
              ORDER BY bucketIso ASC, key ASC`,
         )
         .all(...params) as SeriesRow[];
@@ -501,7 +516,7 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
                  COALESCE(${splitColumn}, '${UNGROUPED_KEY}') AS split,
                  ${MODEL_TOTALS_SELECT}
              FROM usage_events ${where}
-             GROUP BY key, split, model
+             GROUP BY key, split, provider, model
              ORDER BY key ASC, split ASC`,
         )
         .all(...params) as BreakdownRow[];
@@ -528,7 +543,7 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
                  ${MODEL_TOTALS_SELECT}
              FROM usage_events
             WHERE ${clauses.join(" AND ")}
-            GROUP BY key, runId, model
+            GROUP BY key, runId, provider, model
             ORDER BY key ASC`,
         )
         .all(...params) as JobRunRow[];
@@ -611,7 +626,7 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
         .all(...params) as UsageEventRow[];
       return rows.map((row): UsageEventRowWire => {
         const event = rowToEvent(row);
-        const price = pricer(event.model);
+        const price = pricer(event.provider, event.model);
         return { ...event, costUsd: price ? estimateCostUsd(event, price) : null };
       });
     },

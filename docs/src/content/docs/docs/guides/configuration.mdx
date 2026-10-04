@@ -342,7 +342,10 @@ gateways sit in the matrix.
 The [Usage](../../concepts/usage/) tab prices each turn from a per-model rate
 table. Keelson bundles the Anthropic list prices for the Claude models its Claude
 provider offers and recognizes them under the Copilot catalog's dotted ids too.
-Every other model is unpriced until you add it under `modelPrices`, keyed by the
+Copilot models also carry per-token rates in the account's live catalog, and
+those price turns once the catalog has loaded (base-context rates; the ledger does
+not record which turns crossed into long context). Every other model is unpriced
+until you add it under `modelPrices`, keyed by the
 model id the ledger records (the served model, so the id a provider reports, not
 a class alias), with all four rates in US dollars per million tokens:
 
@@ -365,7 +368,7 @@ a class alias), with all four rates in US dollars per million tokens:
 }
 ```
 
-An entry for a bundled model overrides its bundled rate, and the id matches
+An entry overrides a Copilot catalog rate or a bundled rate, and the id matches
 whether you write it dotted or hyphenated. All four rates are required: an entry
 missing one fails the config read rather than pricing that dimension at zero.
 Cost is computed when a Usage view is read, so an edit here reprices history on

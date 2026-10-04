@@ -6,6 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+import type { ModelPrices } from "@keelson/shared";
 import { UnknownProviderError } from "./errors.ts";
 import type { IAgentProvider, ProviderInfo, ProviderRegistration } from "./types.ts";
 
@@ -76,6 +77,16 @@ export function getProviderInfoList(): ProviderInfo[] {
       return info;
     },
   );
+}
+
+// Live catalog prices keyed by provider so identical model ids stay distinct.
+export function getCatalogModelPrices(): Record<string, ModelPrices> {
+  const pricesByProvider: Record<string, ModelPrices> = {};
+  for (const entry of registry.values()) {
+    const prices = entry.modelPrices?.();
+    if (prices) pricesByProvider[entry.id] = prices;
+  }
+  return pricesByProvider;
 }
 
 export function isRegisteredProvider(id: string): boolean {
