@@ -10704,11 +10704,91 @@ a.cvb-card-title::after {
   fill: var(--dim);
   font-family: var(--font-mono, ui-monospace, monospace);
 }
+.usage-stack-chart {
+  position: relative;
+}
+.usage-stack-hit {
+  fill: transparent;
+}
+.usage-stack-svg g[data-active] .usage-stack-hit {
+  fill: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.usage-stack-hit:focus {
+  outline: none;
+}
+.usage-stack-hit:focus-visible {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
 .usage-seg-rect {
   transition: opacity 0.15s;
 }
 .usage-seg-rect:hover {
   opacity: 0.85;
+}
+/* pointer-events-none so the tooltip never steals the hover that places it. */
+.usage-stack-tooltip {
+  position: absolute;
+  top: 8px;
+  z-index: 3;
+  pointer-events: none;
+  min-width: 180px;
+  max-width: min(320px, 90%);
+  margin: 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--bg) 78%, transparent);
+  font-size: 12px;
+}
+/* Too narrow to float over the bars without clipping, so it opens below them. */
+@media (max-width: 640px) {
+  .usage-stack-tooltip {
+    position: static;
+    max-width: none;
+    margin: 8px 0 0;
+  }
+}
+.usage-stack-tooltip-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--dim);
+  margin-bottom: 6px;
+}
+.usage-stack-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+  color: var(--muted);
+}
+.usage-stack-tooltip-row[data-active] {
+  color: var(--fg);
+  font-weight: 600;
+}
+.usage-stack-tooltip-row--sub {
+  padding-left: 14px;
+  font-size: 11px;
+  color: var(--dim);
+}
+.usage-stack-tooltip-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-stack-tooltip-value,
+.usage-stack-tooltip-share {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+}
+.usage-stack-tooltip-share {
+  min-width: 3.5ch;
+  text-align: right;
+  color: var(--dim);
 }
 .usage-legend {
   display: flex;
