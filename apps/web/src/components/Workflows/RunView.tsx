@@ -10,7 +10,7 @@ import {
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
 import { formatDuration } from "../../lib/formatDuration.ts";
 import { formatProviderModel } from "../../lib/formatProvenance.ts";
-import { formatTokens, sumTokenSpend } from "../../lib/formatTokens.ts";
+import { formatTokens, hasSpend, sumTokenSpend } from "../../lib/formatTokens.ts";
 import { useCanvas } from "../Canvas/CanvasHost.tsx";
 import { ProjectChip } from "../Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../Chat/ProjectPickerPopover.tsx";
@@ -138,15 +138,33 @@ export function RunView({
   // Run-level rollup: sum across reporting nodes. Volume, not fill — no
   // percentage gauge here (a run total has no meaningful window to fill).
   const runUsage = useMemo(() => sumTokenSpend(Object.values(nodes).map((v) => v.usage)), [nodes]);
-  const runTotalTokens = runUsage ? runUsage.inputTokens + runUsage.outputTokens : 0;
+  const runTotalTokens = runUsage
+    ? runUsage.inputTokens + (runUsage.cacheCreationInputTokens ?? 0) + runUsage.outputTokens
+    : 0;
   const runUsagePopoverId = `workflow-run-usage-${generatedRunUsageId.replace(/:/g, "")}`;
   const runUsageTooltip =
     runUsage != null
-      ? `${runTotalTokens} tokens total across nodes · ${runUsage.inputTokens} in · ${runUsage.outputTokens} out`
+      ? [
+          `${runTotalTokens} fresh tokens across nodes`,
+          `${runUsage.inputTokens} in`,
+          ...(runUsage.cacheCreationInputTokens !== undefined
+            ? [`${runUsage.cacheCreationInputTokens} cache write`]
+            : []),
+          `${runUsage.outputTokens} out`,
+        ].join(" · ")
       : "";
-  const runUsageBreakdown: TokenUsage | null = runUsage
-    ? { inputTokens: runUsage.inputTokens, outputTokens: runUsage.outputTokens }
-    : null;
+  const runCacheOnly = runUsage != null && !hasSpend(runUsage);
+  const runCachedTokens =
+    (runUsage?.cacheReadInputTokens ?? 0) + (runUsage?.cacheCreationInputTokens ?? 0);
+  const runCacheOnlyLabel = [
+    ...(runUsage?.cacheReadInputTokens !== undefined
+      ? [`${formatTokens(runUsage.cacheReadInputTokens)} cache read`]
+      : []),
+    ...(runUsage?.cacheCreationInputTokens !== undefined
+      ? [`${formatTokens(runUsage.cacheCreationInputTokens)} cache write`]
+      : []),
+  ].join(", ");
+  const runUsageBreakdown: TokenUsage | null = runUsage;
 
   // Run-level provenance chip: collapse to one `provider · model` label only
   // when every node that reported one agrees. Nodes can pin different
@@ -279,12 +297,22 @@ export function RunView({
                     className="run-usage"
                     popoverTarget={runUsagePopoverId}
                     title={runUsageTooltip}
-                    aria-label={`${formatTokens(runUsageBreakdown.inputTokens)} input tokens, ${formatTokens(
-                      runUsageBreakdown.outputTokens,
-                    )} output tokens across nodes`}
+                    aria-label={
+                      runCacheOnly
+                        ? `${runCacheOnlyLabel} tokens across nodes`
+                        : `${formatTokens(runUsageBreakdown.inputTokens)} input tokens, ${formatTokens(
+                            runUsageBreakdown.outputTokens,
+                          )} output tokens across nodes`
+                    }
                   >
-                    ↑{formatTokens(runUsageBreakdown.inputTokens)} ↓
-                    {formatTokens(runUsageBreakdown.outputTokens)}
+                    {runCacheOnly ? (
+                      `⟳ ${formatTokens(runCachedTokens)}`
+                    ) : (
+                      <>
+                        ↑{formatTokens(runUsageBreakdown.inputTokens)} ↓
+                        {formatTokens(runUsageBreakdown.outputTokens)}
+                      </>
+                    )}
                   </button>
                   <UsagePopoverPanel popoverId={runUsagePopoverId} ariaLabel="Run token usage">
                     <UsageBreakdown usage={runUsageBreakdown} spendTitle="Run" />

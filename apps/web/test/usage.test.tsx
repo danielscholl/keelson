@@ -125,10 +125,25 @@ describe("sumTokenSpend", () => {
     ).toEqual({ inputTokens: 879_000, outputTokens: 7834 });
   });
 
+  test("sums cache counts only from nodes that reported them", () => {
+    expect(
+      sumTokenSpend([
+        { inputTokens: 10, outputTokens: 1, cacheCreationInputTokens: 400 },
+        { inputTokens: 20, outputTokens: 2, cacheCreationInputTokens: 600 },
+      ]),
+    ).toEqual({ inputTokens: 30, outputTokens: 3, cacheCreationInputTokens: 1000 });
+  });
+
   test("returns null when nothing was spent — never a fabricated 0", () => {
     expect(sumTokenSpend([])).toBeNull();
     expect(sumTokenSpend([undefined, null])).toBeNull();
     expect(sumTokenSpend([{ inputTokens: 0, outputTokens: 0 }])).toBeNull();
+  });
+
+  test("keeps a run whose only spend was cache reads or writes", () => {
+    expect(
+      sumTokenSpend([{ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 5000 }]),
+    ).toEqual({ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 5000 });
   });
 });
 

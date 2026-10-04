@@ -2,6 +2,8 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { tokenUsageHasSpend } from "@keelson/shared";
+
 // Compact token-count formatting for usage chips and trace rows:
 // 842 → "842", 1 234 → "1.2k", 42 000 → "42k", 1 250 000 → "1.3M".
 export function formatTokens(n: number): string {
@@ -42,20 +44,33 @@ export function hasSpend(usage: { inputTokens: number; outputTokens: number }): 
   return usage.inputTokens + usage.outputTokens > 0;
 }
 
-// Run-level rollup: sum input/output spend across every reporting node. Returns
-// null when nothing was spent so the caller renders nothing rather than a
-// fabricated "0" — the same gate `hasSpend` applies per node.
-export function sumTokenSpend(
-  usages: Iterable<{ inputTokens: number; outputTokens: number } | undefined | null>,
-): { inputTokens: number; outputTokens: number } | null {
-  let inputTokens = 0;
-  let outputTokens = 0;
+// Run-level rollup: sum spend across every reporting node. Returns null when
+// nothing was billed (cache reads and writes count) so the caller renders
+// nothing rather than a fabricated "0".
+export interface TokenSpend {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+}
+
+// Cache counts stay absent unless some node reported them, so "not reported"
+// never reads as a measured zero.
+export function sumTokenSpend(usages: Iterable<TokenSpend | undefined | null>): TokenSpend | null {
+  const total: TokenSpend = { inputTokens: 0, outputTokens: 0 };
   for (const u of usages) {
     if (!u) continue;
-    inputTokens += u.inputTokens;
-    outputTokens += u.outputTokens;
+    total.inputTokens += u.inputTokens;
+    total.outputTokens += u.outputTokens;
+    if (u.cacheReadInputTokens !== undefined) {
+      total.cacheReadInputTokens = (total.cacheReadInputTokens ?? 0) + u.cacheReadInputTokens;
+    }
+    if (u.cacheCreationInputTokens !== undefined) {
+      total.cacheCreationInputTokens =
+        (total.cacheCreationInputTokens ?? 0) + u.cacheCreationInputTokens;
+    }
   }
-  return hasSpend({ inputTokens, outputTokens }) ? { inputTokens, outputTokens } : null;
+  return tokenUsageHasSpend(total) ? total : null;
 }
 
 // Ledger cost: four decimals under a dollar ($0.0123) so a single cheap turn
