@@ -1,4 +1,4 @@
-import { describe, expect, jest, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { CanvasBoardView } from "@keelson/shared";
 import { act, render, renderHook } from "@testing-library/react";
 import { BoardView } from "../src/components/Canvas/BoardView.tsx";
@@ -27,23 +27,31 @@ describe("formatClock", () => {
 
 describe("useClockNow", () => {
   test("every mounted clock shares one interval, which stops after the last unmount", () => {
-    jest.useFakeTimers();
+    let clock = Date.now();
+    const nowSpy = spyOn(Date, "now").mockImplementation(() => clock);
+    const setIntervalSpy = spyOn(globalThis, "setInterval");
+    const clearIntervalSpy = spyOn(globalThis, "clearInterval");
     try {
       const a = renderHook(() => useClockNow());
       const b = renderHook(() => useClockNow());
-      expect(jest.getTimerCount()).toBe(1);
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
       const first = a.result.current;
       act(() => {
-        jest.advanceTimersByTime(CLOCK_TICK_MS);
+        clock += CLOCK_TICK_MS;
+        const tick = setIntervalSpy.mock.calls[0]?.[0];
+        if (typeof tick !== "function") throw new Error("clock interval callback missing");
+        tick();
       });
       expect(a.result.current).toBeGreaterThan(first);
       expect(b.result.current).toBe(a.result.current);
       a.unmount();
-      expect(jest.getTimerCount()).toBe(1);
+      expect(clearIntervalSpy).not.toHaveBeenCalled();
       b.unmount();
-      expect(jest.getTimerCount()).toBe(0);
+      expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
     } finally {
-      jest.useRealTimers();
+      nowSpy.mockRestore();
+      setIntervalSpy.mockRestore();
+      clearIntervalSpy.mockRestore();
     }
   });
 

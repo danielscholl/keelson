@@ -202,7 +202,8 @@ describe("HTML state host", () => {
     const viewKey = key();
     const view = render(<SandboxedHtml html="first" viewKey={viewKey} />);
     const connection = connect(frame(view.container));
-    const state = { task: "\u00e9".repeat(32762) + "x" };
+    const boundaryTask = `${"\u00e9".repeat(32762)}x`;
+    const state = { task: boundaryTask };
     expect(new TextEncoder().encode(JSON.stringify(state)).byteLength).toBe(
       CANVAS_HTML_STATE_MAX_BYTES,
     );
@@ -213,11 +214,11 @@ describe("HTML state host", () => {
     view.rerender(<SandboxedHtml html="second" viewKey={viewKey} />);
     fireEvent.load(frame(view.container));
     const restored = connection.restores()[0].state;
-    expect(restored.task).toBe("\u00e9".repeat(32762) + "x");
+    expect(restored.task).toBe(boundaryTask);
     restored.task = "mutated restore";
     view.rerender(<SandboxedHtml html="third" viewKey={viewKey} />);
     fireEvent.load(frame(view.container));
-    expect(connection.restores()[1].state.task).toBe("\u00e9".repeat(32762) + "x");
+    expect(connection.restores()[1].state.task).toBe(boundaryTask);
     connection.save({ task: "x".repeat(CANVAS_HTML_STATE_MAX_BYTES - 11) });
     view.rerender(<SandboxedHtml html="fourth" viewKey={viewKey} />);
     fireEvent.load(frame(view.container));
