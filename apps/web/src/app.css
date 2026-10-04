@@ -10980,6 +10980,9 @@ a.cvb-card-title::after {
   align-self: stretch;
   background: var(--border-soft);
 }
+.usage-ledger-more {
+  margin-top: 10px;
+}
 .usage-ledger-count {
   margin-top: -6px;
 }

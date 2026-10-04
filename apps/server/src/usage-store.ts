@@ -612,7 +612,7 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
       const pricer = pricerForQuery();
       const rows = db
         .query(
-          `SELECT COALESCE(workflow_name, rib_id, source) AS key,
+          `SELECT COALESCE(workflow_name, 'rib:' || rib_id, source) AS key,
                  COALESCE(run_id, printf('event:%d', id)) AS runId,
                  ${MODEL_TOTALS_SELECT}
              FROM usage_events

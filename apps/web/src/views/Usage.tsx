@@ -1290,7 +1290,7 @@ function JobsSection({ range }: { range: UsageWindow }) {
                 </tbody>
               </table>
             </div>
-            <section className="usage-burn-list" aria-label="Weekly burn by job">
+            <section className="usage-burn-list" aria-label={`Burn by job, ${WINDOW_LABEL[range]}`}>
               {jobs.map((job) => {
                 const pct = Math.max(2, Math.round((job.totalTokens / maxTokens) * 100));
                 return (
@@ -1424,27 +1424,45 @@ function formatEventDuration(ms: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
-const LEDGER_LIMIT = 50;
+const LEDGER_PAGE = 50;
+// The server caps /api/usage/events at 500 rows.
+const LEDGER_MAX = 500;
 const LEDGER_SOURCES: UsageEventSourceWire[] = ["chat", "workflow", "rib"];
 const LEDGER_STATUSES = ["ok", "error", "aborted", "timeout"] as const;
 
 function LedgerSection({ range }: { range: UsageWindow }) {
-  const [events, setEvents] = useState<UsageEventRowWire[] | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [sourceFilter, setSourceFilter] = useState<UsageEventSourceWire | "all">("all");
   const [modelFilter, setModelFilter] = useState<string | "all">("all");
   const [statusFilter, setStatusFilter] = useState<string | "all">("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const filtered = sourceFilter !== "all" || modelFilter !== "all" || statusFilter !== "all";
+  // Page size and rows belong to one window+filter combination, so changing
+  // either starts over at one page instead of showing the previous rows.
+  const queryKey = [range, sourceFilter, modelFilter, statusFilter].join("\u0000");
+  const [page, setPage] = useState({ key: queryKey, limit: LEDGER_PAGE });
+  const limit = page.key === queryKey ? page.limit : LEDGER_PAGE;
+  const [loaded, setLoaded] = useState<{ key: string; events: UsageEventRowWire[] } | null>(null);
+  const events = loaded?.key === queryKey ? loaded.events : null;
 
   useEffect(() => {
     let cancelled = false;
     getUsageSummary({ window: range, groupBy: "model" })
       .then((summary) => {
-        if (!cancelled) setModels(summary.groups.map((group) => group.key));
+        if (cancelled) return;
+        const keys = summary.groups.map((group) => group.key);
+        setModels(keys);
+        // A model picked in a wider window may have no chip in this one.
+        setModelFilter((current) =>
+          current === "all" || keys.includes(current) ? current : "all",
+        );
       })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      .catch(() => {
+        // The chips are a convenience; the ledger itself still loads without them.
+        if (cancelled) return;
+        setModels([]);
+        setModelFilter("all");
       });
     return () => {
       cancelled = true;
@@ -1457,13 +1475,13 @@ function LedgerSection({ range }: { range: UsageWindow }) {
     setError(null);
     getUsageEvents({
       window: range,
-      limit: LEDGER_LIMIT,
+      limit,
       source: sourceFilter === "all" ? undefined : sourceFilter,
       model: modelFilter === "all" ? undefined : modelFilter,
       status: statusFilter === "all" ? undefined : statusFilter,
     })
       .then((res) => {
-        if (!cancelled) setEvents(res);
+        if (!cancelled) setLoaded({ key: queryKey, events: res });
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -1474,7 +1492,10 @@ function LedgerSection({ range }: { range: UsageWindow }) {
     return () => {
       cancelled = true;
     };
-  }, [range, sourceFilter, modelFilter, statusFilter]);
+  }, [range, sourceFilter, modelFilter, statusFilter, limit, queryKey]);
+
+  const capped = !!events && events.length >= limit;
+  const now = new Date();
 
   return (
     <section className="surface-region usage-ledger-region">
@@ -1533,69 +1554,105 @@ function LedgerSection({ range }: { range: UsageWindow }) {
             />
           ))}
         </fieldset>
-        <div className="usage-ledger-count page-sub">
-          {events ? `${events.length.toLocaleString()} events` : "Loading events"}
-        </div>
+        {events && !error && (
+          <div className="usage-ledger-count page-sub">
+            {capped
+              ? `Latest ${events.length.toLocaleString()} events`
+              : `${events.length.toLocaleString()} ${events.length === 1 ? "event" : "events"}`}
+          </div>
+        )}
         {error ? (
           <div className="empty-state" role="alert">
             <div className="empty-state-title">Couldn't load the ledger</div>
             <div className="empty-state-body">{error}</div>
           </div>
-        ) : loading ? (
+        ) : loading && !events ? (
           <div className="page-sub" style={{ padding: "20px 0" }}>
             Loading…
           </div>
         ) : events && events.length > 0 ? (
-          <div className="canvas-view-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Source</th>
-                  <th>Model</th>
-                  <th>↑ In</th>
-                  <th>↓ Out</th>
-                  <th>Cache</th>
-                  <th>Cost</th>
-                  <th>Dur</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {events.map((ev) => (
-                  <tr key={ev.id}>
-                    <td>{new Date(ev.ts).toLocaleTimeString()}</td>
-                    <td>
-                      <span className="pill">{ev.source}</span>
-                    </td>
-                    <td>
-                      <span className="run-provenance">
-                        {formatProviderModel(ev.provider, formatModelLabel(ev.model)) ??
-                          formatModelLabel(ev.model)}
-                      </span>
-                    </td>
-                    <td>↑ {formatTokens(ev.inputTokens + (ev.cacheWriteTokens ?? 0))}</td>
-                    <td>↓ {formatTokens(ev.outputTokens)}</td>
-                    <td>{ev.cacheReadTokens != null ? formatTokens(ev.cacheReadTokens) : "—"}</td>
-                    <td>{formatCostUsd(ev.costUsd)}</td>
-                    <td>{ev.durationMs != null ? formatEventDuration(ev.durationMs) : "—"}</td>
-                    <td>
-                      <span className={`status-dot ${statusDotClass(ev.status)}`} />
-                      {ev.status}
-                    </td>
+          <>
+            <div className="canvas-view-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Source</th>
+                    <th>Model</th>
+                    <th>↑ In</th>
+                    <th>↓ Out</th>
+                    <th>Cache</th>
+                    <th>Cost</th>
+                    <th>Dur</th>
+                    <th>Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {events.map((ev) => (
+                    <tr key={ev.id}>
+                      <td>{formatLedgerTime(ev.ts, now)}</td>
+                      <td>
+                        <span className="pill">{ev.source}</span>
+                      </td>
+                      <td>
+                        <span className="run-provenance">
+                          {formatProviderModel(ev.provider, formatModelLabel(ev.model)) ??
+                            formatModelLabel(ev.model)}
+                        </span>
+                      </td>
+                      <td>↑ {formatTokens(ev.inputTokens + (ev.cacheWriteTokens ?? 0))}</td>
+                      <td>↓ {formatTokens(ev.outputTokens)}</td>
+                      <td>{ev.cacheReadTokens != null ? formatTokens(ev.cacheReadTokens) : "—"}</td>
+                      <td>{formatCostUsd(ev.costUsd)}</td>
+                      <td>{ev.durationMs != null ? formatEventDuration(ev.durationMs) : "—"}</td>
+                      <td>
+                        <span className={`status-dot ${statusDotClass(ev.status)}`} />
+                        {ev.status}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {capped &&
+              (limit < LEDGER_MAX ? (
+                <button
+                  type="button"
+                  className="chip usage-ledger-more"
+                  disabled={loading}
+                  onClick={() =>
+                    setPage({ key: queryKey, limit: Math.min(limit + LEDGER_PAGE, LEDGER_MAX) })
+                  }
+                >
+                  {loading ? "Loading…" : "Show more"}
+                </button>
+              ) : (
+                <div className="usage-ledger-count page-sub">
+                  Showing the latest {LEDGER_MAX}. Narrow the filters to see older events.
+                </div>
+              ))}
+          </>
         ) : (
           <div className="usage-stack-empty">
-            <span className="page-sub">No events recorded in this window yet.</span>
+            <span className="page-sub">
+              {filtered
+                ? "No events match these filters in this window."
+                : "No events recorded in this window yet."}
+            </span>
           </div>
         )}
       </div>
     </section>
   );
+}
+
+// Rows older than today carry their date; the 7d and 30d windows span days.
+function formatLedgerTime(iso: string, now: Date): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toDateString() === now.toDateString()
+    ? d.toLocaleTimeString()
+    : d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 function FilterChip({
