@@ -8,7 +8,7 @@ import {
   type WorkflowFrame,
   type WorkflowRunDetail,
 } from "@keelson/shared";
-import type { RunStreamEvent } from "@keelson/workflows";
+import { addEvalTokens, type EvalTokens, type RunStreamEvent } from "@keelson/workflows";
 
 import { normalizeBase, originHeader } from "../http/base.ts";
 import { listProjects } from "../http/projects-client.ts";
@@ -23,7 +23,7 @@ export interface CaseExecution {
   readonly finalOutput: string | null;
   readonly nodeOutputs: Readonly<Record<string, string>>;
   readonly durationMs: number | null;
-  readonly tokens: { readonly input: number; readonly output: number } | null;
+  readonly tokens: EvalTokens | null;
   readonly costUsd: number | null;
   readonly definitionHash: string | null;
 }
@@ -98,9 +98,7 @@ export function makeInProcessExecutor(opts: InProcessExecutorOptions): CaseExecu
   return async (request) => {
     const succeededOrder: string[] = [];
     let runId: string | null = null;
-    let input = 0;
-    let output = 0;
-    let sawUsage = false;
+    let tokens: EvalTokens | null = null;
     try {
       const result = await runHeadless({
         name: opts.workflow,
@@ -115,9 +113,7 @@ export function makeInProcessExecutor(opts: InProcessExecutorOptions): CaseExecu
           if (event.type === "node_done") {
             if (event.result.status === "succeeded") succeededOrder.push(event.nodeId);
             if (event.result.usage !== undefined) {
-              sawUsage = true;
-              input += event.result.usage.inputTokens;
-              output += event.result.usage.outputTokens;
+              tokens = addEvalTokens(tokens, event.result.usage);
             }
           }
           const line = formatEvent(event);
@@ -136,7 +132,7 @@ export function makeInProcessExecutor(opts: InProcessExecutorOptions): CaseExecu
         finalOutput: last !== undefined ? (nodeOutputs[last] ?? null) : null,
         nodeOutputs,
         durationMs: result.summary.completedAtMs - result.summary.startedAtMs,
-        tokens: sawUsage ? { input, output } : null,
+        tokens,
         costUsd: null,
         definitionHash: result.definitionHash,
       };
@@ -250,16 +246,10 @@ export function makeHttpExecutor(opts: HttpExecutorOptions): CaseExecutor {
       );
     }
     const nodeOutputs = emptyNodeOutputs();
-    let input = 0;
-    let output = 0;
-    let sawUsage = false;
+    let tokens: EvalTokens | null = null;
     for (const row of detail.nodes) {
       if (row.status === "succeeded") nodeOutputs[row.nodeId] = row.outputText ?? "";
-      if (row.usage !== null) {
-        sawUsage = true;
-        input += row.usage.inputTokens;
-        output += row.usage.outputTokens;
-      }
+      if (row.usage !== null) tokens = addEvalTokens(tokens, row.usage);
     }
     // A run that finished before the socket attached replays only run_done,
     // so recover the completion order from the persisted rows instead.
@@ -287,7 +277,7 @@ export function makeHttpExecutor(opts: HttpExecutorOptions): CaseExecutor {
       nodeOutputs,
       durationMs:
         Number.isFinite(startedAt) && Number.isFinite(completedAt) ? completedAt - startedAt : null,
-      tokens: sawUsage ? { input, output } : null,
+      tokens,
       costUsd: await fetchRunCostUsd(opts.baseUrl, runId),
       // Null only for rows persisted before the definition-hash migration.
       definitionHash: detail.definitionHash,

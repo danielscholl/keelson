@@ -40,6 +40,7 @@ export {
   parseJudgeResponse,
 } from "./graders.ts";
 export {
+  addEvalTokens,
   type CompareDecision,
   compareResults,
   compareSplit,
@@ -47,9 +48,12 @@ export {
   EVAL_RESULTS_SCHEMA_VERSION,
   type EvalCaseResult,
   type EvalComparison,
+  type EvalNodeUsage,
   type EvalResultsFile,
   type EvalSummary,
+  type EvalTokens,
   evalResultsFileSchema,
+  freshEvalTokens,
   HEADROOM_PASS_RATE,
   NOISE_INTERVAL_WIDTH,
   pairedDeltas,

@@ -21,10 +21,14 @@ import {
   parseJudgeResponse,
 } from "./graders.ts";
 import {
+  addEvalTokens,
   compareResults,
+  EVAL_RESULTS_SCHEMA_VERSION,
   type EvalCaseResult,
   type EvalResultsFile,
+  type EvalTokens,
   evalResultsFileSchema,
+  freshEvalTokens,
   renderComparisonText,
   renderSummaryMarkdown,
   summarize,
@@ -413,7 +417,7 @@ function result(overrides: Partial<EvalCaseResult>): EvalCaseResult {
 
 function file(cases: EvalCaseResult[], overrides: Partial<EvalResultsFile> = {}): EvalResultsFile {
   return {
-    schemaVersion: 1,
+    schemaVersion: EVAL_RESULTS_SCHEMA_VERSION,
     name: "demo",
     workflow: "w",
     project: null,
@@ -779,21 +783,98 @@ describe("compareResults", () => {
   });
 
   test("duration and tokens ride along, and tokens are null when any run reported none", () => {
-    const run = (tokens: { input: number; output: number } | null, durationMs: number) =>
+    const run = (tokens: EvalTokens | null, durationMs: number) =>
       file(["a", "b"].map((caseId) => result({ caseId, tokens, durationMs })));
-    const cmp = compareResults(
-      run({ input: 10, output: 400 }, 200),
-      run({ input: 10, output: 100 }, 50),
-    );
+    const plain = (input: number, output: number): EvalTokens => ({
+      input,
+      output,
+      cacheRead: null,
+      cacheWrite: null,
+    });
+    const cmp = compareResults(run(plain(10, 400), 200), run(plain(10, 100), 50));
     expect(cmp.duration).toEqual({ beforeMeanMs: 200, afterMeanMs: 50 });
     expect(cmp.tokens).toEqual({
-      before: { input: 20, output: 800 },
-      after: { input: 20, output: 200 },
+      before: { input: 20, output: 800, cacheRead: null, cacheWrite: null, fresh: 820 },
+      after: { input: 20, output: 200, cacheRead: null, cacheWrite: null, fresh: 220 },
     });
     const text = renderComparisonText(cmp);
     expect(text).toContain("duration: mean 200ms → 50ms per case run");
-    expect(text).toContain("tokens: 20 in / 800 out → 20 in / 200 out");
-    expect(compareResults(run(null, 1), run({ input: 1, output: 1 }, 1)).tokens.before).toBeNull();
+    expect(text).toContain("tokens: 820 fresh (20 in, 800 out) → 220 fresh (20 in, 200 out)");
+    expect(compareResults(run(null, 1), run(plain(1, 1), 1)).tokens.before).toBeNull();
+  });
+
+  test("a model reporting new prompt tokens as cache writes compares on fresh tokens", () => {
+    // Copilot GPT/Claude shape: almost no plain input, the prompt lands in cache writes.
+    const cached: EvalTokens = { input: 14, output: 500, cacheRead: 30_000, cacheWrite: 51_990 };
+    const uncached: EvalTokens = { input: 52_004, output: 500, cacheRead: null, cacheWrite: null };
+    expect(freshEvalTokens(cached)).toBe(52_504);
+    expect(freshEvalTokens(uncached)).toBe(52_504);
+    const cmp = compareResults(
+      file([result({ tokens: uncached })]),
+      file([result({ tokens: cached })]),
+    );
+    expect(cmp.tokens.before?.fresh).toBe(52_504);
+    expect(cmp.tokens.after).toEqual({ ...cached, fresh: 52_504 });
+    expect(renderComparisonText(cmp)).toContain(
+      "tokens: 52504 fresh (52004 in, 500 out) → 52504 fresh (14 in, 51990 cache write, 500 out; 30000 cache read)",
+    );
+    const md = renderSummaryMarkdown(file([result({ tokens: cached })]));
+    expect(md).toContain(
+      "- Tokens: 52504 fresh (14 in, 51990 cache write, 500 out; 30000 cache read)",
+    );
+    expect(md).toMatch(/\| 100ms \| 52504 \| unpriced \|/);
+  });
+
+  test("cache counts sum what nodes reported and stay null when none did", () => {
+    let t = addEvalTokens(null, { inputTokens: 5, outputTokens: 1 });
+    expect(t).toEqual({ input: 5, output: 1, cacheRead: null, cacheWrite: null });
+    t = addEvalTokens(t, { inputTokens: 2, outputTokens: 3, cacheCreationInputTokens: 0 });
+    expect(t).toEqual({ input: 7, output: 4, cacheRead: null, cacheWrite: 0 });
+    t = addEvalTokens(t, { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 9 });
+    expect(t).toEqual({ input: 8, output: 5, cacheRead: 9, cacheWrite: 0 });
+  });
+
+  test("a version 1 results file upgrades on read, its cache counts unreported", () => {
+    const current = file([
+      result({ tokens: { input: 3, output: 2, cacheRead: 1, cacheWrite: 4 } }),
+    ]);
+    const v1 = JSON.parse(JSON.stringify(current));
+    v1.schemaVersion = 1;
+    v1.cases[0].tokens = { input: 3, output: 2 };
+    const parsed = evalResultsFileSchema.safeParse(v1);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.schemaVersion).toBe(EVAL_RESULTS_SCHEMA_VERSION);
+    expect(parsed.data?.cases[0]?.tokens).toEqual({
+      input: 3,
+      output: 2,
+      cacheRead: null,
+      cacheWrite: null,
+    });
+    const cmp = compareResults(parsed.data as EvalResultsFile, current);
+    expect(cmp.comparable).toBe(true);
+    expect(cmp.tokens.before).toEqual({
+      input: 3,
+      output: 2,
+      cacheRead: null,
+      cacheWrite: null,
+      fresh: 5,
+    });
+    expect(cmp.tokens.after?.fresh).toBe(9);
+    const reparsed = evalResultsFileSchema.safeParse(JSON.parse(JSON.stringify(parsed.data)));
+    expect(reparsed.success).toBe(true);
+    expect(reparsed.data).toEqual(parsed.data as EvalResultsFile);
+
+    const roundTrip = evalResultsFileSchema.safeParse(JSON.parse(JSON.stringify(current)));
+    expect(roundTrip.success).toBe(true);
+    expect(roundTrip.data?.cases[0]?.tokens?.cacheWrite).toBe(4);
+    // Each version holds its own token shape strictly.
+    const v2Old = JSON.parse(JSON.stringify(current));
+    v2Old.cases[0].tokens = { input: 3, output: 2 };
+    expect(evalResultsFileSchema.safeParse(v2Old).success).toBe(false);
+    const v1New = JSON.parse(JSON.stringify(current));
+    v1New.schemaVersion = 1;
+    expect(evalResultsFileSchema.safeParse(v1New).success).toBe(false);
+    expect(evalResultsFileSchema.safeParse({ ...v1, schemaVersion: 3 }).success).toBe(false);
   });
 
   test("cost delta is null when either side is unpriced", () => {

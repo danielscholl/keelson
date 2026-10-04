@@ -8,6 +8,13 @@
 
 import type { NodeTokenUsage } from "./executor.ts";
 
+// A cache count either side reported survives the sum, even at zero; absent
+// means the provider never reported it.
+function addReported(a: number | undefined, b: number | undefined): number | undefined {
+  if (a === undefined) return b;
+  return b === undefined ? a : a + b;
+}
+
 // Totals sum across attempts; the context pair tracks the latest one
 // (a gauge, not a volume).
 export function addNodeUsage(
@@ -20,10 +27,10 @@ export function addNodeUsage(
     inputTokens: total.inputTokens + u.inputTokens,
     outputTokens: total.outputTokens + u.outputTokens,
   };
-  const cacheRead = (total.cacheReadInputTokens ?? 0) + (u.cacheReadInputTokens ?? 0);
-  if (cacheRead > 0) out.cacheReadInputTokens = cacheRead;
-  const cacheCreation = (total.cacheCreationInputTokens ?? 0) + (u.cacheCreationInputTokens ?? 0);
-  if (cacheCreation > 0) out.cacheCreationInputTokens = cacheCreation;
+  const cacheRead = addReported(total.cacheReadInputTokens, u.cacheReadInputTokens);
+  if (cacheRead !== undefined) out.cacheReadInputTokens = cacheRead;
+  const cacheCreation = addReported(total.cacheCreationInputTokens, u.cacheCreationInputTokens);
+  if (cacheCreation !== undefined) out.cacheCreationInputTokens = cacheCreation;
   const contextTokens = u.contextTokens ?? total.contextTokens;
   if (contextTokens !== undefined) out.contextTokens = contextTokens;
   const contextWindow = u.contextWindow ?? total.contextWindow;
