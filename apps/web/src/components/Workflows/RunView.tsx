@@ -156,6 +156,14 @@ export function RunView({
   const runCacheOnly = runUsage != null && !hasSpend(runUsage);
   const runCachedTokens =
     (runUsage?.cacheReadInputTokens ?? 0) + (runUsage?.cacheCreationInputTokens ?? 0);
+  const runCacheOnlyLabel = [
+    ...(runUsage?.cacheReadInputTokens !== undefined
+      ? [`${formatTokens(runUsage.cacheReadInputTokens)} cache read`]
+      : []),
+    ...(runUsage?.cacheCreationInputTokens !== undefined
+      ? [`${formatTokens(runUsage.cacheCreationInputTokens)} cache write`]
+      : []),
+  ].join(", ");
   const runUsageBreakdown: TokenUsage | null = runUsage;
 
   // Run-level provenance chip: collapse to one `provider · model` label only
@@ -291,7 +299,7 @@ export function RunView({
                     title={runUsageTooltip}
                     aria-label={
                       runCacheOnly
-                        ? `${formatTokens(runCachedTokens)} cached tokens across nodes`
+                        ? `${runCacheOnlyLabel} tokens across nodes`
                         : `${formatTokens(runUsageBreakdown.inputTokens)} input tokens, ${formatTokens(
                             runUsageBreakdown.outputTokens,
                           )} output tokens across nodes`

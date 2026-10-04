@@ -160,9 +160,31 @@ describe("RunView usage header", () => {
 
     render(<RunView workflow={workflow} runId="run-12345678" onBack={() => {}} />);
 
-    const trigger = screen.getByRole("button", { name: "9k cached tokens across nodes" });
+    const trigger = screen.getByRole("button", { name: "9k cache read tokens across nodes" });
     expect(trigger.textContent).toBe("⟳ 9k");
     expect(screen.getByText("Cache read")).toBeDefined();
+  });
+
+  test("names cache reads and writes separately on a cache-only run", () => {
+    runResult = result({
+      collect: node({
+        nodeId: "collect",
+        type: "prompt",
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 9000 },
+      }),
+      verify: node({
+        nodeId: "verify",
+        type: "prompt",
+        usage: { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 1200 },
+      }),
+    });
+
+    render(<RunView workflow={workflow} runId="run-12345678" onBack={() => {}} />);
+
+    const trigger = screen.getByRole("button", {
+      name: "9k cache read, 1.2k cache write tokens across nodes",
+    });
+    expect(trigger.textContent).toBe("⟳ 10k");
   });
 
   test("hides the run-level usage chip when no node reported spend", () => {
