@@ -14,10 +14,13 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
+  type CloneProjectBody,
   type CreateProjectBody,
+  cloneProjectBodySchema,
   createProjectBodySchema,
   type Project,
   ProjectOperationError,
+  projectNameSchema,
 } from "@keelson/shared";
 import { runText } from "@keelson/shared/exec";
 import { canonicalPath, DuplicateProjectNameError, type ProjectsStore } from "./projects-store.ts";
@@ -44,6 +47,17 @@ function normalizeRootPath(raw: string): string {
     throw new ProjectOperationError(400, "rootPath must be an absolute path");
   }
   return resolve(path);
+}
+
+function deriveProjectNameFromUrl(url: string): string | undefined {
+  const trimmed = url
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "")
+    .replace(/\/+$/, "");
+  const start = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf(":"));
+  const candidate = trimmed.slice(start + 1).toLowerCase();
+  return projectNameSchema.safeParse(candidate).success ? candidate : undefined;
 }
 
 export function createProjectsService(opts: {
@@ -115,7 +129,7 @@ export function createProjectsService(opts: {
     owned.set(path, lstatSync(path));
   }
 
-  function cleanup(owned: Map<string, Stats>, gitDir?: string): string[] {
+  function cleanup(owned: Map<string, Stats>, recursivePath?: string): string[] {
     const failures: string[] = [];
     for (const [path, identity] of [...owned].reverse()) {
       try {
@@ -129,7 +143,7 @@ export function createProjectsService(opts: {
           failures.push(`retained replaced path: ${path}`);
           continue;
         }
-        if (path === gitDir) rmSync(path, { recursive: true });
+        if (path === recursivePath) rmSync(path, { recursive: true });
         else rmdirSync(path);
       } catch (error) {
         failures.push(`retained ${path}: ${message(error)}`);
@@ -139,6 +153,55 @@ export function createProjectsService(opts: {
   }
 
   return {
+    async cloneProject(body: CloneProjectBody): Promise<Project> {
+      const parsed = cloneProjectBodySchema.safeParse(body);
+      if (!parsed.success) throw new ProjectOperationError(400, parsed.error.message);
+      const name = parsed.data.name ?? deriveProjectNameFromUrl(parsed.data.url);
+      if (!name) {
+        throw new ProjectOperationError(
+          400,
+          "could not derive project name from url; pass `name` explicitly (lowercase letters, digits, '-' or '_')",
+        );
+      }
+      const dest = resolve(workspaceRoot, name);
+      const release = reserve(name, dest);
+      const owned = new Map<string, Stats>();
+      try {
+        if (pathStat(dest)) {
+          throw new ProjectOperationError(409, `destination already exists: ${dest}`);
+        }
+        createDirectories(workspaceRoot, owned);
+        try {
+          mkdirSync(dest);
+        } catch (error) {
+          if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+            throw new ProjectOperationError(409, `destination already exists: ${dest}`);
+          }
+          throw error;
+        }
+        owned.set(dest, lstatSync(dest));
+        const result = await git(["clone", "--", parsed.data.url, dest], workspaceRoot);
+        if (!result.ok) {
+          throw new ProjectOperationError(502, `git clone failed: ${result.error}`);
+        }
+        return register(name, dest);
+      } catch (error) {
+        const failure =
+          error instanceof ProjectOperationError
+            ? error
+            : new ProjectOperationError(502, `git clone failed: ${message(error)}`);
+        const failures = cleanup(owned, dest);
+        if (failures.length) {
+          throw new ProjectOperationError(
+            failure.status,
+            `${failure.message}; cleanup failed: ${failures.join("; ")}`,
+          );
+        }
+        throw failure;
+      } finally {
+        release();
+      }
+    },
     async createProject(body: CreateProjectBody): Promise<Project> {
       const parsed = createProjectBodySchema.safeParse(body);
       if (!parsed.success) throw new ProjectOperationError(400, parsed.error.message);

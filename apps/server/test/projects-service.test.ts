@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -32,6 +33,177 @@ beforeEach(() => {
   writeFileSync(config, "[user]\n name = Test Operator\n email = operator@example.test\n");
   db = openDatabase({ path: join(temp, "test.db") });
   store = createProjectsStore(db);
+});
+
+describe("cloneProject", () => {
+  async function source(name = "source.git") {
+    const root = join(temp, name);
+    mkdirSync(root);
+    await git(["init"], root);
+    await git(["commit", "--allow-empty", "-m", "Source"], root);
+    return root;
+  }
+
+  test("clones local repositories with derived and explicit names, preserving HEAD", async () => {
+    const url = await source();
+    const svc = service();
+    const derived = await svc.cloneProject({ url: `${url}/` });
+    const explicit = await svc.cloneProject({ url, name: "explicit" });
+    expect(derived.name).toBe("source");
+    expect(derived.rootPath).toBe(join(workspace, "source"));
+    expect(await git(["rev-parse", "HEAD"], derived.rootPath)).toBe(
+      await git(["rev-parse", "HEAD"], url),
+    );
+    expect(store.list()).toEqual([explicit, derived]);
+  });
+
+  test("rejects runtime schema errors and invalid derived names without side effects", async () => {
+    const svc = service();
+    await expect(svc.cloneProject({ url: "" })).rejects.toMatchObject({ status: 400 });
+    await expect(svc.cloneProject({ url: "http://example.com/" })).rejects.toMatchObject({
+      status: 400,
+    });
+    await expect(svc.cloneProject({ url: "git@example.test:Bad Name.git" })).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(existsSync(workspace)).toBe(false);
+  });
+
+  test("preserves existing empty destinations and rejects registered names and roots", async () => {
+    mkdirSync(workspace);
+    const dest = join(workspace, "exists");
+    mkdirSync(dest);
+    const svc = service();
+    await expect(svc.cloneProject({ url: "/source", name: "exists" })).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(readdirSync(dest)).toEqual([]);
+    store.create({ name: "taken", rootPath: join(temp, "outside") });
+    await expect(svc.cloneProject({ url: "/source", name: "taken" })).rejects.toMatchObject({
+      status: 409,
+    });
+    store.create({ name: "registered", rootPath: join(workspace, "root") });
+    await expect(svc.cloneProject({ url: "/source", name: "root" })).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(existsSync(join(workspace, "root"))).toBe(false);
+  });
+
+  test("cleans partial clones and releases reservations for retry", async () => {
+    const url = await source();
+    let fail = true;
+    const runGit: typeof runText = async (cmd, args, opts) => {
+      if (fail) {
+        const dest = args.at(-1);
+        if (!dest) throw new Error("missing destination");
+        writeFileSync(join(dest, "partial"), "partial");
+        return { ok: false, error: "timed out after 60000ms", code: null };
+      }
+      return testGit(cmd, args, opts);
+    };
+    const svc = service(runGit);
+    await expect(svc.cloneProject({ url })).rejects.toMatchObject({
+      status: 502,
+      message: "git clone failed: timed out after 60000ms",
+    });
+    expect(existsSync(workspace)).toBe(false);
+    expect(store.list()).toEqual([]);
+    fail = false;
+    await svc.cloneProject({ url });
+    expect(store.list()).toHaveLength(1);
+  });
+
+  test("surfaces thrown spawn and real clone failures as 502 with cleanup", async () => {
+    const throwing: typeof runText = async () => {
+      throw new Error("spawn failed");
+    };
+    await expect(
+      service(throwing).cloneProject({ url: "/missing", name: "throwing" }),
+    ).rejects.toMatchObject({
+      status: 502,
+      message: "git clone failed: spawn failed",
+    });
+    await expect(
+      service().cloneProject({ url: join(temp, "missing"), name: "missing" }),
+    ).rejects.toMatchObject({
+      status: 502,
+    });
+    expect(existsSync(workspace)).toBe(false);
+  });
+
+  test("rolls back successful clones when registration fails and rechecks final conflicts", async () => {
+    const url = await source();
+    const create = store.create;
+    store.create = () => {
+      throw new Error("insert failed");
+    };
+    await expect(service().cloneProject({ url })).rejects.toMatchObject({
+      status: 500,
+      message: "project registration failed: insert failed",
+    });
+    expect(existsSync(workspace)).toBe(false);
+    store.create = create;
+    const concurrent: typeof runText = async (cmd, args, opts) => {
+      const result = await testGit(cmd, args, opts);
+      store.create({ name: "source", rootPath: join(temp, "competing") });
+      return result;
+    };
+    await expect(service(concurrent).cloneProject({ url })).rejects.toMatchObject({ status: 409 });
+    expect(existsSync(workspace)).toBe(false);
+    expect(store.list()).toHaveLength(1);
+  });
+
+  test("preserves replacement directories and reports cleanup errors with the original failure", async () => {
+    const replacement: typeof runText = async (_cmd, args) => {
+      const dest = args.at(-1);
+      if (!dest) throw new Error("missing destination");
+      renameSync(dest, join(temp, "moved"));
+      mkdirSync(dest);
+      writeFileSync(join(dest, "operator-file"), "keep");
+      return { ok: false, error: "clone failed", code: 1 };
+    };
+    await expect(
+      service(replacement).cloneProject({ url: "/source", name: "replaced" }),
+    ).rejects.toMatchObject({
+      status: 502,
+      message: expect.stringContaining("git clone failed: clone failed; cleanup failed:"),
+    });
+    expect(readFileSync(join(workspace, "replaced", "operator-file"), "utf8")).toBe("keep");
+  });
+
+  test("shares reservations across create and clone requests", async () => {
+    const url = await source();
+    const svc = service();
+    const clone = svc.cloneProject({ url, name: "same" });
+    await expect(svc.createProject({ name: "same" })).rejects.toMatchObject({ status: 409 });
+    await expect(
+      svc.createProject({ name: "other", rootPath: join(workspace, "same") }),
+    ).rejects.toMatchObject({ status: 409 });
+    await clone;
+    const create = svc.createProject({ name: "create-first" });
+    await expect(svc.cloneProject({ url, name: "create-first" })).rejects.toMatchObject({
+      status: 409,
+    });
+    await create;
+    expect(store.list()).toHaveLength(2);
+  });
+
+  test("uses argv separation, noninteractive Git, and a bounded timeout", async () => {
+    const fake: typeof runText = async (cmd, args, opts) => {
+      expect(cmd).toBe("git");
+      expect(args).toEqual(["clone", "--", "git@example.test:Repo.git/", join(workspace, "repo")]);
+      expect(opts?.timeoutMs).toBe(60_000);
+      expect(opts?.env?.GIT_TERMINAL_PROMPT).toBe("0");
+      expect(opts?.env?.GIT_SSH_COMMAND).toBe("ssh -o BatchMode=yes");
+      if (process.platform !== "win32") expect(opts?.env?.GIT_ASKPASS).toBe("/usr/bin/true");
+      return { ok: false, error: "test stop", code: 1 };
+    };
+    await expect(
+      service(fake).cloneProject({ url: "git@example.test:Repo.git/" }),
+    ).rejects.toMatchObject({
+      status: 502,
+    });
+  });
 });
 
 afterEach(() => {
