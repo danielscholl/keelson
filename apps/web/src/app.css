@@ -29,15 +29,17 @@
   --ramp-4:  #8749df;
   --ramp-5:  #7126d9;
 
-  /* Usage "Over time" categorical series palette (validated CVD ΔE ≥ 18.5
-     against the --card surface) — cycled by model index, not reused
-     elsewhere so adding a semantic color never shifts a model's hue. */
+  /* Usage categorical series palette (validated CVD ΔE ≥ 18.5 against the
+     --card surface) — assigned in order, never cycled; models past the sixth
+     fold into --s-other. Not reused elsewhere so adding a semantic color never
+     shifts a model's hue. */
   --s1: #8b7cf6;
   --s2: #bd8622;
   --s3: #3f8edb;
   --s4: #d4663f;
   --s5: #2fa876;
   --s6: #d260a4;
+  --s-other: #8993b2;
 
   /* Reserved identity tones (canvas `id-*`) — one per repeatedly-rendered actor
      (squad member, chamber mind). Validated as a categorical set against this
@@ -103,6 +105,7 @@
   --s4: #b66229;
   --s5: #15834f;
   --s6: #804bc1;
+  --s-other: #7e7896;
 
   /* Identity tones, re-stepped for the light --card (same validation). */
   --id-blue: #2457c5;
@@ -10686,7 +10689,7 @@ a.cvb-card-title::after {
 }
 
 /* Usage page — Over time stacked bar chart. Plain inline SVG (no chart lib);
-   segments reference --s1..--s6 cyclically by model index. */
+   segments reference --s1..--s6 by model, with the tail folded into --s-other. */
 .usage-stack-svg {
   width: 100%;
   height: auto;

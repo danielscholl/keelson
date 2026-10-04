@@ -46,8 +46,9 @@ export type UsageTotalsWire = z.infer<typeof usageTotalsSchema>;
 // Derived at read time from token counts and the price table, never stored, so
 // a price correction reprices history. `costUsd` is null when any contributing
 // event's model has no price (`unpricedEvents` says how many); `cacheHitRatio`
-// is cacheRead / (input + cacheRead), null when no event reported cache reads
-// or the denominator is zero. Neither ever degrades to a fabricated zero.
+// is cacheRead / (input + cacheRead + cacheWrite), null when no event reported
+// cache reads or the denominator is zero. Neither ever degrades to a fabricated
+// zero.
 export const usageCostFieldsSchema = z
   .object({
     costUsd: z.number().nonnegative().nullable(),

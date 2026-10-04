@@ -3,7 +3,9 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import {
+  freshTokens,
   USAGE_PULSE_SNAPSHOT_KEY,
+  type UsageBreakdownResponseWire,
   type UsageEventRowWire,
   type UsageEventSourceWire,
   type UsageJobsRowWire,
@@ -68,10 +70,39 @@ const SERIES_BUCKET: Record<UsageWindow, UsageSeriesBucket> = {
   "30d": "day",
 };
 
-// The validated categorical series palette (see app.css --s1..--s6): cycled
-// by model index so the stack and legend agree regardless of how many
-// distinct models appear in the window.
+// The validated categorical series palette (see app.css --s1..--s6). Slots
+// are never cycled: past six models the long tail folds into one Other series.
 const SERIES_COLOR_COUNT = 6;
+const OTHER_SERIES_COLOR = "var(--s-other)";
+const OTHER_SERIES_KEY = "\u0000other";
+
+export interface SeriesPalette {
+  named: string[];
+  folded: string[];
+  colorOf: (key: string) => string;
+}
+
+// Every chart derives its palette from per-model fresh-token totals over the
+// same window, so a model wears one color across the page. Named slots go in
+// alphabetical order so a model's color doesn't follow its rank.
+export function assignSeriesColors(totals: ReadonlyMap<string, number>): SeriesPalette {
+  const byAlpha = (a: string, b: string) => a.localeCompare(b);
+  const keys = [...totals.keys()];
+  const named =
+    keys.length <= SERIES_COLOR_COUNT
+      ? keys.sort(byAlpha)
+      : keys
+          .sort((a, b) => (totals.get(b) ?? 0) - (totals.get(a) ?? 0) || byAlpha(a, b))
+          .slice(0, SERIES_COLOR_COUNT - 1)
+          .sort(byAlpha);
+  const colors = new Map(named.map((key, i) => [key, `var(--s${i + 1})`]));
+  const folded = [...totals.keys()].filter((key) => !colors.has(key)).sort(byAlpha);
+  return { named, folded, colorOf: (key) => colors.get(key) ?? OTHER_SERIES_COLOR };
+}
+
+function otherSeriesLabel(folded: readonly string[]): string {
+  return `Other (${folded.length} ${folded.length === 1 ? "model" : "models"})`;
+}
 
 // Statuses that count as spend without a kept result — the failure-burn tile
 // sums these. usage/summary has no status dimension (its groups are by
@@ -219,7 +250,7 @@ function PulseSection({
         let turns = 0;
         for (const events of eventsByStatus) {
           for (const ev of events) {
-            tokens += ev.inputTokens + ev.outputTokens;
+            tokens += freshTokens(ev);
             turns += 1;
           }
         }
@@ -286,8 +317,9 @@ function PulseStats({
   failureBurn: FailureBurn;
 }) {
   const { totals } = summary;
-  const totalTokens = totals.inputTokens + totals.outputTokens;
-  const totalInputTokens = totals.inputTokens + totals.cacheReadTokens;
+  const totalTokens = freshTokens(totals);
+  const freshInputTokens = totals.inputTokens + totals.cacheWriteTokens;
+  const totalInputTokens = freshInputTokens + totals.cacheReadTokens;
 
   return (
     <div className="usage-stats">
@@ -295,7 +327,7 @@ function PulseStats({
         <div className="usage-stat-value">{formatTokens(totalTokens)}</div>
         <div className="usage-stat-label">Tokens</div>
         <div className="usage-stat-sub usage-mono">
-          ↑ {formatTokens(totals.inputTokens)} in · ↓ {formatTokens(totals.outputTokens)} out
+          ↑ {formatTokens(freshInputTokens)} in · ↓ {formatTokens(totals.outputTokens)} out
         </div>
       </div>
       <div className="usage-stat">
@@ -348,10 +380,7 @@ function PulseSparkline({ pulse }: { pulse: unknown }) {
   const parsed = usagePulseSnapshotSchema.safeParse(pulse);
   const minuteSeries = parsed.success ? parsed.data.minuteSeries : [];
 
-  const values = useMemo(
-    () => minuteSeries.map((m) => m.inputTokens + m.outputTokens + m.cacheReadTokens),
-    [minuteSeries],
-  );
+  const values = useMemo(() => minuteSeries.map((m) => freshTokens(m)), [minuteSeries]);
 
   const hasSignal = values.some((v) => v > 0);
   const last = values.at(-1) ?? 0;
@@ -415,31 +444,56 @@ interface StackBucket {
   total: number;
 }
 
+export interface ChartSeries {
+  key: string;
+  label: string;
+  color: string;
+}
+
 // Pivots the flat series rows (one row per bucket × model) into per-bucket
-// stacks, in alphabetical model order — the same localeCompare order the
-// roster's palette index uses, so a model wears one color everywhere.
-function pivotSeries(rows: UsageSeriesResponseWire): { models: string[]; buckets: StackBucket[] } {
+// stacks: the palette's named models in alphabetical order, then one Other
+// series summing the folded tail.
+export function pivotSeries(rows: UsageSeriesResponseWire): {
+  series: ChartSeries[];
+  buckets: StackBucket[];
+} {
   const totalsByModel = new Map<string, Map<string, number>>();
+  const modelTotals = new Map<string, number>();
   const bucketTotals = new Map<string, number>();
 
   for (const row of rows) {
-    const tokens = row.inputTokens + row.outputTokens;
+    const tokens = freshTokens(row);
     let perBucket = totalsByModel.get(row.key);
     if (!perBucket) {
       perBucket = new Map();
       totalsByModel.set(row.key, perBucket);
     }
     perBucket.set(row.bucketIso, (perBucket.get(row.bucketIso) ?? 0) + tokens);
+    modelTotals.set(row.key, (modelTotals.get(row.key) ?? 0) + tokens);
     bucketTotals.set(row.bucketIso, (bucketTotals.get(row.bucketIso) ?? 0) + tokens);
   }
 
-  const models = [...totalsByModel.keys()].sort((a, b) => a.localeCompare(b));
-  const buckets = [...bucketTotals.keys()].sort().map((iso) => ({
-    iso,
-    values: models.map((m) => totalsByModel.get(m)?.get(iso) ?? 0),
-    total: bucketTotals.get(iso) ?? 0,
+  const palette = assignSeriesColors(modelTotals);
+  const series: ChartSeries[] = palette.named.map((key) => ({
+    key,
+    label: key,
+    color: palette.colorOf(key),
   }));
-  return { models, buckets };
+  const hasOther = palette.folded.length > 0;
+  if (hasOther) {
+    series.push({
+      key: OTHER_SERIES_KEY,
+      label: otherSeriesLabel(palette.folded),
+      color: OTHER_SERIES_COLOR,
+    });
+  }
+  const buckets = [...bucketTotals.keys()].sort().map((iso) => {
+    const valueAt = (model: string) => totalsByModel.get(model)?.get(iso) ?? 0;
+    const values = palette.named.map(valueAt);
+    if (hasOther) values.push(palette.folded.reduce((sum, model) => sum + valueAt(model), 0));
+    return { iso, values, total: bucketTotals.get(iso) ?? 0 };
+  });
+  return { series, buckets };
 }
 
 function formatBucketLabel(iso: string, bucket: UsageSeriesBucket): string {
@@ -520,7 +574,7 @@ function OverTimeSection({ range }: { range: UsageWindow }) {
             Loading…
           </div>
         ) : pivoted && hasData ? (
-          <StackChart models={pivoted.models} buckets={pivoted.buckets} bucket={bucket} />
+          <StackChart series={pivoted.series} buckets={pivoted.buckets} bucket={bucket} />
         ) : (
           <div className="usage-stack-empty">
             <span className="page-sub">No token spend recorded in this window yet.</span>
@@ -532,11 +586,11 @@ function OverTimeSection({ range }: { range: UsageWindow }) {
 }
 
 function StackChart({
-  models,
+  series,
   buckets,
   bucket,
 }: {
-  models: string[];
+  series: ChartSeries[];
   buckets: StackBucket[];
   bucket: UsageSeriesBucket;
 }) {
@@ -596,17 +650,17 @@ function StackChart({
                 const yTop = padT + plotH - ((cum + v) / ymax) * plotH;
                 cum += v;
                 const gh = Math.max(1, h - 2);
-                const color = `var(--s${(j % SERIES_COLOR_COUNT) + 1})`;
+                const { key, color } = series[j] as ChartSeries;
                 if (j === topIdx) {
                   const r = 4;
                   const x = xc - barW / 2;
                   const w = barW;
                   const path = `M ${x} ${yTop + gh} L ${x} ${yTop + r} Q ${x} ${yTop} ${x + r} ${yTop} L ${x + w - r} ${yTop} Q ${x + w} ${yTop} ${x + w} ${yTop + r} L ${x + w} ${yTop + gh} Z`;
-                  return <path key={models[j]} className="usage-seg-rect" d={path} fill={color} />;
+                  return <path key={key} className="usage-seg-rect" d={path} fill={color} />;
                 }
                 return (
                   <rect
-                    key={models[j]}
+                    key={key}
                     className="usage-seg-rect"
                     x={xc - barW / 2}
                     y={yTop}
@@ -626,13 +680,10 @@ function StackChart({
         })}
       </svg>
       <div className="usage-legend">
-        {models.map((m, i) => (
-          <span className="usage-legend-item" key={m}>
-            <span
-              className="usage-sdot"
-              style={{ background: `var(--s${(i % SERIES_COLOR_COUNT) + 1})` }}
-            />
-            {m}
+        {series.map((s) => (
+          <span className="usage-legend-item" key={s.key}>
+            <span className="usage-sdot" style={{ background: s.color }} />
+            {s.label}
           </span>
         ))}
       </div>
@@ -677,32 +728,25 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
     };
   }, [range]);
 
-  // usage/summary's groups come back ORDER BY key ASC (usage-store.ts), the
-  // same order pivotSeries' first-seen model list settles into for the stack
-  // chart — indexing the palette by that alphabetical order, not by this
-  // table's tokens-desc display order, keeps a model's dot the same color
-  // in both places.
   const rows = useMemo((): RosterRow[] => {
     if (!summary) return [];
-    const colorIndex = new Map(
-      [...summary.groups].sort((a, b) => a.key.localeCompare(b.key)).map((g, i) => [g.key, i]),
-    );
-    const grandTotal = summary.groups.reduce((sum, g) => sum + g.inputTokens + g.outputTokens, 0);
+    const palette = assignSeriesColors(new Map(summary.groups.map((g) => [g.key, freshTokens(g)])));
+    const grandTotal = summary.groups.reduce((sum, g) => sum + freshTokens(g), 0);
     return [...summary.groups]
-      .sort((a, b) => b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens))
+      .sort((a, b) => freshTokens(b) - freshTokens(a))
       .map((g) => {
-        const tokens = g.inputTokens + g.outputTokens;
+        const tokens = freshTokens(g);
         return {
           key: g.key,
           turns: g.events,
-          inputTokens: g.inputTokens,
+          inputTokens: g.inputTokens + g.cacheWriteTokens,
           outputTokens: g.outputTokens,
           cacheHitRatio: g.cacheHitRatio,
           costUsd: g.costUsd,
           unpricedEvents: g.unpricedEvents,
           avgPerTurn: g.events > 0 ? tokens / g.events : 0,
           share: grandTotal > 0 ? Math.round((tokens / grandTotal) * 100) : 0,
-          color: `var(--s${((colorIndex.get(g.key) ?? 0) % SERIES_COLOR_COUNT) + 1})`,
+          color: palette.colorOf(g.key),
         };
       });
   }, [summary]);
@@ -786,12 +830,7 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
 }
 
 function FlowSection({ range }: { range: UsageWindow }) {
-  const [rows, setRows] = useState<Array<{
-    key: string;
-    split: string;
-    inputTokens: number;
-    outputTokens: number;
-  }> | null>(null);
+  const [rows, setRows] = useState<UsageBreakdownResponseWire | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -836,7 +875,7 @@ function FlowSection({ range }: { range: UsageWindow }) {
           <div className="page-sub" style={{ padding: "20px 0" }}>
             Loading…
           </div>
-        ) : rows?.some((row) => row.inputTokens + row.outputTokens > 0) ? (
+        ) : rows?.some((row) => freshTokens(row) > 0) ? (
           <FlowChart rows={rows} />
         ) : (
           <div className="usage-stack-empty">
@@ -848,19 +887,21 @@ function FlowSection({ range }: { range: UsageWindow }) {
   );
 }
 
-function FlowChart({
-  rows,
-}: {
-  rows: Array<{ key: string; split: string; inputTokens: number; outputTokens: number }>;
-}) {
+// Ribbons wear their model's color, the same palette as the page's other charts.
+function FlowChart({ rows }: { rows: UsageBreakdownResponseWire }) {
   const links = rows
     .map((row) => ({
       source: row.key,
       model: row.split,
-      tokens: row.inputTokens + row.outputTokens,
+      tokens: freshTokens(row),
     }))
     .filter((row) => row.tokens > 0)
     .sort((a, b) => b.tokens - a.tokens);
+  const modelTotals = new Map<string, number>();
+  for (const link of links) {
+    modelTotals.set(link.model, (modelTotals.get(link.model) ?? 0) + link.tokens);
+  }
+  const palette = assignSeriesColors(modelTotals);
   const total = links.reduce((sum, row) => sum + row.tokens, 0);
   const sources = [...new Set(links.map((row) => row.source))].sort((a, b) => a.localeCompare(b));
   const models = [...new Set(links.map((row) => row.model))].sort((a, b) => a.localeCompare(b));
@@ -882,12 +923,12 @@ function FlowChart({
         role="img"
         aria-label="Source to model token flow"
       >
-        {links.map((link, i) => {
+        {links.map((link) => {
           const y1 = yFor(sources, link.source);
           const y2 = yFor(models, link.model);
           const strokeWidth = Math.max(3, (link.tokens / maxTokens) * 22);
           const share = total > 0 ? Math.round((link.tokens / total) * 100) : 0;
-          const color = `var(--s${(i % SERIES_COLOR_COUNT) + 1})`;
+          const color = palette.colorOf(link.model);
           return (
             <path
               key={`${link.source}-${link.model}`}
@@ -928,15 +969,18 @@ function FlowChart({
         ))}
       </svg>
       <div className="usage-legend">
-        {links.slice(0, 6).map((link, i) => (
-          <span className="usage-legend-item" key={`${link.source}-${link.model}-legend`}>
-            <span
-              className="usage-sdot"
-              style={{ background: `var(--s${(i % SERIES_COLOR_COUNT) + 1})` }}
-            />
-            {link.source} → {formatModelLabel(link.model)}
+        {palette.named.map((model) => (
+          <span className="usage-legend-item" key={`${model}-legend`}>
+            <span className="usage-sdot" style={{ background: palette.colorOf(model) }} />
+            {formatModelLabel(model)}
           </span>
         ))}
+        {palette.folded.length > 0 && (
+          <span className="usage-legend-item">
+            <span className="usage-sdot" style={{ background: OTHER_SERIES_COLOR }} />
+            {otherSeriesLabel(palette.folded)}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -1023,7 +1067,7 @@ function JobsSection({ range }: { range: UsageWindow }) {
               </table>
             </div>
             <section className="usage-burn-list" aria-label="Weekly burn by job">
-              {jobs.map((job, i) => {
+              {jobs.map((job) => {
                 const pct = Math.max(2, Math.round((job.totalTokens / maxTokens) * 100));
                 return (
                   <div className="usage-burn-row" key={`${job.key}-burn`}>
@@ -1033,7 +1077,7 @@ function JobsSection({ range }: { range: UsageWindow }) {
                         className="usage-popover-meter-fill"
                         style={{
                           width: `${pct}%`,
-                          background: `var(--s${(i % SERIES_COLOR_COUNT) + 1})`,
+                          background: "var(--accent)",
                         }}
                       />
                     </span>
@@ -1306,7 +1350,7 @@ function LedgerSection({ range }: { range: UsageWindow }) {
                           formatModelLabel(ev.model)}
                       </span>
                     </td>
-                    <td>↑ {formatTokens(ev.inputTokens)}</td>
+                    <td>↑ {formatTokens(ev.inputTokens + (ev.cacheWriteTokens ?? 0))}</td>
                     <td>↓ {formatTokens(ev.outputTokens)}</td>
                     <td>{ev.cacheReadTokens != null ? formatTokens(ev.cacheReadTokens) : "—"}</td>
                     <td>{formatCostUsd(ev.costUsd)}</td>

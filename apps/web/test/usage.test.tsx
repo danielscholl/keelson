@@ -282,6 +282,20 @@ describe("UsagePopover — cost and cache hit", () => {
     expect(screen.getByText("$0.0153")).toBeDefined();
   });
 
+  test("the last turn's cache hit counts cache writes in the prompt-token denominator", () => {
+    render(
+      <UsageBreakdown
+        usage={{
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadInputTokens: 300,
+          cacheCreationInputTokens: 600,
+        }}
+      />,
+    );
+    expect(screen.getByText("30%")).toBeDefined();
+  });
+
   test("reads unpriced, never $0, when the ledger has no price for the model", () => {
     render(
       <UsagePopover
