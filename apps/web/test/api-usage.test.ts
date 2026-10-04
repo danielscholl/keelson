@@ -29,6 +29,7 @@ const validTotals = {
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
   costUsd: null,
+  pricedCostUsd: 0,
   unpricedEvents: 3,
   cacheHitRatio: null,
 };
@@ -85,6 +86,7 @@ describe("getUsageJobs", () => {
         avgTokensPerRun: 50,
         p95TokensPerRun: 75,
         totalCostUsd: 0.0123,
+        pricedTotalCostUsd: 0.0123,
         costUsdPerRun: 0.00615,
         unpricedEvents: 0,
         cacheHitRatio: null,

@@ -2056,6 +2056,8 @@ export function Chat({
         setLedgerCost({
           lastTurnCostUsd: events[0]?.costUsd ?? null,
           sessionCostUsd: summary.totals.costUsd,
+          sessionPricedCostUsd: summary.totals.pricedCostUsd,
+          sessionUnpricedEvents: summary.totals.unpricedEvents,
           cacheHitRatio: summary.totals.cacheHitRatio,
         });
       })

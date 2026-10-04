@@ -10,6 +10,7 @@ import { UsageBreakdown, UsagePopover } from "../src/components/Chat/UsagePopove
 import {
   contextFillLevel,
   contextPercent,
+  formatAggregateCostUsd,
   formatCostUsd,
   formatTokens,
   sumTokenSpend,
@@ -33,6 +34,7 @@ let getUsageSummaryImpl: typeof realApi.getUsageSummary = async () => ({
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     costUsd: null,
+    pricedCostUsd: 0,
     unpricedEvents: 0,
     cacheHitRatio: null,
   },
@@ -344,6 +346,14 @@ describe("formatCostUsd", () => {
   });
 });
 
+describe("formatAggregateCostUsd", () => {
+  test("shows the priced part as a floor when some turns have no price", () => {
+    expect(formatAggregateCostUsd(155.03, 155.03, 0)).toBe("$155.03");
+    expect(formatAggregateCostUsd(null, 155.03, 8)).toBe("≥ $155.03");
+    expect(formatAggregateCostUsd(null, 0, 8)).toBe("unpriced");
+  });
+});
+
 describe("UsageChip — cache-only session", () => {
   test("renders the cached total when every billed turn was served from cache", () => {
     render(
@@ -495,6 +505,7 @@ describe("Usage page", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 2,
           cacheHitRatio: null,
         },
@@ -521,6 +532,7 @@ describe("Usage page", () => {
         avgTokensPerRun: 400,
         p95TokensPerRun: 700,
         totalCostUsd: null,
+        pricedTotalCostUsd: 0,
         costUsdPerRun: null,
         unpricedEvents: 0,
         cacheHitRatio: null,
@@ -547,6 +559,7 @@ describe("Usage page", () => {
         avgTokensPerRun: 300,
         p95TokensPerRun: 400,
         totalCostUsd: null,
+        pricedTotalCostUsd: 0,
         costUsdPerRun: null,
         unpricedEvents: 2,
         cacheHitRatio: null,
@@ -572,6 +585,7 @@ describe("Usage page", () => {
         cacheReadTokens: 250,
         cacheWriteTokens: 0,
         costUsd: null,
+        pricedCostUsd: 0,
         unpricedEvents: 1,
         cacheHitRatio: 250 / 1250,
       },
@@ -584,6 +598,7 @@ describe("Usage page", () => {
           cacheReadTokens: 250,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: 250 / 1250,
         },
@@ -598,6 +613,7 @@ describe("Usage page", () => {
         avgTokensPerRun: 300,
         p95TokensPerRun: 400,
         totalCostUsd: null,
+        pricedTotalCostUsd: 0,
         costUsdPerRun: null,
         unpricedEvents: 0,
         cacheHitRatio: null,
@@ -636,6 +652,7 @@ describe("Usage page", () => {
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         costUsd: null,
+        pricedCostUsd: 0,
         unpricedEvents: 0,
         cacheHitRatio: null,
       },
@@ -654,6 +671,7 @@ describe("Usage page", () => {
         cacheReadTokens: 250,
         cacheWriteTokens: 0,
         costUsd: null,
+        pricedCostUsd: 0,
         unpricedEvents: 1,
         cacheHitRatio: 250 / 1250,
       },
@@ -668,6 +686,7 @@ describe("Usage page", () => {
         avgTokensPerRun: 26,
         p95TokensPerRun: 26,
         totalCostUsd: null,
+        pricedTotalCostUsd: 0,
         costUsdPerRun: null,
         unpricedEvents: 0,
         cacheHitRatio: null,
@@ -692,6 +711,7 @@ describe("Usage page", () => {
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         costUsd: null,
+        pricedCostUsd: 0,
         unpricedEvents: 0,
         cacheHitRatio: null,
       },
@@ -709,6 +729,7 @@ describe("Usage page", () => {
         avgTokensPerRun: 320,
         p95TokensPerRun: 400,
         totalCostUsd: null,
+        pricedTotalCostUsd: 0,
         costUsdPerRun: null,
         unpricedEvents: 0,
         cacheHitRatio: null,
@@ -738,6 +759,7 @@ describe("Usage page", () => {
               cacheReadTokens: 0,
               cacheWriteTokens: 0,
               costUsd: null,
+              pricedCostUsd: 0,
               unpricedEvents: 1,
               cacheHitRatio: null,
             },
@@ -750,6 +772,7 @@ describe("Usage page", () => {
                 cacheReadTokens: 0,
                 cacheWriteTokens: 0,
                 costUsd: null,
+                pricedCostUsd: 0,
                 unpricedEvents: 1,
                 cacheHitRatio: null,
               },
@@ -763,6 +786,7 @@ describe("Usage page", () => {
               cacheReadTokens: 0,
               cacheWriteTokens: 0,
               costUsd: null,
+              pricedCostUsd: 0,
               unpricedEvents: 1,
               cacheHitRatio: null,
             },
@@ -807,6 +831,7 @@ describe("Usage page", () => {
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         costUsd: null,
+        pricedCostUsd: 0,
         unpricedEvents: 0,
         cacheHitRatio: null,
       },
@@ -827,6 +852,7 @@ describe("Usage page", () => {
               cacheReadTokens: 0,
               cacheWriteTokens: 0,
               costUsd: null,
+              pricedCostUsd: 0,
               unpricedEvents: 1,
               cacheHitRatio: null,
             },
@@ -839,6 +865,7 @@ describe("Usage page", () => {
                 cacheReadTokens: 0,
                 cacheWriteTokens: 0,
                 costUsd: null,
+                pricedCostUsd: 0,
                 unpricedEvents: 1,
                 cacheHitRatio: null,
               },
@@ -852,6 +879,7 @@ describe("Usage page", () => {
               cacheReadTokens: 0,
               cacheWriteTokens: 0,
               costUsd: null,
+              pricedCostUsd: 0,
               unpricedEvents: 1,
               cacheHitRatio: null,
             },
@@ -892,6 +920,7 @@ describe("Usage page", () => {
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         costUsd: null,
+        pricedCostUsd: 0,
         unpricedEvents: 0,
         cacheHitRatio: null,
       },

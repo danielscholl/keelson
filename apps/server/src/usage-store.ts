@@ -326,6 +326,7 @@ function finishAccumulator(acc: PricedAccumulator): UsagePricedTotalsWire {
     cacheReadTokens: acc.cacheReadTokens,
     cacheWriteTokens: acc.cacheWriteTokens,
     costUsd: acc.unpricedEvents > 0 ? null : acc.costUsd,
+    pricedCostUsd: acc.costUsd,
     unpricedEvents: acc.unpricedEvents,
     cacheHitRatio:
       acc.cacheReadReported > 0
@@ -582,6 +583,7 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
             avgTokensPerRun: runs > 0 ? totalTokens / runs : 0,
             p95TokensPerRun: percentile(sorted, 95),
             totalCostUsd: priced.costUsd,
+            pricedTotalCostUsd: priced.pricedCostUsd,
             costUsdPerRun: priced.costUsd === null || runs === 0 ? null : priced.costUsd / runs,
             unpricedEvents: priced.unpricedEvents,
             cacheHitRatio: priced.cacheHitRatio,

@@ -316,6 +316,7 @@ describe("SQLite UsageStore", () => {
         cacheReadTokens: 2,
         cacheWriteTokens: 1,
         costUsd: null,
+        pricedCostUsd: 0,
         unpricedEvents: 2,
         cacheHitRatio: 2 / 16,
       });
@@ -328,6 +329,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 2,
           cacheWriteTokens: 1,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: 2 / 13,
         },
@@ -339,6 +341,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -436,6 +439,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 2,
           cacheHitRatio: null,
         },
@@ -448,6 +452,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -513,6 +518,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -525,6 +531,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -537,6 +544,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -587,6 +595,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -599,6 +608,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -611,6 +621,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 2,
           cacheHitRatio: null,
         },
@@ -707,6 +718,7 @@ describe("SQLite UsageStore", () => {
           avgTokensPerRun: 25,
           p95TokensPerRun: 40,
           totalCostUsd: null,
+          pricedTotalCostUsd: 0,
           costUsdPerRun: null,
           unpricedEvents: 3,
           cacheHitRatio: null,
@@ -924,7 +936,7 @@ describe("SQLite UsageStore", () => {
       ]);
     });
 
-    test("a job with one unpriced run reports null cost on both cost fields", () => {
+    test("a job with one unpriced run reports null cost on both cost fields, with the priced part as a floor", () => {
       store.record({
         source: "workflow",
         provider: "claude",
@@ -950,6 +962,11 @@ describe("SQLite UsageStore", () => {
         costUsdPerRun: null,
         unpricedEvents: 1,
       });
+      expect(job?.pricedTotalCostUsd).toBeCloseTo(SONNET_COST, 6);
+
+      const { totals } = store.summary({ groupBy: "model" });
+      expect(totals.costUsd).toBeNull();
+      expect(totals.pricedCostUsd).toBeCloseTo(SONNET_COST, 6);
     });
 
     test("config overrides price otherwise-unknown models at read time", () => {
@@ -1176,6 +1193,7 @@ describe("SQLite UsageStore", () => {
       expect(result.totals).toMatchObject({
         events: 0,
         costUsd: 0,
+        pricedCostUsd: 0,
         unpricedEvents: 0,
         cacheHitRatio: null,
       });

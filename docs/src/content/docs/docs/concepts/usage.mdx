@@ -106,11 +106,13 @@ overstate by the cache portion. Rows written since are priced exactly.
 
 **A null cost means unpriced, and it is never shown as zero.** When any event in
 an aggregate ran on a model with no price, the whole aggregate's cost is null and
-its `unpricedEvents` count says how many rows kept it that way. The tab renders
-that as `unpriced` with the count beneath it, so a window that reads `$0.0000`
-really did cost nothing and a window on an unpriced model never looks free. The
-same rule holds for a job: one unpriced run nulls both its cost per run and its
-window cost. A Copilot turn that never resolved past the `auto` alias is
+its `unpricedEvents` count says how many rows kept it that way. `pricedCostUsd`
+(`pricedTotalCostUsd` on a job) still carries the cost of the rows that were
+priced, so the tab renders a mixed window as a floor such as `≥ $155.03` with the
+unpriced count beneath it, and a window with no priced rows at all as
+`unpriced`. A window that reads `$0.0000` really did cost nothing, and a window on
+an unpriced model never looks free. The same rule holds for a job: one unpriced
+run nulls both its cost per run and its window cost, and both show as floors. A Copilot turn that never resolved past the `auto` alias is
 unpriced, since the served model is unknown.
 
 **Cache hit ratio** is cache-read tokens divided by fresh input plus cache-read

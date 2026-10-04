@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef } from "react";
 import {
   contextFillLevel,
   contextPercent,
+  formatAggregateCostUsd,
   formatCacheHit,
   formatCostUsd,
   formatTokens,
@@ -28,6 +29,8 @@ interface UsagePopoverProps {
 export interface ConversationLedgerCost {
   lastTurnCostUsd: number | null;
   sessionCostUsd: number | null;
+  sessionPricedCostUsd: number;
+  sessionUnpricedEvents: number;
   cacheHitRatio: number | null;
 }
 
@@ -222,7 +225,14 @@ export function UsagePopover({ popoverId, latest, totals, ledger }: UsagePopover
           {ledger && (
             <>
               <Row label="Cache hit" value={formatCacheHit(ledger.cacheHitRatio)} />
-              <Row label="Cost" value={formatCostUsd(ledger.sessionCostUsd)} />
+              <Row
+                label="Cost"
+                value={formatAggregateCostUsd(
+                  ledger.sessionCostUsd,
+                  ledger.sessionPricedCostUsd,
+                  ledger.sessionUnpricedEvents,
+                )}
+              />
             </>
           )}
         </section>

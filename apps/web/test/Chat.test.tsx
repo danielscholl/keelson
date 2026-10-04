@@ -101,6 +101,7 @@ mock.module("../src/api.ts", () => ({
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
       costUsd: 0,
+      pricedCostUsd: 0,
       unpricedEvents: 0,
       cacheHitRatio: null,
     },
