@@ -983,17 +983,19 @@ describe("SQLite UsageStore", () => {
           },
         }),
         catalogPrices: () => ({
-          "gpt-6-sol": {
-            inputPerMTok: 1,
-            outputPerMTok: 1,
-            cacheReadPerMTok: 1,
-            cacheWritePerMTok: 1,
-          },
-          "gemini-3.8-flash": {
-            inputPerMTok: 0.75,
-            outputPerMTok: 3.75,
-            cacheReadPerMTok: 0.07,
-            cacheWritePerMTok: 0,
+          copilot: {
+            "gpt-6-sol": {
+              inputPerMTok: 1,
+              outputPerMTok: 1,
+              cacheReadPerMTok: 1,
+              cacheWritePerMTok: 1,
+            },
+            "gemini-3.8-flash": {
+              inputPerMTok: 0.75,
+              outputPerMTok: 3.75,
+              cacheReadPerMTok: 0.07,
+              cacheWritePerMTok: 0,
+            },
           },
         }),
       });
