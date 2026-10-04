@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 import {
   CANVAS_HTML_ACTION_CHANNEL,
   CANVAS_HTML_SIZE_CHANNEL,
+  CANVAS_HTML_STATE_CHANNEL,
   type CanvasBoardView,
   type CanvasDocument,
   type CanvasPlacement,
@@ -634,6 +635,81 @@ describe("CanvasProvider / useCanvas", () => {
     expect(frame.style.height).toBe("20000px");
     postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 0 }, win);
     expect(frame.style.height).toBe("160px");
+  });
+
+  test("snapshot HTML state survives replacement and reopening, isolated from other keys", () => {
+    const source = "rib:demo:drawer-state-original";
+    const other = "rib:demo:drawer-state-other";
+    const originalPost = postRibActionImpl;
+    const calls: unknown[] = [];
+    postRibActionImpl = async (_ribId, action) => {
+      calls.push(action);
+      return { ok: true };
+    };
+    const doc = (key: string): CanvasDocument => ({
+      kind: "html",
+      source: { type: "snapshot", key },
+    });
+    const tree = (key: string) => (
+      <ToastHost>
+        <CanvasProvider>
+          <Opener doc={doc(key)} />
+        </CanvasProvider>
+      </ToastHost>
+    );
+    const connect = () => {
+      const frame = screen.getByRole("dialog").querySelector("iframe")!;
+      const posts: any[] = [];
+      const source = { postMessage: (message: unknown) => posts.push(message) };
+      Object.defineProperty(frame, "contentWindow", { value: source, configurable: true });
+      return { frame, source, posts };
+    };
+    try {
+      snapshotsByKey[source] = {
+        status: "live",
+        data: "<p>original</p>",
+        version: 1,
+        composedAt: null,
+      };
+      const view = render(tree(source));
+      fireEvent.click(screen.getByText("open"));
+      const first = connect();
+      postMessageTo(
+        { channel: CANVAS_HTML_STATE_CHANNEL, type: "save", state: { task: "x" } },
+        first.source,
+      );
+      snapshotsByKey[source] = {
+        ...snapshotsByKey[source]!,
+        data: "<p>replacement</p>",
+        version: 2,
+      };
+      view.rerender(tree(source));
+      expect(first.frame.getAttribute("srcdoc")).toContain("<p>replacement</p>");
+      fireEvent.load(first.frame);
+      expect(first.posts.find((message) => message.type === "restore")?.state).toEqual({
+        task: "x",
+      });
+      snapshotsByKey[other] = { ...snapshotsByKey[source]! };
+      view.rerender(tree(other));
+      fireEvent.click(screen.getByText("open"));
+      const second = connect();
+      expect(second.frame).not.toBe(first.frame);
+      fireEvent.load(second.frame);
+      expect(second.posts.filter((message) => message.type === "restore")).toEqual([]);
+      view.rerender(tree(source));
+      fireEvent.click(screen.getByText("open"));
+      const reopened = connect();
+      fireEvent.load(reopened.frame);
+      expect(reopened.posts.find((message) => message.type === "restore")?.state).toEqual({
+        task: "x",
+      });
+      expect(calls).toEqual([]);
+      expect(document.querySelector(".keelson-toast")).toBeNull();
+    } finally {
+      postRibActionImpl = originalPost;
+      delete snapshotsByKey[source];
+      delete snapshotsByKey[other];
+    }
   });
 
   test("a snapshot-sourced html action dispatches to the rib that owns the key", async () => {
