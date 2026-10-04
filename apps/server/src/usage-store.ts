@@ -10,6 +10,7 @@ import type { Database } from "bun:sqlite";
 import {
   cacheHitRatio,
   estimateCostUsd,
+  freshTokens,
   type ModelPrice,
   type ModelPrices,
   resolveModelPrice,
@@ -312,7 +313,9 @@ function finishAccumulator(acc: PricedAccumulator): UsagePricedTotalsWire {
     costUsd: acc.unpricedEvents > 0 ? null : acc.costUsd,
     unpricedEvents: acc.unpricedEvents,
     cacheHitRatio:
-      acc.cacheReadReported > 0 ? cacheHitRatio(acc.inputTokens, acc.cacheReadTokens) : null,
+      acc.cacheReadReported > 0
+        ? cacheHitRatio(acc.inputTokens, acc.cacheReadTokens, acc.cacheWriteTokens)
+        : null,
   };
 }
 
@@ -530,8 +533,7 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
         )
         .all(...params) as JobRunRow[];
 
-      // Job burn is fresh input + output per run; cache columns feed the cost
-      // and hit ratio but stay out of the token figures.
+      // Job burn is freshTokens per run; cache reads feed only cost and hit ratio.
       const runsByJob = new Map<string, PricedAccumulator[]>();
       for (const [fold, acc] of foldByKey(rows, (row) => `${row.key}\u0000${row.runId}`, pricer)) {
         const key = fold.slice(0, fold.indexOf("\u0000"));
@@ -542,7 +544,7 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
 
       return [...runsByJob.entries()]
         .map(([key, runAccs]) => {
-          const totals = runAccs.map((acc) => acc.inputTokens + acc.outputTokens);
+          const totals = runAccs.map((acc) => freshTokens(acc));
           const sorted = [...totals].sort((a, b) => a - b);
           const totalTokens = totals.reduce((sum, value) => sum + value, 0);
           const runs = totals.length;

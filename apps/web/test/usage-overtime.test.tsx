@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
-import type { UsageSeriesResponseWire } from "@keelson/shared";
+import type { UsageSeriesResponseWire, UsageSeriesRowWire } from "@keelson/shared";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import * as realApi from "../src/api.ts";
 
@@ -78,6 +78,124 @@ async function renderUsage() {
 
 beforeEach(() => {
   seriesRows = [];
+  getUsageSummaryImpl = async () => summaryFixture();
+});
+
+function seriesRow(
+  key: string,
+  tokens: { input: number; output: number; cacheWrite?: number; cacheRead?: number },
+  bucketIso = "2026-07-01T00:00:00.000Z",
+): UsageSeriesRowWire {
+  return {
+    bucketIso,
+    key,
+    events: 1,
+    inputTokens: tokens.input,
+    outputTokens: tokens.output,
+    cacheReadTokens: tokens.cacheRead ?? 0,
+    cacheWriteTokens: tokens.cacheWrite ?? 0,
+    costUsd: null,
+    unpricedEvents: 1,
+    cacheHitRatio: null,
+  };
+}
+
+const NINE_MODELS = [
+  "a-model",
+  "b-model",
+  "c-model",
+  "d-model",
+  "e-model",
+  "f-model",
+  "g-model",
+  "h-model",
+  "i-model",
+];
+
+describe("Usage — fresh-token series", () => {
+  test("a model whose new input lands in cache writes outweighs one with larger raw input", async () => {
+    const { pivotSeries } = await import("../src/views/Usage.tsx");
+    const { series, buckets } = pivotSeries([
+      seriesRow("gemini-3.7-flash", { input: 900_000, output: 20_000 }),
+      seriesRow("gpt-6.1-sol", {
+        input: 2_267,
+        output: 50_000,
+        cacheWrite: 2_080_000,
+        cacheRead: 5_000_000,
+      }),
+    ]);
+    expect(series.map((s) => s.key)).toEqual(["gemini-3.7-flash", "gpt-6.1-sol"]);
+    expect(buckets[0]?.values).toEqual([920_000, 2_132_267]);
+    expect(buckets[0]?.total).toBe(3_052_267);
+  });
+
+  test("up to six models each get their own slot in alphabetical order", async () => {
+    const { assignSeriesColors } = await import("../src/views/Usage.tsx");
+    const palette = assignSeriesColors(
+      new Map([
+        ["zeta", 1],
+        ["alpha", 100],
+        ["mid", 50],
+      ]),
+    );
+    expect(palette.named).toEqual(["alpha", "mid", "zeta"]);
+    expect(palette.folded).toEqual([]);
+    expect(palette.named.map(palette.colorOf)).toEqual(["var(--s1)", "var(--s2)", "var(--s3)"]);
+  });
+
+  test("past six models the tail folds into Other so no two series share a color", async () => {
+    const { assignSeriesColors, pivotSeries } = await import("../src/views/Usage.tsx");
+    const totals = new Map(NINE_MODELS.map((m, i) => [m, (i + 1) * 1000]));
+    const palette = assignSeriesColors(totals);
+    expect(palette.named).toEqual(["e-model", "f-model", "g-model", "h-model", "i-model"]);
+    expect(palette.folded).toEqual(["a-model", "b-model", "c-model", "d-model"]);
+    expect(palette.colorOf("a-model")).toBe("var(--s-other)");
+
+    const { series, buckets } = pivotSeries(
+      NINE_MODELS.map((m, i) => seriesRow(m, { input: (i + 1) * 1000, output: 0 })),
+    );
+    expect(series).toHaveLength(6);
+    expect(new Set(series.map((s) => s.color)).size).toBe(6);
+    expect(series.at(-1)?.label).toBe("Other (4 models)");
+    expect(buckets[0]?.values.at(-1)).toBe(1000 + 2000 + 3000 + 4000);
+  });
+
+  test("the legend names the folded tail instead of reusing a color", async () => {
+    seriesRows = NINE_MODELS.map((m, i) => seriesRow(m, { input: (i + 1) * 1000, output: 0 }));
+
+    await act(async () => {
+      await renderUsage();
+    });
+
+    await waitFor(() => expect(screen.getByText("Other (4 models)")).toBeDefined());
+    expect(screen.getByText("i-model")).toBeDefined();
+    expect(screen.queryByText("a-model")).toBeNull();
+  });
+
+  test("the pulse tile counts cache writes as fresh input and in the cache-hit denominator", async () => {
+    getUsageSummaryImpl = async () => ({
+      totals: {
+        events: 18,
+        inputTokens: 2_267,
+        outputTokens: 50_000,
+        cacheReadTokens: 1_000_000,
+        cacheWriteTokens: 2_080_000,
+        costUsd: null,
+        unpricedEvents: 18,
+        cacheHitRatio: 1_000_000 / 3_082_267,
+      },
+      groups: [],
+    });
+
+    await act(async () => {
+      await renderUsage();
+    });
+
+    await waitFor(() => expect(screen.getByText("Tokens")).toBeDefined());
+    expect(screen.getByText("2.1M")).toBeDefined();
+    expect(screen.getByText("↑ 2.1M in · ↓ 50k out")).toBeDefined();
+    expect(screen.getByText("1M of 3.1M input")).toBeDefined();
+  });
 });
 
 describe("Usage — Over time stacked chart", () => {

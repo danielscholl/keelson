@@ -317,7 +317,7 @@ describe("SQLite UsageStore", () => {
         cacheWriteTokens: 1,
         costUsd: null,
         unpricedEvents: 2,
-        cacheHitRatio: 2 / 15,
+        cacheHitRatio: 2 / 16,
       });
       expect(result.groups).toEqual([
         {
@@ -329,7 +329,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 1,
           costUsd: null,
           unpricedEvents: 1,
-          cacheHitRatio: 2 / 12,
+          cacheHitRatio: 2 / 13,
         },
         {
           key: "gpt-5",
@@ -758,6 +758,39 @@ describe("SQLite UsageStore", () => {
         expect.objectContaining({ key: "workflow", runs: 1, totalTokens: 10 }),
       ]);
     });
+    test("per-run tokens count cache writes as fresh input but leave cache reads out", () => {
+      store.record({
+        source: "workflow",
+        provider: "copilot",
+        model: "gpt-6.1-sol",
+        inputTokens: 12,
+        outputTokens: 300,
+        cacheReadTokens: 90_000,
+        cacheWriteTokens: 115_000,
+        runId: "run-1",
+        workflowName: "review",
+      });
+      store.record({
+        source: "workflow",
+        provider: "copilot",
+        model: "gemini-3.7-flash",
+        inputTokens: 40_000,
+        outputTokens: 500,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        runId: "run-2",
+        workflowName: "review",
+      });
+      const [job] = store.jobs();
+      expect(job).toMatchObject({
+        key: "review",
+        runs: 2,
+        totalTokens: 115_312 + 40_500,
+        avgTokensPerRun: (115_312 + 40_500) / 2,
+        p95TokensPerRun: 115_312,
+      });
+      expect(job?.cacheHitRatio).toBeCloseTo(90_000 / (12 + 90_000 + 115_000 + 40_000), 6);
+    });
   });
 
   describe("events", () => {
@@ -939,7 +972,7 @@ describe("SQLite UsageStore", () => {
       expect(priced.events()[0]?.costUsd).toBeCloseTo(0.002, 6);
     });
 
-    test("cacheHitRatio is cacheRead over input plus cacheRead, null without reported cache reads", () => {
+    test("cacheHitRatio is cacheRead over all prompt tokens, null without reported cache reads", () => {
       store.record({
         source: "chat",
         provider: "claude",
@@ -974,6 +1007,26 @@ describe("SQLite UsageStore", () => {
         store.breakdown({ groupBy: "model", splitBy: "source" }).find((r) => r.key === "gpt-5")
           ?.cacheHitRatio,
       ).toBeNull();
+    });
+
+    test("cacheHitRatio counts cache writes in the prompt-token denominator", () => {
+      store.record({
+        source: "workflow",
+        provider: "copilot",
+        model: "gpt-6.1-sol",
+        inputTokens: 10,
+        outputTokens: 50,
+        cacheReadTokens: 300,
+        cacheWriteTokens: 690,
+      });
+      const result = store.summary({ groupBy: "model" });
+      expect(result.totals.cacheHitRatio).toBeCloseTo(300 / 1000, 6);
+      expect(result.groups[0]?.cacheWriteTokens).toBe(690);
+      const [row] = store.series({ bucket: "hour", groupBy: "model" });
+      expect(row).toMatchObject({ cacheWriteTokens: 690, inputTokens: 10 });
+      expect(row?.cacheHitRatio).toBeCloseTo(0.3, 6);
+      const [split] = store.breakdown({ groupBy: "source", splitBy: "model" });
+      expect(split?.cacheWriteTokens).toBe(690);
     });
 
     test("conversationId scopes summary and events to one conversation's rows", () => {

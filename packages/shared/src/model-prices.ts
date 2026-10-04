@@ -103,14 +103,21 @@ export function estimateCostUsd(tokens: PricedTokenCounts, p: ModelPrice): numbe
   );
 }
 
-// Share of prompt tokens served from cache. Null when cache reads were never
-// reported or nothing was read at all, so a provider that doesn't report cache
-// can't show as 0% hit.
+// Tokens the model newly processed. Cache writes count: providers that split
+// them out report most new prompt tokens there, not in inputTokens.
+export function freshTokens(tokens: PricedTokenCounts): number {
+  return tokens.inputTokens + (tokens.cacheWriteTokens ?? 0) + tokens.outputTokens;
+}
+
+// Share of all prompt tokens (fresh, cache read, cache write) served from
+// cache. Null when cache reads were never reported or nothing was read at all,
+// so a provider that doesn't report cache can't show as 0% hit.
 export function cacheHitRatio(
   inputTokens: number,
   cacheReadTokens: number | null | undefined,
+  cacheWriteTokens: number | null | undefined,
 ): number | null {
   if (cacheReadTokens === null || cacheReadTokens === undefined) return null;
-  const denominator = inputTokens + cacheReadTokens;
+  const denominator = inputTokens + cacheReadTokens + (cacheWriteTokens ?? 0);
   return denominator > 0 ? cacheReadTokens / denominator : null;
 }

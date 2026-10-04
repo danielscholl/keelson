@@ -65,7 +65,13 @@ export function UsageBreakdown({ usage, spendTitle = "Last turn", costUsd }: Usa
         <Row label="Cache read" value={formatTokens(usage.cacheReadInputTokens)} />
         <Row
           label="Cache hit"
-          value={formatCacheHit(cacheHitRatio(usage.inputTokens, usage.cacheReadInputTokens))}
+          value={formatCacheHit(
+            cacheHitRatio(
+              usage.inputTokens,
+              usage.cacheReadInputTokens,
+              usage.cacheCreationInputTokens,
+            ),
+          )}
         />
       </>
     ) : null;

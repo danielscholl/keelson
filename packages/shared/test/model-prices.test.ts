@@ -7,6 +7,7 @@ import {
   BUNDLED_MODEL_PRICES,
   cacheHitRatio,
   estimateCostUsd,
+  freshTokens,
   modelPriceSchema,
   normalizeModelId,
   resolveModelPrice,
@@ -90,15 +91,34 @@ describe("estimateCostUsd", () => {
 });
 
 describe("cacheHitRatio", () => {
-  test("is cacheRead over input plus cacheRead", () => {
-    expect(cacheHitRatio(100, 300)).toBeCloseTo(0.75, 10);
+  test("is cacheRead over input plus cacheRead plus cacheWrite", () => {
+    expect(cacheHitRatio(100, 300, null)).toBeCloseTo(0.75, 10);
+    expect(cacheHitRatio(10, 300, 690)).toBeCloseTo(0.3, 10);
   });
 
   test("is null when cache reads were not reported or nothing was read", () => {
-    expect(cacheHitRatio(100, null)).toBeNull();
-    expect(cacheHitRatio(100, undefined)).toBeNull();
-    expect(cacheHitRatio(0, 0)).toBeNull();
-    expect(cacheHitRatio(100, 0)).toBe(0);
+    expect(cacheHitRatio(100, null, 500)).toBeNull();
+    expect(cacheHitRatio(100, undefined, undefined)).toBeNull();
+    expect(cacheHitRatio(0, 0, 0)).toBeNull();
+    expect(cacheHitRatio(100, 0, 0)).toBe(0);
+  });
+});
+
+describe("freshTokens", () => {
+  test("counts input, cache writes, and output but not cache reads", () => {
+    expect(
+      freshTokens({
+        inputTokens: 12,
+        outputTokens: 300,
+        cacheReadTokens: 90_000,
+        cacheWriteTokens: 115_000,
+      }),
+    ).toBe(115_312);
+  });
+
+  test("treats unreported cache writes as nothing written", () => {
+    expect(freshTokens({ inputTokens: 1000, outputTokens: 50, cacheWriteTokens: null })).toBe(1050);
+    expect(freshTokens({ inputTokens: 1000, outputTokens: 50 })).toBe(1050);
   });
 });
 
