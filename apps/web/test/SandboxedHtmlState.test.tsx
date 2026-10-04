@@ -1,7 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
+import { createContext, runInContext } from "node:vm";
 import { CANVAS_HTML_STATE_CHANNEL } from "@keelson/shared";
 import { fireEvent, render } from "@testing-library/react";
-import { SandboxedHtml } from "../src/components/Canvas/SandboxedHtml.tsx";
+import { composeCanvasHtmlDoc, SandboxedHtml } from "../src/components/Canvas/SandboxedHtml.tsx";
 
 let sequence = 0;
 function key() {
@@ -32,6 +33,99 @@ function connect(frame: HTMLIFrameElement) {
 function frame(container: HTMLElement) {
   return container.querySelector("iframe")!;
 }
+
+function bridge() {
+  const posts: any[] = [];
+  const listeners: Record<string, ((event: any) => void)[]> = {};
+  const parent = { postMessage: (message: unknown) => posts.push(structuredClone(message)) };
+  const warnings: string[] = [];
+  const context = createContext({
+    parent,
+    TextEncoder,
+    console: { warn: (reason: string) => warnings.push(reason) },
+    document: {
+      addEventListener() {},
+      documentElement: { setAttribute() {}, style: {} },
+    },
+    addEventListener(type: string, handler: (event: any) => void) {
+      listeners[type] ??= [];
+      listeners[type].push(handler);
+    },
+  });
+  runInContext("window = globalThis", context);
+  const script = composeCanvasHtmlDoc("").match(/<script>([\s\S]*?)<\/script>/)![1]!;
+  runInContext(script, context);
+  return {
+    posts,
+    warnings,
+    context,
+    evaluate(code: string) {
+      return runInContext(code, context);
+    },
+    receive(message: unknown, source: unknown = parent) {
+      const data = runInContext(`JSON.parse(${JSON.stringify(JSON.stringify(message))})`, context);
+      for (const listener of listeners.message ?? []) listener({ source, data });
+    },
+    restore(state: unknown) {
+      this.receive({ channel: CANVAS_HTML_STATE_CHANNEL, type: "restore", state });
+    },
+  };
+}
+
+describe("injected HTML state bridge", () => {
+  test("posts saveState and preserves the action API", () => {
+    const fixture = bridge();
+    fixture.evaluate('keelson.saveState({ task: "x" }); keelson.action("run", { id: 1 })');
+    expect(fixture.posts[0]).toEqual({
+      channel: CANVAS_HTML_STATE_CHANNEL,
+      type: "save",
+      state: { task: "x" },
+    });
+    expect(fixture.posts[1].type).toBe("run");
+  });
+
+  test("delivers immediately or buffers until registration, and never replays", () => {
+    for (const early of [true, false]) {
+      const fixture = bridge();
+      fixture.evaluate("calls = []; handler = function(state) { calls.push(state); }");
+      if (early) fixture.evaluate("keelson.onRestore(handler)");
+      fixture.restore({});
+      if (!early) fixture.evaluate("keelson.onRestore(handler)");
+      fixture.restore({ task: "duplicate" });
+      fixture.evaluate("keelson.onRestore(handler)");
+      expect(fixture.evaluate("calls")).toEqual([{}]);
+    }
+  });
+
+  test("latest undelivered handler wins and callback failures are visible", () => {
+    const fixture = bridge();
+    fixture.evaluate(
+      'calls = []; keelson.onRestore(() => calls.push("old")); keelson.onRestore(() => calls.push("new"))',
+    );
+    fixture.restore({ task: "x" });
+    expect(fixture.evaluate("calls")).toEqual(["new"]);
+    const broken = bridge();
+    broken.evaluate('keelson.onRestore(() => { throw new Error("callback failed"); })');
+    expect(() => broken.restore({})).toThrow("callback failed");
+    broken.evaluate("calls = []; keelson.onRestore(state => calls.push(state))");
+    expect(broken.evaluate("calls")).toEqual([]);
+  });
+
+  test("a replacement document receives real host output in its callback", () => {
+    const viewKey = key();
+    const view = render(<SandboxedHtml html="old" viewKey={viewKey} />);
+    const connection = connect(frame(view.container));
+    const original = bridge();
+    original.evaluate('keelson.saveState({ task: "x" })');
+    connection.send(original.posts[0]);
+    view.rerender(<SandboxedHtml html="new" viewKey={viewKey} />);
+    fireEvent.load(frame(view.container));
+    const replacement = bridge();
+    replacement.receive(connection.restores()[0]);
+    replacement.evaluate("calls = []; keelson.onRestore(state => calls.push(state))");
+    expect(replacement.evaluate("calls")).toEqual([{ task: "x" }]);
+  });
+});
 
 describe("HTML state host", () => {
   test("restores the latest whole object once after replacement, without actions", () => {

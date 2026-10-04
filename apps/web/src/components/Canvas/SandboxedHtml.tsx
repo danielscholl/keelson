@@ -8,6 +8,7 @@ import {
   canvasHtmlActionSchema,
   canvasHtmlSizeSchema,
   canvasHtmlStateSchema,
+  isCanvasHtmlState,
 } from "@keelson/shared";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
@@ -41,11 +42,61 @@ const BRIDGE_SCRIPT = `
 (function () {
   var CHANNEL = ${JSON.stringify(CANVAS_HTML_ACTION_CHANNEL)};
   var THEME_CHANNEL = ${JSON.stringify(CANVAS_HTML_THEME_CHANNEL)};
+  var STATE_CHANNEL = ${JSON.stringify(CANVAS_HTML_STATE_CHANNEL)};
+  var isState = ${isCanvasHtmlState.toString()};
+  var restoreHandler;
+  var pendingState;
+  var receivedState = false;
+  var consumedState = false;
+  function validState(state) {
+    if (!isState(state)) return false;
+    var json;
+    try {
+      json = JSON.stringify(state);
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error;
+      return false;
+    }
+    return new TextEncoder().encode(json).byteLength <= ${CANVAS_HTML_STATE_MAX_BYTES};
+  }
+  function deliverState() {
+    if (!receivedState || consumedState || !restoreHandler) return;
+    consumedState = true;
+    var state = pendingState;
+    pendingState = undefined;
+    restoreHandler(state);
+  }
+  function saveState(state) {
+    if (!validState(state)) {
+      console.warn("HTML state rejected: invalid JSON object or byte limit");
+      return;
+    }
+    try {
+      parent.postMessage({ channel: STATE_CHANNEL, type: "save", state: state }, "*");
+    } catch (error) {
+      if (!error || error.name !== "DataCloneError") throw error;
+      console.warn("HTML state rejected: structured clone failed");
+    }
+  }
+  function onRestore(handler) {
+    if (typeof handler !== "function") throw new TypeError("onRestore requires a function");
+    restoreHandler = handler;
+    deliverState();
+  }
   function post(type, payload) {
     if (typeof type !== "string" || !type) return;
     parent.postMessage({ channel: CHANNEL, type: type, payload: payload }, "*");
   }
-  window.keelson = { action: post };
+  window.keelson = { action: post, saveState: saveState, onRestore: onRestore };
+  window.addEventListener("message", function (e) {
+    if (e.source !== window.parent) return;
+    var d = e.data;
+    if (!d || d.channel !== STATE_CHANNEL || d.type !== "restore" || receivedState) return;
+    if (Reflect.ownKeys(d).length !== 3 || !validState(d.state)) return;
+    pendingState = d.state;
+    receivedState = true;
+    deliverState();
+  });
   document.addEventListener("click", function (e) {
     var el = e.target && e.target.closest ? e.target.closest("[data-canvas-action]") : null;
     if (el) post(el.getAttribute("data-canvas-action"), undefined);
@@ -196,7 +247,7 @@ function HtmlFrame({
   const ref = useRef<HTMLIFrameElement>(null);
   const themeRef = useRef<CanvasFrameTheme>(readDocumentTheme());
   const localState = useRef<string | undefined>(undefined);
-  const delivery = useMemo(() => ({ done: false }), [html]);
+  const delivery = useMemo(() => ({ html, done: false }), [html]);
 
   // srcDoc is keyed on the fragment only — a theme toggle must NOT recompose it
   // (that reloads the frame and loses scroll/state); toggles ride postMessage.
