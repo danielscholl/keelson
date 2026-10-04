@@ -207,6 +207,35 @@ See [Usage](../../concepts/usage/) for the ledger model.
 | `POST` | `/api/projects/:id/notebook/append` | Append to the notebook (the `note_project` path). |
 | `POST` | `/api/projects/:id/notebook/tidy` | Compact the notebook. |
 
+`POST /api/projects` accepts `{ name, rootPath? }`. Without `rootPath`, the host
+uses `<workspaceRoot>/<name>` (`KEELSON_WORKSPACE`, default `~/keelson`). Explicit
+paths are trimmed, expand a leading `~` or `~/`, and must be absolute. A missing
+or empty directory receives `git init` and one empty `Initialize project` commit
+using the operator's configured Git identity, without touching project files.
+Existing Git repositories and populated non-Git folders are registered unchanged.
+
+`POST /api/projects/clone` accepts `{ url, name? }`. An omitted name derives from
+the URL's final repository segment, lowercased and stripped of trailing slashes
+and `.git`. The destination is `<workspaceRoot>/<name>`; any existing destination,
+even an empty folder, is a conflict. Git runs noninteractively with a 60-second
+timeout.
+
+Both requests reject unknown fields. Names are 1 to 64 characters, starting with
+a lowercase letter or digit and containing only lowercase letters, digits, `-`,
+or `_`. Success is `201 { project }`, with the persisted id, name, resolved absolute
+`rootPath`, and creation time. Failure is `{ error }`: `400` for invalid bodies or
+targets, `409` for duplicate names or exact canonical roots (including symlink
+aliases), `500` for initialization or registration failures, and `502` for clone
+failures. Nested projects beneath the default project are allowed. Mutations
+require an allowed loopback Origin; rejected origins receive `403` before any
+filesystem changes.
+
+An initial-commit failure names missing `user.name` or `user.email` Git config.
+Cleanup removes only operation-created state and reports failures without hiding
+the original error. A registered non-Git project cannot host Write agents until
+it is a repository with a commit; host-initialized repositories are already
+ready. See [Projects and worktrees](../../concepts/projects/#creating-or-registering-a-project).
+
 ## Credentials
 
 | Method | Path | Purpose |
