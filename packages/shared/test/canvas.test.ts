@@ -14,6 +14,7 @@ import {
 } from "../src/canvas.ts";
 import {
   type CanvasGraphSection,
+  type CanvasHtmlStateMessage,
   type CanvasPlacement,
   canvasPlacementSchema,
 } from "../src/index.ts";
@@ -2335,8 +2336,8 @@ describe("canvasHtmlStateSchema", () => {
   it("accepts both directions and JSON object values", () => {
     expect(CANVAS_HTML_STATE_MAX_BYTES).toBe(65_536);
     for (const type of ["save", "restore"] as const) {
-      const message = {
-        channel: CANVAS_HTML_STATE_CHANNEL as typeof CANVAS_HTML_STATE_CHANNEL,
+      const message: CanvasHtmlStateMessage = {
+        channel: CANVAS_HTML_STATE_CHANNEL,
         type,
         state: { nested: [{ text: "x", number: 1, bool: true, nil: null }], empty: {} },
       };
