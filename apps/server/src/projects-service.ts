@@ -54,10 +54,14 @@ function normalizeRootPath(raw: string): string {
 function deriveProjectNameFromUrl(url: string): string | undefined {
   const trimmed = url
     .trim()
-    .replace(/\/+$/, "")
+    .replace(/[\\/]+$/, "")
     .replace(/\.git$/i, "")
-    .replace(/\/+$/, "");
-  const start = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf(":"));
+    .replace(/[\\/]+$/, "");
+  const start = Math.max(
+    trimmed.lastIndexOf("/"),
+    trimmed.lastIndexOf("\\"),
+    trimmed.lastIndexOf(":"),
+  );
   const candidate = trimmed.slice(start + 1).toLowerCase();
   return projectNameSchema.safeParse(candidate).success ? candidate : undefined;
 }

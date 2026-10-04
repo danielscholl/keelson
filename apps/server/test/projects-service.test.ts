@@ -75,6 +75,19 @@ describe("cloneProject", () => {
     expect(existsSync(workspace)).toBe(false);
   });
 
+  test("derives names from Windows local clone paths", async () => {
+    const url = String.raw`C:\repos\Local_Source.git`;
+    const failing: typeof runText = async (_cmd, args) => {
+      expect(args.slice(0, 3)).toEqual(["clone", "--", url]);
+      return { ok: false, error: "test stop", code: 1 };
+    };
+    await expect(service(failing).cloneProject({ url })).rejects.toMatchObject({
+      status: 502,
+      message: "git clone failed: test stop",
+    });
+    expect(existsSync(workspace)).toBe(false);
+  });
+
   test("preserves existing empty destinations and rejects registered names and roots", async () => {
     mkdirSync(workspace);
     const dest = join(workspace, "exists");
