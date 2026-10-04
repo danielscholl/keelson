@@ -9,6 +9,7 @@ import { extname, join, resolve, sep } from "node:path";
 import {
   disposeAllProviders,
   getAgentProvider,
+  getCatalogModelPrices,
   isRegisteredProvider,
   registerGatewayProvider,
   unregisterProvider,
@@ -386,7 +387,10 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     const result = readKeelsonConfig();
     return result.ok ? result.config.modelPrices : undefined;
   };
-  const rawUsageStore = createUsageStore(db, { priceOverrides: modelPriceOverrides });
+  const rawUsageStore = createUsageStore(db, {
+    priceOverrides: modelPriceOverrides,
+    catalogPrices: getCatalogModelPrices,
+  });
   // Registered once on the base manager, mirroring RIBS_VERSION_SNAPSHOT_KEY:
   // the live pulse widget subscribes to today's totals + trailing-60-minute
   // series without polling GET /api/usage/summary.

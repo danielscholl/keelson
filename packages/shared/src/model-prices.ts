@@ -70,9 +70,14 @@ function ownPrice(table: Readonly<Record<string, ModelPrice>>, id: string): Mode
   return Object.hasOwn(table, id) ? table[id] : undefined;
 }
 
-// Operator overrides win by exact id, then by normalized id, before the
-// bundled table is consulted. Unknown → undefined, never a zero price.
-export function resolveModelPrice(model: string, overrides?: ModelPrices): ModelPrice | undefined {
+// Operator overrides win by exact id, then by normalized id; then a provider's
+// live catalog price by exact id; then the bundled table. Unknown → undefined,
+// never a zero price.
+export function resolveModelPrice(
+  model: string,
+  overrides?: ModelPrices,
+  catalog?: ModelPrices,
+): ModelPrice | undefined {
   const normalized = normalizeModelId(model);
   if (overrides) {
     const exact = ownPrice(overrides, model);
@@ -81,7 +86,8 @@ export function resolveModelPrice(model: string, overrides?: ModelPrices): Model
       if (normalizeModelId(id) === normalized) return p;
     }
   }
-  return ownPrice(BUNDLED_MODEL_PRICES, normalized);
+  const live = catalog ? ownPrice(catalog, model) : undefined;
+  return live ?? ownPrice(BUNDLED_MODEL_PRICES, normalized);
 }
 
 export interface PricedTokenCounts {

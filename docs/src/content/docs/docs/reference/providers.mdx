@@ -151,8 +151,10 @@ be able to reach.
 with the synthetic `auto`, which delegates routing to Copilot. After registration,
 it fetches the account's catalog in the background, without delaying server
 startup, rib activation, or CLI bootstrap. It derives `fast`, `balanced`, and
-`deep` from concrete models' cost tiers, excluding `auto` from the ranking; entries
-without cost metadata use catalog order. Its published models then include `auto`
+`deep` from concrete models' cost tiers (the catalog's price category: low,
+medium, high, very high), excluding `auto` from the ranking; entries without cost
+metadata use catalog order. The first model in catalog order wins within a tier,
+so pin the classes in `config.json` when a specific model matters. Its published models then include `auto`
 and the discovered concrete ids. A class-based Copilot turn waits for that bounded
 fetch if it is still in progress. An explicit model, a class pinned in
 `config.json`, or an unclassed turn never waits for it, and the unclassed default

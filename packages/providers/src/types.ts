@@ -13,6 +13,7 @@
 import type {
   MessageChunk,
   ModelInfo,
+  ModelPrices,
   ProviderCapabilities,
   ToolDefinition,
 } from "@keelson/shared";
@@ -158,6 +159,9 @@ export interface ProviderRegistration {
   displayName: string;
   factory: () => IAgentProvider;
   capabilities: ProviderCapabilities;
+  // Per-token prices from the provider's live catalog, keyed by model id. Kept
+  // off `capabilities` so the strict /api/providers wire shape is unchanged.
+  modelPrices?: () => ModelPrices | undefined;
   builtIn: boolean;
   // Optional keyring handle; not unique across providers.
   credentialServiceId?: string;

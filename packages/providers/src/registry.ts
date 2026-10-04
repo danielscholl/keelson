@@ -6,6 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+import type { ModelPrices } from "@keelson/shared";
 import { UnknownProviderError } from "./errors.ts";
 import type { IAgentProvider, ProviderInfo, ProviderRegistration } from "./types.ts";
 
@@ -76,6 +77,18 @@ export function getProviderInfoList(): ProviderInfo[] {
       return info;
     },
   );
+}
+
+// Live catalog prices across providers; the first registration to price a
+// model id wins.
+export function getCatalogModelPrices(): ModelPrices {
+  const merged: ModelPrices = {};
+  for (const entry of registry.values()) {
+    for (const [id, price] of Object.entries(entry.modelPrices?.() ?? {})) {
+      if (!Object.hasOwn(merged, id)) merged[id] = price;
+    }
+  }
+  return merged;
 }
 
 export function isRegisteredProvider(id: string): boolean {

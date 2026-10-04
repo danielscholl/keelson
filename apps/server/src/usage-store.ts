@@ -124,6 +124,9 @@ export interface UsageStoreOptions {
   // Read once per query so an edited config.json reprices history without a
   // restart; cost is never persisted.
   priceOverrides?: () => ModelPrices | undefined;
+  // Live provider catalog prices, consulted after overrides and before the
+  // bundled table.
+  catalogPrices?: () => ModelPrices | undefined;
 }
 
 export interface UsageStore {
@@ -264,10 +267,13 @@ interface MinuteRow extends Omit<TotalsRow, "events"> {
 
 type Pricer = (model: string) => ModelPrice | undefined;
 
-function createPricer(overrides: ModelPrices | undefined): Pricer {
+function createPricer(
+  overrides: ModelPrices | undefined,
+  catalog: ModelPrices | undefined,
+): Pricer {
   const cache = new Map<string, ModelPrice | undefined>();
   return (model) => {
-    if (!cache.has(model)) cache.set(model, resolveModelPrice(model, overrides));
+    if (!cache.has(model)) cache.set(model, resolveModelPrice(model, overrides, catalog));
     return cache.get(model);
   };
 }
@@ -360,7 +366,7 @@ function percentile(sorted: number[], pct: number): number {
 }
 
 export function createUsageStore(db: Database, options: UsageStoreOptions = {}): UsageStore {
-  const pricerForQuery = () => createPricer(options.priceOverrides?.());
+  const pricerForQuery = () => createPricer(options.priceOverrides?.(), options.catalogPrices?.());
   const insertEvent = db.prepare(
     `INSERT INTO usage_events(
        ts, source, provider, model, input_tokens, output_tokens,

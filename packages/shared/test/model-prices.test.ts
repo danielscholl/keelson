@@ -65,6 +65,40 @@ describe("resolveModelPrice", () => {
       BUNDLED_MODEL_PRICES["claude-opus-4-8"],
     );
   });
+  test("a live catalog price sits between operator overrides and the bundled table", () => {
+    const override = {
+      inputPerMTok: 1,
+      outputPerMTok: 2,
+      cacheReadPerMTok: 0.1,
+      cacheWritePerMTok: 1.25,
+    };
+    const live = {
+      inputPerMTok: 0.75,
+      outputPerMTok: 3.75,
+      cacheReadPerMTok: 0.07,
+      cacheWritePerMTok: 0,
+    };
+    expect(resolveModelPrice("gemini-3.8-flash", undefined, { "gemini-3.8-flash": live })).toEqual(
+      live,
+    );
+    expect(
+      resolveModelPrice(
+        "gemini-3.8-flash",
+        { "gemini-3.8-flash": override },
+        {
+          "gemini-3.8-flash": live,
+        },
+      ),
+    ).toEqual(override);
+    expect(resolveModelPrice("claude-opus-4.8", undefined, { "claude-opus-4.8": live })).toEqual(
+      live,
+    );
+    // Catalog keys match exactly: a dotted Copilot key never prices the hyphenated API id.
+    expect(resolveModelPrice("claude-opus-4-8", undefined, { "claude-opus-4.8": live })).toEqual(
+      BUNDLED_MODEL_PRICES["claude-opus-4-8"],
+    );
+    expect(resolveModelPrice("constructor", undefined, {})).toBeUndefined();
+  });
 });
 
 describe("estimateCostUsd", () => {

@@ -92,9 +92,10 @@ the per-million-token rates of the model that served it, summed over the rows in
 view. The harness bundles the Anthropic first-party list prices for the Claude
 models its Claude provider offers (input, output, cache read, and 5-minute cache
 write rates), and recognizes the same models under the dotted ids the Copilot
-catalog uses. Price any other model yourself with the
+catalog uses. Copilot models are priced from the per-token rates in the account's
+live catalog once it has loaded. Price any other model yourself with the
 [`modelPrices`](../../guides/configuration/#model-prices) key in `config.json`,
-which also overrides a bundled rate.
+which also overrides a catalog or bundled rate.
 
 Cost is computed when you read it, never stored. A corrected price reprices
 history on the next load, and nothing in the ledger has to be rewritten. One

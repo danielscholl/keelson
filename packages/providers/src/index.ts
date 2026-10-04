@@ -121,6 +121,7 @@ export {
   clearRegistry,
   disposeAllProviders,
   getAgentProvider,
+  getCatalogModelPrices,
   getProviderInfoList,
   getRegistration,
   isRegisteredProvider,

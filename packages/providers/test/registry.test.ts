@@ -3,6 +3,7 @@ import type { IAgentProvider, ProviderCapabilities } from "../src/index.ts";
 import {
   clearRegistry,
   getAgentProvider,
+  getCatalogModelPrices,
   getProviderInfoList,
   getRegistration,
   isRegisteredProvider,
@@ -293,5 +294,43 @@ describe("getRegistration", () => {
 
   it("throws UnknownProviderError for unregistered id", () => {
     expect(() => getRegistration("nope")).toThrow(UnknownProviderError);
+  });
+});
+
+describe("getCatalogModelPrices", () => {
+  const price = (n: number) => ({
+    inputPerMTok: n,
+    outputPerMTok: n,
+    cacheReadPerMTok: n,
+    cacheWritePerMTok: n,
+  });
+
+  it("merges registrations' live prices, first registration wins, and stays off provider info", () => {
+    registerProvider({
+      id: "a",
+      displayName: "A",
+      factory: () => new FakeProvider(),
+      capabilities: FAKE_CAPABILITIES,
+      modelPrices: () => ({ shared: price(1), "only-a": price(2) }),
+      builtIn: true,
+    });
+    registerProvider({
+      id: "b",
+      displayName: "B",
+      factory: () => new FakeProvider(),
+      capabilities: FAKE_CAPABILITIES,
+      modelPrices: () => ({ shared: price(3) }),
+      builtIn: true,
+    });
+    registerProvider({
+      id: "c",
+      displayName: "C",
+      factory: () => new FakeProvider(),
+      capabilities: FAKE_CAPABILITIES,
+      modelPrices: () => undefined,
+      builtIn: true,
+    });
+    expect(getCatalogModelPrices()).toEqual({ shared: price(1), "only-a": price(2) });
+    expect(getProviderInfoList().every((info) => !("modelPrices" in info))).toBe(true);
   });
 });

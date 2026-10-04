@@ -14,7 +14,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ToolContext } from "@keelson/shared";
+import type { ModelPrice, ToolContext } from "@keelson/shared";
 import { applyToolResultGate, checkToolCallGate } from "../tool-gate.ts";
 import { deriveToolParametersJsonSchema } from "../tool-params.ts";
 import type {
@@ -55,10 +55,22 @@ export interface CopilotModelInfo {
   };
   billing?: {
     multiplier?: number;
+    tokenPrices?: CopilotTokenPrices;
   };
+  modelPickerPriceCategory?: string;
   // Only populated for models whose supports.reasoningEffort is true.
   supportedReasoningEfforts?: Array<"none" | "low" | "medium" | "high" | "xhigh">;
   defaultReasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
+}
+
+// Cents per `batchSize` tokens (batchSize is 1M in every catalog seen so far).
+export interface CopilotTokenPrices {
+  inputPrice?: number;
+  outputPrice?: number;
+  cachePrice?: number;
+  cacheReadPrice?: number;
+  cacheWritePrice?: number;
+  batchSize?: number;
 }
 
 // Buckets per GitHub's Copilot premium-request scale.
@@ -68,6 +80,45 @@ function copilotCostTier(multiplier: number | undefined): ModelInfo["costTier"] 
   if (multiplier <= 1) return "low";
   if (multiplier <= 2) return "mid";
   return "high";
+}
+
+const PRICE_CATEGORY_TIERS: Readonly<Record<string, NonNullable<ModelInfo["costTier"]>>> = {
+  free: "free",
+  low: "low",
+  medium: "mid",
+  high: "high",
+  very_high: "high",
+};
+
+function priceCategoryTier(category: string | undefined): ModelInfo["costTier"] {
+  return category !== undefined && Object.hasOwn(PRICE_CATEGORY_TIERS, category)
+    ? PRICE_CATEGORY_TIERS[category]
+    : undefined;
+}
+
+function isPrice(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0;
+}
+
+// Base-context rates only: a usage row does not record whether the turn crossed
+// into the long-context tier. Missing cache rates fall back to the input rate
+// rather than a fabricated discount.
+export function copilotModelPrice(prices: CopilotTokenPrices | undefined): ModelPrice | undefined {
+  if (!prices || !isPrice(prices.inputPrice) || !isPrice(prices.outputPrice)) return undefined;
+  const batch = isPrice(prices.batchSize) && prices.batchSize > 0 ? prices.batchSize : 1_000_000;
+  const toUsdPerMTok = (cents: number) => (cents / 100) * (1_000_000 / batch);
+  const cacheRead = isPrice(prices.cacheReadPrice)
+    ? prices.cacheReadPrice
+    : isPrice(prices.cachePrice)
+      ? prices.cachePrice
+      : prices.inputPrice;
+  const cacheWrite = isPrice(prices.cacheWritePrice) ? prices.cacheWritePrice : prices.inputPrice;
+  return {
+    inputPerMTok: toUsdPerMTok(prices.inputPrice),
+    outputPerMTok: toUsdPerMTok(prices.outputPrice),
+    cacheReadPerMTok: toUsdPerMTok(cacheRead),
+    cacheWritePerMTok: toUsdPerMTok(cacheWrite),
+  };
 }
 
 // Mirrors @keelson/shared's reasoningEffortLevelSchema. Repeated here so the
@@ -90,8 +141,11 @@ function isKnownReasoningEffort(value: unknown): value is KnownReasoningEffort {
 function projectCopilotModel(m: CopilotModelInfo): ModelInfo {
   const info: ModelInfo = { id: m.id };
   if (m.name) info.displayName = m.name;
-  const tier = copilotCostTier(m.billing?.multiplier);
+  const tier =
+    copilotCostTier(m.billing?.multiplier) ?? priceCategoryTier(m.modelPickerPriceCategory);
   if (tier !== undefined) info.costTier = tier;
+  const price = copilotModelPrice(m.billing?.tokenPrices);
+  if (price !== undefined) info.price = price;
   const supports: NonNullable<ModelInfo["supports"]> = { tools: true };
   if (m.capabilities?.supports?.vision === true) supports.vision = true;
   if (m.capabilities?.supports?.reasoningEffort === true) {
