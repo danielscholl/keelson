@@ -14,7 +14,7 @@ import {
   usagePulseSnapshotSchema,
 } from "@keelson/shared";
 import type { CSSProperties } from "react";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import {
   getUsageBreakdown,
   getUsageEvents,
@@ -626,13 +626,13 @@ function StackChart({
 
   const [hover, setHover] = useState<{ bucket: number; series: number | null } | null>(null);
   const hovered = hover ? buckets[hover.bucket] : undefined;
+  const tooltipId = useId();
 
   return (
     <div className="usage-stack-chart">
       <svg
         className="usage-stack-svg"
         viewBox={`0 0 ${width} ${height}`}
-        role="img"
         aria-label={`Tokens over time by model, bucketed by ${bucket}`}
         onPointerLeave={() => setHover(null)}
       >
@@ -654,6 +654,7 @@ function StackChart({
           const segmentHover = (j: number | null) => () => setHover({ bucket: d, series: j });
           return (
             <g key={b.iso} data-active={hover?.bucket === d || undefined}>
+              {/* biome-ignore lint/a11y/noInteractiveElementToNoninteractiveRole: keyboard focus opens the bucket's details without an action, like a pointer hover. */}
               <rect
                 className="usage-stack-hit"
                 data-testid={`usage-stack-hit-${b.iso}`}
@@ -661,7 +662,13 @@ function StackChart({
                 y={padT}
                 width={groupW}
                 height={plotH}
+                tabIndex={0}
+                role="img"
+                aria-label={`${formatBucketLabel(b.iso, bucket)}: ${formatTokens(b.total)} tokens`}
+                aria-describedby={hover?.bucket === d ? tooltipId : undefined}
                 onPointerEnter={segmentHover(null)}
+                onFocus={segmentHover(null)}
+                onBlur={() => setHover(null)}
               />
               {b.values.map((v, j) => {
                 if (v <= 0) return null;
@@ -709,6 +716,7 @@ function StackChart({
       </svg>
       {hover && hovered && (
         <StackTooltip
+          id={tooltipId}
           series={series}
           bucket={hovered}
           activeSeries={hover.series}
@@ -729,6 +737,8 @@ function StackChart({
   );
 }
 
+// Screen readers get every bucket's models from this table; the tooltip is
+// the pointer and keyboard view of the same numbers.
 function StackDataTable({
   series,
   buckets,
@@ -738,77 +748,48 @@ function StackDataTable({
   buckets: StackBucket[];
   bucket: UsageSeriesBucket;
 }) {
-  const foldedModels = [...new Set(buckets.flatMap((b) => b.folded.map((m) => m.key)))].sort();
-  const columns = [
-    ...series.map((s) => ({
-      key: s.key,
-      label: s.key === OTHER_SERIES_KEY ? "Other" : formatModelLabel(s.label),
-    })),
-    ...foldedModels.map((key) => ({ key, label: formatModelLabel(key) })),
-  ];
-  const share = (value: number, total: number) =>
-    total > 0 ? `${Math.round((value / total) * 100)}%` : "—";
-
+  const rows = buckets.flatMap((b) => {
+    const named = series
+      .map((s, j) => ({ key: s.key, value: b.values[j] ?? 0 }))
+      .filter((m) => m.key !== OTHER_SERIES_KEY);
+    return [...named, ...b.folded]
+      .filter((m) => m.value > 0)
+      .sort((x, y) => y.value - x.value)
+      .map((m) => ({ b, ...m }));
+  });
   return (
-    <div className="usage-stack-data canvas-view-table">
-      <table>
-        <caption>Per-bucket token values and share by model</caption>
-        <thead>
-          <tr>
-            <th scope="col" rowSpan={2}>
-              Bucket
-            </th>
-            <th scope="col" rowSpan={2}>
-              Total
-            </th>
-            {columns.map((column) => (
-              <th key={column.key} scope="colgroup" colSpan={2}>
-                {column.label}
-              </th>
-            ))}
+    <table style={VISUALLY_HIDDEN_STYLE}>
+      <caption>Tokens by model per {bucket}</caption>
+      <thead>
+        <tr>
+          <th scope="col">{bucket === "hour" ? "Hour" : "Day"}</th>
+          <th scope="col">Model</th>
+          <th scope="col">Tokens</th>
+          <th scope="col">Share</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(({ b, key, value }) => (
+          <tr key={`${b.iso}\u0000${key}`}>
+            <td>{formatBucketLabel(b.iso, bucket)}</td>
+            <td>{formatModelLabel(key)}</td>
+            <td>{formatTokens(value)}</td>
+            <td>{b.total > 0 ? `${Math.round((value / b.total) * 100)}%` : "—"}</td>
           </tr>
-          <tr>
-            {columns.flatMap((column) => [
-              <th key={`${column.key}-value`} scope="col">
-                Value
-              </th>,
-              <th key={`${column.key}-share`} scope="col">
-                Share
-              </th>,
-            ])}
-          </tr>
-        </thead>
-        <tbody>
-          {buckets.map((b) => (
-            <tr key={b.iso}>
-              <th scope="row">{formatBucketLabel(b.iso, bucket)}</th>
-              <td>{formatTokens(b.total)}</td>
-              {b.values.map((value, index) => (
-                <Fragment key={series[index]?.key}>
-                  <td>{formatTokens(value)}</td>
-                  <td>{share(value, b.total)}</td>
-                </Fragment>
-              ))}
-              {foldedModels.map((model) => {
-                const value = b.folded.find((m) => m.key === model)?.value ?? 0;
-                return (
-                  <Fragment key={model}>
-                    <td>{formatTokens(value)}</td>
-                    <td>{share(value, b.total)}</td>
-                  </Fragment>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+        ))}
+      </tbody>
+    </table>
   );
 }
+
+// Past this many, the Other rows end in a "+N more" line so the card stays
+// inside the region, whose overflow is hidden.
+const TOOLTIP_FOLDED_ROWS = 4;
 
 // Lists the stack top-down so rows line up with the bar, and opens the Other
 // segment into the models it folds, which its shared gray cannot name.
 function StackTooltip({
+  id,
   series,
   bucket,
   activeSeries,
@@ -820,6 +801,7 @@ function StackTooltip({
   activeSeries: number | null;
   title: string;
   anchorPct: number;
+  id: string;
 }) {
   const share = (v: number) => (bucket.total > 0 ? `${Math.round((v / bucket.total) * 100)}%` : "");
   const rows = series
@@ -829,6 +811,7 @@ function StackTooltip({
   const flipLeft = anchorPct > 50;
   return (
     <div
+      id={id}
       className="usage-stack-tooltip"
       role="tooltip"
       style={flipLeft ? { right: `${100 - anchorPct}%` } : { left: `${anchorPct}%` }}
@@ -849,13 +832,20 @@ function StackTooltip({
             <span className="usage-stack-tooltip-share">{share(value)}</span>
           </div>
           {s.key === OTHER_SERIES_KEY &&
-            bucket.folded.map((m) => (
+            bucket.folded.slice(0, TOOLTIP_FOLDED_ROWS).map((m) => (
               <div key={m.key} className="usage-stack-tooltip-row usage-stack-tooltip-row--sub">
                 <span className="usage-stack-tooltip-label">{formatModelLabel(m.key)}</span>
                 <span className="usage-stack-tooltip-value">{formatTokens(m.value)}</span>
                 <span className="usage-stack-tooltip-share">{share(m.value)}</span>
               </div>
             ))}
+          {s.key === OTHER_SERIES_KEY && bucket.folded.length > TOOLTIP_FOLDED_ROWS && (
+            <div className="usage-stack-tooltip-row usage-stack-tooltip-row--sub">
+              <span className="usage-stack-tooltip-label">
+                +{bucket.folded.length - TOOLTIP_FOLDED_ROWS} more
+              </span>
+            </div>
+          )}
         </div>
       ))}
     </div>

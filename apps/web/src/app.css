@@ -10707,18 +10707,18 @@ a.cvb-card-title::after {
 .usage-stack-chart {
   position: relative;
 }
-.usage-stack-data {
-  margin-top: 16px;
-  overflow-x: auto;
-}
-.usage-stack-data table {
-  min-width: max-content;
-}
 .usage-stack-hit {
   fill: transparent;
 }
 .usage-stack-svg g[data-active] .usage-stack-hit {
   fill: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.usage-stack-hit:focus {
+  outline: none;
+}
+.usage-stack-hit:focus-visible {
+  stroke: var(--accent);
+  stroke-width: 2;
 }
 .usage-seg-rect {
   transition: opacity 0.15s;
@@ -10741,6 +10741,14 @@ a.cvb-card-title::after {
   background: var(--bg-soft);
   box-shadow: 0 8px 20px color-mix(in srgb, var(--bg) 78%, transparent);
   font-size: 12px;
+}
+/* Too narrow to float over the bars without clipping, so it opens below them. */
+@media (max-width: 640px) {
+  .usage-stack-tooltip {
+    position: static;
+    max-width: none;
+    margin: 8px 0 0;
+  }
 }
 .usage-stack-tooltip-title {
   display: flex;
