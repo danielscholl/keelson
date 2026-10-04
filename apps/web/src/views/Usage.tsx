@@ -1236,7 +1236,9 @@ function LedgerSection({ range }: { range: UsageWindow }) {
       })
       .catch(() => {
         // The chips are a convenience; the ledger itself still loads without them.
-        if (!cancelled) setModels([]);
+        if (cancelled) return;
+        setModels([]);
+        setModelFilter("all");
       });
     return () => {
       cancelled = true;

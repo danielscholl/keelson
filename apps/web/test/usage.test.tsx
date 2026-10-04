@@ -932,6 +932,65 @@ describe("Usage page", () => {
     }
   });
 
+  test("a failed model lookup clears the model filter along with its chips", async () => {
+    const original = { summary: getUsageSummaryImpl, events: getUsageEventsImpl };
+    const modelsQueried: Array<string | undefined> = [];
+    getUsageSummaryImpl = async (query) => {
+      if (query.groupBy === "model" && query.window === "7d") throw new Error("lookup failed");
+      return {
+        totals: {
+          events: 1,
+          inputTokens: 10,
+          outputTokens: 5,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: null,
+          unpricedEvents: 1,
+          cacheHitRatio: null,
+        },
+        groups:
+          query.groupBy === "model"
+            ? [
+                {
+                  key: "grok-4.6",
+                  events: 1,
+                  inputTokens: 10,
+                  outputTokens: 5,
+                  cacheReadTokens: 0,
+                  cacheWriteTokens: 0,
+                  costUsd: null,
+                  unpricedEvents: 1,
+                  cacheHitRatio: null,
+                },
+              ]
+            : [],
+      };
+    };
+    getUsageEventsImpl = async (query) => {
+      if (query.status === undefined) modelsQueried.push(query.model);
+      return [];
+    };
+    try {
+      await act(async () => {
+        await renderUsagePage();
+      });
+      fireEvent.click(screen.getByLabelText("Ledger"));
+      fireEvent.click(screen.getByLabelText("30d"));
+      fireEvent.click(await screen.findByRole("button", { name: "grok-4.6" }));
+      await waitFor(() => expect(modelsQueried).toContain("grok-4.6"));
+
+      fireEvent.click(screen.getByLabelText("7d"));
+      await waitFor(() => expect(screen.queryByRole("button", { name: "grok-4.6" })).toBeNull());
+      expect(screen.getByRole("button", { name: "All models" }).getAttribute("aria-pressed")).toBe(
+        "true",
+      );
+      await waitFor(() => expect(modelsQueried.at(-1)).toBeUndefined());
+    } finally {
+      getUsageSummaryImpl = original.summary;
+      getUsageEventsImpl = original.events;
+    }
+  });
+
   test("passes active ledger filters to the events query", async () => {
     const eventCalls: Parameters<typeof realApi.getUsageEvents>[0][] = [];
     getUsageSummaryImpl = async (query) =>
