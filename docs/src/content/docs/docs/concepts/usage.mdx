@@ -60,8 +60,8 @@ ledger each get their own sub-view.
 | Over time | A stacked bar chart of tokens by served model across the window's buckets. |
 | Source to model flow | A ribbon diagram tracing which source (a chat, a workflow, a rib) drove which model. |
 | Model roster | Per model: turns, input and output tokens, cache hit ratio, cost, average tokens per turn, and share of the window. |
-| Jobs | Per recurring workflow or rib job: runs, average and p95 tokens per run, the window total, cost per run, window cost, and cache hit ratio. |
-| Ledger | The raw rows, newest first, each with its priced cost, filterable by source, model, and status. |
+| Jobs | Per recurring workflow or rib job (a rib job reads `rib:<id>`): runs, average and p95 tokens per run, the window total, cost per run, window cost, and cache hit ratio. |
+| Ledger | The raw rows, newest first, each with its priced cost, filterable by source, model, and status. It loads 50 rows at a time, up to the latest 500. |
 
 ## Windows are fixed
 

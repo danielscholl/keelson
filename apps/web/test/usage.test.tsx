@@ -3,6 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterAll, describe, expect, mock, test } from "bun:test";
+import type { UsageEventRowWire } from "@keelson/shared";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as realApi from "../src/api.ts";
 import { UsageChip } from "../src/components/Chat/UsageChip.tsx";
@@ -64,6 +65,29 @@ afterAll(() => {
   getUsageJobsImpl = realApi.getUsageJobs;
   mock.module("../src/api.ts", () => realApi);
 });
+
+function ledgerEvent(id: number): UsageEventRowWire {
+  return {
+    id,
+    ts: "2026-07-01T00:00:00.000Z",
+    source: "chat",
+    provider: "copilot",
+    model: "claude-sonnet-5",
+    inputTokens: 10,
+    outputTokens: 5,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    costUsd: null,
+    durationMs: 1000,
+    status: "ok",
+    conversationId: null,
+    runId: null,
+    nodeId: null,
+    workflowName: null,
+    ribId: null,
+    projectId: null,
+  };
+}
 
 async function renderUsagePage() {
   const { Usage } = await import("../src/views/Usage.tsx");
@@ -534,7 +558,7 @@ describe("Usage page", () => {
     fireEvent.click(screen.getByLabelText("Jobs"));
     await waitFor(() => expect(screen.getAllByText("smoke-test").length).toBeGreaterThan(0));
     expect(screen.getByText("Avg tokens/run")).toBeDefined();
-    expect(screen.getByLabelText("Weekly burn by job")).toBeDefined();
+    expect(screen.getByLabelText("Burn by job, 7d")).toBeDefined();
     getUsageJobsImpl = async () => [];
   });
 
@@ -813,6 +837,99 @@ describe("Usage page", () => {
       groups: [],
     });
     getUsageEventsImpl = async () => [];
+  });
+
+  test("a full ledger page says it is the latest slice and pages on Show more", async () => {
+    const original = { summary: getUsageSummaryImpl, events: getUsageEventsImpl };
+    const limits: Array<number | undefined> = [];
+    getUsageSummaryImpl = async () => {
+      throw new Error("summary down");
+    };
+    getUsageEventsImpl = async (query) => {
+      if (query.status === undefined) limits.push(query.limit);
+      return Array.from({ length: query.limit ?? 0 }, (_, i) => ledgerEvent(i + 1));
+    };
+    try {
+      await act(async () => {
+        await renderUsagePage();
+      });
+      fireEvent.click(screen.getByLabelText("Ledger"));
+
+      await waitFor(() => expect(screen.getByText("Latest 50 events")).toBeDefined());
+      expect(screen.queryByText("Couldn't load the ledger")).toBeNull();
+      const dated = new Date("2026-07-01T00:00:00.000Z").toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+      expect(screen.getAllByText(dated).length).toBe(50);
+
+      fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+      await waitFor(() => expect(screen.getByText("Latest 100 events")).toBeDefined());
+      expect(limits).toEqual([50, 100]);
+    } finally {
+      getUsageSummaryImpl = original.summary;
+      getUsageEventsImpl = original.events;
+    }
+  });
+
+  test("a model filter with no chip in the new window falls back to all models", async () => {
+    const original = { summary: getUsageSummaryImpl, events: getUsageEventsImpl };
+    const modelsQueried: Array<string | undefined> = [];
+    getUsageSummaryImpl = async (query) => ({
+      totals: {
+        events: 1,
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: null,
+        unpricedEvents: 1,
+        cacheHitRatio: null,
+      },
+      groups:
+        query.groupBy === "model" && query.window === "30d"
+          ? [
+              {
+                key: "grok-4.6",
+                events: 1,
+                inputTokens: 10,
+                outputTokens: 5,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                costUsd: null,
+                unpricedEvents: 1,
+                cacheHitRatio: null,
+              },
+            ]
+          : [],
+    });
+    getUsageEventsImpl = async (query) => {
+      if (query.status === undefined) modelsQueried.push(query.model);
+      return [];
+    };
+    try {
+      await act(async () => {
+        await renderUsagePage();
+      });
+      fireEvent.click(screen.getByLabelText("Ledger"));
+      fireEvent.click(screen.getByLabelText("30d"));
+      fireEvent.click(await screen.findByRole("button", { name: "grok-4.6" }));
+      await waitFor(() => expect(modelsQueried).toContain("grok-4.6"));
+
+      fireEvent.click(screen.getByLabelText("7d"));
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "All models" }).getAttribute("aria-pressed"),
+        ).toBe("true"),
+      );
+      await waitFor(() => expect(modelsQueried.at(-1)).toBeUndefined());
+      expect(screen.getByText("No events recorded in this window yet.")).toBeDefined();
+    } finally {
+      getUsageSummaryImpl = original.summary;
+      getUsageEventsImpl = original.events;
+    }
   });
 
   test("passes active ledger filters to the events query", async () => {

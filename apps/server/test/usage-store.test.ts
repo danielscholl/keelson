@@ -754,7 +754,7 @@ describe("SQLite UsageStore", () => {
       });
       const rows = store.jobs({ sinceIso: "2025-01-01T00:00:00.000Z" });
       expect(rows).toEqual([
-        expect.objectContaining({ key: "osdu", runs: 2, totalTokens: 20 }),
+        expect.objectContaining({ key: "rib:osdu", runs: 2, totalTokens: 20 }),
         expect.objectContaining({ key: "workflow", runs: 1, totalTokens: 10 }),
       ]);
     });
