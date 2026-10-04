@@ -71,6 +71,8 @@ function armConversationGate(): void {
 let ribSummaries: RibSummary[] = [];
 const postRibActionCalls: Array<{ id: string; action: unknown }> = [];
 let postRibActionResult: RibActionResponse = { ok: true };
+let ledgerPricedEvents = 0;
+let ledgerUnpricedEvents = 0;
 
 mock.module("../src/api.ts", () => ({
   cloneProject: async () => ({ id: "project-2", name: "copy" }),
@@ -95,13 +97,14 @@ mock.module("../src/api.ts", () => ({
   getUsageEvents: async () => [],
   getUsageSummary: async () => ({
     totals: {
-      events: 0,
+      events: ledgerPricedEvents + ledgerUnpricedEvents,
       inputTokens: 0,
       outputTokens: 0,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      costUsd: 0,
-      unpricedEvents: 0,
+      costUsd: ledgerUnpricedEvents > 0 ? null : 0,
+      pricedCostUsd: 0,
+      unpricedEvents: ledgerUnpricedEvents,
       cacheHitRatio: null,
     },
     groups: [],
@@ -158,6 +161,24 @@ beforeEach(() => {
   postRibActionResult = { ok: true };
   getConversationGate = null;
   releaseConversationGate = null;
+  ledgerPricedEvents = 0;
+  ledgerUnpricedEvents = 0;
+});
+
+describe("Chat conversation usage", () => {
+  test("restored conversations use ledger event counts for a zero-cost floor", async () => {
+    ledgerPricedEvents = 2;
+    ledgerUnpricedEvents = 8;
+    const assistant = conversations[0]!.messages[1]!;
+    assistant.usage = { inputTokens: 1000, outputTokens: 500 };
+    try {
+      renderChat();
+      expect(await screen.findByText("≥ $0.0000")).toBeDefined();
+      expect(screen.getByText("Unpriced turns").parentElement?.textContent).toBe("Unpriced turns8");
+    } finally {
+      delete assistant.usage;
+    }
+  });
 });
 
 describe("Chat send to surface", () => {

@@ -26,16 +26,27 @@ import {
 } from "../api.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { formatProviderModel } from "../lib/formatProvenance.ts";
-import { formatCacheHit, formatCostUsd, formatTokens } from "../lib/formatTokens.ts";
+import {
+  formatAggregateCostUsd,
+  formatCacheHit,
+  formatCostUsd,
+  formatTokens,
+} from "../lib/formatTokens.ts";
 
 const WINDOWS: UsageWindow[] = ["24h", "7d", "30d"];
 
 // A null aggregate cost is unexplained on its own; the count of rows that
 // kept it unpriced is what tells an operator which price to add.
-function formatAggregateCost(costUsd: number | null, unpricedEvents: number): string {
+function formatAggregateCost(
+  costUsd: number | null,
+  pricedCostUsd: number,
+  unpricedEvents: number,
+  pricedEvents: number,
+): string {
+  const cost = formatAggregateCostUsd(costUsd, pricedCostUsd, unpricedEvents, pricedEvents);
   return costUsd === null && unpricedEvents > 0
-    ? `unpriced (${unpricedEvents.toLocaleString()})`
-    : formatCostUsd(costUsd);
+    ? `${cost} (${unpricedEvents.toLocaleString()})`
+    : cost;
 }
 const WINDOW_LABEL: Record<UsageWindow, string> = { "24h": "24h", "7d": "7d", "30d": "30d" };
 type UsageSubView = "overview" | "models" | "jobs" | "ledger";
@@ -331,7 +342,14 @@ function PulseStats({
         </div>
       </div>
       <div className="usage-stat">
-        <div className="usage-stat-value">{formatCostUsd(totals.costUsd)}</div>
+        <div className="usage-stat-value">
+          {formatAggregateCostUsd(
+            totals.costUsd,
+            totals.pricedCostUsd,
+            totals.unpricedEvents,
+            totals.events - totals.unpricedEvents,
+          )}
+        </div>
         <div className="usage-stat-label">Cost</div>
         <div className="usage-stat-sub">
           {totals.unpricedEvents > 0
@@ -881,6 +899,7 @@ interface RosterRow {
   outputTokens: number;
   cacheHitRatio: number | null;
   costUsd: number | null;
+  pricedCostUsd: number;
   unpricedEvents: number;
   avgPerTurn: number;
   share: number;
@@ -926,6 +945,7 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
           outputTokens: g.outputTokens,
           cacheHitRatio: g.cacheHitRatio,
           costUsd: g.costUsd,
+          pricedCostUsd: g.pricedCostUsd,
           unpricedEvents: g.unpricedEvents,
           avgPerTurn: g.events > 0 ? tokens / g.events : 0,
           share: grandTotal > 0 ? Math.round((tokens / grandTotal) * 100) : 0,
@@ -984,7 +1004,14 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                     <td>↑ {formatTokens(r.inputTokens)}</td>
                     <td>↓ {formatTokens(r.outputTokens)}</td>
                     <td>{formatCacheHit(r.cacheHitRatio)}</td>
-                    <td>{formatAggregateCost(r.costUsd, r.unpricedEvents)}</td>
+                    <td>
+                      {formatAggregateCost(
+                        r.costUsd,
+                        r.pricedCostUsd,
+                        r.unpricedEvents,
+                        r.turns - r.unpricedEvents,
+                      )}
+                    </td>
                     <td>{formatTokens(r.avgPerTurn)}</td>
                     <td>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -1241,8 +1268,22 @@ function JobsSection({ range }: { range: UsageWindow }) {
                       <td>{formatTokens(job.avgTokensPerRun)}</td>
                       <td>{formatTokens(job.p95TokensPerRun)}</td>
                       <td>{formatTokens(job.totalTokens)}</td>
-                      <td>{formatAggregateCost(job.costUsdPerRun, job.unpricedEvents)}</td>
-                      <td>{formatAggregateCost(job.totalCostUsd, job.unpricedEvents)}</td>
+                      <td>
+                        {formatAggregateCost(
+                          job.costUsdPerRun,
+                          job.runs > 0 ? job.pricedTotalCostUsd / job.runs : 0,
+                          job.unpricedEvents,
+                          job.pricedEvents,
+                        )}
+                      </td>
+                      <td>
+                        {formatAggregateCost(
+                          job.totalCostUsd,
+                          job.pricedTotalCostUsd,
+                          job.unpricedEvents,
+                          job.pricedEvents,
+                        )}
+                      </td>
                       <td>{formatCacheHit(job.cacheHitRatio)}</td>
                     </tr>
                   ))}

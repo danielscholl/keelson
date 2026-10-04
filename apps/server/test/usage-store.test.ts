@@ -316,6 +316,7 @@ describe("SQLite UsageStore", () => {
         cacheReadTokens: 2,
         cacheWriteTokens: 1,
         costUsd: null,
+        pricedCostUsd: 0,
         unpricedEvents: 2,
         cacheHitRatio: 2 / 16,
       });
@@ -328,6 +329,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 2,
           cacheWriteTokens: 1,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: 2 / 13,
         },
@@ -339,6 +341,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -436,6 +439,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 2,
           cacheHitRatio: null,
         },
@@ -448,6 +452,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -513,6 +518,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -525,6 +531,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -537,6 +544,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -587,6 +595,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -599,6 +608,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -611,6 +621,7 @@ describe("SQLite UsageStore", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           costUsd: null,
+          pricedCostUsd: 0,
           unpricedEvents: 2,
           cacheHitRatio: null,
         },
@@ -707,7 +718,9 @@ describe("SQLite UsageStore", () => {
           avgTokensPerRun: 25,
           p95TokensPerRun: 40,
           totalCostUsd: null,
+          pricedTotalCostUsd: 0,
           costUsdPerRun: null,
+          pricedEvents: 0,
           unpricedEvents: 3,
           cacheHitRatio: null,
         },
@@ -917,6 +930,7 @@ describe("SQLite UsageStore", () => {
       expect(jobs[0]?.totalCostUsd).toBeCloseTo(total, 6);
       expect(jobs[0]?.costUsdPerRun).toBeCloseTo(total / 2, 6);
       expect(jobs[0]?.unpricedEvents).toBe(0);
+      expect(jobs[0]?.pricedEvents).toBe(2);
       const events = store.events();
       expect(events.map((e) => [e.model, e.costUsd])).toEqual([
         ["claude-haiku-4.5", HAIKU_COST],
@@ -924,7 +938,7 @@ describe("SQLite UsageStore", () => {
       ]);
     });
 
-    test("a job with one unpriced run reports null cost on both cost fields", () => {
+    test("a job with one unpriced run reports null cost on both cost fields, with the priced part as a floor", () => {
       store.record({
         source: "workflow",
         provider: "claude",
@@ -948,6 +962,62 @@ describe("SQLite UsageStore", () => {
         runs: 2,
         totalCostUsd: null,
         costUsdPerRun: null,
+        pricedEvents: 1,
+        unpricedEvents: 1,
+      });
+      expect(job?.pricedTotalCostUsd).toBeCloseTo(SONNET_COST, 6);
+
+      const { totals } = store.summary({ groupBy: "model" });
+      expect(totals.costUsd).toBeNull();
+      expect(totals.pricedCostUsd).toBeCloseTo(SONNET_COST, 6);
+    });
+
+    test("priced zero-token and zero-rate events count independently of job runs", () => {
+      const input = {
+        source: "workflow" as const,
+        provider: "claude",
+        runId: "same-run",
+        workflowName: "w",
+      };
+      store.record({
+        ...input,
+        model: "claude-sonnet-5",
+        inputTokens: 0,
+        outputTokens: 0,
+      });
+      store.record({
+        ...input,
+        model: "free-model",
+        inputTokens: 1000,
+        outputTokens: 500,
+        status: "aborted",
+      });
+      store.record({ ...input, model: "unknown", inputTokens: 1, outputTokens: 1 });
+
+      expect(store.jobs()[0]).toMatchObject({ pricedEvents: 1, unpricedEvents: 2 });
+      const repriced = createUsageStore(db, {
+        priceOverrides: () => ({
+          "free-model": {
+            inputPerMTok: 0,
+            outputPerMTok: 0,
+            cacheReadPerMTok: 0,
+            cacheWritePerMTok: 0,
+          },
+        }),
+      });
+      expect(repriced.jobs()[0]).toMatchObject({
+        runs: 1,
+        totalCostUsd: null,
+        pricedTotalCostUsd: 0,
+        costUsdPerRun: null,
+        pricedEvents: 2,
+        unpricedEvents: 1,
+      });
+      const { totals } = repriced.summary({ groupBy: "model" });
+      expect(totals).toMatchObject({
+        events: 3,
+        costUsd: null,
+        pricedCostUsd: 0,
         unpricedEvents: 1,
       });
     });
@@ -1176,6 +1246,7 @@ describe("SQLite UsageStore", () => {
       expect(result.totals).toMatchObject({
         events: 0,
         costUsd: 0,
+        pricedCostUsd: 0,
         unpricedEvents: 0,
         cacheHitRatio: null,
       });

@@ -35,7 +35,10 @@ export const WIRE_PROTOCOL_VERSION = "1.0" as const;
 // `cacheHitRatio`, and `unpricedEvents` on jobs rows; `costUsd` on event rows.
 // 0.10: definition provenance — new `definitionHash` on WorkflowRunSummary.
 // Pre-0.10 clients strict-reject run status and history responses carrying it.
-export const SCHEMA_VERSION = "0.10" as const;
+// 0.11: partial usage cost — new `pricedCostUsd` on usage totals/group/series/
+// breakdown rows and `pricedTotalCostUsd` on jobs rows.
+// 0.12: priced event count — new `pricedEvents` on jobs rows.
+export const SCHEMA_VERSION = "0.12" as const;
 
 // A peer (the server on /api/health + /api/config, or a client's bundle)
 // reports its SCHEMA_VERSION. Any difference from this build's value signals

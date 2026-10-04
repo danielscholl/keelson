@@ -69,6 +69,21 @@ export function formatCostUsd(n: number | null | undefined): string {
   return n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
 }
 
+// A partly priced aggregate shows the priced part as a floor, so one unpriced
+// model doesn't blank out the cost of everything else.
+export function formatAggregateCostUsd(
+  costUsd: number | null,
+  pricedCostUsd: number,
+  unpricedEvents: number,
+  pricedEvents: number,
+): string {
+  if (costUsd !== null || unpricedEvents === 0 || pricedEvents === 0) {
+    return formatCostUsd(costUsd);
+  }
+  if (pricedCostUsd > 0 && pricedCostUsd < 0.0001) return "> $0.0000";
+  return `≥ ${formatCostUsd(pricedCostUsd)}`;
+}
+
 // Cache hit ratio as a whole percentage; null (no cache reads reported, or
 // nothing to divide by) renders as a dash rather than a fabricated 0%.
 export function formatCacheHit(ratio: number | null | undefined): string {
