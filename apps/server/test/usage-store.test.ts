@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ModelPrices } from "@keelson/shared";
 import { openDatabase } from "../src/db/init.ts";
 import { createUsageStore, type UsageStore } from "../src/usage-store.ts";
 import { rmTemp } from "./temp.ts";
@@ -1179,6 +1180,75 @@ describe("SQLite UsageStore", () => {
         unpricedEvents: 0,
         cacheHitRatio: null,
       });
+    });
+    test("a model that leaves the live catalog keeps the price it was last seen at", () => {
+      const price = (n: number) => ({
+        inputPerMTok: n,
+        outputPerMTok: n,
+        cacheReadPerMTok: 0,
+        cacheWritePerMTok: 0,
+      });
+      let live: Record<string, ModelPrices> = {
+        copilot: { "gemini-3.6-flash": price(1), "gemini-3.7-flash": price(2) },
+      };
+      const priced = createUsageStore(db, { catalogPrices: () => live });
+      for (const model of ["gemini-3.6-flash", "gemini-3.7-flash"]) {
+        priced.record({
+          source: "workflow",
+          provider: "copilot",
+          model,
+          inputTokens: 1_000_000,
+          outputTokens: 0,
+        });
+      }
+      const costs = () =>
+        new Map(priced.summary({ groupBy: "model" }).groups.map((g) => [g.key, g.costUsd]));
+      expect(costs().get("gemini-3.6-flash")).toBeCloseTo(1, 6);
+
+      live = { copilot: { "gemini-3.7-flash": price(3) } };
+      expect(costs().get("gemini-3.6-flash")).toBeCloseTo(1, 6);
+      expect(costs().get("gemini-3.7-flash")).toBeCloseTo(3, 6);
+
+      live = {};
+      const restarted = createUsageStore(db, { catalogPrices: () => live });
+      const afterRestart = new Map(
+        restarted.summary({ groupBy: "model" }).groups.map((g) => [g.key, g.costUsd]),
+      );
+      expect(afterRestart.get("gemini-3.6-flash")).toBeCloseTo(1, 6);
+      expect(afterRestart.get("gemini-3.7-flash")).toBeCloseTo(3, 6);
+    });
+
+    test("a config override still wins over a remembered catalog price", () => {
+      createUsageStore(db, {
+        catalogPrices: () => ({
+          copilot: {
+            "gpt-6-sol": {
+              inputPerMTok: 1,
+              outputPerMTok: 1,
+              cacheReadPerMTok: 0,
+              cacheWritePerMTok: 0,
+            },
+          },
+        }),
+      }).summary({ groupBy: "model" });
+      const overridden = createUsageStore(db, {
+        priceOverrides: () => ({
+          "gpt-6-sol": {
+            inputPerMTok: 7,
+            outputPerMTok: 7,
+            cacheReadPerMTok: 0,
+            cacheWritePerMTok: 0,
+          },
+        }),
+      });
+      overridden.record({
+        source: "chat",
+        provider: "copilot",
+        model: "gpt-6-sol",
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+      });
+      expect(overridden.summary({ groupBy: "model" }).totals.costUsd).toBeCloseTo(7, 6);
     });
   });
 

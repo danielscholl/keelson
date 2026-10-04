@@ -374,8 +374,81 @@ function percentile(sorted: number[], pct: number): number {
   return sorted[Math.max(0, Math.min(sorted.length - 1, idx))] ?? 0;
 }
 
+interface CatalogPriceRow {
+  provider: string;
+  model: string;
+  input_per_mtok: number;
+  output_per_mtok: number;
+  cache_read_per_mtok: number;
+  cache_write_per_mtok: number;
+}
+
+function samePrice(a: ModelPrice, b: ModelPrice): boolean {
+  return (
+    a.inputPerMTok === b.inputPerMTok &&
+    a.outputPerMTok === b.outputPerMTok &&
+    a.cacheReadPerMTok === b.cacheReadPerMTok &&
+    a.cacheWritePerMTok === b.cacheWritePerMTok
+  );
+}
+
+// Provider catalogs drop retired models, which would leave their history
+// unpriced; every live price is remembered and live prices win over remembered.
+function createCatalogMemory(db: Database) {
+  const selectAll = db.prepare("SELECT * FROM catalog_model_prices");
+  const upsert = db.prepare(
+    `INSERT INTO catalog_model_prices(
+       provider, model, input_per_mtok, output_per_mtok, cache_read_per_mtok,
+       cache_write_per_mtok, seen_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(provider, model) DO UPDATE SET
+       input_per_mtok = excluded.input_per_mtok,
+       output_per_mtok = excluded.output_per_mtok,
+       cache_read_per_mtok = excluded.cache_read_per_mtok,
+       cache_write_per_mtok = excluded.cache_write_per_mtok,
+       seen_at = excluded.seen_at`,
+  );
+  return (live: Record<string, ModelPrices> | undefined): Record<string, ModelPrices> => {
+    const remembered = new Map<string, Map<string, ModelPrice>>();
+    for (const row of selectAll.all() as CatalogPriceRow[]) {
+      const byModel = remembered.get(row.provider) ?? new Map<string, ModelPrice>();
+      byModel.set(row.model, {
+        inputPerMTok: row.input_per_mtok,
+        outputPerMTok: row.output_per_mtok,
+        cacheReadPerMTok: row.cache_read_per_mtok,
+        cacheWritePerMTok: row.cache_write_per_mtok,
+      });
+      remembered.set(row.provider, byModel);
+    }
+    const seenAt = new Date().toISOString();
+    for (const [provider, prices] of Object.entries(live ?? {})) {
+      const byModel = remembered.get(provider) ?? new Map<string, ModelPrice>();
+      for (const [model, price] of Object.entries(prices)) {
+        const known = byModel.get(model);
+        if (known && samePrice(known, price)) continue;
+        upsert.run(
+          provider,
+          model,
+          price.inputPerMTok,
+          price.outputPerMTok,
+          price.cacheReadPerMTok,
+          price.cacheWritePerMTok,
+          seenAt,
+        );
+        byModel.set(model, price);
+      }
+      remembered.set(provider, byModel);
+    }
+    return Object.fromEntries(
+      [...remembered].map(([provider, byModel]) => [provider, Object.fromEntries(byModel)]),
+    );
+  };
+}
+
 export function createUsageStore(db: Database, options: UsageStoreOptions = {}): UsageStore {
-  const pricerForQuery = () => createPricer(options.priceOverrides?.(), options.catalogPrices?.());
+  const catalogMemory = createCatalogMemory(db);
+  const pricerForQuery = () =>
+    createPricer(options.priceOverrides?.(), catalogMemory(options.catalogPrices?.()));
   const insertEvent = db.prepare(
     `INSERT INTO usage_events(
        ts, source, provider, model, input_tokens, output_tokens,

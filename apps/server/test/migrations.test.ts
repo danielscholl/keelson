@@ -30,7 +30,7 @@ describe("migrations", () => {
         version: number;
       }>
     ).map((r) => r.version);
-    expect(versions).toEqual([12, 13, 14, 15, 16, 17, 18, 19]);
+    expect(versions).toEqual([12, 13, 14, 15, 16, 17, 18, 19, 20]);
 
     expect(tableNames(db)).toContain("conversations");
     expect(tableNames(db)).toContain("memories");
@@ -49,6 +49,7 @@ describe("migrations", () => {
     expect(nodeColumns.map((column) => column.name)).toContain("approval_json");
     expect(tableNames(db)).toContain("usage_events");
     expect(tableNames(db)).toContain("ops");
+    expect(tableNames(db)).toContain("catalog_model_prices");
     db.close();
   });
 
@@ -73,7 +74,7 @@ describe("migrations", () => {
     }>;
     expect(nodeColumns.map((column) => column.name)).toContain("approval_json");
     expect(db.query("SELECT MAX(version) AS v FROM schema_version").get() as { v: number }).toEqual(
-      { v: 19 },
+      { v: 20 },
     );
     db.close();
   });
@@ -100,7 +101,7 @@ describe("migrations", () => {
 
     expect(tableNames(db)).toEqual(before);
     expect(db.query("SELECT count(*) AS c FROM schema_version").get() as { c: number }).toEqual({
-      c: 8,
+      c: 9,
     });
     db.close();
   });
