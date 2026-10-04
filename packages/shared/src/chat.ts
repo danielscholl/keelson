@@ -37,6 +37,7 @@ export const WIRE_PROTOCOL_VERSION = "1.0" as const;
 // Pre-0.10 clients strict-reject run status and history responses carrying it.
 // 0.11: partial usage cost — new `pricedCostUsd` on usage totals/group/series/
 // breakdown rows and `pricedTotalCostUsd` on jobs rows.
+// 0.12: priced event count — new `pricedEvents` on jobs rows.
 export const SCHEMA_VERSION = "0.12" as const;
 
 // A peer (the server on /api/health + /api/config, or a client's bundle)

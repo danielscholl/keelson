@@ -111,7 +111,8 @@ its `unpricedEvents` count says how many rows kept it that way. `pricedCostUsd`
 priced, so the tab renders a mixed window as a floor such as `≥ $155.03` with the
 unpriced count still visible, and a window with no priced rows at all as
 `unpriced`. Zero-cost priced rows still count as priced, so a mixed window whose
-priced subtotal is zero reads `≥ $0.0000`. A fully priced window that reads
+priced subtotal is zero reads `≥ $0.0000`, and one whose priced subtotal is
+positive but under `$0.0001` reads `> $0.0000`. A fully priced window that reads
 `$0.0000` really did cost nothing, and a window on an unpriced model never looks
 free. The same rule holds for a job: one unpriced row nulls both its cost per run
 and its window cost. Both show floors with the unpriced count when any rows were

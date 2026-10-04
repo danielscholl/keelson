@@ -406,6 +406,12 @@ describe("formatAggregateCostUsd", () => {
     expect(formatAggregateCostUsd(0, 0, 0, 0)).toBe("$0.0000");
     expect(formatAggregateCostUsd(null, 0, 0, 0)).toBe("unpriced");
   });
+
+  test("a sub-threshold priced part reads as a single strict floor", () => {
+    expect(formatAggregateCostUsd(null, 0.00004, 8, 2)).toBe("> $0.0000");
+    expect(formatAggregateCostUsd(null, 0.0001, 8, 2)).toBe("≥ $0.0001");
+    expect(formatAggregateCostUsd(0.00004, 0.00004, 0, 2)).toBe("<$0.0001");
+  });
 });
 
 describe("UsageChip — cache-only session", () => {

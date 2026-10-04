@@ -80,6 +80,7 @@ export function formatAggregateCostUsd(
   if (costUsd !== null || unpricedEvents === 0 || pricedEvents === 0) {
     return formatCostUsd(costUsd);
   }
+  if (pricedCostUsd > 0 && pricedCostUsd < 0.0001) return "> $0.0000";
   return `≥ ${formatCostUsd(pricedCostUsd)}`;
 }
 
