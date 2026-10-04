@@ -14,7 +14,7 @@ import {
   usagePulseSnapshotSchema,
 } from "@keelson/shared";
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   getUsageBreakdown,
   getUsageEvents,
@@ -724,6 +724,84 @@ function StackChart({
           </span>
         ))}
       </div>
+      <StackDataTable series={series} buckets={buckets} bucket={bucket} />
+    </div>
+  );
+}
+
+function StackDataTable({
+  series,
+  buckets,
+  bucket,
+}: {
+  series: ChartSeries[];
+  buckets: StackBucket[];
+  bucket: UsageSeriesBucket;
+}) {
+  const foldedModels = [...new Set(buckets.flatMap((b) => b.folded.map((m) => m.key)))].sort();
+  const columns = [
+    ...series.map((s) => ({
+      key: s.key,
+      label: s.key === OTHER_SERIES_KEY ? "Other" : formatModelLabel(s.label),
+    })),
+    ...foldedModels.map((key) => ({ key, label: formatModelLabel(key) })),
+  ];
+  const share = (value: number, total: number) =>
+    total > 0 ? `${Math.round((value / total) * 100)}%` : "—";
+
+  return (
+    <div className="usage-stack-data canvas-view-table">
+      <table>
+        <caption>Per-bucket token values and share by model</caption>
+        <thead>
+          <tr>
+            <th scope="col" rowSpan={2}>
+              Bucket
+            </th>
+            <th scope="col" rowSpan={2}>
+              Total
+            </th>
+            {columns.map((column) => (
+              <th key={column.key} scope="colgroup" colSpan={2}>
+                {column.label}
+              </th>
+            ))}
+          </tr>
+          <tr>
+            {columns.flatMap((column) => [
+              <th key={`${column.key}-value`} scope="col">
+                Value
+              </th>,
+              <th key={`${column.key}-share`} scope="col">
+                Share
+              </th>,
+            ])}
+          </tr>
+        </thead>
+        <tbody>
+          {buckets.map((b) => (
+            <tr key={b.iso}>
+              <th scope="row">{formatBucketLabel(b.iso, bucket)}</th>
+              <td>{formatTokens(b.total)}</td>
+              {b.values.map((value, index) => (
+                <Fragment key={series[index]?.key}>
+                  <td>{formatTokens(value)}</td>
+                  <td>{share(value, b.total)}</td>
+                </Fragment>
+              ))}
+              {foldedModels.map((model) => {
+                const value = b.folded.find((m) => m.key === model)?.value ?? 0;
+                return (
+                  <Fragment key={model}>
+                    <td>{formatTokens(value)}</td>
+                    <td>{share(value, b.total)}</td>
+                  </Fragment>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

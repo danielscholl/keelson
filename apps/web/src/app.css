@@ -10707,6 +10707,13 @@ a.cvb-card-title::after {
 .usage-stack-chart {
   position: relative;
 }
+.usage-stack-data {
+  margin-top: 16px;
+  overflow-x: auto;
+}
+.usage-stack-data table {
+  min-width: max-content;
+}
 .usage-stack-hit {
   fill: transparent;
 }

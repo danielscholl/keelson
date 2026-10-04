@@ -247,6 +247,16 @@ describe("Usage — Over time stacked chart", () => {
     expect(screen.getByText("claude-sonnet-5")).toBeDefined();
     expect(screen.getByText("gpt-5.5")).toBeDefined();
     expect(screen.getByText("Jul 2")).toBeDefined();
+    const table = within(
+      screen.getByRole("table", { name: "Per-bucket token values and share by model" }),
+    );
+    expect(table.getAllByRole("row")).toHaveLength(4);
+    expect(table.getByRole("columnheader", { name: "claude-sonnet-5" })).toBeDefined();
+    const jul1 = within(table.getByRole("row", { name: /Jul 1/ }));
+    expect(jul1.getByText("1.2M")).toBeDefined();
+    expect(jul1.getByText("71%")).toBeDefined();
+    expect(jul1.getByText("500k")).toBeDefined();
+    expect(jul1.getByText("29%")).toBeDefined();
   });
 
   test("hovering a bar names every model in its stack and opens the Other tail", async () => {
@@ -267,6 +277,11 @@ describe("Usage — Over time stacked chart", () => {
     expect(tooltip.getByText("Other")).toBeDefined();
     expect(tooltip.getByText("a-model")).toBeDefined();
     expect(tooltip.getByText("d-model")).toBeDefined();
+    const table = within(
+      screen.getByRole("table", { name: "Per-bucket token values and share by model" }),
+    );
+    expect(table.getByRole("columnheader", { name: "Other" })).toBeDefined();
+    expect(table.getByRole("columnheader", { name: "a-model" })).toBeDefined();
 
     fireEvent.pointerLeave(screen.getByLabelText(/Tokens over time by model/));
     expect(screen.queryByRole("tooltip")).toBeNull();
