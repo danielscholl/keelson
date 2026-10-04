@@ -79,16 +79,14 @@ export function getProviderInfoList(): ProviderInfo[] {
   );
 }
 
-// Live catalog prices across providers; the first registration to price a
-// model id wins.
-export function getCatalogModelPrices(): ModelPrices {
-  const merged: ModelPrices = {};
+// Live catalog prices keyed by provider so identical model ids stay distinct.
+export function getCatalogModelPrices(): Record<string, ModelPrices> {
+  const pricesByProvider: Record<string, ModelPrices> = {};
   for (const entry of registry.values()) {
-    for (const [id, price] of Object.entries(entry.modelPrices?.() ?? {})) {
-      if (!Object.hasOwn(merged, id)) merged[id] = price;
-    }
+    const prices = entry.modelPrices?.();
+    if (prices) pricesByProvider[entry.id] = prices;
   }
-  return merged;
+  return pricesByProvider;
 }
 
 export function isRegisteredProvider(id: string): boolean {

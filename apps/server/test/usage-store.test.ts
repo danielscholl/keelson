@@ -1017,6 +1017,48 @@ describe("SQLite UsageStore", () => {
       expect(groups.get("gpt-6-sol")?.costUsd).toBeCloseTo(9, 6);
     });
 
+    test("live catalog prices resolve by provider when model ids collide", () => {
+      const priced = createUsageStore(db, {
+        catalogPrices: () => ({
+          copilot: {
+            "gpt-6-sol": {
+              inputPerMTok: 1,
+              outputPerMTok: 1,
+              cacheReadPerMTok: 1,
+              cacheWritePerMTok: 1,
+            },
+          },
+          gateway: {
+            "gpt-6-sol": {
+              inputPerMTok: 5,
+              outputPerMTok: 5,
+              cacheReadPerMTok: 5,
+              cacheWritePerMTok: 5,
+            },
+          },
+        }),
+      });
+      store.record({
+        source: "workflow",
+        provider: "copilot",
+        model: "gpt-6-sol",
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+      });
+      store.record({
+        source: "workflow",
+        provider: "gateway",
+        model: "gpt-6-sol",
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+      });
+
+      const summary = priced.summary({ groupBy: "model" });
+      expect(summary.totals.costUsd).toBeCloseTo(6, 6);
+      expect(summary.groups[0]?.costUsd).toBeCloseTo(6, 6);
+      expect(priced.events().map((event) => event.costUsd)).toEqual([5, 1]);
+    });
+
     test("cacheHitRatio is cacheRead over all prompt tokens, null without reported cache reads", () => {
       store.record({
         source: "chat",

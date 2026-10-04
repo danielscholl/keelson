@@ -305,7 +305,7 @@ describe("getCatalogModelPrices", () => {
     cacheWritePerMTok: n,
   });
 
-  it("merges registrations' live prices, first registration wins, and stays off provider info", () => {
+  it("keeps live prices scoped to their provider and off provider info", () => {
     registerProvider({
       id: "a",
       displayName: "A",
@@ -330,7 +330,10 @@ describe("getCatalogModelPrices", () => {
       modelPrices: () => undefined,
       builtIn: true,
     });
-    expect(getCatalogModelPrices()).toEqual({ shared: price(1), "only-a": price(2) });
+    expect(getCatalogModelPrices()).toEqual({
+      a: { shared: price(1), "only-a": price(2) },
+      b: { shared: price(3) },
+    });
     expect(getProviderInfoList().every((info) => !("modelPrices" in info))).toBe(true);
   });
 });
