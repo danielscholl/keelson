@@ -304,6 +304,33 @@ describe("Usage — Over time stacked chart", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
+  test("Escape closes the card, and the pointer leaving keeps a focused bar's card open", async () => {
+    seriesRows = [
+      seriesRow("a-model", { input: 1000, output: 0 }, "2026-07-01T00:00:00.000Z"),
+      seriesRow("a-model", { input: 2000, output: 0 }, "2026-07-02T00:00:00.000Z"),
+    ];
+
+    await act(async () => {
+      await renderUsage();
+    });
+
+    const chart = await screen.findByLabelText(/Tokens over time by model/);
+    const jul1 = screen.getByRole("img", { name: "Jul 1: 1k tokens" });
+
+    fireEvent.pointerEnter(screen.getByTestId("usage-stack-hit-2026-07-02T00:00:00.000Z"));
+    expect(within(screen.getByRole("tooltip")).getByText("Jul 2")).toBeDefined();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+
+    fireEvent.focus(jul1);
+    fireEvent.pointerEnter(screen.getByTestId("usage-stack-hit-2026-07-02T00:00:00.000Z"));
+    expect(within(screen.getByRole("tooltip")).getByText("Jul 2")).toBeDefined();
+    fireEvent.pointerLeave(chart);
+    const tooltip = screen.getByRole("tooltip");
+    expect(within(tooltip).getByText("Jul 1")).toBeDefined();
+    expect(jul1.getAttribute("aria-describedby")).toBe(tooltip.id);
+  });
+
   test("shows a quiet placeholder line instead of a broken chart when the series is empty", async () => {
     seriesRows = [];
 

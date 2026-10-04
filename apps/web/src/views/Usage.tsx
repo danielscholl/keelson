@@ -624,9 +624,25 @@ function StackChart({
     return { value, y };
   });
 
-  const [hover, setHover] = useState<{ bucket: number; series: number | null } | null>(null);
+  // Pointer and keyboard focus are tracked apart so leaving the chart with the
+  // mouse falls back to the focused bar instead of closing its details.
+  const [pointer, setPointer] = useState<{ bucket: number; series: number | null } | null>(null);
+  const [focused, setFocused] = useState<number | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+  const active = pointer ?? (focused !== null ? { bucket: focused, series: null } : null);
+  const hover = dismissed ? null : active;
   const hovered = hover ? buckets[hover.bucket] : undefined;
   const tooltipId = useId();
+
+  const open = hover !== null;
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDismissed(true);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
 
   return (
     <div className="usage-stack-chart">
@@ -634,7 +650,7 @@ function StackChart({
         className="usage-stack-svg"
         viewBox={`0 0 ${width} ${height}`}
         aria-label={`Tokens over time by model, bucketed by ${bucket}`}
-        onPointerLeave={() => setHover(null)}
+        onPointerLeave={() => setPointer(null)}
       >
         {gridLines.map(({ value, y }) => (
           <g key={value}>
@@ -651,7 +667,10 @@ function StackChart({
           b.values.forEach((v, j) => {
             if (v > 0) topIdx = j;
           });
-          const segmentHover = (j: number | null) => () => setHover({ bucket: d, series: j });
+          const segmentHover = (j: number | null) => () => {
+            setPointer({ bucket: d, series: j });
+            setDismissed(false);
+          };
           return (
             <g key={b.iso} data-active={hover?.bucket === d || undefined}>
               {/* biome-ignore lint/a11y/noInteractiveElementToNoninteractiveRole: keyboard focus opens the bucket's details without an action, like a pointer hover. */}
@@ -667,8 +686,11 @@ function StackChart({
                 aria-label={`${formatBucketLabel(b.iso, bucket)}: ${formatTokens(b.total)} tokens`}
                 aria-describedby={hover?.bucket === d ? tooltipId : undefined}
                 onPointerEnter={segmentHover(null)}
-                onFocus={segmentHover(null)}
-                onBlur={() => setHover(null)}
+                onFocus={() => {
+                  setFocused(d);
+                  setDismissed(false);
+                }}
+                onBlur={() => setFocused((current) => (current === d ? null : current))}
               />
               {b.values.map((v, j) => {
                 if (v <= 0) return null;
