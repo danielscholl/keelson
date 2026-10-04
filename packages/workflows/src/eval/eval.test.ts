@@ -834,7 +834,7 @@ describe("compareResults", () => {
     expect(t).toEqual({ input: 8, output: 5, cacheRead: 9, cacheWrite: 0 });
   });
 
-  test("a version 1 results file still loads, its cache counts unreported", () => {
+  test("a version 1 results file upgrades on read, its cache counts unreported", () => {
     const current = file([
       result({ tokens: { input: 3, output: 2, cacheRead: 1, cacheWrite: 4 } }),
     ]);
@@ -843,7 +843,7 @@ describe("compareResults", () => {
     v1.cases[0].tokens = { input: 3, output: 2 };
     const parsed = evalResultsFileSchema.safeParse(v1);
     expect(parsed.success).toBe(true);
-    expect(parsed.data?.schemaVersion).toBe(1);
+    expect(parsed.data?.schemaVersion).toBe(EVAL_RESULTS_SCHEMA_VERSION);
     expect(parsed.data?.cases[0]?.tokens).toEqual({
       input: 3,
       output: 2,
@@ -860,6 +860,9 @@ describe("compareResults", () => {
       fresh: 5,
     });
     expect(cmp.tokens.after?.fresh).toBe(9);
+    const reparsed = evalResultsFileSchema.safeParse(JSON.parse(JSON.stringify(parsed.data)));
+    expect(reparsed.success).toBe(true);
+    expect(reparsed.data).toEqual(parsed.data as EvalResultsFile);
 
     const roundTrip = evalResultsFileSchema.safeParse(JSON.parse(JSON.stringify(current)));
     expect(roundTrip.success).toBe(true);

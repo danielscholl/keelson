@@ -22,7 +22,6 @@ import {
 } from "./stats.ts";
 
 export const EVAL_RESULTS_SCHEMA_VERSION = 2;
-export type EvalResultsSchemaVersion = 1 | typeof EVAL_RESULTS_SCHEMA_VERSION;
 export const EVAL_OUTPUT_INLINE_LIMIT = 16 * 1024;
 
 export const HEADROOM_PASS_RATE = 0.95;
@@ -127,7 +126,7 @@ export interface EvalSummary {
 }
 
 export interface EvalResultsFile {
-  readonly schemaVersion: EvalResultsSchemaVersion;
+  readonly schemaVersion: typeof EVAL_RESULTS_SCHEMA_VERSION;
   readonly name: string;
   readonly workflow: string;
   readonly project: string | null;
@@ -638,10 +637,7 @@ const v1TokensSchema = z
   .strict()
   .transform((t): EvalTokens => ({ ...t, cacheRead: null, cacheWrite: null }));
 
-function resultsFileSchema<V extends EvalResultsSchemaVersion>(
-  version: V,
-  tokens: z.ZodType<EvalTokens>,
-) {
+function resultsFileSchema<V extends number>(version: V, tokens: z.ZodType<EvalTokens>) {
   return z
     .object({
       schemaVersion: z.literal(version),
@@ -724,11 +720,11 @@ function resultsFileSchema<V extends EvalResultsSchemaVersion>(
 }
 
 // Validates a results file on the way back in, so compare works from a
-// checked shape instead of trusting a hand-edited or truncated document.
-export const evalResultsFileSchema: z.ZodType<EvalResultsFile> = z.discriminatedUnion(
-  "schemaVersion",
-  [
+// checked shape instead of trusting a hand-edited or truncated document. Older
+// versions upgrade on read, so a parsed file always parses again.
+export const evalResultsFileSchema: z.ZodType<EvalResultsFile> = z
+  .discriminatedUnion("schemaVersion", [
     resultsFileSchema(1, v1TokensSchema),
     resultsFileSchema(EVAL_RESULTS_SCHEMA_VERSION, evalTokensSchema),
-  ],
-);
+  ])
+  .transform((file) => ({ ...file, schemaVersion: EVAL_RESULTS_SCHEMA_VERSION }));

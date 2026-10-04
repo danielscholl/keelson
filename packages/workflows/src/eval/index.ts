@@ -50,7 +50,6 @@ export {
   type EvalComparison,
   type EvalNodeUsage,
   type EvalResultsFile,
-  type EvalResultsSchemaVersion,
   type EvalSummary,
   type EvalTokens,
   evalResultsFileSchema,
