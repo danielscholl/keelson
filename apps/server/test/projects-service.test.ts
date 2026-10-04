@@ -218,10 +218,6 @@ const testGit: typeof runText = (cmd, args, opts) =>
       ...opts?.env,
       GIT_CONFIG_GLOBAL: config,
       GIT_CONFIG_NOSYSTEM: "1",
-      GIT_AUTHOR_NAME: "Test Operator",
-      GIT_AUTHOR_EMAIL: "operator@example.test",
-      GIT_COMMITTER_NAME: "Test Operator",
-      GIT_COMMITTER_EMAIL: "operator@example.test",
     },
   });
 
@@ -246,6 +242,11 @@ describe("createProject", () => {
       "Initialize project|Test Operator|operator@example.test",
     );
     expect(await git(["ls-tree", "-r", "--name-only", "HEAD"], project.rootPath)).toBe("");
+    const worktree = join(temp, "immediate-write");
+    await git(["worktree", "add", "-b", "immediate-write", worktree], project.rootPath);
+    expect(await git(["rev-parse", "HEAD"], worktree)).toBe(
+      await git(["rev-parse", "HEAD"], project.rootPath),
+    );
   });
 
   test("create initializes an existing empty folder and trims explicit paths", async () => {
