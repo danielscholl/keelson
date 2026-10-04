@@ -21,11 +21,59 @@ import {
   wilsonInterval,
 } from "./stats.ts";
 
-export const EVAL_RESULTS_SCHEMA_VERSION = 1;
+export const EVAL_RESULTS_SCHEMA_VERSION = 2;
+export type EvalResultsSchemaVersion = 1 | typeof EVAL_RESULTS_SCHEMA_VERSION;
 export const EVAL_OUTPUT_INLINE_LIMIT = 16 * 1024;
 
 export const HEADROOM_PASS_RATE = 0.95;
 export const NOISE_INTERVAL_WIDTH = 0.2;
+
+// Cache counts are null when no node in the run reported them, which is not
+// the same as reporting zero.
+export interface EvalTokens {
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number | null;
+  readonly cacheWrite: number | null;
+}
+
+// Structural mirror of the workflow executor's NodeTokenUsage.
+export interface EvalNodeUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadInputTokens?: number;
+  readonly cacheCreationInputTokens?: number;
+}
+
+function addCount(a: number | null, b: number | null): number | null {
+  if (a === null) return b;
+  return b === null ? a : a + b;
+}
+
+function sumEvalTokens(a: EvalTokens, b: EvalTokens): EvalTokens {
+  return {
+    input: a.input + b.input,
+    output: a.output + b.output,
+    cacheRead: addCount(a.cacheRead, b.cacheRead),
+    cacheWrite: addCount(a.cacheWrite, b.cacheWrite),
+  };
+}
+
+export function addEvalTokens(total: EvalTokens | null, usage: EvalNodeUsage): EvalTokens {
+  const node: EvalTokens = {
+    input: usage.inputTokens,
+    output: usage.outputTokens,
+    cacheRead: usage.cacheReadInputTokens ?? null,
+    cacheWrite: usage.cacheCreationInputTokens ?? null,
+  };
+  return total === null ? node : sumEvalTokens(total, node);
+}
+
+// Mirror of freshTokens in @keelson/shared/model-prices.ts; this package takes
+// no upstream deps, and apps/cli tests hold the two in lockstep.
+export function freshEvalTokens(tokens: EvalTokens): number {
+  return tokens.input + (tokens.cacheWrite ?? 0) + tokens.output;
+}
 
 export interface EvalCaseResult {
   readonly caseId: string;
@@ -44,7 +92,7 @@ export interface EvalCaseResult {
     readonly path: string | null;
   };
   readonly durationMs: number | null;
-  readonly tokens: { readonly input: number; readonly output: number } | null;
+  readonly tokens: EvalTokens | null;
   readonly costUsd: number | null;
   readonly definitionHash: string | null;
   readonly error: string | null;
@@ -79,7 +127,7 @@ export interface EvalSummary {
 }
 
 export interface EvalResultsFile {
-  readonly schemaVersion: typeof EVAL_RESULTS_SCHEMA_VERSION;
+  readonly schemaVersion: EvalResultsSchemaVersion;
   readonly name: string;
   readonly workflow: string;
   readonly project: string | null;
@@ -232,21 +280,27 @@ export interface EvalComparison {
   readonly warnings: readonly string[];
 }
 
-export interface TokenTotals {
-  readonly input: number;
-  readonly output: number;
+export interface TokenTotals extends EvalTokens {
+  readonly fresh: number;
 }
 
 function tokenTotals(results: readonly EvalCaseResult[]): TokenTotals | null {
   if (results.length === 0) return null;
-  let input = 0;
-  let output = 0;
+  let total: EvalTokens | null = null;
   for (const r of results) {
     if (r.tokens === null) return null;
-    input += r.tokens.input;
-    output += r.tokens.output;
+    total = total === null ? r.tokens : sumEvalTokens(total, r.tokens);
   }
-  return { input, output };
+  return total === null ? null : { ...total, fresh: freshEvalTokens(total) };
+}
+
+function fmtTokens(t: TokenTotals | null): string {
+  if (t === null) return "n/a";
+  const parts = [`${t.input} in`];
+  if (t.cacheWrite !== null) parts.push(`${t.cacheWrite} cache write`);
+  parts.push(`${t.output} out`);
+  const read = t.cacheRead === null ? "" : `; ${t.cacheRead} cache read`;
+  return `${t.fresh} fresh (${parts.join(", ")}${read})`;
 }
 
 function caseRates(
@@ -496,6 +550,7 @@ export function renderSummaryMarkdown(file: EvalResultsFile): string {
   );
   lines.push(`- Duration: mean ${fmtMs(s.duration.meanMs)}, p95 ${fmtMs(s.duration.p95Ms)}`);
   lines.push(`- Cost: ${fmtUsd(s.cost.totalUsd)} total`);
+  lines.push(`- Tokens: ${fmtTokens(tokenTotals(file.cases))}`);
   lines.push(
     `- Definition hash: ${s.definitionHashes.length === 0 ? "not reported" : s.definitionHashes.join(", ")}`,
   );
@@ -508,15 +563,15 @@ export function renderSummaryMarkdown(file: EvalResultsFile): string {
   }
   lines.push("## Cases");
   lines.push("");
-  lines.push("| Case | Split | Rep | Status | Detail | Duration | Cost | Run |");
-  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
+  lines.push("| Case | Split | Rep | Status | Detail | Duration | Fresh tokens | Cost | Run |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const c of file.cases) {
     const detail = (c.status === "error" ? (c.error ?? c.grader.detail) : c.grader.detail)
       .replace(/\\/g, "\\\\")
       .replace(/\|/g, "\\|")
       .replace(/\s+/g, " ");
     lines.push(
-      `| ${c.caseId} | ${c.split} | ${c.rep} | ${c.status} | ${detail} | ${fmtMs(c.durationMs)} | ${fmtUsd(c.costUsd)} | ${c.runId ? c.runId.slice(0, 8) : "n/a"} |`,
+      `| ${c.caseId} | ${c.split} | ${c.rep} | ${c.status} | ${detail} | ${fmtMs(c.durationMs)} | ${c.tokens === null ? "n/a" : freshEvalTokens(c.tokens)} | ${fmtUsd(c.costUsd)} | ${c.runId ? c.runId.slice(0, 8) : "n/a"} |`,
     );
   }
   lines.push("");
@@ -548,8 +603,6 @@ export function renderComparisonText(cmp: EvalComparison): string {
   lines.push(
     `duration: mean ${fmtMs(cmp.duration.beforeMeanMs)} → ${fmtMs(cmp.duration.afterMeanMs)} per case run`,
   );
-  const fmtTokens = (t: TokenTotals | null) =>
-    t === null ? "n/a" : `${t.input} in / ${t.output} out`;
   lines.push(`tokens: ${fmtTokens(cmp.tokens.before)} → ${fmtTokens(cmp.tokens.after)}`);
   lines.push(`decision: ${cmp.decision} (${cmp.reason})`);
   for (const w of cmp.warnings) lines.push(`warning: ${w}`);
@@ -570,84 +623,112 @@ const splitStatsSchema = z
   })
   .strict();
 
-// Validates a results file on the way back in, so compare works from a
-// checked shape instead of trusting a hand-edited or truncated document.
-export const evalResultsFileSchema: z.ZodType<EvalResultsFile> = z
+const evalTokensSchema = z
   .object({
-    schemaVersion: z.literal(EVAL_RESULTS_SCHEMA_VERSION),
-    name: z.string().min(1),
-    workflow: z.string().min(1),
-    project: z.string().nullable(),
-    caseFile: z.string(),
-    caseSetHash: z.string().min(1),
-    createdAt: z.string(),
-    mode: z.enum(["http", "in-process"]),
-    reps: z.number().int().positive(),
-    splitFilter: z.enum(["train", "test", "all"]),
-    provider: z.string().nullable().optional(),
-    keelsonVersion: z.string().nullable().optional(),
-    cases: z.array(
-      z
-        .object({
-          caseId: z.string(),
-          split: z.enum(EVAL_SPLITS),
-          rep: z.number().int().positive(),
-          runId: z.string().nullable(),
-          status: gradeStatusSchema,
-          grader: z
-            .object({
-              type: z.enum(EVAL_GRADER_TYPES),
-              detail: z.string(),
-              judge: z
-                .object({
-                  reps: z.number().int(),
-                  verdicts: z.array(gradeStatusSchema),
-                  disagreement: z.boolean(),
-                  claims: z.array(
-                    z
-                      .object({ claim: z.string(), met: z.boolean(), evidence: z.string() })
-                      .strict(),
-                  ),
-                })
-                .strict()
-                .optional(),
-            })
-            .strict(),
-          output: z
-            .object({ text: z.string(), truncated: z.boolean(), path: z.string().nullable() })
-            .strict(),
-          durationMs: z.number().nullable(),
-          tokens: z.object({ input: z.number(), output: z.number() }).strict().nullable(),
-          costUsd: z.number().nullable(),
-          definitionHash: z.string().nullable(),
-          error: z.string().nullable(),
-        })
-        .strict(),
-    ),
-    summary: z
-      .object({
-        overall: splitStatsSchema,
-        splits: z.object({ train: splitStatsSchema, test: splitStatsSchema }).strict(),
-        errors: z.number().int().nonnegative(),
-        graderNoise: z
-          .object({
-            judged: z.number().int().nonnegative(),
-            disagreements: z.number().int().nonnegative(),
-            rate: z.number().nullable(),
-          })
-          .strict(),
-        duration: z
-          .object({ meanMs: z.number().nullable(), p95Ms: z.number().nullable() })
-          .strict(),
-        cost: z
-          .object({
-            totalUsd: z.number().nullable(),
-            perCaseUsd: z.record(z.string(), z.number().nullable()),
-          })
-          .strict(),
-        definitionHashes: z.array(z.string()),
-        warnings: z.array(z.string()),
-      })
-      .strict(),
+    input: z.number(),
+    output: z.number(),
+    cacheRead: z.number().nullable(),
+    cacheWrite: z.number().nullable(),
   })
   .strict();
+
+// Version 1 predates the cache split, so its cache counts read as unreported.
+const v1TokensSchema = z
+  .object({ input: z.number(), output: z.number() })
+  .strict()
+  .transform((t): EvalTokens => ({ ...t, cacheRead: null, cacheWrite: null }));
+
+function resultsFileSchema<V extends EvalResultsSchemaVersion>(
+  version: V,
+  tokens: z.ZodType<EvalTokens>,
+) {
+  return z
+    .object({
+      schemaVersion: z.literal(version),
+      name: z.string().min(1),
+      workflow: z.string().min(1),
+      project: z.string().nullable(),
+      caseFile: z.string(),
+      caseSetHash: z.string().min(1),
+      createdAt: z.string(),
+      mode: z.enum(["http", "in-process"]),
+      reps: z.number().int().positive(),
+      splitFilter: z.enum(["train", "test", "all"]),
+      provider: z.string().nullable().optional(),
+      keelsonVersion: z.string().nullable().optional(),
+      cases: z.array(
+        z
+          .object({
+            caseId: z.string(),
+            split: z.enum(EVAL_SPLITS),
+            rep: z.number().int().positive(),
+            runId: z.string().nullable(),
+            status: gradeStatusSchema,
+            grader: z
+              .object({
+                type: z.enum(EVAL_GRADER_TYPES),
+                detail: z.string(),
+                judge: z
+                  .object({
+                    reps: z.number().int(),
+                    verdicts: z.array(gradeStatusSchema),
+                    disagreement: z.boolean(),
+                    claims: z.array(
+                      z
+                        .object({ claim: z.string(), met: z.boolean(), evidence: z.string() })
+                        .strict(),
+                    ),
+                  })
+                  .strict()
+                  .optional(),
+              })
+              .strict(),
+            output: z
+              .object({ text: z.string(), truncated: z.boolean(), path: z.string().nullable() })
+              .strict(),
+            durationMs: z.number().nullable(),
+            tokens: tokens.nullable(),
+            costUsd: z.number().nullable(),
+            definitionHash: z.string().nullable(),
+            error: z.string().nullable(),
+          })
+          .strict(),
+      ),
+      summary: z
+        .object({
+          overall: splitStatsSchema,
+          splits: z.object({ train: splitStatsSchema, test: splitStatsSchema }).strict(),
+          errors: z.number().int().nonnegative(),
+          graderNoise: z
+            .object({
+              judged: z.number().int().nonnegative(),
+              disagreements: z.number().int().nonnegative(),
+              rate: z.number().nullable(),
+            })
+            .strict(),
+          duration: z
+            .object({ meanMs: z.number().nullable(), p95Ms: z.number().nullable() })
+            .strict(),
+          cost: z
+            .object({
+              totalUsd: z.number().nullable(),
+              perCaseUsd: z.record(z.string(), z.number().nullable()),
+            })
+            .strict(),
+          definitionHashes: z.array(z.string()),
+          warnings: z.array(z.string()),
+        })
+        .strict(),
+    })
+    .strict();
+}
+
+// Validates a results file on the way back in, so compare works from a
+// checked shape instead of trusting a hand-edited or truncated document.
+export const evalResultsFileSchema: z.ZodType<EvalResultsFile> = z.discriminatedUnion(
+  "schemaVersion",
+  [
+    resultsFileSchema(1, v1TokensSchema),
+    resultsFileSchema(EVAL_RESULTS_SCHEMA_VERSION, evalTokensSchema),
+  ],
+);

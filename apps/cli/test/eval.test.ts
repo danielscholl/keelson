@@ -16,7 +16,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { clearRegistry } from "@keelson/providers";
-import { parseEvalCaseFile } from "@keelson/workflows";
+import { freshTokens } from "@keelson/shared";
+import { freshEvalTokens, parseEvalCaseFile } from "@keelson/workflows";
 
 import { judgeProviderError } from "../src/commands/eval.ts";
 import { type CaseExecution, fetchRunCostUsd, makeInProcessExecutor } from "../src/eval/execute.ts";
@@ -52,7 +53,7 @@ function execution(overrides: Partial<CaseExecution>): CaseExecution {
     finalOutput: "final text",
     nodeOutputs: { first: '{"status":"ok"}', last: "final text" },
     durationMs: 10,
-    tokens: { input: 3, output: 2 },
+    tokens: { input: 3, output: 2, cacheRead: null, cacheWrite: 40 },
     costUsd: null,
     definitionHash: "abc",
     ...overrides,
@@ -136,7 +137,7 @@ cases:
     const final = results.cases.find((c) => c.caseId === "final" && c.rep === 2);
     expect(final?.output.path).toBe(join(tmp, "outputs", caseOutputBasename(0, "final", 2)));
     expect(readFileSync(final?.output.path ?? "", "utf8")).toBe("final text");
-    expect(final?.tokens).toEqual({ input: 3, output: 2 });
+    expect(final?.tokens).toEqual({ input: 3, output: 2, cacheRead: null, cacheWrite: 40 });
     expect(results.createdAt).toBe("2026-09-30T12:00:00.000Z");
   });
 
@@ -201,6 +202,25 @@ cases:
     expect(prompts.join("\n")).not.toContain("never shown");
     expect(results.summary.graderNoise.judged).toBe(1);
     expect(results.summary.graderNoise.rate).toBe(0);
+  });
+});
+
+describe("freshEvalTokens", () => {
+  test("matches the shared freshTokens the Usage page counts with", () => {
+    for (const t of [
+      { input: 14, output: 500, cacheRead: 30_000, cacheWrite: 51_990 },
+      { input: 52_004, output: 500, cacheRead: null, cacheWrite: null },
+      { input: 0, output: 0, cacheRead: 7, cacheWrite: 0 },
+    ]) {
+      expect(freshEvalTokens(t)).toBe(
+        freshTokens({
+          inputTokens: t.input,
+          outputTokens: t.output,
+          cacheReadTokens: t.cacheRead,
+          cacheWriteTokens: t.cacheWrite,
+        }),
+      );
+    }
   });
 });
 
