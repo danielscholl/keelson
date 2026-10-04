@@ -898,8 +898,8 @@ function FlowChart({ rows }: { rows: UsageBreakdownResponseWire }) {
     .filter((row) => row.tokens > 0)
     .sort((a, b) => b.tokens - a.tokens);
   const modelTotals = new Map<string, number>();
-  for (const link of links) {
-    modelTotals.set(link.model, (modelTotals.get(link.model) ?? 0) + link.tokens);
+  for (const row of rows) {
+    modelTotals.set(row.split, (modelTotals.get(row.split) ?? 0) + freshTokens(row));
   }
   const palette = assignSeriesColors(modelTotals);
   const total = links.reduce((sum, row) => sum + row.tokens, 0);
