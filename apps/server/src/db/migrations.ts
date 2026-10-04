@@ -381,6 +381,24 @@ const migrations: Migration[] = [
       db.exec("ALTER TABLE workflow_runs ADD COLUMN definition_hash TEXT;");
     },
   },
+  {
+    version: 20,
+    description: "remember provider catalog prices so retired models keep pricing their history",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE catalog_model_prices (
+          provider             TEXT NOT NULL,
+          model                TEXT NOT NULL,
+          input_per_mtok       REAL NOT NULL,
+          output_per_mtok      REAL NOT NULL,
+          cache_read_per_mtok  REAL NOT NULL,
+          cache_write_per_mtok REAL NOT NULL,
+          seen_at              TEXT NOT NULL,
+          PRIMARY KEY (provider, model)
+        );
+      `);
+    },
+  },
 ];
 
 // The lowest version this build can apply. A database stamped below it was
