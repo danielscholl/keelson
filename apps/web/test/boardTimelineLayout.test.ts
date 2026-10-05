@@ -116,8 +116,6 @@ describe("timeline layout", () => {
         const layout = layoutTimeline({ ...section, window }, width, now);
         expect(layout.ticks.length).toBeGreaterThanOrEqual(2);
         expect(layout.ticks.length).toBeLessThanOrEqual(8);
-        expect(layout.ticks[0]?.x).toBe(layout.plot.left);
-        expect(layout.ticks.at(-1)?.x).toBe(layout.plot.right);
         for (const tick of layout.ticks) {
           expect(Number.isFinite(tick.at) && Number.isFinite(tick.x)).toBe(true);
           expect(tick.label).not.toBe("");
@@ -126,5 +124,18 @@ describe("timeline layout", () => {
         }
       }
     }
+  });
+
+  it("places ticks on round times", () => {
+    const layout = layoutTimeline({ ...section, window: { from, to } }, 1200, now);
+    expect(layout.ticks.map((tick) => tick.label)).toEqual([
+      "12:00",
+      "12:10",
+      "12:20",
+      "12:30",
+      "12:40",
+      "12:50",
+      "13:00",
+    ]);
   });
 });

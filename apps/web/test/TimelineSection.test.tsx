@@ -158,7 +158,8 @@ describe("timeline section", () => {
     expect(container.textContent).toContain("open-ended");
     expect(container.textContent).toContain("hatched");
     expect(container.textContent).toContain("No activity");
-    expect(container.textContent).toContain("2026-10-05T14:00:00Z");
+    expect(container.textContent).toContain("14:00");
+    expect(container.textContent).not.toContain("2026-10-05T");
     expect(container.querySelectorAll(".cvb-timeline-list time")).toHaveLength(
       2 * section.spans.length - 1 + section.marks.length,
     );

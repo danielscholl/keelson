@@ -1,10 +1,20 @@
 import type { CanvasTimelineSection, CanvasTimelineSpan } from "@keelson/shared";
 import { useId, useLayoutEffect, useRef, useState } from "react";
-import { layoutTimeline } from "../../lib/boardTimelineLayout.ts";
+import { formatTimelineTime, layoutTimeline } from "../../lib/boardTimelineLayout.ts";
 import { useClockNow } from "../../lib/relativeClock.ts";
 
-function spanDescription(span: CanvasTimelineSpan) {
-  return `${span.title}: ${span.from} to ${span.to ?? "open-ended"}${span.hatched ? " (hatched)" : ""}`;
+function windowRange(section: CanvasTimelineSection) {
+  const until = "clock" in section.window ? section.window.clock.until : section.window.to;
+  return Date.parse(until) - Date.parse(section.window.from);
+}
+
+function timeText(iso: string, range: number) {
+  return formatTimelineTime(Date.parse(iso), range);
+}
+
+function spanDescription(span: CanvasTimelineSpan, range: number) {
+  const end = span.to ? timeText(span.to, range) : "open-ended";
+  return `${span.title}: ${timeText(span.from, range)} to ${end}${span.hatched ? " (hatched)" : ""}`;
 }
 
 function TimelineContents({
@@ -19,12 +29,15 @@ function TimelineContents({
   const id = useId();
   const layout = layoutTimeline(section, width, now);
   const until = "clock" in section.window ? section.window.clock.until : section.window.to;
+  const range = windowRange(section);
   return (
     <>
       <div className="cvb-timeline-window">
-        <time dateTime={section.window.from}>{section.window.from}</time>
+        <time dateTime={section.window.from}>
+          {new Date(Date.parse(section.window.from)).toISOString().slice(0, 16).replace("T", " ")}
+        </time>
         {" to "}
-        <time dateTime={until}>{until}</time>
+        <time dateTime={until}>{timeText(until, range)}</time>
         {" · axis in UTC"}
       </div>
       {width < 720 ? (
@@ -56,9 +69,13 @@ function TimelineContents({
                       <li key={`span-${index}`} data-source-index={index}>
                         <strong>{span.title}</strong>
                         {" · "}
-                        <time dateTime={span.from}>{span.from}</time>
+                        <time dateTime={span.from}>{timeText(span.from, range)}</time>
                         {" to "}
-                        {span.to ? <time dateTime={span.to}>{span.to}</time> : "open-ended"}
+                        {span.to ? (
+                          <time dateTime={span.to}>{timeText(span.to, range)}</time>
+                        ) : (
+                          "open-ended"
+                        )}
                         {span.hatched && " · hatched"}
                       </li>
                     ))}
@@ -66,7 +83,7 @@ function TimelineContents({
                       <li key={`mark-${index}`} data-source-index={index}>
                         {mark.glyph} <strong>{mark.title}</strong>
                         {" · "}
-                        <time dateTime={mark.at}>{mark.at}</time>
+                        <time dateTime={mark.at}>{timeText(mark.at, range)}</time>
                       </li>
                     ))}
                   </ul>
@@ -152,9 +169,9 @@ function TimelineContents({
                 data-tone={span.tone ?? section.lanes[laneIndex]!.tone ?? "neutral"}
                 data-open={span.to === undefined || undefined}
                 data-hatched={span.hatched || undefined}
-                aria-label={`${section.lanes[laneIndex]!.label}, ${spanDescription(span)}`}
+                aria-label={`${section.lanes[laneIndex]!.label}, ${spanDescription(span, range)}`}
               >
-                <title>{spanDescription(span)}</title>
+                <title>{spanDescription(span, range)}</title>
                 <rect
                   className="cvb-timeline-bar"
                   x={x}
