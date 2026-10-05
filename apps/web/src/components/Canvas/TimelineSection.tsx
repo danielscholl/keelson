@@ -4,11 +4,15 @@ import type {
   CanvasTimelineSpan,
 } from "@keelson/shared";
 import { useId, useLayoutEffect, useRef, useState } from "react";
-import { layoutTimeline } from "../../lib/boardTimelineLayout.ts";
+import {
+  formatTimelineTimestamp,
+  formatTimelineZone,
+  layoutTimeline,
+} from "../../lib/boardTimelineLayout.ts";
 import { useClockNow } from "../../lib/relativeClock.ts";
 
 function timeText(iso: string) {
-  return new Date(iso).toISOString().replace("T", " ").replace("Z", " UTC");
+  return formatTimelineTimestamp(Date.parse(iso));
 }
 
 function spanDescription(span: CanvasTimelineSpan) {
@@ -32,13 +36,14 @@ function TimelineContents({
   const id = useId();
   const layout = layoutTimeline(section, width, now);
   const until = "clock" in section.window ? section.window.clock.until : section.window.to;
+  const zone = formatTimelineZone(Date.parse(section.window.from));
   return (
     <>
       <div className="cvb-timeline-window">
         <time dateTime={section.window.from}>{timeText(section.window.from)}</time>
         {" to "}
         <time dateTime={until}>{timeText(until)}</time>
-        {" · axis in UTC"}
+        {` · axis in ${zone}`}
       </div>
       {width < 720 ? (
         <div className="cvb-timeline-list">
@@ -97,7 +102,7 @@ function TimelineContents({
           className="cvb-timeline-plot"
           width="100%"
           viewBox={`0 0 ${width} ${layout.height}`}
-          aria-label={`${section.title ?? "Timeline"}; time axis in UTC`}
+          aria-label={`${section.title ?? "Timeline"}; time axis in ${zone}`}
         >
           <title>{section.title ?? "Timeline"}</title>
           <defs>
