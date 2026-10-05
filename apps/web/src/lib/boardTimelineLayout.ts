@@ -27,13 +27,32 @@ const TICK_STEPS = [
   365 * DAY,
 ];
 
+export function formatTimelineTimestamp(at: number) {
+  const date = new Date(at);
+  if (!Number.isFinite(date.getTime())) throw new RangeError("Invalid time value");
+  const pad = (value: number, length = 2) => String(value).padStart(length, "0");
+  return (
+    `${pad(date.getFullYear(), 4)}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.` +
+    pad(date.getMilliseconds(), 3)
+  );
+}
+
+export function formatTimelineZone(at: number) {
+  const zone = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+    .formatToParts(at)
+    .find((part) => part.type === "timeZoneName");
+  if (!zone) throw new Error("Timeline timezone name is unavailable");
+  return zone.value;
+}
+
 export function formatTimelineTime(at: number, range: number, interval = range) {
-  const iso = new Date(at).toISOString();
-  if (interval < 1_000) return iso.slice(11, 23);
-  if (range < 5 * MINUTE) return iso.slice(11, 19);
-  if (range < DAY) return iso.slice(11, 16);
-  if (range < 7 * DAY) return `${iso.slice(5, 10)} ${iso.slice(11, 16)}`;
-  return iso.slice(0, 10);
+  const local = formatTimelineTimestamp(at);
+  if (interval < 1_000) return local.slice(11, 23);
+  if (range < 5 * MINUTE) return local.slice(11, 19);
+  if (range < DAY) return local.slice(11, 16);
+  if (range < 7 * DAY) return `${local.slice(5, 10)} ${local.slice(11, 16)}`;
+  return local.slice(0, 10);
 }
 
 export function layoutTimeline(section: CanvasTimelineSection, width: number, now: number) {

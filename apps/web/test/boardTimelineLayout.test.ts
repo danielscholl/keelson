@@ -1,6 +1,10 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { CanvasTimelineSection } from "@keelson/shared";
-import { layoutTimeline } from "../src/lib/boardTimelineLayout.ts";
+import {
+  formatTimelineTimestamp,
+  formatTimelineZone,
+  layoutTimeline,
+} from "../src/lib/boardTimelineLayout.ts";
 
 const from = "2026-10-05T12:00:00Z";
 const to = "2026-10-05T13:00:00Z";
@@ -18,6 +22,37 @@ const section: CanvasTimelineSection = {
 };
 
 describe("timeline layout", () => {
+  const originalTZ = process.env.TZ;
+  beforeAll(() => {
+    process.env.TZ = "America/Chicago";
+  });
+  afterAll(() => {
+    if (originalTZ === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTZ;
+  });
+
+  it("formats full local timestamps with dates and millisecond precision", () => {
+    expect(formatTimelineTimestamp(Date.parse("2026-10-05T22:36:07.360Z"))).toBe(
+      "2026-10-05 17:36:07.360",
+    );
+    expect(formatTimelineTimestamp(Date.parse("2026-10-06T00:00:00.005Z"))).toBe(
+      "2026-10-05 19:00:00.005",
+    );
+    expect(() => formatTimelineTimestamp(Number.NaN)).toThrow(RangeError);
+  });
+
+  it.each(["2026-01-05T12:00:00Z", "2026-10-05T12:00:00Z"])(
+    "derives the short local zone at %s",
+    (iso) => {
+      const at = Date.parse(iso);
+      const expected = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+        .formatToParts(at)
+        .find((part) => part.type === "timeZoneName")?.value;
+      expect(expected).toBeDefined();
+      expect(formatTimelineZone(at)).toBe(expected!);
+    },
+  );
+
   it("keeps lane order and divides only adjacent group transitions", () => {
     const layout = layoutTimeline(section, 1200, now);
     expect(layout.lanes.map(({ lane }) => lane.id)).toEqual(["b", "a", "c"]);
@@ -132,12 +167,12 @@ describe("timeline layout", () => {
     {
       from: "2026-10-05T12:00:00.100Z",
       to: "2026-10-05T12:00:00.900Z",
-      labels: ["12:00:00.100", "12:00:00.900"],
+      labels: ["07:00:00.100", "07:00:00.900"],
     },
     {
       from: "2026-10-05T07:00:00.900-05:00",
       to: "2026-10-05T14:00:01.100+02:00",
-      labels: ["12:00:00.900", "12:00:01.100"],
+      labels: ["07:00:00.900", "07:00:01.100"],
     },
   ])("includes milliseconds for sub-second tick intervals from $from", ({ from, to, labels }) => {
     for (const window of [
@@ -158,25 +193,25 @@ describe("timeline layout", () => {
       now,
     );
     expect(layout.ticks.map((tick) => tick.label)).toEqual([
-      "12:00:00",
-      "12:00:01",
-      "12:00:02",
-      "12:00:03",
-      "12:00:04",
-      "12:00:05",
+      "07:00:00",
+      "07:00:01",
+      "07:00:02",
+      "07:00:03",
+      "07:00:04",
+      "07:00:05",
     ]);
   });
 
   it("places ticks on round times", () => {
     const layout = layoutTimeline({ ...section, window: { from, to } }, 1200, now);
     expect(layout.ticks.map((tick) => tick.label)).toEqual([
-      "12:00",
-      "12:10",
-      "12:20",
-      "12:30",
-      "12:40",
-      "12:50",
-      "13:00",
+      "07:00",
+      "07:10",
+      "07:20",
+      "07:30",
+      "07:40",
+      "07:50",
+      "08:00",
     ]);
   });
 });
