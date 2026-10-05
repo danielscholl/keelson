@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import {
   CANVAS_HTML_ACTION_CHANNEL,
+  CANVAS_HTML_STATE_CHANNEL,
   RIBS_VERSION_SNAPSHOT_KEY,
   type RibActionResponse,
   type RibSummary,
@@ -566,6 +567,100 @@ describe("Surface", () => {
     const region = container.querySelector(".surface-region") as HTMLElement;
     expect(region.querySelector("iframe.canvas-html-frame")).not.toBeNull();
     expect(region.textContent).not.toContain("didn't match a known view type");
+  });
+
+  test("HTML regions retain isolated tasks through recomposition, collapse and drawer expansion", () => {
+    const source = "rib:demo:surface-state-launcher";
+    const other = "rib:demo:surface-state-secondary";
+    const markup = '<textarea id="task"></textarea><p>Project A / Provider A</p>';
+    live(source, markup);
+    live(other, markup);
+    ribFixture.ribs = [
+      {
+        ...htmlRib(source),
+        views: [
+          { key: source, canvasKind: "html" },
+          { key: other, canvasKind: "html" },
+        ],
+      },
+    ];
+    const descriptor: RibSurfaceDescriptor = {
+      id: "state-launcher",
+      title: "Launcher",
+      layout: {
+        rows: [
+          {
+            columns: [
+              { key: source, title: "Task", collapsible: true, workflow: "refresh-state-launcher" },
+              { key: other, title: "Other task", workflow: "refresh-state-secondary" },
+            ],
+          },
+        ],
+      },
+    };
+    const tree = () => (
+      <ToastHost>
+        <RibsProvider>
+          <CanvasProvider>
+            <Surface descriptor={descriptor} />
+          </CanvasProvider>
+        </RibsProvider>
+      </ToastHost>
+    );
+    const view = render(tree());
+    const region = (key: string) =>
+      view.container.querySelector(`[data-region-key="${key}"]`)! as HTMLElement;
+    const connect = (frame: HTMLIFrameElement) => {
+      const posts: any[] = [];
+      const source = { postMessage: (message: unknown) => posts.push(message) };
+      Object.defineProperty(frame, "contentWindow", { value: source, configurable: true });
+      return {
+        posts,
+        save(state: unknown) {
+          postMessageTo({ channel: CANVAS_HTML_STATE_CHANNEL, type: "save", state }, source);
+        },
+        restore() {
+          fireEvent.load(frame);
+          return posts.find((message) => message.type === "restore")?.state;
+        },
+      };
+    };
+    const firstFrame = region(source).querySelector("iframe")!;
+    const first = connect(firstFrame);
+    const secondFrame = region(other).querySelector("iframe")!;
+    const second = connect(secondFrame);
+    first.save({ task: "Keep my task" });
+    second.save({ task: "Another task" });
+    expect(postRibActionCalls).toEqual([]);
+    expect(triggerCalls).toEqual([]);
+    expect(reloadCalls).toEqual({});
+    live(source, '<textarea id="task"></textarea><p>Project B / Provider B</p>');
+    live(other, '<textarea id="task"></textarea><p>Project B / Provider B</p>');
+    view.rerender(tree());
+    expect(firstFrame.getAttribute("srcdoc")).toContain("Project B / Provider B");
+    expect(first.restore()).toEqual({ task: "Keep my task" });
+    expect(second.restore()).toEqual({ task: "Another task" });
+    fireEvent.click(within(region(source)).getByRole("button", { name: "Collapse region" }));
+    expect(region(source).querySelector("iframe")).toBeNull();
+    fireEvent.click(within(region(source)).getByRole("button", { name: "Expand region" }));
+    const remountedFrame = region(source).querySelector("iframe")!;
+    expect(remountedFrame).not.toBe(firstFrame);
+    const remounted = connect(remountedFrame);
+    expect(remounted.restore()).toEqual({ task: "Keep my task" });
+    fireEvent.click(within(region(source)).getByRole("button", { name: "Expand" }));
+    const drawer = connect(screen.getByRole("dialog").querySelector("iframe")!);
+    expect(drawer.restore()).toEqual({ task: "Keep my task" });
+    drawer.save({ task: "Edited in drawer" });
+    expect(remounted.posts.filter((message) => message.type === "restore")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Close canvas" }));
+    fireEvent.click(within(region(source)).getByRole("button", { name: "Collapse region" }));
+    fireEvent.click(within(region(source)).getByRole("button", { name: "Expand region" }));
+    const shared = connect(region(source).querySelector("iframe")!);
+    expect(shared.restore()).toEqual({ task: "Edited in drawer" });
+    expect(postRibActionCalls).toEqual([]);
+    expect(triggerCalls).toEqual([]);
+    expect(reloadCalls).toEqual({});
+    expect(document.querySelector(".keelson-toast")).toBeNull();
   });
 
   test("hideWhenEmpty omits an html region whose markup is blank, and keeps one with content", () => {

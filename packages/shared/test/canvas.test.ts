@@ -2,14 +2,19 @@ import { describe, expect, it } from "bun:test";
 import { z } from "zod";
 import {
   CANVAS_HTML_ACTION_CHANNEL,
+  CANVAS_HTML_STATE_CHANNEL,
+  CANVAS_HTML_STATE_MAX_BYTES,
   canvasDocumentSchema,
   canvasHtmlActionSchema,
+  canvasHtmlStateSchema,
   canvasKindSchema,
   canvasViewSchema,
   getRunArtifactResponseSchema,
+  isCanvasHtmlState,
 } from "../src/canvas.ts";
 import {
   type CanvasGraphSection,
+  type CanvasHtmlStateMessage,
   type CanvasPlacement,
   canvasPlacementSchema,
 } from "../src/index.ts";
@@ -2324,6 +2329,91 @@ describe("canvasHtmlActionSchema", () => {
         ribId: "other-rib",
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("canvasHtmlStateSchema", () => {
+  it("accepts both directions and JSON object values", () => {
+    expect(CANVAS_HTML_STATE_MAX_BYTES).toBe(65_536);
+    for (const type of ["save", "restore"] as const) {
+      const message: CanvasHtmlStateMessage = {
+        channel: CANVAS_HTML_STATE_CHANNEL,
+        type,
+        state: { nested: [{ text: "x", number: 1, bool: true, nil: null }], empty: {} },
+      };
+      expect(canvasHtmlStateSchema.parse(message)).toEqual(message);
+    }
+    expect(isCanvasHtmlState({})).toBe(true);
+    const shared = { task: "x" };
+    expect(isCanvasHtmlState({ a: shared, b: shared })).toBe(true);
+    expect(isCanvasHtmlState(Object.create(null))).toBe(true);
+  });
+
+  it("rejects non-JSON roots and nested values", () => {
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    for (const value of [
+      undefined,
+      null,
+      [],
+      "x",
+      1,
+      false,
+      () => {},
+      Symbol(),
+      1n,
+      { x: undefined },
+      { x: () => {} },
+      { x: Symbol() },
+      { x: 1n },
+      { x: NaN },
+      { x: Infinity },
+      { x: new Date() },
+      { x: new Map() },
+      { x: new Set() },
+      { x: new (class State {})() },
+      cycle,
+      { x: new Array(1) },
+      { [Symbol()]: "x" },
+      {
+        get x() {
+          throw new Error("must not invoke getters");
+        },
+      },
+    ]) {
+      expect(
+        canvasHtmlStateSchema.safeParse({
+          channel: CANVAS_HTML_STATE_CHANNEL,
+          type: "save",
+          state: value,
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("rejects wrong channels, directions, missing state and supplied identities", () => {
+    const message = { channel: CANVAS_HTML_STATE_CHANNEL, type: "save", state: {} };
+    for (const invalid of [
+      { ...message, channel: "other" },
+      { ...message, type: "action" },
+      { ...message, viewKey: "rib:other:view" },
+      { ...message, ribId: "other" },
+      { channel: CANVAS_HTML_STATE_CHANNEL, type: "restore" },
+    ])
+      expect(canvasHtmlStateSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("validates deep nesting without recursion and rejects deep cycles", () => {
+    const root: Record<string, unknown> = {};
+    let leaf = root;
+    for (let i = 0; i < 20_000; i++) {
+      const next = {};
+      leaf.next = next;
+      leaf = next;
+    }
+    expect(isCanvasHtmlState(root)).toBe(true);
+    leaf.next = root;
+    expect(isCanvasHtmlState(root)).toBe(false);
   });
 });
 

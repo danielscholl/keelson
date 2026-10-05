@@ -79,6 +79,12 @@ the browser either has a renderer for that shape or refuses politely.
 | `view` | A typed visualization: a `table`, a `graph` of nodes and edges, or a `board`. |
 | `html` | Untrusted rib-supplied markup rendered in a sandboxed iframe. The host owns the document shell (a CSP with `connect-src 'none'` blocks script-initiated network connections; a bridge script is injected first). Frame script calls `keelson.action(type, payload)` to post typed actions back; the rib's handler receives them with `origin: "canvas-html"`, which the host stamps itself after reading only `type` and `payload` off the frame message, so a frame can never claim `"board"`. The markup is untrusted (rib- or LLM-authored, and frame script can post on load without a user gesture), so a rib's `onAction` should gate frame-origin verbs to a safe subset. The shell stamps the app's resolved theme as `data-theme` on the frame's root element and pushes later toggles into the frame, so markup styled through `:root[data-theme]` token overrides re-themes live. |
 
+HTML views can opt into preserving small UI drafts across document replacement
+with `keelson.saveState` and `keelson.onRestore`. State is isolated by snapshot
+key and retained only in bounded browser-tab memory, not durable rib storage.
+The [HTML state bridge reference](../../reference/snapshots/#html-state-bridge)
+defines restoration timing, placement sharing, and limits.
+
 The `board` is the workhorse: a dashboard composed from a fixed section
 vocabulary, stats, segments, bars, tables, cards, rows, actions, a grid, a chart
 (a deterministic line or timeseries plot), seats (a fixed-capacity identity row),

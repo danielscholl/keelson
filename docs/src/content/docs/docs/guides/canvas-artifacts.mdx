@@ -40,6 +40,14 @@ The pipeline has three parts:
   the app's resolved theme onto the frame and pushes toggles live, so a
   token-styled page re-themes without a reload.
 
+Pages can opt into transient UI state with `keelson.saveState` and
+`keelson.onRestore`. Snapshot-backed pages retain it by key in bounded
+browser-tab memory; inline text and direct artifact sources without a snapshot
+key retain it only for the component's lifetime. This is not artifact or draft
+storage, and a page reload loses it. See the
+[HTML state bridge reference](../../reference/snapshots/#html-state-bridge)
+for the API, lifecycle, and limits.
+
 ## Publishing from chat
 
 Any provider with the tool registry sees `canvas_publish`. A typical exchange:

@@ -82,9 +82,11 @@ export function SnapshotStateView({ snapshot, busy }: { snapshot: SnapshotState;
 export function HtmlFromData({
   data,
   onAction,
+  viewKey,
 }: {
   data: unknown;
   onAction?: (action: CanvasHtmlAction) => void;
+  viewKey?: string;
 }) {
   if (typeof data !== "string") {
     return (
@@ -93,7 +95,7 @@ export function HtmlFromData({
       </p>
     );
   }
-  return <SandboxedHtml html={data} onAction={onAction} />;
+  return <SandboxedHtml html={data} viewKey={viewKey} onAction={onAction} />;
 }
 
 // The SnapshotStateView twin for `canvasKind: "html"` keys. Same reason to
@@ -103,16 +105,18 @@ export function HtmlStateView({
   snapshot,
   busy,
   onAction,
+  viewKey,
 }: {
   snapshot: SnapshotState;
   busy?: boolean;
   onAction?: (action: CanvasHtmlAction) => void;
+  viewKey?: string;
 }) {
   if (snapshot.status === "error") {
     return <p className="canvas-drawer-note canvas-drawer-error">Failed to load this snapshot.</p>;
   }
   if (snapshot.status === "live") {
-    return <HtmlFromData data={snapshot.data} onAction={onAction} />;
+    return <HtmlFromData data={snapshot.data} viewKey={viewKey} onAction={onAction} />;
   }
   return <CanvasSkeleton label={busy ? "Running…" : "Loading…"} />;
 }

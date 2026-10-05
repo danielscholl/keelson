@@ -93,6 +93,65 @@ export const canvasHtmlSizeSchema = z
   .strict();
 export type CanvasHtmlSizeMessage = z.infer<typeof canvasHtmlSizeSchema>;
 
+export const CANVAS_HTML_STATE_CHANNEL = "keelson:canvas:html:state";
+export const CANVAS_HTML_STATE_MAX_BYTES = 65_536;
+export interface CanvasHtmlState {
+  [key: string]: CanvasHtmlStateValue;
+}
+type CanvasHtmlStateValue =
+  | string
+  | number
+  | boolean
+  | null
+  | CanvasHtmlState
+  | CanvasHtmlStateValue[];
+
+export function isCanvasHtmlState(value: unknown): value is CanvasHtmlState {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const active = new WeakSet<object>();
+  const pending: { value: unknown; exit?: boolean }[] = [{ value }];
+  while (pending.length) {
+    const item = pending.pop()!;
+    const current = item.value;
+    if (current === null || typeof current === "string" || typeof current === "boolean") continue;
+    if (typeof current === "number") {
+      if (!Number.isFinite(current)) return false;
+      continue;
+    }
+    if (typeof current !== "object") return false;
+    if (item.exit) {
+      active.delete(current);
+      continue;
+    }
+    const array = Array.isArray(current);
+    const prototype = Object.getPrototypeOf(current);
+    if (!array && prototype !== Object.prototype && prototype !== null) return false;
+    if (active.has(current)) return false;
+    active.add(current);
+    pending.push({ value: current, exit: true });
+    const keys = Reflect.ownKeys(current);
+    if (array && keys.length !== current.length + 1) return false;
+    for (const key of keys) {
+      if (array && key === "length") continue;
+      if (typeof key !== "string") return false;
+      if (array && (!/^(0|[1-9]\d*)$/.test(key) || Number(key) >= current.length)) return false;
+      const descriptor = Object.getOwnPropertyDescriptor(current, key)!;
+      if (!descriptor.enumerable || !("value" in descriptor)) return false;
+      pending.push({ value: descriptor.value });
+    }
+  }
+  return true;
+}
+
+export const canvasHtmlStateSchema = z
+  .object({
+    channel: z.literal(CANVAS_HTML_STATE_CHANNEL),
+    type: z.enum(["save", "restore"]),
+    state: z.custom<CanvasHtmlState>(isCanvasHtmlState),
+  })
+  .strict();
+export type CanvasHtmlStateMessage = z.infer<typeof canvasHtmlStateSchema>;
+
 // Payload contract for a `kind: "view"` canvas. The data carries its own `view`
 // discriminant — the producer (a workflow or a rib) bakes it in; the base picks
 // a renderer from a closed catalog. Domain-free on purpose: `node.kind` is a

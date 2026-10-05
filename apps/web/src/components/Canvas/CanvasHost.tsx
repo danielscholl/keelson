@@ -538,7 +538,7 @@ function HtmlBody({
         snapshotKey={source.key}
         render={(data) =>
           typeof data === "string" ? (
-            <SandboxedHtml html={data} onAction={onAction} />
+            <SandboxedHtml html={data} viewKey={source.key} onAction={onAction} />
           ) : (
             <p className="canvas-drawer-note canvas-drawer-error">
               This HTML canvas expected text but received structured data.

@@ -1,10 +1,14 @@
 import {
   CANVAS_HTML_ACTION_CHANNEL,
   CANVAS_HTML_SIZE_CHANNEL,
+  CANVAS_HTML_STATE_CHANNEL,
+  CANVAS_HTML_STATE_MAX_BYTES,
   CANVAS_HTML_THEME_CHANNEL,
   type CanvasHtmlAction,
   canvasHtmlActionSchema,
   canvasHtmlSizeSchema,
+  canvasHtmlStateSchema,
+  isCanvasHtmlState,
 } from "@keelson/shared";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
@@ -38,11 +42,61 @@ const BRIDGE_SCRIPT = `
 (function () {
   var CHANNEL = ${JSON.stringify(CANVAS_HTML_ACTION_CHANNEL)};
   var THEME_CHANNEL = ${JSON.stringify(CANVAS_HTML_THEME_CHANNEL)};
+  var STATE_CHANNEL = ${JSON.stringify(CANVAS_HTML_STATE_CHANNEL)};
+  var isState = ${isCanvasHtmlState.toString()};
+  var restoreHandler;
+  var pendingState;
+  var receivedState = false;
+  var consumedState = false;
+  function validState(state) {
+    if (!isState(state)) return false;
+    var json;
+    try {
+      json = JSON.stringify(state);
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error;
+      return false;
+    }
+    return new TextEncoder().encode(json).byteLength <= ${CANVAS_HTML_STATE_MAX_BYTES};
+  }
+  function deliverState() {
+    if (!receivedState || consumedState || !restoreHandler) return;
+    consumedState = true;
+    var state = pendingState;
+    pendingState = undefined;
+    restoreHandler(state);
+  }
+  function saveState(state) {
+    if (!validState(state)) {
+      console.warn("HTML state rejected: invalid JSON object or byte limit");
+      return;
+    }
+    try {
+      parent.postMessage({ channel: STATE_CHANNEL, type: "save", state: state }, "*");
+    } catch (error) {
+      if (!error || error.name !== "DataCloneError") throw error;
+      console.warn("HTML state rejected: structured clone failed");
+    }
+  }
+  function onRestore(handler) {
+    if (typeof handler !== "function") throw new TypeError("onRestore requires a function");
+    restoreHandler = handler;
+    deliverState();
+  }
   function post(type, payload) {
     if (typeof type !== "string" || !type) return;
     parent.postMessage({ channel: CHANNEL, type: type, payload: payload }, "*");
   }
-  window.keelson = { action: post };
+  window.keelson = { action: post, saveState: saveState, onRestore: onRestore };
+  window.addEventListener("message", function (e) {
+    if (e.source !== window.parent) return;
+    var d = e.data;
+    if (!d || d.channel !== STATE_CHANNEL || d.type !== "restore" || receivedState) return;
+    if (Reflect.ownKeys(d).length !== 3 || !validState(d.state)) return;
+    pendingState = d.state;
+    receivedState = true;
+    deliverState();
+  });
   document.addEventListener("click", function (e) {
     var el = e.target && e.target.closest ? e.target.closest("[data-canvas-action]") : null;
     if (el) post(el.getAttribute("data-canvas-action"), undefined);
@@ -157,14 +211,43 @@ export function composeCanvasHtmlDoc(fragment: string, theme?: CanvasFrameTheme)
 // Renders untrusted, rib-supplied HTML in an isolated iframe, relays its
 // structured actions to `onAction`, and pushes the SPA's resolved theme into it.
 export function SandboxedHtml({
+  viewKey,
+  ...props
+}: {
+  html: string;
+  viewKey?: string;
+  onAction?: (action: CanvasHtmlAction) => void;
+}) {
+  return (
+    <HtmlFrame
+      key={viewKey === undefined ? "unkeyed" : `key:${viewKey}`}
+      viewKey={viewKey}
+      {...props}
+    />
+  );
+}
+
+const savedStates = new Map<string, string>();
+
+function retainState(key: string, json: string) {
+  savedStates.delete(key);
+  savedStates.set(key, json);
+  if (savedStates.size > 64) savedStates.delete(savedStates.keys().next().value!);
+}
+
+function HtmlFrame({
   html,
   onAction,
+  viewKey,
 }: {
   html: string;
   onAction?: (action: CanvasHtmlAction) => void;
+  viewKey?: string;
 }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const themeRef = useRef<CanvasFrameTheme>(readDocumentTheme());
+  const localState = useRef<string | undefined>(undefined);
+  const delivery = useMemo(() => ({ html, done: false }), [html]);
 
   // srcDoc is keyed on the fragment only — a theme toggle must NOT recompose it
   // (that reloads the frame and loses scroll/state); toggles ride postMessage.
@@ -179,6 +262,49 @@ export function SandboxedHtml({
     // payload is just a theme name, nothing sensitive rides this channel.
     win.postMessage({ channel: CANVAS_HTML_THEME_CHANNEL, theme: themeRef.current }, "*");
   }, []);
+
+  const onLoad = useCallback(() => {
+    postTheme();
+    const win = ref.current?.contentWindow;
+    if (delivery.done || typeof win?.postMessage !== "function") return;
+    delivery.done = true;
+    const json = viewKey === undefined ? localState.current : savedStates.get(viewKey);
+    if (json === undefined) return;
+    if (viewKey !== undefined) retainState(viewKey, json);
+    win.postMessage(
+      { channel: CANVAS_HTML_STATE_CHANNEL, type: "restore", state: JSON.parse(json) },
+      "*",
+    );
+  }, [delivery, postTheme, viewKey]);
+
+  useEffect(() => {
+    function onState(e: MessageEvent) {
+      if ((e.data as { channel?: unknown } | null)?.channel !== CANVAS_HTML_STATE_CHANNEL) return;
+      if (!ref.current || e.source !== ref.current.contentWindow) return;
+      const parsed = canvasHtmlStateSchema.safeParse(e.data);
+      if (!parsed.success) {
+        console.warn("HTML state rejected: invalid envelope or JSON value");
+        return;
+      }
+      if (parsed.data.type !== "save") return;
+      let json: string;
+      try {
+        json = JSON.stringify(parsed.data.state);
+      } catch (error) {
+        if (!(error instanceof RangeError)) throw error;
+        console.warn("HTML state rejected: excessive nesting");
+        return;
+      }
+      if (new TextEncoder().encode(json).byteLength > CANVAS_HTML_STATE_MAX_BYTES) {
+        console.warn("HTML state rejected: byte limit exceeded");
+        return;
+      }
+      if (viewKey === undefined) localState.current = json;
+      else retainState(viewKey, json);
+    }
+    window.addEventListener("message", onState);
+    return () => window.removeEventListener("message", onState);
+  }, [viewKey]);
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -243,7 +369,7 @@ export function SandboxedHtml({
       sandbox="allow-scripts"
       referrerPolicy="no-referrer"
       srcDoc={srcDoc}
-      onLoad={postTheme}
+      onLoad={onLoad}
     />
   );
 }
