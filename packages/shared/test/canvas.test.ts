@@ -539,7 +539,7 @@ describe("canvasViewSchema", () => {
 
   it("rejects an unknown board section kind and an extra section key (strict)", () => {
     expect(() =>
-      canvasViewSchema.parse({ view: "board", sections: [{ kind: "timeline", items: [] }] }),
+      canvasViewSchema.parse({ view: "board", sections: [{ kind: "unknown-section", items: [] }] }),
     ).toThrow();
     expect(() =>
       canvasViewSchema.parse({

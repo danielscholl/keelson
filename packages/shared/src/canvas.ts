@@ -1038,6 +1038,90 @@ const graphSectionSchema = z
   .strict();
 export type CanvasGraphSection = z.infer<typeof graphSectionSchema>;
 
+const timelineTimestampSchema = z.string().datetime({ offset: true });
+const timelineWindowSchema = z.union([
+  z
+    .object({ from: timelineTimestampSchema, to: timelineTimestampSchema })
+    .strict()
+    .refine((window) => Date.parse(window.to) > Date.parse(window.from), {
+      message: "window end must be after its start",
+      path: ["to"],
+    }),
+  z
+    .object({
+      from: timelineTimestampSchema,
+      clock: z.object({ until: timelineTimestampSchema }).strict(),
+    })
+    .strict()
+    .refine((window) => Date.parse(window.clock.until) > Date.parse(window.from), {
+      message: "window end must be after its start",
+      path: ["clock", "until"],
+    }),
+]);
+export type CanvasTimelineWindow = z.infer<typeof timelineWindowSchema>;
+
+const timelineLaneSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    tone: canvasToneSchema
+      .extract([
+        "id-blue",
+        "id-amber",
+        "id-teal",
+        "id-rose",
+        "id-olive",
+        "brand",
+        "neutral",
+        "info",
+      ])
+      .optional(),
+    group: z.string().optional(),
+  })
+  .strict();
+export type CanvasTimelineLane = z.infer<typeof timelineLaneSchema>;
+
+const timelineSpanSchema = z
+  .object({
+    lane: z.string().min(1),
+    from: timelineTimestampSchema,
+    to: timelineTimestampSchema.optional(),
+    tone: canvasToneSchema.optional(),
+    hatched: z.boolean().optional(),
+    title: z.string().min(1),
+  })
+  .strict()
+  .refine((span) => span.to === undefined || Date.parse(span.to) >= Date.parse(span.from), {
+    message: "span end must not precede its start",
+    path: ["to"],
+  });
+export type CanvasTimelineSpan = z.infer<typeof timelineSpanSchema>;
+
+const timelineMarkSchema = z
+  .object({
+    lane: z.string().min(1),
+    at: timelineTimestampSchema,
+    glyph: z.string().refine((glyph) => Array.from(glyph).length === 1, {
+      message: "glyph must be one Unicode code point",
+    }),
+    title: z.string().min(1),
+  })
+  .strict();
+export type CanvasTimelineMark = z.infer<typeof timelineMarkSchema>;
+
+const timelineSectionSchema = z
+  .object({
+    kind: z.literal("timeline"),
+    title: z.string().optional(),
+    window: timelineWindowSchema,
+    lanes: z.array(timelineLaneSchema).min(1).max(12),
+    spans: z.array(timelineSpanSchema).max(400),
+    marks: z.array(timelineMarkSchema).max(200),
+    legend: z.string().optional(),
+  })
+  .strict();
+export type CanvasTimelineSection = z.infer<typeof timelineSectionSchema>;
+
 const leafBoardSectionSchema = z.discriminatedUnion("kind", [
   statsSectionSchema,
   segmentsSectionSchema,
@@ -1051,6 +1135,7 @@ const leafBoardSectionSchema = z.discriminatedUnion("kind", [
   seatsSectionSchema,
   journeySectionSchema,
   graphSectionSchema,
+  timelineSectionSchema,
 ]);
 
 // `columns` lays leaf sections side by side (a two-column Lifecycle | Actions
@@ -1087,6 +1172,7 @@ const canvasBoardSectionSchema = z.discriminatedUnion("kind", [
   seatsSectionSchema,
   journeySectionSchema,
   graphSectionSchema,
+  timelineSectionSchema,
   columnsBoardSectionSchema,
 ]);
 
@@ -1162,6 +1248,29 @@ function assertLeafSectionUniqueness(
         code: "custom",
         message: 'baseline "auto" fits the line mark only — bars and areas anchor at zero',
         path: [...path, "baseline"],
+      });
+    }
+  } else if (leaf.kind === "timeline") {
+    const ids = new Set<string>();
+    leaf.lanes.forEach((lane, i) => {
+      if (ids.has(lane.id)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "lane ids must be unique",
+          path: [...path, "lanes", i, "id"],
+        });
+      }
+      ids.add(lane.id);
+    });
+    for (const key of ["spans", "marks"] as const) {
+      leaf[key].forEach((item, i) => {
+        if (!ids.has(item.lane)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `lane "${item.lane}" names no lane`,
+            path: [...path, key, i, "lane"],
+          });
+        }
       });
     }
   } else if (leaf.kind === "graph") {

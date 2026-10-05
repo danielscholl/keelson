@@ -72,6 +72,25 @@ describe("design guide placement", () => {
       "a graph whose edges carry the story better told as a journey or table",
     );
   });
+
+  test("guides activity toward bounded timelines with host ticking and text fallback", () => {
+    const board = CANVAS_DESIGN_GUIDE_SECTIONS.board;
+    for (const phrase of [
+      "spans on lanes over a window; a chart is for values",
+      "Required arrays: lanes",
+      "cap 12 lanes / 400 spans / 200 marks",
+      "{ from, to } or { from, clock: { until } }",
+      "single-code-point glyph",
+      "open-ended dashed outline",
+      "shared clock without new frames",
+      "until is fixed, not a sliding window",
+      "Below 720px of section width",
+      "lists every span and mark as text",
+      'expectView(key, "board")',
+    ]) {
+      expect(board).toContain(phrase);
+    }
+  });
 });
 
 describe("design guide voice", () => {
