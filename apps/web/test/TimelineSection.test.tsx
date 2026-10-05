@@ -25,6 +25,14 @@ function measureAt(initial: number) {
   };
 }
 
+function expectedZoneAt(iso: string) {
+  const zone = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+    .formatToParts(Date.parse(iso))
+    .find((part) => part.type === "timeZoneName")?.value;
+  expect(zone).toBeDefined();
+  return zone!;
+}
+
 const fixed: CanvasTimelineSection = {
   ...timelineFixture,
   window: { from: timelineFixture.window.from, to: "2026-10-05T13:00:00Z" },
@@ -44,10 +52,7 @@ describe("timeline section", () => {
     measureAt(1200);
     const { container } = render(<BoardView view={{ view: "board", sections: [fixed] }} />);
     expect(container.querySelector(".cvb-section-title")?.textContent).toBe(fixed.title);
-    const zone = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
-      .formatToParts(Date.parse(fixed.window.from))
-      .find((part) => part.type === "timeZoneName")?.value;
-    expect(zone).toBeDefined();
+    const zone = expectedZoneAt(fixed.window.from);
     expect(container.querySelector(".cvb-timeline-window")?.textContent).toBe(
       `2026-10-05 07:00:00.000 to 2026-10-05 08:00:00.000 · axis in ${zone}`,
     );
@@ -92,6 +97,145 @@ describe("timeline section", () => {
     expect(container.querySelector(".cvb-timeline-legend")?.textContent).toBe(fixed.legend);
     expect(container.querySelector(".cvb-timeline-now")).toBeNull();
   });
+
+  test.each(
+    [
+      {
+        name: "same-day",
+        from: "2026-10-05T22:36:07.360Z",
+        to: "2026-10-05T22:46:00Z",
+        start: "2026-10-05 17:36:07.360",
+        end: "2026-10-05 17:46:00.000",
+        ticks: ["17:38", "17:40", "17:42", "17:44", "17:46"],
+      },
+      {
+        name: "local-midnight",
+        from: "2026-10-06T04:59:30Z",
+        to: "2026-10-06T05:00:30Z",
+        start: "2026-10-05 23:59:30.000",
+        end: "2026-10-06 00:00:30.000",
+        ticks: ["23:59:30", "23:59:45", "00:00:00", "00:00:15", "00:00:30"],
+      },
+      {
+        name: "UTC-midnight on one local day",
+        from: "2026-10-05T23:59:30Z",
+        to: "2026-10-06T00:00:30Z",
+        start: "2026-10-05 18:59:30.000",
+        end: "2026-10-05 19:00:30.000",
+        ticks: ["18:59:30", "18:59:45", "19:00:00", "19:00:15", "19:00:30"],
+      },
+      {
+        name: "sub-second with ISO offsets",
+        from: "2026-10-05T17:36:07.100-05:00",
+        to: "2026-10-06T00:36:07.900+02:00",
+        start: "2026-10-05 17:36:07.100",
+        end: "2026-10-05 17:36:07.900",
+        ticks: ["17:36:07.100", "17:36:07.900"],
+      },
+    ].flatMap((value) =>
+      [719, 1200].flatMap((width) => [false, true].map((live) => ({ ...value, width, live }))),
+    ),
+  )(
+    "shows $name local text at $width px (live=$live)",
+    ({ from, to, start, end, ticks, width, live }) => {
+      measureAt(width);
+      const span = { lane: "north", title: "Work at 22:36Z", from, to };
+      const marks = [
+        { lane: "north", title: "Started", glyph: "*", at: from },
+        { lane: "north", title: "Done", glyph: "*", at: to },
+      ];
+      const section: CanvasTimelineSection = {
+        ...fixed,
+        window: live ? { from, clock: { until: to } } : { from, to },
+        spans: [span],
+        marks,
+      };
+      const { container } = render(<BoardView view={{ view: "board", sections: [section] }} />);
+      const zone = expectedZoneAt(from);
+      const caption = container.querySelector(".cvb-timeline-window");
+      expect(caption?.textContent).toBe(`${start} to ${end} · axis in ${zone}`);
+      expect(caption?.textContent?.split(zone)).toHaveLength(2);
+      expect(
+        [...container.querySelectorAll(".cvb-timeline-window time")].map((el) =>
+          el.getAttribute("datetime"),
+        ),
+      ).toEqual([from, to]);
+      if (width < 720) {
+        expect(container.querySelector(".cvb-timeline-plot")).toBeNull();
+        expect(
+          [...container.querySelectorAll(".cvb-timeline-list time")].map((el) => el.textContent),
+        ).toEqual([start, end, start, end]);
+        expect(
+          [...container.querySelectorAll(".cvb-timeline-list time")].map((el) =>
+            el.getAttribute("datetime"),
+          ),
+        ).toEqual([from, to, from, to]);
+        expect(
+          [...container.querySelectorAll(".cvb-timeline-list li")].map((el) => el.textContent),
+        ).toEqual([
+          `${span.title} · ${start} to ${end}`,
+          `* ${marks[0]!.title} · ${start}`,
+          `* ${marks[1]!.title} · ${end}`,
+        ]);
+      } else {
+        expect(container.querySelector(".cvb-timeline-list")).toBeNull();
+        expect(container.querySelector(".cvb-timeline-plot")?.getAttribute("aria-label")).toBe(
+          `${section.title}; time axis in ${zone}`,
+        );
+        expect(
+          [...container.querySelectorAll(".cvb-timeline-tick")].map((el) => el.textContent),
+        ).toEqual(ticks);
+        const bar = container.querySelector(".cvb-timeline-span");
+        const description = `${span.title}: ${start} to ${end}`;
+        expect(bar?.querySelector("title")?.textContent).toBe(description);
+        expect(bar?.getAttribute("aria-label")).toBe(`North, ${description}`);
+        expect(bar?.querySelector(".cvb-timeline-span-title")?.textContent).toBe(span.title);
+        const points = container.querySelectorAll(".cvb-timeline-mark");
+        expect(points).toHaveLength(2);
+        [start, end].forEach((timestamp, index) => {
+          const text = `${marks[index]!.title}: ${timestamp}`;
+          expect(points[index]?.querySelector("title")?.textContent).toBe(text);
+          expect(points[index]?.getAttribute("aria-label")).toBe(`North, ${text}`);
+        });
+      }
+    },
+  );
+
+  test.each(["2026-01-05T13:00:00Z", "2026-01-07T12:00:00Z"])(
+    "uses the window-start short zone for a winter window ending at %s",
+    (to) => {
+      measureAt(1200);
+      jest.useFakeTimers();
+      jest.setSystemTime(Date.parse("2026-07-05T12:00:00Z"));
+      try {
+        const from = "2026-01-05T12:00:00Z";
+        const { container, unmount } = render(
+          <BoardView
+            view={{
+              view: "board",
+              sections: [{ ...fixed, window: { from, to }, spans: [], marks: [] }],
+            }}
+          />,
+        );
+        try {
+          const zone = expectedZoneAt(from);
+          expect(container.querySelector(".cvb-timeline-window")?.textContent).toEndWith(
+            ` · axis in ${zone}`,
+          );
+          expect(container.querySelector(".cvb-timeline-window time")?.textContent).toBe(
+            "2026-01-05 06:00:00.000",
+          );
+          expect(container.querySelector(".cvb-timeline-plot")?.getAttribute("aria-label")).toBe(
+            `${fixed.title}; time axis in ${zone}`,
+          );
+        } finally {
+          unmount();
+        }
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
 
   test.each([719, 1200])(
     "keeps full local item timestamps in a seven-day window at %ipx",
