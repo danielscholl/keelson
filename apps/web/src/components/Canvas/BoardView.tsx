@@ -24,6 +24,7 @@ import { ChartSection } from "./ChartSection.tsx";
 import { GraphSection } from "./GraphSection.tsx";
 import { ModelCatalogPopover, ModelFieldPicker } from "./ModelFieldPicker.tsx";
 import { TableView } from "./TableView.tsx";
+import { TimelineSection } from "./TimelineSection.tsx";
 
 type BoardSection = CanvasBoardView["sections"][number];
 type Segment = { label: string; n: number | null; tone?: CanvasTone };
@@ -1422,6 +1423,8 @@ function Section({ section }: { section: BoardSection }) {
       return <ChartSection section={section} />;
     case "graph":
       return <GraphSection section={section} />;
+    case "timeline":
+      return <TimelineSection section={section} />;
     case "seats": {
       const key = makeKeyer();
       return (
