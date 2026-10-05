@@ -611,30 +611,96 @@ describe("CanvasProvider / useCanvas", () => {
     expect(seen).toEqual([valid]);
   });
 
-  test("SandboxedHtml grows to a frame-reported content height, clamped", () => {
-    render(<SandboxedHtml html="<p>x</p>" />);
-    const frame = document.querySelector("iframe.canvas-html-frame") as HTMLIFrameElement;
-    const win = {} as Window;
-    Object.defineProperty(frame, "contentWindow", { value: win, configurable: true });
+  describe("SandboxedHtml sizing", () => {
+    function sizingFrame() {
+      const { container } = render(<SandboxedHtml html="<p>x</p>" />);
+      const frame = container.querySelector("iframe")!;
+      const source = {};
+      Object.defineProperty(frame, "contentWindow", { value: source, configurable: true });
+      frame.style.minHeight = "60vh";
+      return { frame, source };
+    }
 
-    postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 1234 }, {} as Window); // wrong source
-    postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: "big" }, win); // bad schema
-    expect(frame.style.height).toBe("");
+    test("preserves the loading floor before any report", () => {
+      const { frame } = sizingFrame();
+      expect(frame.style.height).toBe("");
+      expect(frame.style.minHeight).toBe("60vh");
+    });
 
-    postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 1234.6 }, win);
-    expect(frame.style.height).toBe("1235px");
-    // Content-sized now, so the pre-measurement viewport floor is released.
-    expect(frame.style.minHeight).toBe("0px");
+    test.each([
+      ["missing height", { channel: CANVAS_HTML_SIZE_CHANNEL }],
+      ["zero", { channel: CANVAS_HTML_SIZE_CHANNEL, height: 0 }],
+    ])("preserves fresh-frame styles for %s", (_name, message) => {
+      const { frame, source } = sizingFrame();
+      postMessageTo(message, source);
+      expect(frame.style.height).toBe("");
+      expect(frame.style.minHeight).toBe("60vh");
+    });
 
-    // A shorter report shrinks the frame — sizing is bidirectional.
-    postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 400 }, win);
-    expect(frame.style.height).toBe("400px");
+    test.each([80, 0.1, 1, 31, 31.4, 32])(
+      "fits positive %s px content with a 32px minimum",
+      (height) => {
+        const { frame, source } = sizingFrame();
+        postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height }, source);
+        expect(frame.style.height).toBe(`${Math.max(Math.round(height), 32)}px`);
+        expect(frame.style.minHeight).toBe("0px");
+      },
+    );
 
-    // A hostile or broken height is clamped, never applied raw.
-    postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 10_000_000 }, win);
-    expect(frame.style.height).toBe("20000px");
-    postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 0 }, win);
-    expect(frame.style.height).toBe("160px");
+    test("shrinks from 400px to 80px and retains that height after zero", () => {
+      const { frame, source } = sizingFrame();
+      postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 400 }, source);
+      expect(frame.style.height).toBe("400px");
+      expect(frame.style.minHeight).toBe("0px");
+      postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 80 }, source);
+      expect(frame.style.height).toBe("80px");
+      expect(frame.style.minHeight).toBe("0px");
+      postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 0 }, source);
+      expect(frame.style.height).toBe("80px");
+      expect(frame.style.minHeight).toBe("0px");
+    });
+
+    test("rounds fractional reports and retains the ceiling after zero", () => {
+      const { frame, source } = sizingFrame();
+      for (const [height, expected] of [
+        [1234.6, "1235px"],
+        [20_000, "20000px"],
+        [10_000_000, "20000px"],
+        [0, "20000px"],
+      ] as const) {
+        postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height }, source);
+        expect(frame.style.height).toBe(expected);
+        expect(frame.style.minHeight).toBe("0px");
+      }
+    });
+
+    test("rejects foreign sources, channels, and invalid envelopes without style changes", () => {
+      const { frame, source } = sizingFrame();
+      const invalid = [
+        null,
+        { channel: "other", height: 400 },
+        { channel: CANVAS_HTML_SIZE_CHANNEL },
+        { channel: CANVAS_HTML_SIZE_CHANNEL, height: "big" },
+        { channel: CANVAS_HTML_SIZE_CHANNEL, height: -1 },
+        { channel: CANVAS_HTML_SIZE_CHANNEL, height: Number.NaN },
+        { channel: CANVAS_HTML_SIZE_CHANNEL, height: Number.POSITIVE_INFINITY },
+        { channel: CANVAS_HTML_SIZE_CHANNEL, height: Number.NEGATIVE_INFINITY },
+        { channel: CANVAS_HTML_SIZE_CHANNEL, height: 400, extra: true },
+      ];
+      for (const measured of [false, true]) {
+        if (measured) postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 400 }, source);
+        const height = frame.style.height;
+        const minHeight = frame.style.minHeight;
+        postMessageTo({ channel: CANVAS_HTML_SIZE_CHANNEL, height: 800 }, {});
+        expect(frame.style.height).toBe(height);
+        expect(frame.style.minHeight).toBe(minHeight);
+        for (const message of invalid) {
+          postMessageTo(message, source);
+          expect(frame.style.height).toBe(height);
+          expect(frame.style.minHeight).toBe(minHeight);
+        }
+      }
+    });
   });
 
   test("snapshot HTML state survives replacement and reopening, isolated from other keys", () => {
