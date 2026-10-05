@@ -343,11 +343,11 @@ function HtmlFrame({
       const frame = ref.current;
       if (!frame || e.source !== frame.contentWindow) return;
       const parsed = canvasHtmlSizeSchema.safeParse(e.data);
-      if (!parsed.success) return;
+      if (!parsed.success || parsed.data.height === 0) return;
       // The frame is untrusted: clamp before applying. The floor keeps a broken
       // measurement from collapsing the panel; the ceiling keeps a hostile one
       // from minting a hundred-thousand-pixel page.
-      const height = Math.min(Math.max(Math.round(parsed.data.height), 160), 20_000);
+      const height = Math.min(Math.max(Math.round(parsed.data.height), 32), 20_000);
       frame.style.height = `${height}px`;
       // Content-sized now — the pre-measurement viewport floor no longer applies.
       frame.style.minHeight = "0px";
