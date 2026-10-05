@@ -210,7 +210,7 @@ toggle wins after, and emptying the board re-arms it.
 
 ## Board sections
 
-Each section is discriminated on `kind`. Twelve are leaf sections; `columns` is a
+Each section is discriminated on `kind`. Thirteen are leaf sections; `columns` is a
 one-level layout wrapper that nests leaf sections side by side.
 
 | `kind` | Shape | For |
@@ -227,6 +227,7 @@ one-level layout wrapper that nests leaf sections side by side.
 | `seats` | `items: [{ tone?, filled?, label? }]` | A fixed-capacity identity row an actor roster fills. A dashed empty seat becomes solid when `filled`; a `label` (the actor's name) becomes the seat's tooltip and accessible name, and an unlabelled seat is decorative (`aria-hidden`). Identity colour never renders without a name (see [Tones](#tones)). |
 | `journey` | `items: [{ title, text? }]` | A numbered step strip (numbers derive from order) that says what will happen next. Replaces stacks of "nothing here yet" placeholder chrome on first-run surfaces. |
 | `graph` | `title?`, `columns?: string[]`, `nodes: [{ id, label, sublabel?, tone?, kind?, rank?, badges?: [{ text, tone? }], action?: { type, payload? }, selected? }]`, `edges: [{ source, target, label?, tone?, dashed? }]` | A ranked dependency, lineage, or parent-child map. Accepts 1 to 48 nodes and at most 200 edges. Node ids must be unique, both edge ends must name nodes, `selected: true` requires an action, and rank must be an integer at least zero. Section, node, and edge objects reject unknown keys. |
+| `timeline` | `title?`, `window`, `lanes: [{ id, label, tone?, group? }]`, `spans: [{ lane, from, to?, tone?, hatched?, title }]`, `marks: [{ lane, at, glyph, title }]`, `legend?` | Spans on lanes over a window; a chart is for values. Accepts 1 to 12 lanes, at most 400 spans and 200 marks. All three arrays are required; spans and marks may be empty. |
 | `columns` | `columns: [{ weight?, sections: LeafSection[] }]` | Lays leaf sections side by side. One level deep only. |
 
 **Graph layout.** Nodes occupy left-to-right rank columns and keep input order
@@ -259,6 +260,65 @@ graphs, publish the relevant slice and put "showing N of M" in `title`.
 Graph sections require a harness that supports this board-section kind. An older
 harness may support the top-level `view: "graph"` while rejecting a graph inside
 a board; check support before a rib adopts the section.
+
+**Timeline contract.** `window` is exactly `{ from, to }` or
+`{ from, clock: { until } }`. All timestamps are ISO 8601 with an offset.
+The window end must be after its start; a closed span's end may equal, but
+never precede, its start. Lane ids must be unique. Every span and mark must
+reference a declared lane. Ids, labels, and item titles are nonempty; a mark's
+`glyph` is one Unicode code point, including supplementary-plane characters.
+Section, window, lane, span, and mark objects reject unknown keys.
+Publish through `expectView(key, "board")` for these checks at either the board's
+top level or inside `columns`. `@keelson/shared` exports `CanvasTimelineSection`,
+`CanvasTimelineWindow`, `CanvasTimelineLane`, `CanvasTimelineSpan`, and
+`CanvasTimelineMark`.
+
+```ts
+const activity: CanvasTimelineSection = {
+  kind: "timeline",
+  title: "Activity window",
+  window: {
+    from: "2026-10-05T12:00:00Z",
+    clock: { until: "2026-10-05T13:00:00Z" },
+  },
+  lanes: [
+    { id: "prepare", label: "Prepare", tone: "id-blue", group: "Work" },
+    { id: "review", label: "Review", tone: "id-teal", group: "Checks" },
+  ],
+  spans: [
+    {
+      lane: "prepare", title: "Prepare inputs",
+      from: "2026-10-05T12:00:00Z", to: "2026-10-05T12:12:00Z",
+    },
+    { lane: "review", title: "Review in progress", from: "2026-10-05T12:15:00Z" },
+  ],
+  marks: [
+    { lane: "prepare", at: "2026-10-05T12:12:00Z", glyph: "*", title: "Inputs ready" },
+  ],
+  legend: "Dashed outline: open-ended. Marks: checkpoints.",
+};
+```
+
+**Timeline rendering.** Lanes keep input order; adjacent groups are divided.
+Lane tones are `id-blue`, `id-amber`, `id-teal`, `id-rose`, `id-olive`, `brand`,
+`neutral`, or `info`. A span's tone override accepts the full tone vocabulary,
+otherwise it inherits the lane tone, then `neutral`. Labels stay in readable ink.
+`hatched` adds a hatch; omitted `to` adds a dashed open-ended outline. These
+treatments can coexist. Marks expose their titles as tooltips.
+
+A clock window uses the host's shared 30-second clock, without new frames.
+`until` is a fixed upper bound, not a sliding window: running spans extend to
+the lesser of now and `until`, and the now rule disappears outside the window.
+Future-starting open spans wait until their start. Fixed windows have no now
+rule, and open spans extend to `to`. The axis labels use UTC.
+
+Data outside the window is valid: the plot clips intersecting spans and omits
+fully outside spans and marks. Zero-duration spans get a small visible width.
+Overlapping spans draw in source order and may overpaint. Below 720px of
+**section width**, the plot becomes lane lists containing every span and mark,
+including items outside the window, with times and explicit open-ended/hatched
+status. Publish a bounded slice when the full history exceeds the caps.
+Older hosts reject the `timeline` section kind; check support before adoption.
 
 A card `field` is `{ label?, value, tone?, href?, copyable?, copyAction? }`,
 or `{ label?, people: [{ name, tone? }] }`, which renders identity-toned names
