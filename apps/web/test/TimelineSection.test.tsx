@@ -59,11 +59,119 @@ describe("timeline section", () => {
     expect(spans[3]?.hasAttribute("data-hatched")).toBe(true);
     expect(spans[3]?.querySelector(".cvb-timeline-hatch")).not.toBeNull();
     expect(spans[3]?.getAttribute("aria-label")).toContain("Review, Review in progress:");
+    expect(spans[3]?.getAttribute("aria-label")).toContain("2026-10-05 12:20:00.000 UTC");
     expect(spans[3]?.getAttribute("aria-label")).toContain("open-ended (hatched)");
-    expect(container.querySelector(".cvb-timeline-mark title")?.textContent).toBe("Inputs ready");
+    expect(container.querySelector(".cvb-timeline-mark title")?.textContent).toBe(
+      "Inputs ready: 2026-10-05 12:12:00.000 UTC",
+    );
     expect(container.querySelector(".cvb-timeline-mark text")?.textContent).toBe("\u25c6");
     expect(container.querySelector(".cvb-timeline-legend")?.textContent).toBe(fixed.legend);
     expect(container.querySelector(".cvb-timeline-now")).toBeNull();
+  });
+
+  test.each([719, 1200])(
+    "keeps full UTC item timestamps in a seven-day window at %ipx",
+    (width) => {
+      measureAt(width);
+      const span = {
+        lane: "north",
+        title: "Hourly work",
+        from: "2026-10-05T07:00:00.125-05:00",
+        to: "2026-10-05T15:00:00.875+02:00",
+      };
+      const mark = { lane: "north", title: "Checkpoint", glyph: "*", at: span.from };
+      const { container } = render(
+        <BoardView
+          view={{
+            view: "board",
+            sections: [
+              {
+                ...fixed,
+                window: { from: "2026-10-05T00:00:00Z", to: "2026-10-12T00:00:00Z" },
+                spans: [span],
+                marks: [mark],
+              },
+            ],
+          }}
+        />,
+      );
+      expect(
+        [...container.querySelectorAll(".cvb-timeline-window time")].map((el) => el.textContent),
+      ).toEqual(["2026-10-05 00:00:00.000 UTC", "2026-10-12 00:00:00.000 UTC"]);
+      const start = "2026-10-05 12:00:00.125 UTC";
+      const end = "2026-10-05 13:00:00.875 UTC";
+      if (width < 720) {
+        expect(
+          [...container.querySelectorAll(".cvb-timeline-list time")].map((el) => el.textContent),
+        ).toEqual([start, end, start]);
+        expect(
+          [...container.querySelectorAll(".cvb-timeline-list time")].map((el) =>
+            el.getAttribute("datetime"),
+          ),
+        ).toEqual([span.from, span.to, mark.at]);
+      } else {
+        const description = `${span.title}: ${start} to ${end}`;
+        const bar = container.querySelector(".cvb-timeline-span");
+        expect(bar?.querySelector("title")?.textContent).toBe(description);
+        expect(bar?.getAttribute("aria-label")).toBe(`North, ${description}`);
+        const point = container.querySelector(".cvb-timeline-mark");
+        expect(point?.querySelector("title")?.textContent).toBe(`${mark.title}: ${start}`);
+        expect(point?.getAttribute("aria-label")).toBe(`North, ${mark.title}: ${start}`);
+        expect(
+          [...container.querySelectorAll(".cvb-timeline-tick")].map((el) => el.textContent),
+        ).toEqual([
+          "2026-10-05",
+          "2026-10-06",
+          "2026-10-07",
+          "2026-10-08",
+          "2026-10-09",
+          "2026-10-10",
+          "2026-10-11",
+          "2026-10-12",
+        ]);
+      }
+    },
+  );
+
+  test.each([719, 1200])("keeps historical UTC dates in a one-hour window at %ipx", (width) => {
+    measureAt(width);
+    const span = {
+      lane: "north",
+      title: "Cross-day work",
+      from: "2026-10-04T12:00:00Z",
+      to: "2026-10-05T13:00:00Z",
+    };
+    const marks = [4, 5, 6].map((day) => ({
+      lane: "north",
+      title: `Day ${day}`,
+      glyph: "*",
+      at: `2026-10-0${day}T12:00:00Z`,
+    }));
+    const { container } = render(
+      <BoardView view={{ view: "board", sections: [{ ...fixed, spans: [span], marks }] }} />,
+    );
+    if (width < 720) {
+      expect(
+        [...container.querySelectorAll(".cvb-timeline-list time")].map((el) => el.textContent),
+      ).toEqual([
+        "2026-10-04 12:00:00.000 UTC",
+        "2026-10-05 13:00:00.000 UTC",
+        "2026-10-04 12:00:00.000 UTC",
+        "2026-10-05 12:00:00.000 UTC",
+        "2026-10-06 12:00:00.000 UTC",
+      ]);
+    } else {
+      const description =
+        "Cross-day work: 2026-10-04 12:00:00.000 UTC to 2026-10-05 13:00:00.000 UTC";
+      const bar = container.querySelector(".cvb-timeline-span");
+      expect(bar?.querySelector("title")?.textContent).toBe(description);
+      expect(bar?.getAttribute("aria-label")).toBe(`North, ${description}`);
+      expect(container.querySelectorAll(".cvb-timeline-mark")).toHaveLength(1);
+      expect(container.querySelector(".cvb-timeline-mark title")?.textContent).toBe(
+        "Day 5: 2026-10-05 12:00:00.000 UTC",
+      );
+      expect(container.querySelector(".cvb-timeline-tick")?.textContent).toBe("12:00");
+    }
   });
 
   test("uses neutral as the final tone fallback and renders payloads as text", () => {
@@ -156,6 +264,7 @@ describe("timeline section", () => {
       section.spans.length + section.marks.length,
     );
     expect(container.textContent).toContain("open-ended");
+    expect(container.textContent).toContain("2026-10-05 12:20:00.000 UTC to open-ended");
     expect(container.textContent).toContain("hatched");
     expect(container.textContent).toContain("No activity");
     expect(container.textContent).toContain("14:00");
@@ -200,6 +309,12 @@ describe("timeline section", () => {
     );
     try {
       expect(start).toHaveBeenCalledTimes(1);
+      expect(
+        [...container.querySelectorAll(".cvb-timeline-window time")].map((el) => el.textContent),
+      ).toEqual(["2026-10-05 12:00:00.000 UTC", "2026-10-05 13:00:00.000 UTC"]);
+      expect(container.querySelector(".cvb-timeline-span[data-open] title")?.textContent).toBe(
+        "Review in progress: 2026-10-05 12:20:00.000 UTC to open-ended (hatched)",
+      );
       const rule = container.querySelector(".cvb-timeline-now line");
       const bar = container.querySelector(".cvb-timeline-span[data-open] .cvb-timeline-bar");
       const beforeX = Number(rule?.getAttribute("x1"));

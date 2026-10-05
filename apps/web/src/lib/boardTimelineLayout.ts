@@ -27,8 +27,9 @@ const TICK_STEPS = [
   365 * DAY,
 ];
 
-export function formatTimelineTime(at: number, range: number) {
+export function formatTimelineTime(at: number, range: number, interval = range) {
   const iso = new Date(at).toISOString();
+  if (interval < 1_000) return iso.slice(11, 23);
   if (range < 5 * MINUTE) return iso.slice(11, 19);
   if (range < DAY) return iso.slice(11, 16);
   if (range < 7 * DAY) return `${iso.slice(5, 10)} ${iso.slice(11, 16)}`;
@@ -86,7 +87,12 @@ export function layoutTimeline(section: CanvasTimelineSection, width: number, no
   let times: number[] = [];
   for (let at = Math.ceil(from / step) * step; at <= to; at += step) times.push(at);
   if (times.length < 2) times = [from, to];
-  const ticks = times.map((at) => ({ at, x: scale(at), label: formatTimelineTime(at, to - from) }));
+  const interval = times[1]! - times[0]!;
+  const ticks = times.map((at) => ({
+    at,
+    x: scale(at),
+    label: formatTimelineTime(at, to - from, interval),
+  }));
   return {
     plot,
     height: plot.bottom + 12,

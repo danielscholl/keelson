@@ -1,20 +1,23 @@
-import type { CanvasTimelineSection, CanvasTimelineSpan } from "@keelson/shared";
+import type {
+  CanvasTimelineMark,
+  CanvasTimelineSection,
+  CanvasTimelineSpan,
+} from "@keelson/shared";
 import { useId, useLayoutEffect, useRef, useState } from "react";
-import { formatTimelineTime, layoutTimeline } from "../../lib/boardTimelineLayout.ts";
+import { layoutTimeline } from "../../lib/boardTimelineLayout.ts";
 import { useClockNow } from "../../lib/relativeClock.ts";
 
-function windowRange(section: CanvasTimelineSection) {
-  const until = "clock" in section.window ? section.window.clock.until : section.window.to;
-  return Date.parse(until) - Date.parse(section.window.from);
+function timeText(iso: string) {
+  return new Date(iso).toISOString().replace("T", " ").replace("Z", " UTC");
 }
 
-function timeText(iso: string, range: number) {
-  return formatTimelineTime(Date.parse(iso), range);
+function spanDescription(span: CanvasTimelineSpan) {
+  const end = span.to ? timeText(span.to) : "open-ended";
+  return `${span.title}: ${timeText(span.from)} to ${end}${span.hatched ? " (hatched)" : ""}`;
 }
 
-function spanDescription(span: CanvasTimelineSpan, range: number) {
-  const end = span.to ? timeText(span.to, range) : "open-ended";
-  return `${span.title}: ${timeText(span.from, range)} to ${end}${span.hatched ? " (hatched)" : ""}`;
+function markDescription(mark: CanvasTimelineMark) {
+  return `${mark.title}: ${timeText(mark.at)}`;
 }
 
 function TimelineContents({
@@ -29,15 +32,12 @@ function TimelineContents({
   const id = useId();
   const layout = layoutTimeline(section, width, now);
   const until = "clock" in section.window ? section.window.clock.until : section.window.to;
-  const range = windowRange(section);
   return (
     <>
       <div className="cvb-timeline-window">
-        <time dateTime={section.window.from}>
-          {new Date(Date.parse(section.window.from)).toISOString().slice(0, 16).replace("T", " ")}
-        </time>
+        <time dateTime={section.window.from}>{timeText(section.window.from)}</time>
         {" to "}
-        <time dateTime={until}>{timeText(until, range)}</time>
+        <time dateTime={until}>{timeText(until)}</time>
         {" · axis in UTC"}
       </div>
       {width < 720 ? (
@@ -69,10 +69,10 @@ function TimelineContents({
                       <li key={`span-${index}`} data-source-index={index}>
                         <strong>{span.title}</strong>
                         {" · "}
-                        <time dateTime={span.from}>{timeText(span.from, range)}</time>
+                        <time dateTime={span.from}>{timeText(span.from)}</time>
                         {" to "}
                         {span.to ? (
-                          <time dateTime={span.to}>{timeText(span.to, range)}</time>
+                          <time dateTime={span.to}>{timeText(span.to)}</time>
                         ) : (
                           "open-ended"
                         )}
@@ -83,7 +83,7 @@ function TimelineContents({
                       <li key={`mark-${index}`} data-source-index={index}>
                         {mark.glyph} <strong>{mark.title}</strong>
                         {" · "}
-                        <time dateTime={mark.at}>{timeText(mark.at, range)}</time>
+                        <time dateTime={mark.at}>{timeText(mark.at)}</time>
                       </li>
                     ))}
                   </ul>
@@ -169,9 +169,9 @@ function TimelineContents({
                 data-tone={span.tone ?? section.lanes[laneIndex]!.tone ?? "neutral"}
                 data-open={span.to === undefined || undefined}
                 data-hatched={span.hatched || undefined}
-                aria-label={`${section.lanes[laneIndex]!.label}, ${spanDescription(span, range)}`}
+                aria-label={`${section.lanes[laneIndex]!.label}, ${spanDescription(span)}`}
               >
-                <title>{spanDescription(span, range)}</title>
+                <title>{spanDescription(span)}</title>
                 <rect
                   className="cvb-timeline-bar"
                   x={x}
@@ -206,9 +206,9 @@ function TimelineContents({
                 key={index}
                 className="cvb-timeline-mark"
                 data-source-index={index}
-                aria-label={`${section.lanes[laneIndex]!.label}, ${mark.title}: ${mark.at}`}
+                aria-label={`${section.lanes[laneIndex]!.label}, ${markDescription(mark)}`}
               >
-                <title>{mark.title}</title>
+                <title>{markDescription(mark)}</title>
                 <text x={x} y={y + 22} textAnchor="middle">
                   {mark.glyph}
                 </text>

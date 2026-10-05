@@ -107,6 +107,7 @@ describe("timeline layout", () => {
 
   it("generates finite, bounded ticks suited to plot width and short or long ranges", () => {
     for (const window of [
+      { from, to: "2026-10-05T12:00:00.500Z" },
       { from, to: "2026-10-05T12:00:05Z" },
       { from, to },
       { from, to: "2026-10-09T12:00:00Z" },
@@ -116,6 +117,7 @@ describe("timeline layout", () => {
         const layout = layoutTimeline({ ...section, window }, width, now);
         expect(layout.ticks.length).toBeGreaterThanOrEqual(2);
         expect(layout.ticks.length).toBeLessThanOrEqual(8);
+        expect(new Set(layout.ticks.map((tick) => tick.label)).size).toBe(layout.ticks.length);
         for (const tick of layout.ticks) {
           expect(Number.isFinite(tick.at) && Number.isFinite(tick.x)).toBe(true);
           expect(tick.label).not.toBe("");
@@ -124,6 +126,45 @@ describe("timeline layout", () => {
         }
       }
     }
+  });
+
+  it.each([
+    {
+      from: "2026-10-05T12:00:00.100Z",
+      to: "2026-10-05T12:00:00.900Z",
+      labels: ["12:00:00.100", "12:00:00.900"],
+    },
+    {
+      from: "2026-10-05T07:00:00.900-05:00",
+      to: "2026-10-05T14:00:01.100+02:00",
+      labels: ["12:00:00.900", "12:00:01.100"],
+    },
+  ])("includes milliseconds for sub-second tick intervals from $from", ({ from, to, labels }) => {
+    for (const window of [
+      { from, to },
+      { from, clock: { until: to } },
+    ]) {
+      for (const width of [720, 1200, 10000]) {
+        const layout = layoutTimeline({ ...section, window }, width, now);
+        expect(layout.ticks.map((tick) => tick.label)).toEqual(labels);
+      }
+    }
+  });
+
+  it("keeps whole-second ticks compact and distinct in a five-second window", () => {
+    const layout = layoutTimeline(
+      { ...section, window: { from, to: "2026-10-05T12:00:05Z" } },
+      1200,
+      now,
+    );
+    expect(layout.ticks.map((tick) => tick.label)).toEqual([
+      "12:00:00",
+      "12:00:01",
+      "12:00:02",
+      "12:00:03",
+      "12:00:04",
+      "12:00:05",
+    ]);
   });
 
   it("places ticks on round times", () => {
