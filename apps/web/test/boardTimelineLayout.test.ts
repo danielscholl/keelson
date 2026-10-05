@@ -182,6 +182,8 @@ describe("timeline layout", () => {
       for (const width of [720, 1200, 10000]) {
         const layout = layoutTimeline({ ...section, window }, width, now);
         expect(layout.ticks.map((tick) => tick.label)).toEqual(labels);
+        expect(layout.ticks.map((tick) => tick.at)).toEqual([Date.parse(from), Date.parse(to)]);
+        expect(layout.ticks.map((tick) => tick.x)).toEqual([160, width - 24]);
       }
     }
   });
@@ -213,5 +215,122 @@ describe("timeline layout", () => {
       "07:50",
       "08:00",
     ]);
+    expect(layout.ticks.map((tick) => tick.at)).toEqual(
+      [
+        "2026-10-05T12:00:00Z",
+        "2026-10-05T12:10:00Z",
+        "2026-10-05T12:20:00Z",
+        "2026-10-05T12:30:00Z",
+        "2026-10-05T12:40:00Z",
+        "2026-10-05T12:50:00Z",
+        "2026-10-05T13:00:00Z",
+      ].map((iso) => Date.parse(iso)),
+    );
+    layout.ticks.forEach((tick, index) => {
+      expect(tick.x).toBeCloseTo(160 + (1016 * index) / 6);
+    });
+  });
+
+  it("crosses local midnight without moving epoch-based ticks", () => {
+    const layout = layoutTimeline(
+      {
+        ...section,
+        window: { from: "2026-10-06T04:59:30Z", to: "2026-10-06T05:00:30Z" },
+      },
+      1200,
+      now,
+    );
+    expect(layout.ticks.map((tick) => tick.label)).toEqual([
+      "23:59:30",
+      "23:59:45",
+      "00:00:00",
+      "00:00:15",
+      "00:00:30",
+    ]);
+    expect(layout.ticks.map((tick) => tick.at)).toEqual(
+      [
+        "2026-10-06T04:59:30Z",
+        "2026-10-06T04:59:45Z",
+        "2026-10-06T05:00:00Z",
+        "2026-10-06T05:00:15Z",
+        "2026-10-06T05:00:30Z",
+      ].map((iso) => Date.parse(iso)),
+    );
+    expect(layout.ticks.map((tick) => tick.x)).toEqual([160, 414, 668, 922, 1176]);
+  });
+
+  it("keeps elapsed tick epochs and positions across spring-forward DST", () => {
+    const layout = layoutTimeline(
+      {
+        ...section,
+        window: { from: "2026-03-08T07:00:00Z", to: "2026-03-08T10:00:00Z" },
+      },
+      1200,
+      now,
+    );
+    expect(layout.ticks.map((tick) => tick.label)).toEqual([
+      "01:00",
+      "01:30",
+      "03:00",
+      "03:30",
+      "04:00",
+      "04:30",
+      "05:00",
+    ]);
+    expect(layout.ticks.map((tick) => tick.at)).toEqual(
+      [
+        "2026-03-08T07:00:00Z",
+        "2026-03-08T07:30:00Z",
+        "2026-03-08T08:00:00Z",
+        "2026-03-08T08:30:00Z",
+        "2026-03-08T09:00:00Z",
+        "2026-03-08T09:30:00Z",
+        "2026-03-08T10:00:00Z",
+      ].map((iso) => Date.parse(iso)),
+    );
+    layout.ticks.forEach((tick, index) => {
+      expect(tick.x).toBeCloseTo(160 + (1016 * index) / 6);
+    });
+  });
+
+  it("projects multi-day tick dates locally without re-anchoring at local midnight", () => {
+    const layout = layoutTimeline(
+      {
+        ...section,
+        window: { from: "2026-10-05T00:00:00Z", to: "2026-10-07T00:00:00Z" },
+      },
+      1200,
+      now,
+    );
+    expect(layout.ticks.map((tick) => tick.label)).toEqual([
+      "10-04 19:00",
+      "10-05 07:00",
+      "10-05 19:00",
+      "10-06 07:00",
+      "10-06 19:00",
+    ]);
+    expect(layout.ticks.map((tick) => tick.at)).toEqual(
+      [
+        "2026-10-05T00:00:00Z",
+        "2026-10-05T12:00:00Z",
+        "2026-10-06T00:00:00Z",
+        "2026-10-06T12:00:00Z",
+        "2026-10-07T00:00:00Z",
+      ].map((iso) => Date.parse(iso)),
+    );
+    expect(layout.ticks.map((tick) => tick.x)).toEqual([160, 414, 668, 922, 1176]);
+  });
+
+  it("gives equivalent ISO offsets identical epochs, labels, and geometry", () => {
+    const utc = layoutTimeline(section, 1200, now);
+    for (const window of [
+      { from: "2026-10-05T07:00:00-05:00", to: "2026-10-05T15:00:00+02:00" },
+      {
+        from: "2026-10-05T07:00:00-05:00",
+        clock: { until: "2026-10-05T15:00:00+02:00" },
+      },
+    ]) {
+      expect(layoutTimeline({ ...section, window }, 1200, now).ticks).toEqual(utc.ticks);
+    }
   });
 });
