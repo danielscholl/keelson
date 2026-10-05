@@ -32,7 +32,7 @@ export const projectNameSchema = z
 export const createProjectBodySchema = z
   .object({
     name: projectNameSchema,
-    rootPath: z.string().min(1),
+    rootPath: z.string().min(1).optional(),
   })
   .strict();
 export type CreateProjectBody = z.infer<typeof createProjectBodySchema>;
@@ -44,6 +44,16 @@ export const cloneProjectBodySchema = z
   })
   .strict();
 export type CloneProjectBody = z.infer<typeof cloneProjectBodySchema>;
+
+export class ProjectOperationError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ProjectOperationError";
+  }
+}
 
 export const updateProjectBodySchema = z
   .object({

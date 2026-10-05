@@ -17,6 +17,7 @@ import {
 import {
   DEFAULT_PROJECT_NAME,
   POLICY_APPROVALS_SNAPSHOT_KEY,
+  ProjectOperationError,
   policyApprovalsSnapshotSchema,
   RIBS_VERSION_SNAPSHOT_KEY,
   SCHEMA_VERSION,
@@ -81,6 +82,7 @@ import type { PolicyEngine } from "./policy-engine.ts";
 import { projectNotebookRoutes } from "./project-notebook-handler.ts";
 import { createProjectNotebookStore } from "./project-notebook-store.ts";
 import { projectsRoutes } from "./projects-handler.ts";
+import { createProjectsService } from "./projects-service.ts";
 import { createProjectsStore, type ProjectsStore } from "./projects-store.ts";
 import { installRedactedConsole } from "./redact.ts";
 import { allRegions, createRunEventDispatcher } from "./ribs.ts";
@@ -285,6 +287,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // (unusually) reads projects during registerTools, before the store is wired,
   // sees an empty list: project selection is a runtime concern, not an activation one.
   let projectsStoreRef: ProjectsStore | undefined;
+  let projectsServiceRef: ReturnType<typeof createProjectsService> | undefined;
   // Late-bound like the refs above: the memory store needs the database (created below),
   // but RibContext.getMemory reads it lazily at recall/writeback time, by which point boot
   // is done. A rib's coordinator uses it to fold prior decisions into a run and write
@@ -310,6 +313,18 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
       createRibCredentialAccessor(credentialStore, ribId)(serviceId),
     getRibDataDir: (ribId) => ribDataDir(ribId, KEELSON_HOME),
     getProjects: () => projectsStoreRef?.list() ?? [],
+    createProject: async (body) => {
+      if (!projectsServiceRef) {
+        throw new ProjectOperationError(503, "project service is not ready");
+      }
+      return projectsServiceRef.createProject(body);
+    },
+    cloneProject: async (body) => {
+      if (!projectsServiceRef) {
+        throw new ProjectOperationError(503, "project service is not ready");
+      }
+      return projectsServiceRef.cloneProject(body);
+    },
     getPolicyEngine: () => policyEngine,
     getWorkflowController: () => workflowControllerRef,
     getMemoryStore: () => memoryStoreRef,
@@ -432,6 +447,11 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
       name: DEFAULT_PROJECT_NAME,
       rootPath: WORKSPACE_ROOT,
     });
+  const projectsService = createProjectsService({
+    store: projectsStore,
+    workspaceRoot: WORKSPACE_ROOT,
+  });
+  projectsServiceRef = projectsService;
   // Idempotent backfills — safe to re-run because the WHERE clauses match
   // only legacy NULL rows that pre-date project scoping. Without these,
   // chat recall (now project-scoped) silently stops returning them and
@@ -820,7 +840,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     commandInvokers: ribs.commandInvokers,
     commandCompleters: ribs.commandCompleters,
   });
-  projectsRoutes(app, { store: projectsStore, projectsRoot: WORKSPACE_ROOT });
+  projectsRoutes(app, { store: projectsStore, service: projectsService });
   workspaceRoutes(app, { store: workspaceLeaseStore });
   memoryRoutes(app, { memoryStore });
   usageRoutes(app, { store: usageStore });

@@ -84,6 +84,8 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
 | `getCredential?(serviceId)` | `Promise<string \| undefined>` | Read-only, resolves a keychain entry under `rib_<id>_<serviceId>`. A rib cannot read another rib's secrets. |
 | `getDataDir?()` | `string` | Absolute path to the rib's private data directory under the keelson home, named `rib-<id>` (`<home>/rib-<rib-id>`). Path only: the rib creates it when it writes. |
 | `getProjects?()` | `readonly Project[]` | Read-only snapshot of the operator's project records at call time. Use to offer project selection and pass `project.rootPath` as `RibAgentTurnRequest.cwd`. Optional: a rib built against an older harness degrades to no project selection, not a throw. |
+| `createProject?(body: CreateProjectBody)` | `Promise<Project>` | Create or register an operator-global project through the host's project service. `body` is `{ name, rootPath? }`. Rejects with `ProjectOperationError`; see project creation below. |
+| `cloneProject?(body: CloneProjectBody)` | `Promise<Project>` | Clone and register through the same service as HTTP. `body` is `{ url, name? }`; omitted names derive from the repository URL. The destination is beneath the workspace root. |
 | `runAgentTurn?(req)` | `RibAgentTurn` | Runs one agent turn through the provider registry, inheriting provider pinning, credentials, and the policy engine's `tool_result`/response redaction (the same gates the workflow `prompt` path runs). The return `RibAgentTurn` is a settled dual-handle `{ stream, result }`: `result` settles once with the authoritative text, usage, status, `sessionId`, and `stopReason`, and is the source of truth, while `stream` forwards the provider's live `tool_use`/`tool_result` chunks so a rib can trace a long-running turn as it happens, then appends the settled text tail and a terminal `done`. When the result carries an error, the stream also yields an `{ type: "error", message }` chunk before that terminal `done`, so a rib draining the stream never reads a failed turn as clean. A rib takes text from `result`, never reassembling it from the stream. `result.stopReason` is `"end" \| "max_tokens" \| "aborted" \| "timeout" \| "error"`: it mirrors `status` on aborted, timeout, and error, while `end` and `max_tokens` come only from providers that report a finish reason. Derive truncation as `stopReason === "max_tokens"`. `result.sessionId` is the provider's backend session id; pass it as the next turn's `req.resumeSessionId` to continue that session. Providers whose `capabilities.sessionResume` is false ignore it. `req.modelClass` (`"fast" \| "balanced" \| "deep"`) picks a model the way a workflow node's class does: the config file's `modelClasses` for the resolved provider, then the provider's own class map, then its default model. An explicit `req.model` wins over the class. `req.reasoningEffort` (`"none" \| "low" \| "medium" \| "high" \| "xhigh"`) is a hint, not a pin: it reaches the provider only when that provider's capabilities report `reasoningEffort: true`, and is dropped silently otherwise, so the turn still runs at the provider's own tier. `result.model` is the model that served the turn as the provider reported it, else the model the turn asked for. `req.turnContext` is an opaque `Readonly<Record<string, unknown>>` forwarded verbatim to tool executions and interpreted only by the calling rib. An omitted `req.cwd` runs the turn in a neutral non-repo directory, never the server's cwd. A turn that omits `tools`, `allowedTools`, and `disallowedTools` is locked to `allowedTools: []`, text-only rather than reaching ambient built-ins. A turn that carries real spend records a usage-ledger row under the owning rib id. `req.allowedDirectories` sets confinement roots for the turn: file and shell path args that canonicalize outside them are denied by the always-registered `builtin:path_confinement` policy (realpath-resolved against symlink escape), while empty or absent leaves the turn unconfined; it is wired on this rib-agent-turn path via the Claude provider. Requested sibling rib tools project only when an operator grant clears `caller:target:tool` (or the target's `*`), from the config file's `crossRibGrants` or `KEELSON_CROSS_RIB_GRANTS`, and the two union; self tools and SDK built-ins keep their existing behavior. |
 | `callTool?(targetRibId, name, args, opts?)` | `Promise<CallToolResult>` | Governed cross-rib invocation of a sibling rib's owned tool. Denied by default, requires an operator grant (the config file's `crossRibGrants` or `KEELSON_CROSS_RIB_GRANTS`, unioned) and policy approval, resolves to `{ ok: false }` instead of throwing, and is bounded by `KEELSON_CROSS_RIB_CALL_TIMEOUT_MS` (default 30000 ms). `opts.signal` forwards caller cancellation and `opts.timeoutMs` overrides the timeout for that call. |
 | `getToolReachability?(names)` | `readonly ToolReachability[]` | Pre-flight: would these tool names project onto a turn this rib runs? Synchronous, batched, and non-throwing, so a rib can check the whole set once (at start-up, say) rather than discovering the gap from an agent that reports a capability it never had. Each verdict carries `name`, a `status`, and the owning rib as `ownerRibId` when a rib owns the tool. `reachable` means the floor clears the name; `cross-rib-denied` and `denylisted` mean the floor drops it. `unregistered` is not a denial: the harness registers no such tool, so the name still rides the turn as an allow-list entry and whether it resolves is the provider's answer. A provider SDK built-in like `Read` lands there, and so does a typo, so the caller decides which it is (it knows which names it expects a rib to own). When several could apply, the order is `unregistered`, then `cross-rib-denied`, then `denylisted`. It answers the operator floor only: registration, the cross-rib grant gate, and the denylist. It does not run the policy engine, whose projection is scoped to a resolved provider that does not exist yet at pre-flight, so `reachable` means the floor clears the tool, not that policy will allow it. |
@@ -121,6 +123,58 @@ try {
 A second holder fails fast, naming the current holder and purpose.
 `KEELSON_DISABLE_MUTATION_LOCK` is an emergency operator bypass, not a normal
 coordination path.
+
+### Project creation
+
+`CreateProjectBody`, `CloneProjectBody`, `Project`, and `ProjectOperationError`
+are exported from `@keelson/shared`. Both mutation methods are optional,
+independently of `getProjects`. Check for the capability before using it on an
+older host:
+
+```ts
+import type { RibContext } from "@keelson/shared";
+
+async function createProject(ctx: RibContext) {
+  if (!ctx.createProject) {
+    throw new Error("project creation unavailable on this host");
+  }
+  const project = await ctx.createProject({ name: "demo" });
+  return project;
+}
+```
+
+Without `rootPath`, creation uses `<workspaceRoot>/<name>`, where the host resolves
+`KEELSON_WORKSPACE` (default `~/keelson`), not its process cwd or a rib's data
+directory. Explicit paths are trimmed, expand a leading `~` or `~/`, and must be
+absolute. The persisted result includes the resolved absolute `rootPath`;
+`getProjects()` sees the registration immediately.
+
+For a missing or empty target, the host creates any missing directories, runs
+`git init`, then `git commit --allow-empty -m "Initialize project"` using your
+configured Git identity. It touches no project files. The empty commit gives the
+repository a HEAD that worktrees can branch from immediately. Existing Git
+repositories, including unborn repositories, and populated non-Git folders are
+registered untouched. A non-Git project cannot host Write agents until it is a
+Git repository with a commit; existing unborn repositories also need a commit.
+See [Projects and worktrees](../../concepts/projects/#creating-or-registering-a-project).
+
+Names must be 1 to 64 characters, start with a lowercase letter or digit, and
+contain only lowercase letters, digits, `-`, or `_`. Both bodies reject unknown
+fields. Duplicate names and exact canonical roots, including symlink aliases,
+conflict across HTTP and rib calls. A project nested beneath the default project's
+root is allowed. Cloning refuses any existing destination, including an empty
+directory, and runs noninteractively with a 60-second Git timeout.
+
+Rejections carry `ProjectOperationError.status` and `message`: `400` for invalid
+input or targets, `409` for conflicts, `500` for initialization or registration
+failures, `502` for clone failures, and `503` when the host service is not ready.
+Calls during activation can receive `503`; retry after readiness, not by waiting
+inside an activation hook. A missing Git identity produces an initialization
+failure naming `user.name` or `user.email`. Set the missing keys with
+`git config --global user.name "Your Name"` and
+`git config --global user.email "you@example.com"`. On failure, cleanup removes
+only operation-created state; pre-existing folders and unexpected user content
+are retained, and cleanup failures appear alongside the original error.
 
 ## Hooks
 

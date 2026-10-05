@@ -22,7 +22,7 @@ const RIB_CONTRACT_DOC = join(
 describe("rib-contract reference stays in sync with the contract", () => {
   const doc = readFileSync(RIB_CONTRACT_DOC, "utf-8");
 
-  for (const field of [...HOOK_FIELDS, ...ARRAY_FIELDS]) {
+  for (const field of [...HOOK_FIELDS, ...ARRAY_FIELDS, "createProject", "cloneProject"]) {
     it(`names the '${field}' member`, () => {
       expect(doc).toContain(field);
     });

@@ -25,7 +25,7 @@ import type { CommandCompletion, CommandInvokeResult, RibCommandDescriptor } fro
 import type { RibDocsSource } from "./docs.ts";
 import type { MemoryTools } from "./memory.ts";
 import type { Policy } from "./policy.ts";
-import type { Project } from "./projects.ts";
+import type { CloneProjectBody, CreateProjectBody, Project } from "./projects.ts";
 import type { ToolDefinition } from "./tools.ts";
 import { workflowDiscoveryNoticeSchema } from "./workflows.ts";
 
@@ -375,6 +375,8 @@ export interface RibContext {
   // NOT a sandbox: it confines nothing; a turn can still pin any cwd. Optional so a
   // rib built against an older harness degrades to no project selection, not a throw.
   getProjects?: () => readonly Project[];
+  createProject?: (body: CreateProjectBody) => Promise<Project>;
+  cloneProject?: (body: CloneProjectBody) => Promise<Project>;
   // Run one agent turn. Optional, like the accessors above, so a rib that
   // needs rooms but finds it absent fails closed. Provider routing is global,
   // not namespace-scoped. See RibAgentTurn for the stream/result contract.

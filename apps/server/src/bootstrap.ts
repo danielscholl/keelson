@@ -262,6 +262,8 @@ export interface BootstrapRibsOptions {
   // turn cwd. The composition root passes `() => projectsStore.list()`. Optional so
   // bootstrapRibs unit tests without a projects store stay deterministic.
   getProjects?: () => readonly Project[];
+  createProject?: RibContext["createProject"];
+  cloneProject?: RibContext["cloneProject"];
   // Agent-turn factory. Defaults to the CLI-backed makeRibAgentTurn;
   // injectable so tests pass a fake instead of shelling a provider CLI.
   runAgentTurn?: (ribId: string, req: RibAgentTurnRequest) => RibAgentTurn;
@@ -958,6 +960,8 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(options.getRibCredential ? { getRibCredential: options.getRibCredential } : {}),
     ...(options.getRibDataDir ? { getRibDataDir: options.getRibDataDir } : {}),
     ...(options.getProjects ? { getProjects: options.getProjects } : {}),
+    ...(options.createProject ? { createProject: options.createProject } : {}),
+    ...(options.cloneProject ? { cloneProject: options.cloneProject } : {}),
     ...(options.dynamicRegionStore ? { dynamicRegionStore: options.dynamicRegionStore } : {}),
     ...(options.invalidateManifest ? { invalidateManifest: options.invalidateManifest } : {}),
     ...(refreshWorkflow ? { refreshWorkflow } : {}),

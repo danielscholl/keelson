@@ -22,12 +22,14 @@ import type {
   RecallResponse,
   RegisterOpRequest,
   Rib,
+  RibContext,
   RibProviderInfo,
   ToolDefinition,
   WritebackRequest,
   WritebackResponse,
 } from "@keelson/shared";
 import {
+  ProjectOperationError,
   RECALL_REQUEST_SCHEMA_VERSION,
   RECALL_RESPONSE_SCHEMA_VERSION,
   WRITEBACK_REQUEST_SCHEMA_VERSION,
@@ -519,6 +521,95 @@ describe("bootstrapRibs", () => {
       createdAt: "2026-01-03T00:00:00.000Z",
     });
     expect(accessor?.()).toEqual(live);
+  });
+
+  test("createProject and cloneProject forward arguments, results, errors, and late binding", async () => {
+    delete process.env.KEELSON_RIBS;
+    let context: RibContext | undefined;
+    let source: Pick<RibContext, "createProject" | "cloneProject"> | undefined;
+    const rib: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        context = ctx;
+        return [];
+      },
+    };
+    await bootstrapRibs({
+      available: { alpha: rib },
+      createProject: async (body) => {
+        if (!source?.createProject) throw new ProjectOperationError(503, "projects not ready");
+        return source.createProject(body);
+      },
+      cloneProject: async (body) => {
+        if (!source?.cloneProject) throw new ProjectOperationError(503, "projects not ready");
+        return source.cloneProject(body);
+      },
+    });
+    if (!context?.createProject || !context.cloneProject)
+      throw new Error("missing project methods");
+    await expect(context.createProject({ name: "early" })).rejects.toMatchObject({ status: 503 });
+    await expect(context.cloneProject({ url: "/source" })).rejects.toMatchObject({ status: 503 });
+    const created: Project = {
+      id: "p1",
+      name: "demo",
+      rootPath: "/workspace/demo",
+      createdAt: "now",
+    };
+    const cloned: Project = { ...created, id: "p2", name: "cloned", rootPath: "/workspace/cloned" };
+    const calls: unknown[] = [];
+    source = {
+      createProject: async (body) => {
+        calls.push(body);
+        return created;
+      },
+      cloneProject: async (body) => {
+        calls.push(body);
+        return cloned;
+      },
+    };
+    expect(await context.createProject({ name: "demo" })).toBe(created);
+    expect(await context.cloneProject({ url: "/source", name: "cloned" })).toBe(cloned);
+    expect(calls).toEqual([{ name: "demo" }, { url: "/source", name: "cloned" }]);
+    const failure = new ProjectOperationError(409, "root already registered");
+    source = {
+      createProject: async () => {
+        throw failure;
+      },
+      cloneProject: async () => {
+        throw failure;
+      },
+    };
+    await expect(context.createProject({ name: "demo" })).rejects.toBe(failure);
+    await expect(context.cloneProject({ url: "/source" })).rejects.toBe(failure);
+  });
+
+  test("createProject and cloneProject are independently optional", async () => {
+    delete process.env.KEELSON_RIBS;
+    const project: Project = {
+      id: "p",
+      name: "demo",
+      rootPath: "/workspace/demo",
+      createdAt: "now",
+    };
+    for (const methods of [
+      {},
+      { createProject: async () => project },
+      { cloneProject: async () => project },
+    ]) {
+      let context: RibContext | undefined;
+      const rib: Rib = {
+        id: "alpha",
+        displayName: "alpha",
+        registerTools: (ctx) => {
+          context = ctx;
+          return [];
+        },
+      };
+      await bootstrapRibs({ available: { alpha: rib }, ...methods });
+      expect(context?.createProject !== undefined).toBe("createProject" in methods);
+      expect(context?.cloneProject !== undefined).toBe("cloneProject" in methods);
+    }
   });
 
   test("acquireWorkspace forwards to the late-bound manager with a rib-scoped owner", async () => {

@@ -8,7 +8,7 @@ sidebar:
 import { Aside, Steps } from "@astrojs/starlight/components";
 
 Agent work has to happen somewhere on disk. A **project** is keelson's name for
-that somewhere: a named pointer to a repository root that conversations and
+that somewhere: a named pointer to a directory that conversations and
 workflow runs attach to, so you bind work to a directory once instead of retyping
 a path every turn. This page covers what a project is, the different ways chat and
 runs attach to one, and the git-worktree isolation that lets a run change code
@@ -18,8 +18,8 @@ without touching your working tree.
 
 A project is a small, durable record: a **name** and a **root path** (plus an id
 and a creation time), owned by the server and stored in SQLite next to your
-conversations and runs. Nothing more. `keelson project add <name> <path>`
-registers one, and `keelson project list` and `keelson project remove` manage the
+conversations and runs. `keelson project add <name> <path>`
+creates or registers one, and `keelson project list` and `keelson project remove` manage the
 set. A fresh home carries a `default` project, so work has somewhere to land
 before you register your own.
 
@@ -32,6 +32,39 @@ is where work for this name happens. Three things hang off that binding:
 - **Recall and the notebook** are scoped by project: memory recall filters to the
   project, and the project notebook (standing markdown) is injected into every
   chat turn for that project. See [Memory and state](../memory-and-state/).
+
+## Creating or registering a project
+
+The host's project service backs `keelson project add`, HTTP creation, and the
+optional rib methods [`createProject` and `cloneProject`](../../reference/rib-contract/#project-creation).
+HTTP and ribs can create with a name alone. The destination defaults to
+`<workspaceRoot>/<name>`: `KEELSON_WORKSPACE`, or `~/keelson` when unset. The CLI
+still requires an explicit path. Returned project records carry a resolved
+absolute root.
+
+| Target before creation | Host behavior | Ready for worktrees |
+| --- | --- | --- |
+| Missing directory | Create directories, initialize Git, make one empty `Initialize project` commit. | Yes. |
+| Empty directory | Initialize Git and make the same empty commit. | Yes. |
+| Existing Git repository | Register without changing files, index, config, or history. | If it has a commit. |
+| Populated non-Git folder | Register as-is, without Git initialization or a commit. | No. |
+
+Host-created repositories use your configured Git identity and touch no project
+files. If the initial commit fails, creation fails with a clear error naming
+missing `user.name` or `user.email` config. Set those Git keys and retry. Cleanup
+removes only state the operation created, not pre-existing folders or unexpected
+user content.
+
+A non-Git project cannot host Write agents until it is a Git repository with a
+commit. Existing repositories with an unborn HEAD also need a commit. Repositories
+initialized by the host already have the empty commit, so their first Write
+agent can branch into a worktree immediately.
+
+Names and exact canonical roots must be unique; symlink aliases count as the same
+root. A project beneath the default project's root is allowed. Cloning creates a
+project beneath the workspace root and refuses any existing destination, even an
+empty folder. See the [HTTP project API](../../reference/api/#projects) for request
+shapes and errors.
 
 ## Two ways to attach
 

@@ -187,8 +187,15 @@ counting as up to date.
 | Command | Does |
 | --- | --- |
 | `keelson project list` | List registered projects. Server-required. |
-| `keelson project add <name> <rootPath>` | Register a project pointing at a local directory. Server-required. |
+| `keelson project add <name> <rootPath>` | Create or register a project pointing at a local directory. Server-required. |
 | `keelson project remove <nameOrId>` | Remove a project by name or id. Server-required. |
+
+`project add` initializes missing or empty targets with Git and one empty
+`Initialize project` commit using your configured Git identity. Existing
+repositories and populated non-Git folders are registered untouched. A non-Git
+project cannot host Write agents until it is a Git repository with a commit.
+See [Creating or registering a project](../../concepts/projects/#creating-or-registering-a-project)
+for initialization failures, root conflicts, and worktree readiness.
 
 ## Workspaces
 

@@ -178,6 +178,8 @@ export interface ApplyRibsOptions {
   // the rib reads to offer project selection and pin a turn's cwd. Not rib-scoped —
   // projects are shared. Optional so applyRibs unit tests without a store stay simple.
   readonly getProjects?: () => readonly Project[];
+  readonly createProject?: RibContext["createProject"];
+  readonly cloneProject?: RibContext["cloneProject"];
   // Runs one agent turn for a rib. NOT namespace-scoped — provider routing
   // is global; `ribId` is passed for future per-rib policy/logging. Optional so
   // test rigs without a provider/CLI stay deterministic.
@@ -386,6 +388,8 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
         : {}),
       ...(opts.getRibDataDir ? { getDataDir: () => opts.getRibDataDir!(rib.id) } : {}),
       ...(opts.getProjects ? { getProjects: opts.getProjects } : {}),
+      ...(opts.createProject ? { createProject: opts.createProject } : {}),
+      ...(opts.cloneProject ? { cloneProject: opts.cloneProject } : {}),
       ...(opts.runAgentTurn ? { runAgentTurn: (req) => opts.runAgentTurn!(rib.id, req) } : {}),
       ...(opts.dynamicRegionStore
         ? { registerRegion: opts.dynamicRegionStore.registerForRib(rib.id, surfaceIds) }
