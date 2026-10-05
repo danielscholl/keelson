@@ -19,6 +19,9 @@ import { join } from "node:path";
 import { parse, stringify } from "yaml";
 import { bundledWorkflowsDir } from "../src/seed.ts";
 
+// Every case drives real git repositories, which run slowly on a loaded machine.
+const gitTest = (name: string, fn: () => void | Promise<void>) => test(name, fn, 20_000);
+
 // The bodies shell out to bash, git, jq, and bun; the forge-shim tests skip
 // on Windows for the same reason.
 const shimDescribe = process.platform === "win32" ? describe.skip : describe;
@@ -299,7 +302,7 @@ shimDescribe("hillclimb preflight and baseline", () => {
     rmSync(fx.root, { recursive: true, force: true });
   });
 
-  test("resolves the project copy, branches, and snapshots the target", () => {
+  gitTest("resolves the project copy, branches, and snapshots the target", () => {
     const pre = runNode(fx, "preflight");
     expect(pre.code).toBe(0);
     expect(pre.json).toMatchObject({ workflow: "demo", target: fx.target, rounds: 3 });
@@ -311,7 +314,7 @@ shimDescribe("hillclimb preflight and baseline", () => {
     ]);
   });
 
-  test("refuses a dirty target, a bundled-only workflow, and too many rounds", () => {
+  gitTest("refuses a dirty target, a bundled-only workflow, and too many rounds", () => {
     writeFileSync(fx.target, `${TARGET_SOURCE}# dirty\n`);
     expect(runNode(fx, "preflight").stderr).toContain("uncommitted changes");
     git(fx, "checkout", "--", fx.target);
@@ -325,7 +328,7 @@ shimDescribe("hillclimb preflight and baseline", () => {
     );
   });
 
-  test("refuses a case set without cases in both splits", () => {
+  gitTest("refuses a case set without cases in both splits", () => {
     for (const split of ["", "split:\n  test: [a, b, c]\n", "split:\n  train: [a, b, c]\n"]) {
       writeFileSync(fx.caseFile, CASE_FILE.replace(/split:\n {2}train.*\n {2}test.*\n/, split));
       const pre = runNode(fx, "preflight");
@@ -335,7 +338,7 @@ shimDescribe("hillclimb preflight and baseline", () => {
     expect(calls(fx)).toEqual([]);
   });
 
-  test("the baseline hands the proposer the train split only", () => {
+  gitTest("the baseline hands the proposer the train split only", () => {
     setUp(fx);
     const view = JSON.parse(readFileSync(join(fx.artifacts, "train-view", "results.json"), "utf8"));
     expect(view.rows.map((r: { caseId: string }) => r.caseId)).toEqual(["a", "b"]);
@@ -346,7 +349,7 @@ shimDescribe("hillclimb preflight and baseline", () => {
     expect(existsSync(join(fx.artifacts, "kept.json"))).toBe(true);
   });
 
-  test("the baseline fails the run when a case errors, naming the count", () => {
+  gitTest("the baseline fails the run when a case errors, naming the count", () => {
     expect(runNode(fx, "preflight").code).toBe(0);
     writeFileSync(
       join(fx.fake, "next-eval.json"),
@@ -357,7 +360,7 @@ shimDescribe("hillclimb preflight and baseline", () => {
     expect(base.stderr).toContain("1 case run(s) errored");
   });
 
-  test("a baseline that mixes workflow definitions stops before proposing", () => {
+  gitTest("a baseline that mixes workflow definitions stops before proposing", () => {
     expect(runNode(fx, "preflight").code).toBe(0);
     const mixed = JSON.parse(results(fx, { a: "pass", b: "fail", c: "fail" }));
     mixed.summary.definitionHashes = ["aaa", "bbb"];
@@ -368,8 +371,10 @@ shimDescribe("hillclimb preflight and baseline", () => {
     expect(existsSync(join(fx.artifacts, "kept.json"))).toBe(false);
   });
 
-  test("allows existing prompt, loop prompt, and node description text while preserving structure", () => {
-    const source = `name: demo
+  gitTest(
+    "allows existing prompt, loop prompt, and node description text while preserving structure",
+    () => {
+      const source = `name: demo
 description: demo
 future_workflow: { mode: frozen }
 nodes:
@@ -386,42 +391,46 @@ nodes:
       max_iterations: 2
     depends_on: [say]
 `;
-    writeFileSync(fx.target, source);
-    git(fx, "add", fx.target);
-    git(fx, "commit", "-q", "-m", "rich target");
-    setUp(fx);
-    const candidate = source
-      .replace("Greet the user.", "Use a concise greeting.")
-      .replace("Say hello.", "Say hello in English.")
-      .replace("Say hello again.", "Repeat hello in English.")
-      .replace("name: demo\ndescription: demo", "description: demo\nname: demo");
-    writeFileSync(fx.target, candidate);
-    writeFileSync(
-      join(fx.fake, "next-eval.json"),
-      results(fx, { a: "pass", b: "pass", c: "pass" }),
-    );
-    writeFileSync(join(fx.fake, "next-compare.json"), compare("keep", "improved", "improved"));
-    expect(round(fx)).toMatchObject({ decision: "keep", committed: true });
-    expect(readFileSync(join(fx.artifacts, "target.kept.yaml"), "utf8")).toBe(candidate);
-    const reordered = parse(candidate);
-    reordered.nodes.reverse();
-    for (const changed of [
-      candidate.replace("max_iterations: 2", "max_iterations: 3"),
-      candidate.replace("until: DONE", "until: FINISHED"),
-      candidate.replace("depends_on: [say]", "depends_on: []"),
-      candidate.replace("future_node: { mode: frozen }", "future_node: { mode: changed }"),
-      candidate.replace("future_workflow: { mode: frozen }", "future_workflow: { mode: changed }"),
-      candidate.replace("    description: Repeat the greeting.\n", ""),
-      stringify(reordered),
-    ]) {
-      writeFileSync(fx.target, changed);
-      expect(round(fx)).toMatchObject({ decision: "scope-violation", continue: false });
-      expect(readFileSync(fx.target, "utf8")).toBe(candidate);
-    }
-    expect(calls(fx).filter((c) => c.includes("eval run"))).toHaveLength(2);
-  });
+      writeFileSync(fx.target, source);
+      git(fx, "add", fx.target);
+      git(fx, "commit", "-q", "-m", "rich target");
+      setUp(fx);
+      const candidate = source
+        .replace("Greet the user.", "Use a concise greeting.")
+        .replace("Say hello.", "Say hello in English.")
+        .replace("Say hello again.", "Repeat hello in English.")
+        .replace("name: demo\ndescription: demo", "description: demo\nname: demo");
+      writeFileSync(fx.target, candidate);
+      writeFileSync(
+        join(fx.fake, "next-eval.json"),
+        results(fx, { a: "pass", b: "pass", c: "pass" }),
+      );
+      writeFileSync(join(fx.fake, "next-compare.json"), compare("keep", "improved", "improved"));
+      expect(round(fx)).toMatchObject({ decision: "keep", committed: true });
+      expect(readFileSync(join(fx.artifacts, "target.kept.yaml"), "utf8")).toBe(candidate);
+      const reordered = parse(candidate);
+      reordered.nodes.reverse();
+      for (const changed of [
+        candidate.replace("max_iterations: 2", "max_iterations: 3"),
+        candidate.replace("until: DONE", "until: FINISHED"),
+        candidate.replace("depends_on: [say]", "depends_on: []"),
+        candidate.replace("future_node: { mode: frozen }", "future_node: { mode: changed }"),
+        candidate.replace(
+          "future_workflow: { mode: frozen }",
+          "future_workflow: { mode: changed }",
+        ),
+        candidate.replace("    description: Repeat the greeting.\n", ""),
+        stringify(reordered),
+      ]) {
+        writeFileSync(fx.target, changed);
+        expect(round(fx)).toMatchObject({ decision: "scope-violation", continue: false });
+        expect(readFileSync(fx.target, "utf8")).toBe(candidate);
+      }
+      expect(calls(fx).filter((c) => c.includes("eval run"))).toHaveLength(2);
+    },
+  );
 
-  test("keeps a valid prompt improvement outside git without requiring a commit", () => {
+  gitTest("keeps a valid prompt improvement outside git without requiring a commit", () => {
     fx.target = join(fx.root, "standalone", "demo.yaml");
     mkdirSync(join(fx.root, "standalone"));
     writeFileSync(fx.target, TARGET_SOURCE);
@@ -459,7 +468,7 @@ shimDescribe("hillclimb round decisions", () => {
     rmSync(fx.root, { recursive: true, force: true });
   });
 
-  test("keep commits the change, advances the kept results, and continues", () => {
+  gitTest("keep commits the change, advances the kept results, and continues", () => {
     propose(fx, "# round one\n");
     writeFileSync(
       join(fx.fake, "next-eval.json"),
@@ -495,7 +504,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(calls(fx).filter((c) => c.includes("eval compare"))).toHaveLength(1);
   });
 
-  test("revert restores the kept target and counts a flat round", () => {
+  gitTest("revert restores the kept target and counts a flat round", () => {
     propose(fx, "# round one\n");
     writeFileSync(
       join(fx.fake, "next-eval.json"),
@@ -518,7 +527,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(kept.summary.overall.passed).toBe(1);
   });
 
-  test("two flat rounds in a row stop the loop", () => {
+  gitTest("two flat rounds in a row stop the loop", () => {
     writeFileSync(
       join(fx.fake, "next-eval.json"),
       results(fx, { a: "pass", b: "fail", c: "fail" }),
@@ -539,7 +548,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(readFileSync(fx.target, "utf8")).toBe(TARGET_SOURCE);
   });
 
-  test("a keep resets the streak and the last round never continues", () => {
+  gitTest("a keep resets the streak and the last round never continues", () => {
     writeFileSync(
       join(fx.fake, "next-eval.json"),
       results(fx, { a: "pass", b: "fail", c: "fail" }),
@@ -573,7 +582,7 @@ shimDescribe("hillclimb round decisions", () => {
     );
   });
 
-  test("a declined change stops the loop without an eval", () => {
+  gitTest("a declined change stops the loop without an eval", () => {
     const before = calls(fx).length;
     const out = round(fx, { changed: false, summary: "no shared root cause left" });
     expect(out).toMatchObject({
@@ -584,7 +593,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(calls(fx)).toHaveLength(before);
   });
 
-  test("an edit that fails validation is rejected, kept aside, and reverted", () => {
+  gitTest("an edit that fails validation is rejected, kept aside, and reverted", () => {
     propose(fx, "# HC_BROKEN\n");
     const out = round(fx);
     expect(out).toMatchObject({
@@ -601,7 +610,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(calls(fx).some((c) => c.includes("eval run") && calls(fx).indexOf(c) > 1)).toBe(false);
   });
 
-  test("an eval that ran the kept definition again is an error, not a flat round", () => {
+  gitTest("an eval that ran the kept definition again is an error, not a flat round", () => {
     propose(fx, "# rule\n");
     writeFileSync(
       join(fx.fake, "next-eval.json"),
@@ -617,7 +626,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(readFileSync(fx.target, "utf8")).toBe(TARGET_SOURCE);
   });
 
-  test("an errored eval reverts and stops", () => {
+  gitTest("an errored eval reverts and stops", () => {
     propose(fx, "# round one\n");
     writeFileSync(
       join(fx.fake, "next-eval.json"),
@@ -629,7 +638,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(readFileSync(fx.target, "utf8")).toBe(TARGET_SOURCE);
   });
 
-  test("a proposer that touched other files is a scope violation", () => {
+  gitTest("a proposer that touched other files is a scope violation", () => {
     propose(fx, "# round one\n");
     writeFileSync(join(fx.repo, "other.txt"), "changed by the proposer\n");
     const out = round(fx);
@@ -638,7 +647,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(readFileSync(join(fx.repo, "other.txt"), "utf8")).toBe("changed by the proposer\n");
   });
 
-  test("an edit to a file that was already dirty or untracked is a scope violation", () => {
+  gitTest("an edit to a file that was already dirty or untracked is a scope violation", () => {
     for (const name of ["other.txt", "notes.txt"]) {
       const previousBranch = git(fx, "branch", "--show-current");
       git(fx, "checkout", "-q", "main");
@@ -661,7 +670,7 @@ shimDescribe("hillclimb round decisions", () => {
     }
   });
 
-  test("untouched dirty and untracked files do not trip the scope check", () => {
+  gitTest("untouched dirty and untracked files do not trip the scope check", () => {
     const previousBranch = git(fx, "branch", "--show-current");
     git(fx, "checkout", "-q", "main");
     git(fx, "branch", "-D", previousBranch);
@@ -684,7 +693,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(git(fx, "status", "--porcelain")).toBe("M other.txt\n?? notes.txt");
   });
 
-  test("a similarly named file is not mistaken for the editable target", () => {
+  gitTest("a similarly named file is not mistaken for the editable target", () => {
     propose(fx, "Always greet in English.");
     writeFileSync(`${fx.target}.backup`, "out of scope\n");
     const out = round(fx);
@@ -694,7 +703,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(calls(fx).filter((c) => c.includes("eval run"))).toHaveLength(1);
   });
 
-  test("valid YAML edits to protected fields are rejected before evaluation", () => {
+  gitTest("valid YAML edits to protected fields are rejected before evaluation", () => {
     const mutations = [
       TARGET_SOURCE.replace("name: demo", "name: other"),
       TARGET_SOURCE.replace("description: demo", "description: changed"),
@@ -724,7 +733,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(git(fx, "status", "--porcelain")).toBe("");
   });
 
-  test("comment-only edits stop without evaluation and restore the exact kept file", () => {
+  gitTest("comment-only edits stop without evaluation and restore the exact kept file", () => {
     writeFileSync(fx.target, `${TARGET_SOURCE}# formatting only\n`);
     const before = calls(fx).filter((c) => c.includes("eval run")).length;
     const out = round(fx);
@@ -734,7 +743,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(calls(fx).filter((c) => c.includes("eval run"))).toHaveLength(before);
   });
 
-  test("an eval that mixes definitions reverts and stops", () => {
+  gitTest("an eval that mixes definitions reverts and stops", () => {
     propose(fx, "Always greet in English.");
     const mixed = JSON.parse(results(fx, { a: "pass", b: "pass", c: "pass" }));
     mixed.summary.definitionHashes = ["aaa", "bbb"];
@@ -746,7 +755,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(calls(fx).some((c) => c.includes("eval compare"))).toBe(false);
   });
 
-  test("a failed commit stops without advancing the kept file, results, or staged state", () => {
+  gitTest("a failed commit stops without advancing the kept file, results, or staged state", () => {
     propose(fx, "Always greet in English.");
     writeFileSync(join(fx.repo, ".git", "hooks", "pre-commit"), "#!/bin/sh\nexit 1\n", {
       mode: 0o755,
@@ -769,7 +778,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(git(fx, "log", "--oneline").split("\n")).toHaveLength(1);
   });
 
-  test("a hook that rewrites the target is rolled back without advancing kept state", () => {
+  gitTest("a hook that rewrites the target is rolled back without advancing kept state", () => {
     const hooks = {
       "pre-commit":
         '#!/bin/sh\nprintf "# formatted by a hook\\n" >> .keelson/workflows/demo.yaml\ngit add .keelson/workflows/demo.yaml\n',
@@ -797,7 +806,7 @@ shimDescribe("hillclimb round decisions", () => {
     }
   });
 
-  test("a later failed commit restores the previously committed improvement", () => {
+  gitTest("a later failed commit restores the previously committed improvement", () => {
     propose(fx, "Always greet in English.");
     writeFileSync(
       join(fx.fake, "next-eval.json"),
@@ -824,29 +833,32 @@ shimDescribe("hillclimb round decisions", () => {
     expect(git(fx, "status", "--porcelain")).toBe("");
   });
 
-  test("a kept commit excludes and preserves unrelated staged changes present before preflight", () => {
-    const previousBranch = git(fx, "branch", "--show-current");
-    git(fx, "checkout", "-q", "main");
-    git(fx, "branch", "-D", previousBranch);
-    writeFileSync(join(fx.repo, "other.txt"), "operator change\n");
-    git(fx, "add", "other.txt");
-    setUp(fx);
-    propose(fx, "Always greet in English.");
-    writeFileSync(
-      join(fx.fake, "next-eval.json"),
-      results(fx, { a: "pass", b: "pass", c: "pass" }),
-    );
-    writeFileSync(join(fx.fake, "next-compare.json"), compare("keep", "improved", "improved"));
-    expect(round(fx)).toMatchObject({ decision: "keep", committed: true });
-    expect(git(fx, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")).toBe(
-      ".keelson/workflows/demo.yaml",
-    );
-    expect(git(fx, "diff", "--cached", "--name-only")).toBe("other.txt");
-    expect(git(fx, "show", "HEAD:other.txt")).toBe("untouched");
-    expect(readFileSync(join(fx.repo, "other.txt"), "utf8")).toBe("operator change\n");
-  });
+  gitTest(
+    "a kept commit excludes and preserves unrelated staged changes present before preflight",
+    () => {
+      const previousBranch = git(fx, "branch", "--show-current");
+      git(fx, "checkout", "-q", "main");
+      git(fx, "branch", "-D", previousBranch);
+      writeFileSync(join(fx.repo, "other.txt"), "operator change\n");
+      git(fx, "add", "other.txt");
+      setUp(fx);
+      propose(fx, "Always greet in English.");
+      writeFileSync(
+        join(fx.fake, "next-eval.json"),
+        results(fx, { a: "pass", b: "pass", c: "pass" }),
+      );
+      writeFileSync(join(fx.fake, "next-compare.json"), compare("keep", "improved", "improved"));
+      expect(round(fx)).toMatchObject({ decision: "keep", committed: true });
+      expect(git(fx, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")).toBe(
+        ".keelson/workflows/demo.yaml",
+      );
+      expect(git(fx, "diff", "--cached", "--name-only")).toBe("other.txt");
+      expect(git(fx, "show", "HEAD:other.txt")).toBe("untouched");
+      expect(readFileSync(join(fx.repo, "other.txt"), "utf8")).toBe("operator change\n");
+    },
+  );
 
-  test("a failed proposer counts as a flat round after restoring the target", () => {
+  gitTest("a failed proposer counts as a flat round after restoring the target", () => {
     propose(fx, "# half-written\n");
     const out = round(fx, { state: "failed" });
     expect(out).toMatchObject({
@@ -858,7 +870,7 @@ shimDescribe("hillclimb round decisions", () => {
     expect(readFileSync(fx.target, "utf8")).toBe(TARGET_SOURCE);
   });
 
-  test("a skipped proposer settles without advancing the round counter", () => {
+  gitTest("a skipped proposer settles without advancing the round counter", () => {
     const out = round(fx, { state: "skipped" });
     expect(out).toMatchObject({ decision: "skipped", continue: false });
     expect(readFileSync(join(fx.artifacts, "round"), "utf8").trim()).toBe("0");
@@ -881,7 +893,7 @@ shimDescribe("hillclimb collect", () => {
     KEELSON_NODE_round_3_STATE: "completed",
   };
 
-  test("recommends the branch after a kept round and lists what still fails", () => {
+  gitTest("recommends the branch after a kept round and lists what still fails", () => {
     propose(fx, "# round one\n");
     writeFileSync(
       join(fx.fake, "next-eval.json"),
@@ -912,7 +924,7 @@ shimDescribe("hillclimb collect", () => {
     expect(view.rows.map((r: { caseId: string }) => r.caseId)).toEqual(["a", "b", "c"]);
   });
 
-  test("returns to the original branch when nothing was kept", () => {
+  gitTest("returns to the original branch when nothing was kept", () => {
     round(fx, { changed: false });
     const out = runNode(fx, "collect", settled);
     expect(out.code).toBe(0);
@@ -922,7 +934,7 @@ shimDescribe("hillclimb collect", () => {
     expect(git(fx, "branch", "--list", "keelson/hillclimb/*")).toBe("");
   });
 
-  test("notes a crashed round and restores the kept target", () => {
+  gitTest("notes a crashed round and restores the kept target", () => {
     propose(fx, "# half-written\n");
     const out = runNode(fx, "collect", {
       ...settled,
@@ -936,7 +948,7 @@ shimDescribe("hillclimb collect", () => {
     expect(readFileSync(fx.target, "utf8")).toBe(TARGET_SOURCE);
   });
 
-  test("refuses a merge recommendation for a kept round without a recorded commit", () => {
+  gitTest("refuses a merge recommendation for a kept round without a recorded commit", () => {
     writeFileSync(
       join(fx.artifacts, "round-1-decision.json"),
       JSON.stringify({ round: 1, decision: "keep", committed: false }),
