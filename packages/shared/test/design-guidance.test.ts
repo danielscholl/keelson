@@ -80,6 +80,8 @@ describe("design guide placement", () => {
       "Required arrays: lanes",
       "cap 12 lanes / 400 spans / 200 marks",
       "{ from, to } or { from, clock: { until } }",
+      "in the viewer's local timezone",
+      "the caption names the zone once",
       "single-code-point glyph",
       "open-ended dashed outline",
       "shared clock without new frames",
