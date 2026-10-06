@@ -152,6 +152,10 @@ const BRIDGE_SCRIPT = `
     requestAnimationFrame(function () { scheduled = false; postSize(); });
   }
   window.addEventListener("load", postSize);
+  // A content-sized root keeps its box when the host applies a report, so the
+  // observers miss that resize; without it the viewport baseline goes stale and
+  // later real growth reads as viewport-coupled and is never reported.
+  window.addEventListener("resize", schedulePostSize);
   if (typeof ResizeObserver === "function") {
     var sizer = new ResizeObserver(schedulePostSize);
     if (document.documentElement) sizer.observe(document.documentElement);
