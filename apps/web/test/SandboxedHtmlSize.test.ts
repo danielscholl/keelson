@@ -106,6 +106,9 @@ function sizeBridge() {
     notifyResize() {
       for (const observer of resizeObservers) observer.notify();
     },
+    resizeWindow() {
+      for (const listener of windowListeners.resize ?? []) listener();
+    },
     notifyMutation() {
       for (const observer of mutationObservers) observer.notify();
     },
@@ -204,6 +207,27 @@ describe("injected HTML sizing bridge", () => {
     fixture.sizes.bodyHeight = 80;
     fixture.measure();
     expect(fixture.posts.map((message) => message.height)).toEqual([80, 300, 40, 80]);
+  });
+
+  test("reports growth after the host resizes a content-sized frame", () => {
+    const fixture = sizeBridge();
+    fixture.sizes.viewport = 80;
+    fixture.sizes.rootHeight = 80;
+    fixture.domReady();
+    fixture.sizes.bodyHeight = 865;
+    fixture.sizes.rootHeight = 865;
+    fixture.notifyMutation();
+    fixture.flush();
+    // The host applies the report; a content-sized root keeps its box, so only
+    // the window resize tells the bridge the viewport grew.
+    fixture.sizes.viewport = 865;
+    fixture.resizeWindow();
+    fixture.flush();
+    fixture.sizes.bodyHeight = 1021;
+    fixture.sizes.rootHeight = 1021;
+    fixture.notifyMutation();
+    fixture.flush();
+    expect(fixture.posts.map((message) => message.height)).toEqual([80, 865, 1021]);
   });
 
   test.each([
