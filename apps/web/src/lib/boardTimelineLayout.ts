@@ -64,6 +64,16 @@ export function formatTimelineTime(at: number, from: number, to: number, interva
   return local.slice(0, 10);
 }
 
+// Day-sized ticks sit on the viewer's local midnights, so a date label marks where that day starts.
+function localMidnights(from: number, to: number, days: number) {
+  const day = new Date(from);
+  day.setHours(0, 0, 0, 0);
+  if (day.getTime() < from) day.setDate(day.getDate() + 1);
+  const times: number[] = [];
+  for (; day.getTime() <= to; day.setDate(day.getDate() + days)) times.push(day.getTime());
+  return times;
+}
+
 export function layoutTimeline(section: CanvasTimelineSection, width: number, now: number) {
   const from = Date.parse(section.window.from);
   const to = Date.parse("clock" in section.window ? section.window.clock.until : section.window.to);
@@ -112,8 +122,8 @@ export function layoutTimeline(section: CanvasTimelineSection, width: number, no
   const maxTicks = Math.min(8, Math.max(2, Math.floor((plot.right - plot.left) / 120) + 1));
   const step =
     TICK_STEPS.find((s) => (to - from) / s <= maxTicks - 1) ?? (to - from) / (maxTicks - 1);
-  let times: number[] = [];
-  for (let at = Math.ceil(from / step) * step; at <= to; at += step) times.push(at);
+  let times = step >= DAY ? localMidnights(from, to, Math.round(step / DAY)) : [];
+  if (step < DAY) for (let at = Math.ceil(from / step) * step; at <= to; at += step) times.push(at);
   if (times.length < 2) times = [from, to];
   const interval = times[1]! - times[0]!;
   const labels = times.map((at) => formatTimelineTime(at, from, to, interval));

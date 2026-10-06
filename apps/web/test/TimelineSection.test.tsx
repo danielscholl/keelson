@@ -310,7 +310,6 @@ describe("timeline section", () => {
         expect(
           [...container.querySelectorAll(".cvb-timeline-tick")].map((el) => el.textContent),
         ).toEqual([
-          "2026-10-04",
           "2026-10-05",
           "2026-10-06",
           "2026-10-07",

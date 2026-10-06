@@ -394,6 +394,52 @@ describe("timeline layout", () => {
     expect(layout.ticks.map((tick) => tick.x)).toEqual([160, 414, 668, 922, 1176]);
   });
 
+  it("places day-sized ticks on local midnights", () => {
+    const layout = layoutTimeline(
+      {
+        ...section,
+        window: { from: "2026-10-01T05:00:00Z", to: "2026-10-15T05:00:00Z" },
+      },
+      1200,
+      now,
+    );
+    expect(layout.ticks.map((tick) => tick.label)).toEqual([
+      "2026-10-01",
+      "2026-10-03",
+      "2026-10-05",
+      "2026-10-07",
+      "2026-10-09",
+      "2026-10-11",
+      "2026-10-13",
+      "2026-10-15",
+    ]);
+    layout.ticks.forEach((tick, index) => {
+      expect(new Date(tick.at).getHours()).toBe(0);
+      expect(tick.x).toBeCloseTo(160 + (1016 * index) / 7);
+    });
+  });
+
+  it("keeps day-sized ticks on local midnight across a DST change", () => {
+    const layout = layoutTimeline(
+      {
+        ...section,
+        window: { from: "2026-10-25T05:00:00Z", to: "2026-11-08T06:00:00Z" },
+      },
+      1200,
+      now,
+    );
+    expect(layout.ticks.map((tick) => tick.label)).toEqual([
+      "2026-10-25",
+      "2026-11-01",
+      "2026-11-08",
+    ]);
+    expect(layout.ticks.map((tick) => tick.at)).toEqual(
+      ["2026-10-25T05:00:00Z", "2026-11-01T05:00:00Z", "2026-11-08T06:00:00Z"].map((iso) =>
+        Date.parse(iso),
+      ),
+    );
+  });
+
   it("gives equivalent ISO offsets identical epochs, labels, and geometry", () => {
     const utc = layoutTimeline(section, 1200, now);
     for (const window of [
