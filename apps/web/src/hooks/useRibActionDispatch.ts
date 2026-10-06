@@ -202,9 +202,15 @@ export function useHtmlFrameAction(
   ribId: string | null,
   opts?: {
     onOpenCanvas?: (key: string, title?: string, placement?: CanvasPlacement) => void;
+    // The seed comes from the rib's own reply, so a frame can only open a chat
+    // its rib chose to open; the rib gates which frame verbs reach that reply.
+    onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
   },
 ): (action: CanvasHtmlAction) => void {
-  const { run } = useRibActionDispatch(ribId, { onOpenCanvas: opts?.onOpenCanvas });
+  const { run } = useRibActionDispatch(ribId, {
+    onOpenCanvas: opts?.onOpenCanvas,
+    onOpenChat: opts?.onOpenChat,
+  });
   return useCallback(
     (action: CanvasHtmlAction) => {
       if (ribId) void run({ type: action.type, payload: action.payload, origin: "canvas-html" });

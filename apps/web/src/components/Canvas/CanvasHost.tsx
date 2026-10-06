@@ -505,7 +505,7 @@ function HtmlCanvas({
       ),
     [openCanvas, onOpenChat, onLaunchWorkflow, onOpenRun, resolveCanvasKind],
   );
-  const onAction = useHtmlFrameAction(ribId, { onOpenCanvas });
+  const onAction = useHtmlFrameAction(ribId, { onOpenCanvas, onOpenChat });
   return <HtmlBody source={source} onAction={onAction} />;
 }
 

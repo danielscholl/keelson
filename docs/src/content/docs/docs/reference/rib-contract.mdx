@@ -205,7 +205,8 @@ are retained, and cleanup failures appear alongside the original error.
    `view` | `html` | `log` (`html` renders untrusted, rib-authored markup in a
    sandboxed iframe; the frame can post structured actions back to the host,
    which are relayed to the owning rib's `onAction` with `origin: "canvas-html"`
-   so the rib can gate them to a safe subset. `log` renders terminal output
+   so the rib can gate them to a safe subset. The reply to a frame action may
+   carry `open-canvas` or `open-chat`; the host drops any other effect. `log` renders terminal output
    verbatim in a monospace block with ANSI escapes resolved — never parsed as
    markdown; its payload should be a string, and a non-string payload renders as
    formatted JSON). The payload published under `key`
