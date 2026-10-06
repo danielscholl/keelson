@@ -27,13 +27,51 @@ const TICK_STEPS = [
   365 * DAY,
 ];
 
-export function formatTimelineTime(at: number, range: number, interval = range) {
-  const iso = new Date(at).toISOString();
-  if (interval < 1_000) return iso.slice(11, 23);
-  if (range < 5 * MINUTE) return iso.slice(11, 19);
-  if (range < DAY) return iso.slice(11, 16);
-  if (range < 7 * DAY) return `${iso.slice(5, 10)} ${iso.slice(11, 16)}`;
-  return iso.slice(0, 10);
+export function formatTimelineTimestamp(at: number) {
+  const date = new Date(at);
+  if (!Number.isFinite(date.getTime())) throw new RangeError("Invalid time value");
+  const pad = (value: number, length = 2) => String(value).padStart(length, "0");
+  return (
+    `${pad(date.getFullYear(), 4)}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.` +
+    pad(date.getMilliseconds(), 3)
+  );
+}
+
+export function formatTimelineZone(at: number, timeZoneName: "short" | "shortOffset" = "short") {
+  const zone = new Intl.DateTimeFormat(undefined, { timeZoneName })
+    .formatToParts(at)
+    .find((part) => part.type === "timeZoneName");
+  if (!zone) throw new Error("Timeline timezone name is unavailable");
+  return zone.value;
+}
+
+export function formatTimelineTime(at: number, from: number, to: number, interval = to - from) {
+  const range = to - from;
+  const local = formatTimelineTimestamp(at);
+  if (range < DAY) {
+    const time =
+      interval < 1_000
+        ? local.slice(11, 23)
+        : range < 5 * MINUTE
+          ? local.slice(11, 19)
+          : local.slice(11, 16);
+    const crossesMidnight =
+      formatTimelineTimestamp(from).slice(0, 10) !== formatTimelineTimestamp(to).slice(0, 10);
+    return crossesMidnight ? `${local.slice(5, 10)} ${time}` : time;
+  }
+  if (range < 7 * DAY) return `${local.slice(5, 10)} ${local.slice(11, 16)}`;
+  return local.slice(0, 10);
+}
+
+// Day-sized ticks sit on the viewer's local midnights, so a date label marks where that day starts.
+function localMidnights(from: number, to: number, days: number) {
+  const day = new Date(from);
+  day.setHours(0, 0, 0, 0);
+  if (day.getTime() < from) day.setDate(day.getDate() + 1);
+  const times: number[] = [];
+  for (; day.getTime() <= to; day.setDate(day.getDate() + days)) times.push(day.getTime());
+  return times;
 }
 
 export function layoutTimeline(section: CanvasTimelineSection, width: number, now: number) {
@@ -84,15 +122,20 @@ export function layoutTimeline(section: CanvasTimelineSection, width: number, no
   const maxTicks = Math.min(8, Math.max(2, Math.floor((plot.right - plot.left) / 120) + 1));
   const step =
     TICK_STEPS.find((s) => (to - from) / s <= maxTicks - 1) ?? (to - from) / (maxTicks - 1);
-  let times: number[] = [];
-  for (let at = Math.ceil(from / step) * step; at <= to; at += step) times.push(at);
+  let times = step >= DAY ? localMidnights(from, to, Math.round(step / DAY)) : [];
+  if (step < DAY) for (let at = Math.ceil(from / step) * step; at <= to; at += step) times.push(at);
   if (times.length < 2) times = [from, to];
   const interval = times[1]! - times[0]!;
-  const ticks = times.map((at) => ({
-    at,
-    x: scale(at),
-    label: formatTimelineTime(at, to - from, interval),
-  }));
+  const labels = times.map((at) => formatTimelineTime(at, from, to, interval));
+  const ticks = times.map((at, index) => {
+    const label = labels[index]!;
+    const repeated = labels.indexOf(label) !== labels.lastIndexOf(label);
+    return {
+      at,
+      x: scale(at),
+      label: repeated ? `${label} ${formatTimelineZone(at, "shortOffset")}` : label,
+    };
+  });
   return {
     plot,
     height: plot.bottom + 12,

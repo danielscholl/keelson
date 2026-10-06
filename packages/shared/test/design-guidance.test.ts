@@ -73,13 +73,20 @@ describe("design guide placement", () => {
     );
   });
 
-  test("guides activity toward bounded timelines with host ticking and text fallback", () => {
+  test("guides bounded timelines with local time, host ticking, and text fallback", () => {
     const board = CANVAS_DESIGN_GUIDE_SECTIONS.board;
     for (const phrase of [
       "spans on lanes over a window; a chart is for values",
       "Required arrays: lanes",
       "cap 12 lanes / 400 spans / 200 marks",
       "{ from, to } or { from, clock: { until } }",
+      "offset-aware ISO timestamps",
+      "ticks, window captions, item descriptions/tooltips, and narrow-list timestamps",
+      "in the viewer's local timezone",
+      "local calendar dates and milliseconds",
+      "the caption names the zone once",
+      "short Intl zone name at the window's start",
+      "Placement stays instant-based across DST changes",
       "single-code-point glyph",
       "open-ended dashed outline",
       "shared clock without new frames",

@@ -1,6 +1,10 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { CanvasTimelineSection } from "@keelson/shared";
-import { layoutTimeline } from "../src/lib/boardTimelineLayout.ts";
+import {
+  formatTimelineTimestamp,
+  formatTimelineZone,
+  layoutTimeline,
+} from "../src/lib/boardTimelineLayout.ts";
 
 const from = "2026-10-05T12:00:00Z";
 const to = "2026-10-05T13:00:00Z";
@@ -18,6 +22,37 @@ const section: CanvasTimelineSection = {
 };
 
 describe("timeline layout", () => {
+  const originalTZ = process.env.TZ;
+  beforeAll(() => {
+    process.env.TZ = "America/Chicago";
+  });
+  afterAll(() => {
+    if (originalTZ === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTZ;
+  });
+
+  it("formats full local timestamps with dates and millisecond precision", () => {
+    expect(formatTimelineTimestamp(Date.parse("2026-10-05T22:36:07.360Z"))).toBe(
+      "2026-10-05 17:36:07.360",
+    );
+    expect(formatTimelineTimestamp(Date.parse("2026-10-06T00:00:00.005Z"))).toBe(
+      "2026-10-05 19:00:00.005",
+    );
+    expect(() => formatTimelineTimestamp(Number.NaN)).toThrow(RangeError);
+  });
+
+  it.each(["2026-01-05T12:00:00Z", "2026-10-05T12:00:00Z"])(
+    "derives the short local zone at %s",
+    (iso) => {
+      const at = Date.parse(iso);
+      const expected = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+        .formatToParts(at)
+        .find((part) => part.type === "timeZoneName")?.value;
+      expect(expected).toBeDefined();
+      expect(formatTimelineZone(at)).toBe(expected!);
+    },
+  );
+
   it("keeps lane order and divides only adjacent group transitions", () => {
     const layout = layoutTimeline(section, 1200, now);
     expect(layout.lanes.map(({ lane }) => lane.id)).toEqual(["b", "a", "c"]);
@@ -110,6 +145,7 @@ describe("timeline layout", () => {
       { from, to: "2026-10-05T12:00:00.500Z" },
       { from, to: "2026-10-05T12:00:05Z" },
       { from, to },
+      { from: "2026-11-01T05:00:00Z", to: "2026-11-01T08:00:00Z" },
       { from, to: "2026-10-09T12:00:00Z" },
       { from, to: "2027-10-05T12:00:00Z" },
     ]) {
@@ -132,12 +168,12 @@ describe("timeline layout", () => {
     {
       from: "2026-10-05T12:00:00.100Z",
       to: "2026-10-05T12:00:00.900Z",
-      labels: ["12:00:00.100", "12:00:00.900"],
+      labels: ["07:00:00.100", "07:00:00.900"],
     },
     {
       from: "2026-10-05T07:00:00.900-05:00",
       to: "2026-10-05T14:00:01.100+02:00",
-      labels: ["12:00:00.900", "12:00:01.100"],
+      labels: ["07:00:00.900", "07:00:01.100"],
     },
   ])("includes milliseconds for sub-second tick intervals from $from", ({ from, to, labels }) => {
     for (const window of [
@@ -147,6 +183,8 @@ describe("timeline layout", () => {
       for (const width of [720, 1200, 10000]) {
         const layout = layoutTimeline({ ...section, window }, width, now);
         expect(layout.ticks.map((tick) => tick.label)).toEqual(labels);
+        expect(layout.ticks.map((tick) => tick.at)).toEqual([Date.parse(from), Date.parse(to)]);
+        expect(layout.ticks.map((tick) => tick.x)).toEqual([160, width - 24]);
       }
     }
   });
@@ -158,25 +196,260 @@ describe("timeline layout", () => {
       now,
     );
     expect(layout.ticks.map((tick) => tick.label)).toEqual([
-      "12:00:00",
-      "12:00:01",
-      "12:00:02",
-      "12:00:03",
-      "12:00:04",
-      "12:00:05",
+      "07:00:00",
+      "07:00:01",
+      "07:00:02",
+      "07:00:03",
+      "07:00:04",
+      "07:00:05",
     ]);
   });
 
   it("places ticks on round times", () => {
     const layout = layoutTimeline({ ...section, window: { from, to } }, 1200, now);
     expect(layout.ticks.map((tick) => tick.label)).toEqual([
-      "12:00",
-      "12:10",
-      "12:20",
-      "12:30",
-      "12:40",
-      "12:50",
-      "13:00",
+      "07:00",
+      "07:10",
+      "07:20",
+      "07:30",
+      "07:40",
+      "07:50",
+      "08:00",
     ]);
+    expect(layout.ticks.map((tick) => tick.at)).toEqual(
+      [
+        "2026-10-05T12:00:00Z",
+        "2026-10-05T12:10:00Z",
+        "2026-10-05T12:20:00Z",
+        "2026-10-05T12:30:00Z",
+        "2026-10-05T12:40:00Z",
+        "2026-10-05T12:50:00Z",
+        "2026-10-05T13:00:00Z",
+      ].map((iso) => Date.parse(iso)),
+    );
+    layout.ticks.forEach((tick, index) => {
+      expect(tick.x).toBeCloseTo(160 + (1016 * index) / 6);
+    });
+  });
+
+  it.each([false, true])("dates ticks across local midnight (live=%s)", (live) => {
+    const from = "2026-10-06T04:59:30Z";
+    const to = "2026-10-06T05:00:30Z";
+    const layout = layoutTimeline(
+      {
+        ...section,
+        window: live ? { from, clock: { until: to } } : { from, to },
+      },
+      1200,
+      now,
+    );
+    expect(layout.ticks.map((tick) => tick.label)).toEqual([
+      "10-05 23:59:30",
+      "10-05 23:59:45",
+      "10-06 00:00:00",
+      "10-06 00:00:15",
+      "10-06 00:00:30",
+    ]);
+    expect(layout.ticks.map((tick) => tick.at)).toEqual(
+      [
+        "2026-10-06T04:59:30Z",
+        "2026-10-06T04:59:45Z",
+        "2026-10-06T05:00:00Z",
+        "2026-10-06T05:00:15Z",
+        "2026-10-06T05:00:30Z",
+      ].map((iso) => Date.parse(iso)),
+    );
+    expect(layout.ticks.map((tick) => tick.x)).toEqual([160, 414, 668, 922, 1176]);
+  });
+
+  it.each([
+    {
+      from: "2026-10-05T23:59:59.900-05:00",
+      to: "2026-10-06T07:00:00.100+02:00",
+      labels: ["10-05 23:59:59.900", "10-06 00:00:00.100"],
+    },
+    {
+      from: "2027-01-01T05:59:59.900Z",
+      to: "2027-01-01T06:00:00.100Z",
+      labels: ["12-31 23:59:59.900", "01-01 00:00:00.100"],
+    },
+    {
+      from: "2026-10-06T04:30:00Z",
+      to: "2026-10-06T05:30:00Z",
+      labels: [
+        "10-05 23:30",
+        "10-05 23:40",
+        "10-05 23:50",
+        "10-06 00:00",
+        "10-06 00:10",
+        "10-06 00:20",
+        "10-06 00:30",
+      ],
+    },
+  ])("retains tick precision with dates across midnight from $from", ({ from, to, labels }) => {
+    for (const window of [
+      { from, to },
+      { from, clock: { until: to } },
+    ]) {
+      const layout = layoutTimeline({ ...section, window }, 1200, now);
+      expect(layout.ticks.map((tick) => tick.label)).toEqual(labels);
+    }
+  });
+
+  it.each([false, true])(
+    "disambiguates repeated fall-back ticks without moving them (live=%s)",
+    (live) => {
+      const from = "2026-11-01T05:00:00Z";
+      const to = "2026-11-01T08:00:00Z";
+      const layout = layoutTimeline(
+        { ...section, window: live ? { from, clock: { until: to } } : { from, to } },
+        1200,
+        now,
+      );
+      expect(layout.ticks.map((tick) => tick.label)).toEqual([
+        "00:00",
+        "00:30",
+        "01:00 GMT-5",
+        "01:30 GMT-5",
+        "01:00 GMT-6",
+        "01:30 GMT-6",
+        "02:00",
+      ]);
+      expect(layout.ticks.map((tick) => tick.at)).toEqual(
+        [
+          "2026-11-01T05:00:00Z",
+          "2026-11-01T05:30:00Z",
+          "2026-11-01T06:00:00Z",
+          "2026-11-01T06:30:00Z",
+          "2026-11-01T07:00:00Z",
+          "2026-11-01T07:30:00Z",
+          "2026-11-01T08:00:00Z",
+        ].map((iso) => Date.parse(iso)),
+      );
+      layout.ticks.forEach((tick, index) => {
+        expect(tick.x).toBeCloseTo(160 + (1016 * index) / 6);
+      });
+    },
+  );
+
+  it("keeps elapsed tick epochs and positions across spring-forward DST", () => {
+    const layout = layoutTimeline(
+      {
+        ...section,
+        window: { from: "2026-03-08T07:00:00Z", to: "2026-03-08T10:00:00Z" },
+      },
+      1200,
+      now,
+    );
+    expect(layout.ticks.map((tick) => tick.label)).toEqual([
+      "01:00",
+      "01:30",
+      "03:00",
+      "03:30",
+      "04:00",
+      "04:30",
+      "05:00",
+    ]);
+    expect(layout.ticks.map((tick) => tick.at)).toEqual(
+      [
+        "2026-03-08T07:00:00Z",
+        "2026-03-08T07:30:00Z",
+        "2026-03-08T08:00:00Z",
+        "2026-03-08T08:30:00Z",
+        "2026-03-08T09:00:00Z",
+        "2026-03-08T09:30:00Z",
+        "2026-03-08T10:00:00Z",
+      ].map((iso) => Date.parse(iso)),
+    );
+    layout.ticks.forEach((tick, index) => {
+      expect(tick.x).toBeCloseTo(160 + (1016 * index) / 6);
+    });
+  });
+
+  it("projects multi-day tick dates locally without re-anchoring at local midnight", () => {
+    const layout = layoutTimeline(
+      {
+        ...section,
+        window: { from: "2026-10-05T00:00:00Z", to: "2026-10-07T00:00:00Z" },
+      },
+      1200,
+      now,
+    );
+    expect(layout.ticks.map((tick) => tick.label)).toEqual([
+      "10-04 19:00",
+      "10-05 07:00",
+      "10-05 19:00",
+      "10-06 07:00",
+      "10-06 19:00",
+    ]);
+    expect(layout.ticks.map((tick) => tick.at)).toEqual(
+      [
+        "2026-10-05T00:00:00Z",
+        "2026-10-05T12:00:00Z",
+        "2026-10-06T00:00:00Z",
+        "2026-10-06T12:00:00Z",
+        "2026-10-07T00:00:00Z",
+      ].map((iso) => Date.parse(iso)),
+    );
+    expect(layout.ticks.map((tick) => tick.x)).toEqual([160, 414, 668, 922, 1176]);
+  });
+
+  it("places day-sized ticks on local midnights", () => {
+    const layout = layoutTimeline(
+      {
+        ...section,
+        window: { from: "2026-10-01T05:00:00Z", to: "2026-10-15T05:00:00Z" },
+      },
+      1200,
+      now,
+    );
+    expect(layout.ticks.map((tick) => tick.label)).toEqual([
+      "2026-10-01",
+      "2026-10-03",
+      "2026-10-05",
+      "2026-10-07",
+      "2026-10-09",
+      "2026-10-11",
+      "2026-10-13",
+      "2026-10-15",
+    ]);
+    layout.ticks.forEach((tick, index) => {
+      expect(new Date(tick.at).getHours()).toBe(0);
+      expect(tick.x).toBeCloseTo(160 + (1016 * index) / 7);
+    });
+  });
+
+  it("keeps day-sized ticks on local midnight across a DST change", () => {
+    const layout = layoutTimeline(
+      {
+        ...section,
+        window: { from: "2026-10-25T05:00:00Z", to: "2026-11-08T06:00:00Z" },
+      },
+      1200,
+      now,
+    );
+    expect(layout.ticks.map((tick) => tick.label)).toEqual([
+      "2026-10-25",
+      "2026-11-01",
+      "2026-11-08",
+    ]);
+    expect(layout.ticks.map((tick) => tick.at)).toEqual(
+      ["2026-10-25T05:00:00Z", "2026-11-01T05:00:00Z", "2026-11-08T06:00:00Z"].map((iso) =>
+        Date.parse(iso),
+      ),
+    );
+  });
+
+  it("gives equivalent ISO offsets identical epochs, labels, and geometry", () => {
+    const utc = layoutTimeline(section, 1200, now);
+    for (const window of [
+      { from: "2026-10-05T07:00:00-05:00", to: "2026-10-05T15:00:00+02:00" },
+      {
+        from: "2026-10-05T07:00:00-05:00",
+        clock: { until: "2026-10-05T15:00:00+02:00" },
+      },
+    ]) {
+      expect(layoutTimeline({ ...section, window }, 1200, now).ticks).toEqual(utc.ticks);
+    }
   });
 });

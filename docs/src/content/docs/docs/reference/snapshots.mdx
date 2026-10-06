@@ -310,7 +310,17 @@ A clock window uses the host's shared 30-second clock, without new frames.
 `until` is a fixed upper bound, not a sliding window: running spans extend to
 the lesser of now and `until`, and the now rule disappears outside the window.
 Future-starting open spans wait until their start. Fixed windows have no now
-rule, and open spans extend to `to`. The axis labels use UTC.
+rule, and open spans extend to `to`.
+
+Ticks, window captions, item descriptions and tooltips, and narrow-list times
+render in the viewer's local timezone. Short-window ticks include dates when the
+window crosses local midnight. Repeated local tick labels include UTC offsets
+to distinguish instants across a fall-back DST change. Caption and item
+timestamps keep full local calendar dates and millisecond precision. The caption
+names the zone once,
+using `Intl.DateTimeFormat` with `timeZoneName: "short"` at the window's start,
+including windows spanning a day or a DST change. Inputs remain offset-aware ISO
+instants; tick and item placement stays instant-based across DST changes.
 
 Data outside the window is valid: the plot clips intersecting spans and omits
 fully outside spans and marks. Zero-duration spans get a small visible width.
