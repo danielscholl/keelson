@@ -518,8 +518,33 @@ describe("useHtmlFrameAction — frame effects", () => {
     });
   }
 
+  test("opens the chat its rib seeded without a toast", async () => {
+    postRibActionImpl = async () => ({ ok: true, data: { effect: "open-chat", seed: SEED } });
+    const rec = recorders();
+    const { result } = renderHook(
+      () =>
+        useHtmlFrameAction("demo", { onOpenCanvas: rec.onOpenCanvas, onOpenChat: rec.onOpenChat }),
+      { wrapper },
+    );
+    await frameAct(result.current);
+    await waitFor(() => expect(rec.chats).toEqual([SEED]));
+    expect(rec.canvases).toEqual([]);
+    expect(toastCount()).toBe(0);
+  });
+
+  test("without onOpenChat an open-chat reply retains the success toast", async () => {
+    postRibActionImpl = async () => ({ ok: true, data: { effect: "open-chat", seed: SEED } });
+    const rec = recorders();
+    const { result } = renderHook(
+      () => useHtmlFrameAction("demo", { onOpenCanvas: rec.onOpenCanvas }),
+      { wrapper },
+    );
+    await frameAct(result.current);
+    await waitFor(() => expect(toastText()).toContain("inspect ✓"));
+    expect(rec.chats).toEqual([]);
+  });
+
   for (const data of [
-    { effect: "open-chat", seed: SEED },
     { effect: "run-workflow", workflow: "ship" },
     { effect: "open-surface", surfaceId: "surface:demo:rooms" },
     { effect: "open-run", runId: "run-1", workflow: "ship" },
@@ -531,7 +556,6 @@ describe("useHtmlFrameAction — frame effects", () => {
       const successes: RibAction[] = [];
       const widerOptions = {
         onOpenCanvas: rec.onOpenCanvas,
-        onOpenChat: rec.onOpenChat,
         onLaunchWorkflow: rec.onLaunchWorkflow,
         onOpenSurface: rec.onOpenSurface,
         onOpenRun: (_workflow: string, runId: string) => runs.push(runId),

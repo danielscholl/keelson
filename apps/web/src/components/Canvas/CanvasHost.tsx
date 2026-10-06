@@ -485,8 +485,18 @@ function HtmlCanvas({
   onOpenRun?: (workflowName: string, runId: string) => void;
 }) {
   const ribId = source.type === "snapshot" ? ribIdFromKey(source.key) : null;
-  const { openCanvas } = useCanvas();
+  const { openCanvas, close } = useCanvas();
   const resolveCanvasKind = useCanvasKindForKey();
+  // Same contract as ViewCanvas: the chat opens, then the drawer closes over it.
+  const onOpenChatAndClose = useCallback(
+    (seed: OpenChatSeed) => {
+      if (!onOpenChat) return;
+      const pending = Promise.resolve(onOpenChat(seed));
+      close();
+      return pending;
+    },
+    [onOpenChat, close],
+  );
   // openCanvas drops any handler it isn't handed, so forward the drawer's own.
   const onOpenCanvas = useCallback(
     (key: string, title?: string, placement?: CanvasPlacement) =>
@@ -505,7 +515,10 @@ function HtmlCanvas({
       ),
     [openCanvas, onOpenChat, onLaunchWorkflow, onOpenRun, resolveCanvasKind],
   );
-  const onAction = useHtmlFrameAction(ribId, { onOpenCanvas });
+  const onAction = useHtmlFrameAction(ribId, {
+    onOpenCanvas,
+    onOpenChat: onOpenChat ? onOpenChatAndClose : undefined,
+  });
   return <HtmlBody source={source} onAction={onAction} />;
 }
 

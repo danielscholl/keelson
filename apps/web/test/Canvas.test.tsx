@@ -922,10 +922,59 @@ describe("CanvasProvider / useCanvas", () => {
     });
   }
 
-  for (const data of [
-    { effect: "open-chat", seed: { systemPrompt: "Be helpful.", name: "Helper" } },
-    { effect: "run-workflow", workflow: "ship" },
-  ]) {
+  test("a snapshot HTML frame opens the chat its rib seeded", async () => {
+    const source = "rib:demo:html-panel";
+    const originalPost = postRibActionImpl;
+    snapshotsByKey[source] = {
+      status: "live",
+      data: "<button data-canvas-action='navigate'>Navigate</button>",
+      version: 1,
+      composedAt: null,
+    };
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "open-chat", seed: { systemPrompt: "Be helpful.", name: "Helper" } },
+    });
+    const chats: string[] = [];
+    function ChatOpener() {
+      const { openCanvas } = useCanvas();
+      return (
+        <button
+          type="button"
+          onClick={() =>
+            openCanvas(
+              { kind: "html", source: { type: "snapshot", key: source }, title: "Source" },
+              { onOpenChat: (seed) => chats.push(seed.name ?? "") },
+            )
+          }
+        >
+          open-chat-opener
+        </button>
+      );
+    }
+    try {
+      render(
+        <ToastHost>
+          <CanvasProvider>
+            <ChatOpener />
+          </CanvasProvider>
+        </ToastHost>,
+      );
+      fireEvent.click(screen.getByText("open-chat-opener"));
+      const frame = screen
+        .getByRole("dialog", { name: "Source" })
+        .querySelector("iframe.canvas-html-frame") as HTMLIFrameElement;
+      await sendFrameAction(frame, "navigate");
+      await waitFor(() => expect(chats).toEqual(["Helper"]));
+      expect(document.querySelector(".keelson-toast-ok")).toBeNull();
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Source" })).toBeNull());
+    } finally {
+      delete snapshotsByKey[source];
+      postRibActionImpl = originalPost;
+    }
+  });
+
+  for (const data of [{ effect: "run-workflow", workflow: "ship" }]) {
     test(`a snapshot HTML frame does not invoke the ${data.effect} opener or close`, async () => {
       const source = "rib:demo:html-panel";
       const originalPost = postRibActionImpl;

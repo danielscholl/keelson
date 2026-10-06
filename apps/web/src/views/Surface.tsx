@@ -334,13 +334,21 @@ function SurfaceRegion({
         },
         {
           ...(placement ? { placement } : {}),
-          onOpenChat,
+          ...(onExplore ? { onOpenChat } : {}),
           ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
           ...(onOpenSurface ? { onOpenSurface } : {}),
           ...(onOpenRun ? { onOpenRun } : {}),
         },
       ),
-    [openCanvas, onOpenChat, onLaunchWorkflow, onOpenSurface, onOpenRun, resolveCanvasKind],
+    [
+      openCanvas,
+      onExplore,
+      onOpenChat,
+      onLaunchWorkflow,
+      onOpenSurface,
+      onOpenRun,
+      resolveCanvasKind,
+    ],
   );
   // Only wire onOpenChat when onExplore exists; otherwise the dispatch would
   // intercept an open-chat directive, no-op, and swallow the normal success path.
@@ -373,7 +381,10 @@ function SurfaceRegion({
   const regionKind = resolveCanvasKind(region.key);
   const isHtml = regionKind === "html";
   const isLog = regionKind === "log";
-  const onFrameAction = useHtmlFrameAction(ribId, { onOpenCanvas });
+  const onFrameAction = useHtmlFrameAction(ribId, {
+    onOpenCanvas,
+    onOpenChat: onExplore ? onOpenChat : undefined,
+  });
 
   const parsed =
     !isHtml && !isLog && snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
@@ -422,7 +433,7 @@ function SurfaceRegion({
       // So an Enter/launch button clicked in the expanded drawer behaves the same
       // way it does inline, instead of being swallowed with a success toast.
       {
-        onOpenChat,
+        ...(onExplore ? { onOpenChat } : {}),
         ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
         ...(onOpenSurface ? { onOpenSurface } : {}),
         ...(onOpenRun ? { onOpenRun } : {}),
