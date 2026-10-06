@@ -38,19 +38,28 @@ export function formatTimelineTimestamp(at: number) {
   );
 }
 
-export function formatTimelineZone(at: number) {
-  const zone = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+export function formatTimelineZone(at: number, timeZoneName: "short" | "shortOffset" = "short") {
+  const zone = new Intl.DateTimeFormat(undefined, { timeZoneName })
     .formatToParts(at)
     .find((part) => part.type === "timeZoneName");
   if (!zone) throw new Error("Timeline timezone name is unavailable");
   return zone.value;
 }
 
-export function formatTimelineTime(at: number, range: number, interval = range) {
+export function formatTimelineTime(at: number, from: number, to: number, interval = to - from) {
+  const range = to - from;
   const local = formatTimelineTimestamp(at);
-  if (interval < 1_000) return local.slice(11, 23);
-  if (range < 5 * MINUTE) return local.slice(11, 19);
-  if (range < DAY) return local.slice(11, 16);
+  if (range < DAY) {
+    const time =
+      interval < 1_000
+        ? local.slice(11, 23)
+        : range < 5 * MINUTE
+          ? local.slice(11, 19)
+          : local.slice(11, 16);
+    const crossesMidnight =
+      formatTimelineTimestamp(from).slice(0, 10) !== formatTimelineTimestamp(to).slice(0, 10);
+    return crossesMidnight ? `${local.slice(5, 10)} ${time}` : time;
+  }
   if (range < 7 * DAY) return `${local.slice(5, 10)} ${local.slice(11, 16)}`;
   return local.slice(0, 10);
 }
@@ -107,11 +116,16 @@ export function layoutTimeline(section: CanvasTimelineSection, width: number, no
   for (let at = Math.ceil(from / step) * step; at <= to; at += step) times.push(at);
   if (times.length < 2) times = [from, to];
   const interval = times[1]! - times[0]!;
-  const ticks = times.map((at) => ({
-    at,
-    x: scale(at),
-    label: formatTimelineTime(at, to - from, interval),
-  }));
+  const labels = times.map((at) => formatTimelineTime(at, from, to, interval));
+  const ticks = times.map((at, index) => {
+    const label = labels[index]!;
+    const repeated = labels.indexOf(label) !== labels.lastIndexOf(label);
+    return {
+      at,
+      x: scale(at),
+      label: repeated ? `${label} ${formatTimelineZone(at, "shortOffset")}` : label,
+    };
+  });
   return {
     plot,
     height: plot.bottom + 12,

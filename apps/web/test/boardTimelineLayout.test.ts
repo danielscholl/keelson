@@ -145,6 +145,7 @@ describe("timeline layout", () => {
       { from, to: "2026-10-05T12:00:00.500Z" },
       { from, to: "2026-10-05T12:00:05Z" },
       { from, to },
+      { from: "2026-11-01T05:00:00Z", to: "2026-11-01T08:00:00Z" },
       { from, to: "2026-10-09T12:00:00Z" },
       { from, to: "2027-10-05T12:00:00Z" },
     ]) {
@@ -231,21 +232,23 @@ describe("timeline layout", () => {
     });
   });
 
-  it("crosses local midnight without moving epoch-based ticks", () => {
+  it.each([false, true])("dates ticks across local midnight (live=%s)", (live) => {
+    const from = "2026-10-06T04:59:30Z";
+    const to = "2026-10-06T05:00:30Z";
     const layout = layoutTimeline(
       {
         ...section,
-        window: { from: "2026-10-06T04:59:30Z", to: "2026-10-06T05:00:30Z" },
+        window: live ? { from, clock: { until: to } } : { from, to },
       },
       1200,
       now,
     );
     expect(layout.ticks.map((tick) => tick.label)).toEqual([
-      "23:59:30",
-      "23:59:45",
-      "00:00:00",
-      "00:00:15",
-      "00:00:30",
+      "10-05 23:59:30",
+      "10-05 23:59:45",
+      "10-06 00:00:00",
+      "10-06 00:00:15",
+      "10-06 00:00:30",
     ]);
     expect(layout.ticks.map((tick) => tick.at)).toEqual(
       [
@@ -258,6 +261,76 @@ describe("timeline layout", () => {
     );
     expect(layout.ticks.map((tick) => tick.x)).toEqual([160, 414, 668, 922, 1176]);
   });
+
+  it.each([
+    {
+      from: "2026-10-05T23:59:59.900-05:00",
+      to: "2026-10-06T07:00:00.100+02:00",
+      labels: ["10-05 23:59:59.900", "10-06 00:00:00.100"],
+    },
+    {
+      from: "2027-01-01T05:59:59.900Z",
+      to: "2027-01-01T06:00:00.100Z",
+      labels: ["12-31 23:59:59.900", "01-01 00:00:00.100"],
+    },
+    {
+      from: "2026-10-06T04:30:00Z",
+      to: "2026-10-06T05:30:00Z",
+      labels: [
+        "10-05 23:30",
+        "10-05 23:40",
+        "10-05 23:50",
+        "10-06 00:00",
+        "10-06 00:10",
+        "10-06 00:20",
+        "10-06 00:30",
+      ],
+    },
+  ])("retains tick precision with dates across midnight from $from", ({ from, to, labels }) => {
+    for (const window of [
+      { from, to },
+      { from, clock: { until: to } },
+    ]) {
+      const layout = layoutTimeline({ ...section, window }, 1200, now);
+      expect(layout.ticks.map((tick) => tick.label)).toEqual(labels);
+    }
+  });
+
+  it.each([false, true])(
+    "disambiguates repeated fall-back ticks without moving them (live=%s)",
+    (live) => {
+      const from = "2026-11-01T05:00:00Z";
+      const to = "2026-11-01T08:00:00Z";
+      const layout = layoutTimeline(
+        { ...section, window: live ? { from, clock: { until: to } } : { from, to } },
+        1200,
+        now,
+      );
+      expect(layout.ticks.map((tick) => tick.label)).toEqual([
+        "00:00",
+        "00:30",
+        "01:00 GMT-5",
+        "01:30 GMT-5",
+        "01:00 GMT-6",
+        "01:30 GMT-6",
+        "02:00",
+      ]);
+      expect(layout.ticks.map((tick) => tick.at)).toEqual(
+        [
+          "2026-11-01T05:00:00Z",
+          "2026-11-01T05:30:00Z",
+          "2026-11-01T06:00:00Z",
+          "2026-11-01T06:30:00Z",
+          "2026-11-01T07:00:00Z",
+          "2026-11-01T07:30:00Z",
+          "2026-11-01T08:00:00Z",
+        ].map((iso) => Date.parse(iso)),
+      );
+      layout.ticks.forEach((tick, index) => {
+        expect(tick.x).toBeCloseTo(160 + (1016 * index) / 6);
+      });
+    },
+  );
 
   it("keeps elapsed tick epochs and positions across spring-forward DST", () => {
     const layout = layoutTimeline(

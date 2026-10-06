@@ -313,8 +313,11 @@ Future-starting open spans wait until their start. Fixed windows have no now
 rule, and open spans extend to `to`.
 
 Ticks, window captions, item descriptions and tooltips, and narrow-list times
-render in the viewer's local timezone. Caption and item timestamps keep full
-local calendar dates and millisecond precision. The caption names the zone once,
+render in the viewer's local timezone. Short-window ticks include dates when the
+window crosses local midnight. Repeated local tick labels include UTC offsets
+to distinguish instants across a fall-back DST change. Caption and item
+timestamps keep full local calendar dates and millisecond precision. The caption
+names the zone once,
 using `Intl.DateTimeFormat` with `timeZoneName: "short"` at the window's start,
 including windows spanning a day or a DST change. Inputs remain offset-aware ISO
 instants; tick and item placement stays instant-based across DST changes.
