@@ -967,6 +967,7 @@ describe("CanvasProvider / useCanvas", () => {
       await sendFrameAction(frame, "navigate");
       await waitFor(() => expect(chats).toEqual(["Helper"]));
       expect(document.querySelector(".keelson-toast-ok")).toBeNull();
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Source" })).toBeNull());
     } finally {
       delete snapshotsByKey[source];
       postRibActionImpl = originalPost;
