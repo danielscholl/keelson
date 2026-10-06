@@ -387,6 +387,39 @@ describe("timeline section", () => {
     expect(container.querySelector("script")).toBeNull();
   });
 
+  test("keeps a narrow bar's title in its tooltip only and draws marks below the bar", () => {
+    measureAt(1200);
+    const from = fixed.window.from;
+    const plusSeconds = (s: number) => new Date(Date.parse(from) + s * 1_000).toISOString();
+    const { container } = render(
+      <BoardView
+        view={{
+          view: "board",
+          sections: [
+            {
+              ...fixed,
+              lanes: [{ id: "lead", label: "@lead" }],
+              spans: [
+                { lane: "lead", from, to: plusSeconds(20), title: "turn 1 · ok · 20 s" },
+                { lane: "lead", from: plusSeconds(60), to: fixed.window.to, title: "turn 2 · ok" },
+              ],
+              marks: [{ lane: "lead", at: plusSeconds(10), glyph: "?", title: "asked you" }],
+            },
+          ],
+        }}
+      />,
+    );
+    const [narrow, wide] = container.querySelectorAll(".cvb-timeline-span");
+    expect(narrow?.querySelector(".cvb-timeline-span-title")).toBeNull();
+    expect(narrow?.querySelector("title")?.textContent).toStartWith("turn 1 · ok · 20 s: ");
+    expect(wide?.querySelector(".cvb-timeline-span-title")?.textContent).toBe("turn 2 · ok");
+    const bar = narrow!.querySelector(".cvb-timeline-bar")!;
+    const barBottom = Number(bar.getAttribute("y")) + Number(bar.getAttribute("height"));
+    const glyph = container.querySelector(".cvb-timeline-mark text")!;
+    // The 16px glyph sits on its baseline, so its top clears the bar.
+    expect(Number(glyph.getAttribute("y")) - 16).toBeGreaterThanOrEqual(barBottom - 3);
+  });
+
   test("renders nested timelines and gives each instance distinct hatch and clip ids", () => {
     measureAt(1200);
     const { container } = render(
