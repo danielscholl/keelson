@@ -948,8 +948,8 @@ export type OpenChatSeed = z.infer<typeof openChatSeedSchema>;
 // optionally focusing one region after navigation. `open-run` opens an existing
 // run in the run drawer beside the surface, approval composer included.
 // A rib handling an action stamped `origin: "canvas-html"` may return `open-canvas`
-// for its own snapshot; frame markup cannot request effects directly, and other
-// client effects are not wired for frame actions.
+// for its own snapshot or `open-chat` with a seed it wrote; frame markup cannot
+// request effects directly, and other client effects are not wired for frame actions.
 export const ribClientEffectSchema = z.discriminatedUnion("effect", [
   z.object({ effect: z.literal("open-chat"), seed: openChatSeedSchema }).strict(),
   z

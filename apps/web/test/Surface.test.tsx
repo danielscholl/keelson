@@ -774,6 +774,52 @@ describe("Surface", () => {
     });
   });
 
+  for (const withExplore of [true, false]) {
+    test(`an html region's open-chat reply ${withExplore ? "reaches onExplore" : "keeps the toast without onExplore"}`, async () => {
+      live("rib:demo:html-panel", "<p>hi</p>");
+      ribFixture.ribs = [htmlRib("rib:demo:html-panel")];
+      postRibActionResult = {
+        ok: true,
+        data: { effect: "open-chat", seed: { systemPrompt: "Gather the issue.", name: "Start" } },
+      };
+      const seeds: ChatSeed[] = [];
+      const { container } = render(
+        <ToastHost>
+          <RibsProvider>
+            <CanvasProvider>
+              <Surface
+                descriptor={{
+                  id: "cimpl",
+                  title: "CIMPL",
+                  layout: {
+                    rows: [{ columns: [{ key: "rib:demo:html-panel", title: "HTML Lens" }] }],
+                  },
+                }}
+                {...(withExplore ? { onExplore: (seed: ChatSeed) => seeds.push(seed) } : {})}
+              />
+            </CanvasProvider>
+          </RibsProvider>
+        </ToastHost>,
+      );
+      const frame = container.querySelector("iframe.canvas-html-frame") as HTMLIFrameElement;
+      const win = {} as Window;
+      Object.defineProperty(frame, "contentWindow", { value: win, configurable: true });
+      postMessageTo({ channel: CANVAS_HTML_ACTION_CHANNEL, type: "prepare", payload: {} }, win);
+      await waitFor(() => expect(postRibActionCalls.length).toBe(1));
+      if (withExplore) {
+        await waitFor(() => expect(seeds).toHaveLength(1));
+        expect(seeds[0]).toMatchObject({
+          name: "Start",
+          systemPrompt: "Gather the issue.",
+          openingPrompt: OPENING_PROMPT,
+        });
+        expect(document.querySelector(".keelson-toast-ok")).toBeNull();
+      } else {
+        await waitFor(() => expect(document.querySelector(".keelson-toast-ok")).not.toBeNull());
+      }
+    });
+  }
+
   for (const kind of ["view", "html"] as const) {
     test(`an inline html action opens a ${kind} snapshot without refreshing or toasting`, async () => {
       const source = "rib:demo:html-panel";
