@@ -35,6 +35,7 @@ function fakeStore(): UsageStore {
     breakdown: () => [],
     jobs: () => [],
     events: () => [],
+    price: () => undefined,
     pulse: () => ({
       composedTotals: {
         events: 0,

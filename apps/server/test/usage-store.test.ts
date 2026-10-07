@@ -1289,6 +1289,44 @@ describe("SQLite UsageStore", () => {
       expect(afterRestart.get("gemini-3.7-flash")).toBeCloseTo(3, 6);
     });
 
+    test("1-hour cache writes on a ledger row price at the 1-hour rate", () => {
+      store.record({
+        source: "rib",
+        provider: "claude",
+        model: "claude-fable-5-1",
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheWriteTokens: 1_000_000,
+        cacheWrite1hTokens: 1_000_000,
+      });
+      expect(store.summary({ groupBy: "model" }).totals.costUsd).toBeCloseTo(20, 6);
+      expect(store.events()[0]?.costUsd).toBeCloseTo(20, 6);
+    });
+
+    test("price() resolves unrecorded counts the way the ledger queries do", () => {
+      const priced = createUsageStore(db, {
+        catalogPrices: () => ({
+          copilot: {
+            "gpt-6.1-sol": {
+              inputPerMTok: 2,
+              outputPerMTok: 10,
+              cacheReadPerMTok: 0.1,
+              cacheWritePerMTok: 2.5,
+            },
+          },
+        }),
+      });
+      const tokens = {
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+        cacheReadTokens: 1_000_000,
+        cacheWriteTokens: 1_000_000,
+      };
+      expect(priced.price("copilot", "gpt-6.1-sol", tokens)).toBeCloseTo(14.6, 6);
+      expect(priced.price("claude", "claude-opus-5-5", tokens)).toBeCloseTo(29.2, 6);
+      expect(priced.price("copilot", "no-such-model", tokens)).toBeUndefined();
+    });
+
     test("a config override still wins over a remembered catalog price", () => {
       createUsageStore(db, {
         catalogPrices: () => ({

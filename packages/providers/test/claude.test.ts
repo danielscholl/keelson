@@ -2243,6 +2243,37 @@ describe("ClaudeProvider — token usage (chat/workflow usage feedback)", () => 
     });
   });
 
+  it("forwards the 1-hour share of cache writes", async () => {
+    const sdk = makeMockSdk({
+      scenario: async (push) => {
+        await push({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          usage: {
+            input_tokens: 3,
+            output_tokens: 4,
+            cache_creation_input_tokens: 50,
+            cache_creation: { ephemeral_5m_input_tokens: 10, ephemeral_1h_input_tokens: 40 },
+          },
+          uuid: "result-uuid",
+          session_id: "sess-id",
+        } as ClaudeSdkMessage);
+      },
+    });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+
+    const usage = chunks.find((c) => c.type === "usage");
+    expect(usage).toMatchObject({
+      usage: { cacheCreationInputTokens: 50, cacheCreation1hInputTokens: 40 },
+    });
+  });
+
   it("emits no usage chunk when the result carries no counts", async () => {
     const sdk = makeMockSdk({ scenario: pushSuccess });
     const provider = new ClaudeProvider({

@@ -524,6 +524,7 @@ function buildClaudeTokenUsage(
   const output = toTokenCount(msg.usage?.output_tokens);
   const cacheRead = toTokenCount(msg.usage?.cache_read_input_tokens);
   const cacheCreation = toTokenCount(msg.usage?.cache_creation_input_tokens);
+  const cacheCreation1h = toTokenCount(msg.usage?.cache_creation?.ephemeral_1h_input_tokens);
   const lastInput = toTokenCount(lastApiUsage?.input_tokens);
   const lastCacheRead = toTokenCount(lastApiUsage?.cache_read_input_tokens);
   const lastCacheCreation = toTokenCount(lastApiUsage?.cache_creation_input_tokens);
@@ -546,6 +547,9 @@ function buildClaudeTokenUsage(
   const usage: TokenUsage = { inputTokens: input ?? 0, outputTokens: output ?? 0 };
   if (cacheRead !== undefined) usage.cacheReadInputTokens = cacheRead;
   if (cacheCreation !== undefined) usage.cacheCreationInputTokens = cacheCreation;
+  if (cacheCreation !== undefined && cacheCreation1h !== undefined) {
+    usage.cacheCreation1hInputTokens = Math.min(cacheCreation1h, cacheCreation);
+  }
   if (lastInput !== undefined || lastCacheRead !== undefined || lastCacheCreation !== undefined) {
     usage.contextTokens = (lastInput ?? 0) + (lastCacheRead ?? 0) + (lastCacheCreation ?? 0);
   }

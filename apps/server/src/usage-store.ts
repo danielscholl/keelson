@@ -13,6 +13,7 @@ import {
   freshTokens,
   type ModelPrice,
   type ModelPrices,
+  type PricedTokenCounts,
   resolveModelPrice,
   type UsageBreakdownRowWire,
   type UsageEventRowWire,
@@ -39,6 +40,8 @@ export interface RecordUsageEventInput {
   outputTokens?: number;
   cacheReadTokens?: number | null;
   cacheWriteTokens?: number | null;
+  // The part of cacheWriteTokens written to the 1-hour cache.
+  cacheWrite1hTokens?: number | null;
   durationMs?: number | null;
   // Omitted → 'ok'.
   status?: string;
@@ -142,6 +145,9 @@ export interface UsageStore {
   // zero-filled per-minute series over the trailing 60 minutes. `now` is
   // injectable for tests; defaults to the wall clock.
   pulse(now?: Date): UsagePulseSnapshotWire;
+  // Prices counts that are not (yet) ledger rows with the same price resolution
+  // the queries use; undefined when the model has no price.
+  price(provider: string, model: string, tokens: PricedTokenCounts): number | undefined;
 }
 
 interface UsageEventRow {
@@ -154,6 +160,7 @@ interface UsageEventRow {
   output_tokens: number;
   cache_read_tokens: number | null;
   cache_write_tokens: number | null;
+  cache_write_1h_tokens: number | null;
   duration_ms: number | null;
   status: string;
   conversation_id: string | null;
@@ -227,6 +234,7 @@ const MODEL_TOTALS_SELECT = `
   provider,
   model,
   ${TOTALS_SELECT},
+  COALESCE(SUM(cache_write_1h_tokens), 0) AS cacheWrite1hTokens,
   COUNT(cache_read_tokens) AS cacheReadReported
 `;
 
@@ -241,6 +249,7 @@ interface TotalsRow {
 interface ModelTotalsRow extends TotalsRow {
   provider: string;
   model: string;
+  cacheWrite1hTokens: number;
   cacheReadReported: number;
 }
 
@@ -453,9 +462,9 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
   const insertEvent = db.prepare(
     `INSERT INTO usage_events(
        ts, source, provider, model, input_tokens, output_tokens,
-       cache_read_tokens, cache_write_tokens, duration_ms, status,
+       cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, duration_ms, status,
        conversation_id, run_id, node_id, workflow_name, rib_id, project_id
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const listAll = db.prepare("SELECT * FROM usage_events ORDER BY ts DESC, id DESC LIMIT ?");
   const listBySource = db.prepare(
@@ -490,6 +499,7 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
         floorCount(input.outputTokens, 0),
         floorNullableCount(input.cacheReadTokens),
         floorNullableCount(input.cacheWriteTokens),
+        floorNullableCount(input.cacheWrite1hTokens),
         floorNullableCount(input.durationMs),
         input.status ?? "ok",
         input.conversationId ?? null,
@@ -703,7 +713,12 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
       return rows.map((row): UsageEventRowWire => {
         const event = rowToEvent(row);
         const price = pricer(event.provider, event.model);
-        return { ...event, costUsd: price ? estimateCostUsd(event, price) : null };
+        return {
+          ...event,
+          costUsd: price
+            ? estimateCostUsd({ ...event, cacheWrite1hTokens: row.cache_write_1h_tokens }, price)
+            : null,
+        };
       });
     },
     pulse(now = new Date()) {
@@ -731,6 +746,10 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
       }
 
       return { composedTotals, minuteSeries };
+    },
+    price(provider, model, tokens) {
+      const price = pricerForQuery()(provider, model);
+      return price ? estimateCostUsd(tokens, price) : undefined;
     },
   };
 }

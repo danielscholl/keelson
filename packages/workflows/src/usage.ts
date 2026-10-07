@@ -31,6 +31,11 @@ export function addNodeUsage(
   if (cacheRead !== undefined) out.cacheReadInputTokens = cacheRead;
   const cacheCreation = addReported(total.cacheCreationInputTokens, u.cacheCreationInputTokens);
   if (cacheCreation !== undefined) out.cacheCreationInputTokens = cacheCreation;
+  const cacheCreation1h = addReported(
+    total.cacheCreation1hInputTokens,
+    u.cacheCreation1hInputTokens,
+  );
+  if (cacheCreation1h !== undefined) out.cacheCreation1hInputTokens = cacheCreation1h;
   const contextTokens = u.contextTokens ?? total.contextTokens;
   if (contextTokens !== undefined) out.contextTokens = contextTokens;
   const contextWindow = u.contextWindow ?? total.contextWindow;

@@ -743,6 +743,9 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
           ...(turnUsage.cacheCreationInputTokens !== undefined
             ? { cacheWriteTokens: turnUsage.cacheCreationInputTokens }
             : {}),
+          ...(turnUsage.cacheCreation1hInputTokens !== undefined
+            ? { cacheWrite1hTokens: turnUsage.cacheCreation1hInputTokens }
+            : {}),
           ...(Number.isFinite(durationMs) ? { durationMs } : {}),
           status: streamFailed ? "error" : "ok",
           conversationId,

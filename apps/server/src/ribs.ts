@@ -184,6 +184,8 @@ export interface ApplyRibsOptions {
   // is global; `ribId` is passed for future per-rib policy/logging. Optional so
   // test rigs without a provider/CLI stay deterministic.
   readonly runAgentTurn?: (ribId: string, req: RibAgentTurnRequest) => RibAgentTurn;
+  // Backs RibContext.priceTokens. Optional so rigs without a usage ledger leave it off.
+  readonly priceTokens?: RibContext["priceTokens"];
   // Backs RibContext.registerRegion so a rib can add surface regions at runtime.
   // Optional so unit tests for applyRibs without a manifest store stay simple.
   readonly dynamicRegionStore?: DynamicRegionStore;
@@ -391,6 +393,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       ...(opts.createProject ? { createProject: opts.createProject } : {}),
       ...(opts.cloneProject ? { cloneProject: opts.cloneProject } : {}),
       ...(opts.runAgentTurn ? { runAgentTurn: (req) => opts.runAgentTurn!(rib.id, req) } : {}),
+      ...(opts.priceTokens ? { priceTokens: opts.priceTokens } : {}),
       ...(opts.dynamicRegionStore
         ? { registerRegion: opts.dynamicRegionStore.registerForRib(rib.id, surfaceIds) }
         : {}),

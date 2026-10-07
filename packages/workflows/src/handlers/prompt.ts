@@ -981,6 +981,8 @@ function sanitizeNodeUsage(u: unknown): NodeTokenUsage | undefined {
   if (cacheRead !== undefined) out.cacheReadInputTokens = cacheRead;
   const cacheCreation = count(rec.cacheCreationInputTokens);
   if (cacheCreation !== undefined) out.cacheCreationInputTokens = cacheCreation;
+  const cacheCreation1h = count(rec.cacheCreation1hInputTokens);
+  if (cacheCreation1h !== undefined) out.cacheCreation1hInputTokens = cacheCreation1h;
   const contextTokens = count(rec.contextTokens);
   if (contextTokens !== undefined) out.contextTokens = contextTokens;
   const contextWindow = count(rec.contextWindow);
