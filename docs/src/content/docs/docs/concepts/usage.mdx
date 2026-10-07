@@ -14,9 +14,8 @@ question the other surfaces cannot give you on their own, where the tokens went,
 and it needs no rib. A running provider is enough to start filling it.
 
 Usage measures token counts first. Everything on the tab is a count of tokens, a
-rate, or a turn tally, and the one recommendation it makes is a heuristic over
-those counts. Alongside the counts it reports an estimated dollar cost, derived
-at read time from a price table, and a cache hit ratio. Neither is a bill: see
+rate, or a turn tally. Alongside the counts it reports an estimated dollar cost,
+derived at read time from a price table, and a cache hit ratio. Neither is a bill: see
 [Cost and cache hit ratio](#cost-and-cache-hit-ratio) for exactly what they are.
 
 ## One ledger, three capture seams
@@ -56,12 +55,12 @@ ledger each get their own sub-view.
 
 | View | Shows |
 | --- | --- |
-| Pulse | Today's running totals and a trailing-hour tokens-per-minute sparkline, streamed live. |
-| Over time | A stacked bar chart of tokens by served model across the window's buckets. |
-| Source to model flow | A ribbon diagram tracing which source (a chat, a workflow, a rib) drove which model. |
-| Model roster | Per model, most expensive first: turns, tokens handled (cache reads included), cost, cost per million tokens, and cache hit ratio, with paired bars that split the tokens and the cost by token type. |
+| Pulse | The window's tokens split by type, cost and the price sources behind it, turns, cache hit ratio, and failure burn, plus a trailing-hour tokens-per-minute sparkline streamed live. |
+| Over time | A stacked bar chart of tokens or cost by served model across the window's buckets. |
+| Source to model flow | A ribbon diagram tracing which source (a chat, a workflow, a rib) drove which model, sized by tokens or cost. |
+| Model roster | Per model, most expensive first: turns, tokens, cost, and cache hit ratio, with paired bars that split the tokens and the cost by token type. Under each model sits its price card, the per-million-token rates for cache read, input, cache write, and output in the bars' order, and where they came from. |
 | Jobs | Per recurring workflow or rib job (a rib job reads `rib:<id>`), most expensive first: runs, cost, cost per run, and the model that incurred most of the cost. A rib that records its turns without a run id is counted in turns instead of runs. |
-| Ledger | The raw rows, newest first, each with its priced cost, filterable by source, model, and status. It loads 50 rows at a time, up to the latest 500. |
+| Ledger | The raw rows, newest first, each with its four token counts and priced cost, filterable by source, model, and status. Hovering a cost shows the rate behind each part of it. It loads 50 rows at a time, up to the latest 500. |
 
 ## Windows are fixed
 
@@ -137,10 +136,7 @@ turn is priced at the model that actually served it even across a model swap.
 ## Observability, not admission control
 
 Usage records what turns did run and shows you the shape of it; it never stops a
-turn. The one recommendation it surfaces, the right-size nudge, flags a recurring
-workflow or rib job that has run at least three times and averaged under five
-hundred tokens a run, small enough that a lighter model would likely keep up.
-That threshold is a heuristic over per-run token averages, not a cost estimate.
+turn.
 
 Ceilings live elsewhere. The [budget gate](../../guides/governance/) is a
 separate feature that denies a turn at request time once a running token or turn

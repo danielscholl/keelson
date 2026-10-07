@@ -188,11 +188,11 @@ totals plus a trailing series) rather than polling these routes.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/usage/summary` | Windowed totals grouped by `groupBy` (default `model`). |
+| `GET` | `/api/usage/summary` | Windowed totals grouped by `groupBy` (default `model`). `priceCards` on the totals and each group lists the distinct rates and source (`override`, `catalog`, or `bundled`) its priced turns used. |
 | `GET` | `/api/usage/series` | A time series over the window. `bucket` (`hour` \| `day`) defaults to `hour` for `24h` and `day` otherwise. |
 | `GET` | `/api/usage/breakdown` | A two-dimensional split: `groupBy` (default `source`) crossed with `splitBy` (default `model`). |
-| `GET` | `/api/usage/jobs` | Per-job token and cost rollups over the window, backing the right-size nudge. `pricedEvents` counts priced ledger rows, not runs. |
-| `GET` | `/api/usage/events` | The raw usage events, newest first. `limit` caps at 500; filter by `source` (`chat` \| `workflow` \| `rib`), `model`, or `status`. |
+| `GET` | `/api/usage/jobs` | Per-job token and cost rollups over the window. `pricedEvents` counts priced ledger rows, not runs. |
+| `GET` | `/api/usage/events` | The raw usage events, newest first, each with the `priceCard` it was priced at. `limit` caps at 500; filter by `source` (`chat` \| `workflow` \| `rib`), `model`, or `status`. |
 
 See [Usage](../../concepts/usage/) for the ledger model.
 

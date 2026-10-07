@@ -79,24 +79,41 @@ function ownPrice(table: Readonly<Record<string, ModelPrice>>, id: string): Mode
   return Object.hasOwn(table, id) ? table[id] : undefined;
 }
 
+export type ModelPriceSource = "override" | "catalog" | "bundled";
+
+export interface ResolvedModelPrice {
+  price: ModelPrice;
+  source: ModelPriceSource;
+}
+
 // Operator overrides win by exact id, then by normalized id; then a provider's
 // live catalog price by exact id; then the bundled table. Unknown → undefined,
 // never a zero price.
+export function resolveModelPriceWithSource(
+  model: string,
+  overrides?: ModelPrices,
+  catalog?: ModelPrices,
+): ResolvedModelPrice | undefined {
+  const normalized = normalizeModelId(model);
+  if (overrides) {
+    const exact = ownPrice(overrides, model);
+    if (exact) return { price: exact, source: "override" };
+    for (const [id, p] of Object.entries(overrides)) {
+      if (normalizeModelId(id) === normalized) return { price: p, source: "override" };
+    }
+  }
+  const live = catalog ? ownPrice(catalog, model) : undefined;
+  if (live) return { price: live, source: "catalog" };
+  const bundled = ownPrice(BUNDLED_MODEL_PRICES, normalized);
+  return bundled ? { price: bundled, source: "bundled" } : undefined;
+}
+
 export function resolveModelPrice(
   model: string,
   overrides?: ModelPrices,
   catalog?: ModelPrices,
 ): ModelPrice | undefined {
-  const normalized = normalizeModelId(model);
-  if (overrides) {
-    const exact = ownPrice(overrides, model);
-    if (exact) return exact;
-    for (const [id, p] of Object.entries(overrides)) {
-      if (normalizeModelId(id) === normalized) return p;
-    }
-  }
-  const live = catalog ? ownPrice(catalog, model) : undefined;
-  return live ?? ownPrice(BUNDLED_MODEL_PRICES, normalized);
+  return resolveModelPriceWithSource(model, overrides, catalog)?.price;
 }
 
 export interface PricedTokenCounts {

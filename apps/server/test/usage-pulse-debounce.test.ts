@@ -29,6 +29,7 @@ function fakeStore(): UsageStore {
         pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 0,
         cacheHitRatio: null,
+        priceCards: [],
       },
       groups: [],
     }),

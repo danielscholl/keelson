@@ -78,18 +78,35 @@ export const usagePricedTotalsSchema = usageTotalsSchema
   .strict();
 export type UsagePricedTotalsWire = z.infer<typeof usagePricedTotalsSchema>;
 
+// The rates (USD per 1M tokens) a provider/model's turns were priced at, and
+// where they came from.
+export const usagePriceCardSchema = z
+  .object({
+    provider: z.string(),
+    source: z.enum(["override", "catalog", "bundled"]),
+    inputPerMTok: z.number().nonnegative(),
+    cacheReadPerMTok: z.number().nonnegative(),
+    cacheWritePerMTok: z.number().nonnegative(),
+    cacheWrite1hPerMTok: z.number().nonnegative().optional(),
+    outputPerMTok: z.number().nonnegative(),
+  })
+  .strict();
+export type UsagePriceCardWire = z.infer<typeof usagePriceCardSchema>;
+
 // (a) GET /api/usage/summary — overall totals plus a per-group (source,
-// provider, model, etc. — grouping is a query param) breakdown.
+// provider, model, etc. — grouping is a query param) breakdown. `priceCards`
+// lists each distinct card the row's priced turns used.
 export const usageGroupRowSchema = usagePricedTotalsSchema
   .extend({
     key: z.string(),
+    priceCards: z.array(usagePriceCardSchema),
   })
   .strict();
 export type UsageGroupRowWire = z.infer<typeof usageGroupRowSchema>;
 
 export const usageSummaryResponseSchema = z
   .object({
-    totals: usagePricedTotalsSchema,
+    totals: usagePricedTotalsSchema.extend({ priceCards: z.array(usagePriceCardSchema) }).strict(),
     groups: z.array(usageGroupRowSchema),
   })
   .strict();
@@ -166,6 +183,7 @@ export const usageEventRowSchema = z
     cacheWriteTokens: z.number().int().nonnegative().nullable(),
     // Priced at read time from this row's counts; null when the model has no price.
     costUsd: z.number().nonnegative().nullable(),
+    priceCard: usagePriceCardSchema.nullable(),
     durationMs: z.number().int().nonnegative().nullable(),
     // Read-side stays open: the ledger is append-only history, so rows written
     // by another writer version must render, not 500 the whole tail. The

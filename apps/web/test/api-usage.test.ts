@@ -37,9 +37,12 @@ const validTotals = {
 
 describe("getUsageSummary", () => {
   test("parses a valid usage summary payload", async () => {
-    stubFetch({ totals: validTotals, groups: [{ ...validTotals, key: "claude-sonnet-5" }] });
+    stubFetch({
+      totals: { ...validTotals, priceCards: [] },
+      groups: [{ ...validTotals, key: "claude-sonnet-5", priceCards: [] }],
+    });
     const result = await getUsageSummary();
-    expect(result.totals).toEqual(validTotals);
+    expect(result.totals).toEqual({ ...validTotals, priceCards: [] });
     expect(result.groups[0]?.key).toBe("claude-sonnet-5");
   });
 
@@ -127,6 +130,7 @@ const validEventRow = {
   cacheReadTokens: null,
   cacheWriteTokens: null,
   costUsd: null,
+  priceCard: null,
   durationMs: null,
   status: "ok",
   conversationId: null,

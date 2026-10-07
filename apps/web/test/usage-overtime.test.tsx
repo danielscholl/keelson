@@ -46,6 +46,7 @@ function summaryFixture() {
       pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
       unpricedEvents: 1,
       cacheHitRatio: null,
+      priceCards: [],
     },
     groups: [],
   };
@@ -116,8 +117,8 @@ const NINE_MODELS = [
   "i-model",
 ];
 
-describe("Usage — fresh-token series", () => {
-  test("a model whose new input lands in cache writes outweighs one with larger raw input", async () => {
+describe("Usage — token series", () => {
+  test("the series counts every token type, cache reads included", async () => {
     const { pivotSeries } = await import("../src/views/Usage.tsx");
     const { series, buckets } = pivotSeries([
       seriesRow("gemini-3.7-flash", { input: 900_000, output: 20_000 }),
@@ -129,8 +130,8 @@ describe("Usage — fresh-token series", () => {
       }),
     ]);
     expect(series.map((s) => s.key)).toEqual(["gemini-3.7-flash", "gpt-6.1-sol"]);
-    expect(buckets[0]?.values).toEqual([920_000, 2_132_267]);
-    expect(buckets[0]?.total).toBe(3_052_267);
+    expect(buckets[0]?.values).toEqual([920_000, 7_132_267]);
+    expect(buckets[0]?.total).toBe(8_052_267);
   });
 
   test("up to six models each get their own slot in alphabetical order", async () => {
@@ -177,7 +178,7 @@ describe("Usage — fresh-token series", () => {
     expect(legend.queryByText("a-model")).toBeNull();
   });
 
-  test("the pulse tile counts cache writes as fresh input and in the cache-hit denominator", async () => {
+  test("the pulse tile counts every token type and cache writes in the cache-hit denominator", async () => {
     getUsageSummaryImpl = async () => ({
       totals: {
         events: 18,
@@ -190,6 +191,7 @@ describe("Usage — fresh-token series", () => {
         pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 18,
         cacheHitRatio: 1_000_000 / 3_082_267,
+        priceCards: [],
       },
       groups: [],
     });
@@ -198,9 +200,8 @@ describe("Usage — fresh-token series", () => {
       await renderUsage();
     });
 
-    await waitFor(() => expect(screen.getByText("Tokens")).toBeDefined());
-    expect(screen.getByText("2.1M")).toBeDefined();
-    expect(screen.getByText("↑ 2.1M in · ↓ 50k out")).toBeDefined();
+    await waitFor(() => expect(screen.getByText("3.1M")).toBeDefined());
+    expect(screen.getByLabelText("Tokens: 3.1M")).toBeDefined();
     expect(screen.getByText("1M of 3.1M input")).toBeDefined();
   });
 });
@@ -354,5 +355,26 @@ describe("Usage — Over time stacked chart", () => {
       expect(screen.getByText("No token spend recorded in this window yet.")).toBeDefined(),
     );
     expect(screen.queryByLabelText(/Tokens over time by model/)).toBeNull();
+  });
+
+  test("the Cost switch stacks priced cost instead of tokens", async () => {
+    seriesRows = [
+      {
+        ...seriesRow("gpt-6-sol", { input: 0, output: 0, cacheRead: 9_000_000 }),
+        pricedCostUsd: 1.8,
+      },
+      { ...seriesRow("gpt-6-astra", { input: 0, output: 100_000 }), pricedCostUsd: 5 },
+    ];
+
+    await act(async () => {
+      await renderUsage();
+    });
+
+    await waitFor(() => expect(screen.getByLabelText(/Tokens over time by model/)).toBeDefined());
+    fireEvent.click(screen.getAllByLabelText("Cost")[0] as HTMLElement);
+    await waitFor(() => expect(screen.getByLabelText(/Cost over time by model/)).toBeDefined());
+    const table = within(screen.getByRole("table", { name: "Cost by model per day" }));
+    expect(table.getByRole("row", { name: "Jul 1 gpt-6-astra $5.00 74%" })).toBeDefined();
+    expect(table.getByRole("row", { name: "Jul 1 gpt-6-sol $1.80 26%" })).toBeDefined();
   });
 });
