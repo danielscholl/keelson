@@ -50,11 +50,23 @@ export type UsageTotalsWire = z.infer<typeof usageTotalsSchema>;
 // floor on the true total; `cacheHitRatio`
 // is cacheRead / (input + cacheRead + cacheWrite), null when no event reported
 // cache reads or the denominator is zero. Neither ever degrades to a fabricated
-// zero.
+// zero. `pricedCostByTypeUsd` splits `pricedCostUsd` by the token type that
+// incurred it.
+export const usageCostByTypeSchema = z
+  .object({
+    input: z.number().nonnegative(),
+    cacheRead: z.number().nonnegative(),
+    cacheWrite: z.number().nonnegative(),
+    output: z.number().nonnegative(),
+  })
+  .strict();
+export type UsageCostByTypeWire = z.infer<typeof usageCostByTypeSchema>;
+
 export const usageCostFieldsSchema = z
   .object({
     costUsd: z.number().nonnegative().nullable(),
     pricedCostUsd: z.number().nonnegative(),
+    pricedCostByTypeUsd: usageCostByTypeSchema,
     unpricedEvents: z.number().int().nonnegative(),
     cacheHitRatio: z.number().min(0).max(1).nullable(),
   })
@@ -68,21 +80,9 @@ export type UsagePricedTotalsWire = z.infer<typeof usagePricedTotalsSchema>;
 
 // (a) GET /api/usage/summary — overall totals plus a per-group (source,
 // provider, model, etc. — grouping is a query param) breakdown.
-// Priced events' cost split by token type; unpriced events contribute nothing.
-export const usageCostPartsSchema = z
-  .object({
-    input: z.number().nonnegative(),
-    cacheRead: z.number().nonnegative(),
-    cacheWrite: z.number().nonnegative(),
-    output: z.number().nonnegative(),
-  })
-  .strict();
-export type UsageCostPartsWire = z.infer<typeof usageCostPartsSchema>;
-
 export const usageGroupRowSchema = usagePricedTotalsSchema
   .extend({
     key: z.string(),
-    costParts: usageCostPartsSchema.optional(),
   })
   .strict();
 export type UsageGroupRowWire = z.infer<typeof usageGroupRowSchema>;
@@ -135,6 +135,13 @@ export const usageJobsRowSchema = z
     pricedEvents: z.number().int().nonnegative(),
     unpricedEvents: z.number().int().nonnegative(),
     cacheHitRatio: z.number().min(0).max(1).nullable(),
+    // Events recorded without a run id; each one counts as its own run above,
+    // so a job with any is measured in turns rather than runs.
+    eventsWithoutRun: z.number().int().nonnegative(),
+    // The model that incurred the most priced cost (most events when nothing
+    // was priced), and its share of the job's priced cost.
+    mainModel: z.string().nullable(),
+    mainModelCostShare: z.number().min(0).max(1).nullable(),
   })
   .strict();
 export type UsageJobsRowWire = z.infer<typeof usageJobsRowSchema>;

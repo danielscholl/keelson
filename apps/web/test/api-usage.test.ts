@@ -30,6 +30,7 @@ const validTotals = {
   cacheWriteTokens: 0,
   costUsd: null,
   pricedCostUsd: 0,
+  pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
   unpricedEvents: 3,
   cacheHitRatio: null,
 };
@@ -88,6 +89,9 @@ const validJob = {
   pricedEvents: 2,
   unpricedEvents: 0,
   cacheHitRatio: null,
+  eventsWithoutRun: 0,
+  mainModel: null,
+  mainModelCostShare: null,
 };
 
 describe("getUsageJobs", () => {

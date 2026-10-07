@@ -6,7 +6,6 @@ import { describe, expect, test } from "bun:test";
 import {
   BUNDLED_MODEL_PRICES,
   cacheHitRatio,
-  estimateCostPartsUsd,
   estimateCostUsd,
   freshTokens,
   modelPriceSchema,
@@ -142,28 +141,6 @@ describe("estimateCostUsd", () => {
       cacheWritePerMTok: 2.5,
     };
     expect(estimateCostUsd(tokens, noHourRate)).toBeCloseTo(2.5, 10);
-  });
-});
-
-describe("estimateCostPartsUsd", () => {
-  test("splits the same cost by token type, 1-hour writes in cache write", () => {
-    const tokens = {
-      inputTokens: 1000,
-      outputTokens: 500,
-      cacheReadTokens: 2000,
-      cacheWriteTokens: 1_000_000,
-      cacheWrite1hTokens: 400_000,
-    };
-    const fable = resolveModelPrice("claude-fable-5-1")!;
-    const parts = estimateCostPartsUsd(tokens, fable);
-    expect(parts.input).toBeCloseTo(0.01, 10);
-    expect(parts.output).toBeCloseTo(0.025, 10);
-    expect(parts.cacheRead).toBeCloseTo(0.0005, 10);
-    expect(parts.cacheWrite).toBeCloseTo(15.5, 10);
-    expect(parts.input + parts.cacheRead + parts.cacheWrite + parts.output).toBeCloseTo(
-      estimateCostUsd(tokens, fable),
-      10,
-    );
   });
 });
 

@@ -892,56 +892,72 @@ function StackTooltip({
   );
 }
 
-// One stacking order for both bars, so a token segment and the cost it drove
-// sit in the same place on a row.
-const SPEND_PARTS = [
+const TOKEN_TYPES = [
   { id: "cacheRead", label: "Cache read" },
-  { id: "input", label: "New input" },
+  { id: "input", label: "Input" },
   { id: "cacheWrite", label: "Cache write" },
   { id: "output", label: "Output" },
 ] as const;
-type SpendPart = (typeof SPEND_PARTS)[number]["id"];
-type SpendSplit = Record<SpendPart, number>;
+type TokenType = (typeof TOKEN_TYPES)[number]["id"];
+type ByTokenType = Record<TokenType, number>;
 
 interface RosterRow {
   key: string;
   turns: number;
-  tokens: SpendSplit;
-  totalTokens: number;
-  cost: SpendSplit | null;
+  tokens: number;
+  tokensByType: ByTokenType;
+  costByType: ByTokenType;
+  cacheHitRatio: number | null;
   costUsd: number | null;
   pricedCostUsd: number;
   unpricedEvents: number;
+  usdPerMTok: number | null;
   color: string;
 }
 
-function SpendBar({
-  split,
-  max,
+function formatUsdPerMTok(n: number | null): string {
+  if (n === null) return "—";
+  if (n > 0 && n < 0.01) return "<$0.01";
+  return `$${n.toFixed(2)}`;
+}
+
+function sumByType(values: ByTokenType): number {
+  return values.input + values.cacheRead + values.cacheWrite + values.output;
+}
+
+// One bar per measure, split by token type. Width is relative to the largest
+// value in the table so a long token bar beside a short cost bar reads as cheap.
+function TokenTypeBar({
   label,
+  values,
+  max,
   format,
 }: {
-  split: SpendSplit;
-  max: number;
   label: string;
-  format: (n: number) => string;
+  values: ByTokenType;
+  max: number;
+  format: (value: number) => string;
 }) {
-  const detail = SPEND_PARTS.map((p) => `${p.label} ${format(split[p.id])}`).join(" · ");
+  const total = sumByType(values);
+  const width = max > 0 ? Math.max(total > 0 ? 1 : 0, (total / max) * 100) : 0;
   return (
-    <span className="usage-spend-cell">
-      <span className="usage-spend-bar" role="img" aria-label={detail} title={detail}>
-        {SPEND_PARTS.map((p) =>
-          split[p.id] > 0 ? (
-            <span
-              key={p.id}
-              className="usage-spend-seg"
-              data-part={p.id}
-              style={{ width: `${(split[p.id] / max) * 100}%` }}
-            />
-          ) : null,
-        )}
+    <span className="usage-typebar" role="img" aria-label={`${label}: ${format(total)}`}>
+      <span className="usage-typebar-label">{label}</span>
+      <span className="usage-typebar-track">
+        <span className="usage-typebar-fill" style={{ width: `${width}%` }}>
+          {TOKEN_TYPES.map(({ id, label: typeLabel }) =>
+            values[id] > 0 ? (
+              <span
+                key={id}
+                className="usage-typebar-seg"
+                data-type={id}
+                style={{ flexGrow: values[id] }}
+                title={`${typeLabel}: ${format(values[id])}`}
+              />
+            ) : null,
+          )}
+        </span>
       </span>
-      <span className="usage-spend-value usage-mono">{label}</span>
     </span>
   );
 }
@@ -975,29 +991,32 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
     const palette = assignSeriesColors(new Map(summary.groups.map((g) => [g.key, freshTokens(g)])));
     return summary.groups
       .map((g) => {
-        const tokens: SpendSplit = {
-          cacheRead: g.cacheReadTokens,
+        const tokensByType: ByTokenType = {
           input: g.inputTokens,
+          cacheRead: g.cacheReadTokens,
           cacheWrite: g.cacheWriteTokens,
           output: g.outputTokens,
         };
+        const tokens = sumByType(tokensByType);
         return {
           key: g.key,
           turns: g.events,
           tokens,
-          totalTokens: tokens.cacheRead + tokens.input + tokens.cacheWrite + tokens.output,
-          cost: g.costParts ?? null,
+          tokensByType,
+          costByType: { ...g.pricedCostByTypeUsd },
+          cacheHitRatio: g.cacheHitRatio,
           costUsd: g.costUsd,
           pricedCostUsd: g.pricedCostUsd,
           unpricedEvents: g.unpricedEvents,
+          usdPerMTok: g.costUsd !== null && tokens > 0 ? (g.costUsd / tokens) * 1_000_000 : null,
           color: palette.colorOf(g.key),
         };
       })
-      .sort((a, b) => b.pricedCostUsd - a.pricedCostUsd || b.totalTokens - a.totalTokens);
+      .sort((a, b) => b.pricedCostUsd - a.pricedCostUsd || b.tokens - a.tokens);
   }, [summary]);
 
-  const maxTokens = Math.max(1, ...rows.map((r) => r.totalTokens));
-  const maxCost = Math.max(1e-9, ...rows.map((r) => r.pricedCostUsd));
+  const maxTokens = Math.max(0, ...rows.map((r) => r.tokens));
+  const maxCost = Math.max(0, ...rows.map((r) => r.pricedCostUsd));
 
   return (
     <section className="surface-region usage-roster-region">
@@ -1023,14 +1042,6 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
           </div>
         ) : rows.length > 0 ? (
           <>
-            <div className="usage-spend-legend">
-              {SPEND_PARTS.map((p) => (
-                <span key={p.id} className="usage-legend-item">
-                  <span className="usage-spend-swatch" data-part={p.id} />
-                  {p.label}
-                </span>
-              ))}
-            </div>
             <div className="canvas-view-table">
               <table>
                 <thead>
@@ -1039,57 +1050,60 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                     <th>Turns</th>
                     <th>Tokens</th>
                     <th>Cost</th>
-                    <th>$ / 1M tokens</th>
+                    <th title="Cost per million tokens handled, cache reads included">
+                      $ / 1M tokens
+                    </th>
+                    <th>Cache hit</th>
+                    <th>Tokens vs cost</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => {
-                    const pricedTurns = r.turns - r.unpricedEvents;
-                    const costLabel = formatAggregateCost(
-                      r.costUsd,
-                      r.pricedCostUsd,
-                      r.unpricedEvents,
-                      pricedTurns,
-                    );
-                    return (
-                      <tr key={r.key}>
-                        <td>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                            <span className="usage-sdot" style={{ background: r.color }} />
-                            {formatModelLabel(r.key)}
-                          </span>
-                        </td>
-                        <td>{r.turns.toLocaleString()}</td>
-                        <td>
-                          <SpendBar
-                            split={r.tokens}
-                            max={maxTokens}
-                            label={formatTokens(r.totalTokens)}
-                            format={formatTokens}
-                          />
-                        </td>
-                        <td>
-                          {r.cost && pricedTurns > 0 ? (
-                            <SpendBar
-                              split={r.cost}
-                              max={maxCost}
-                              label={costLabel}
-                              format={formatCostUsd}
-                            />
-                          ) : (
-                            costLabel
-                          )}
-                        </td>
-                        <td className="usage-mono">
-                          {r.costUsd !== null && r.totalTokens > 0
-                            ? `$${((r.costUsd / r.totalTokens) * 1_000_000).toFixed(2)}`
-                            : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {rows.map((r) => (
+                    <tr key={r.key}>
+                      <td>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <span className="usage-sdot" style={{ background: r.color }} />
+                          {formatModelLabel(r.key)}
+                        </span>
+                      </td>
+                      <td>{r.turns.toLocaleString()}</td>
+                      <td>{formatTokens(r.tokens)}</td>
+                      <td>
+                        {formatAggregateCost(
+                          r.costUsd,
+                          r.pricedCostUsd,
+                          r.unpricedEvents,
+                          r.turns - r.unpricedEvents,
+                        )}
+                      </td>
+                      <td>{formatUsdPerMTok(r.usdPerMTok)}</td>
+                      <td>{formatCacheHit(r.cacheHitRatio)}</td>
+                      <td className="usage-typebar-cell">
+                        <TokenTypeBar
+                          label="Tokens"
+                          values={r.tokensByType}
+                          max={maxTokens}
+                          format={formatTokens}
+                        />
+                        <TokenTypeBar
+                          label="Cost"
+                          values={r.costByType}
+                          max={maxCost}
+                          format={formatCostUsd}
+                        />
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
+            </div>
+            <div className="usage-legend">
+              {TOKEN_TYPES.map(({ id, label }) => (
+                <span className="usage-legend-item" key={id}>
+                  <span className="usage-sdot usage-typebar-seg" data-type={id} />
+                  {label}
+                </span>
+              ))}
             </div>
           </>
         ) : (
@@ -1259,8 +1273,36 @@ function FlowChart({ rows }: { rows: UsageBreakdownResponseWire }) {
   );
 }
 
+interface JobRow {
+  key: string;
+  count: number;
+  unit: "run" | "turn";
+  costUsd: number;
+  lowerBound: boolean;
+  unpricedEvents: number;
+  mainModel: string | null;
+  mainModelCostShare: number | null;
+}
+
+// Rib turns recorded without a run id each count as their own "run" on the
+// wire, so those jobs are measured per turn rather than per run.
+function toJobRow(job: UsageJobsRowWire): JobRow {
+  const events = job.pricedEvents + job.unpricedEvents;
+  const perTurn = job.eventsWithoutRun > 0;
+  return {
+    key: job.key,
+    count: perTurn ? events : job.runs,
+    unit: perTurn ? "turn" : "run",
+    costUsd: job.pricedTotalCostUsd,
+    lowerBound: job.totalCostUsd === null && job.unpricedEvents > 0,
+    unpricedEvents: job.unpricedEvents,
+    mainModel: job.mainModel,
+    mainModelCostShare: job.mainModelCostShare,
+  };
+}
+
 function JobsSection({ range }: { range: UsageWindow }) {
-  const [jobs, setJobs] = useState<UsageJobsRowWire[] | null>(null);
+  const [jobs, setJobs] = useState<JobRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -1272,10 +1314,7 @@ function JobsSection({ range }: { range: UsageWindow }) {
       .then((res) => {
         if (!cancelled) {
           setJobs(
-            [...res].sort(
-              (a, b) =>
-                b.pricedTotalCostUsd - a.pricedTotalCostUsd || b.totalTokens - a.totalTokens,
-            ),
+            res.map(toJobRow).sort((a, b) => b.costUsd - a.costUsd || a.key.localeCompare(b.key)),
           );
         }
       })
@@ -1290,8 +1329,8 @@ function JobsSection({ range }: { range: UsageWindow }) {
     };
   }, [range]);
 
-  const maxCost = Math.max(1e-9, ...(jobs ?? []).map((job) => job.pricedTotalCostUsd));
-  const unpricedTurns = (jobs ?? []).reduce((sum, job) => sum + job.unpricedEvents, 0);
+  const maxCost = Math.max(0, ...(jobs ?? []).map((job) => job.costUsd));
+  const unpriced = (jobs ?? []).reduce((sum, job) => sum + job.unpricedEvents, 0);
 
   return (
     <section className="surface-region usage-jobs-region">
@@ -1324,40 +1363,47 @@ function JobsSection({ range }: { range: UsageWindow }) {
                     <th>Job</th>
                     <th>Runs</th>
                     <th>Cost</th>
-                    <th>Cost / run</th>
+                    <th>Cost each</th>
+                    <th>Main model</th>
                   </tr>
                 </thead>
                 <tbody>
                   {jobs.map((job) => {
-                    const priced = job.pricedEvents > 0;
+                    const pct = maxCost > 0 ? Math.max(2, (job.costUsd / maxCost) * 100) : 0;
+                    const mark = job.lowerBound ? " *" : "";
                     return (
                       <tr key={job.key}>
-                        <td className="usage-mono">{job.key}</td>
-                        <td>{job.runs.toLocaleString()}</td>
+                        <td>{job.key}</td>
                         <td>
-                          {priced ? (
-                            <span className="usage-spend-cell">
-                              <span className="usage-spend-bar">
-                                <span
-                                  className="usage-spend-seg"
-                                  style={{
-                                    width: `${(job.pricedTotalCostUsd / maxCost) * 100}%`,
-                                    background: "var(--accent)",
-                                  }}
-                                />
-                              </span>
-                              <span className="usage-spend-value usage-mono">
-                                {formatCostUsd(job.pricedTotalCostUsd)}
-                              </span>
-                            </span>
-                          ) : (
-                            "unpriced"
-                          )}
+                          {job.count.toLocaleString()} {job.count === 1 ? job.unit : `${job.unit}s`}
                         </td>
-                        <td className="usage-mono">
-                          {priced && job.runs > 0
-                            ? formatCostUsd(job.pricedTotalCostUsd / job.runs)
+                        <td>
+                          <span className="usage-job-cost">
+                            <span className="usage-popover-meter">
+                              <span
+                                className="usage-popover-meter-fill"
+                                style={{ width: `${pct}%`, background: "var(--accent)" }}
+                              />
+                            </span>
+                            <span className="usage-mono">
+                              {formatCostUsd(job.costUsd)}
+                              {mark}
+                            </span>
+                          </span>
+                        </td>
+                        <td>
+                          {job.count > 0
+                            ? `${formatCostUsd(job.costUsd / job.count)}${mark} / ${job.unit}`
                             : "—"}
+                        </td>
+                        <td>
+                          {job.mainModel === null
+                            ? "—"
+                            : `${formatModelLabel(job.mainModel)}${
+                                job.mainModelCostShare === null
+                                  ? ""
+                                  : ` · ${Math.round(job.mainModelCostShare * 100)}%`
+                              }`}
                         </td>
                       </tr>
                     );
@@ -1365,12 +1411,12 @@ function JobsSection({ range }: { range: UsageWindow }) {
                 </tbody>
               </table>
             </div>
-            {unpricedTurns > 0 ? (
+            {unpriced > 0 && (
               <p className="page-sub usage-jobs-note">
-                {unpricedTurns.toLocaleString()} {unpricedTurns === 1 ? "turn has" : "turns have"}{" "}
-                no price and {unpricedTurns === 1 ? "isn't" : "aren't"} counted in these costs.
+                * Lower bound: {unpriced.toLocaleString()} {unpriced === 1 ? "turn" : "turns"} ran
+                on a model with no known price.
               </p>
-            ) : null}
+            )}
           </>
         ) : (
           <div className="usage-stack-empty">

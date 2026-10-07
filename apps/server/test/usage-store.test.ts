@@ -318,6 +318,7 @@ describe("SQLite UsageStore", () => {
         cacheWriteTokens: 1,
         costUsd: null,
         pricedCostUsd: 0,
+        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 2,
         cacheHitRatio: 2 / 16,
       });
@@ -331,9 +332,9 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 1,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: 2 / 13,
-          costParts: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         },
         {
           key: "gpt-5",
@@ -344,9 +345,9 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
-          costParts: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         },
       ]);
     });
@@ -443,6 +444,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 2,
           cacheHitRatio: null,
         },
@@ -456,6 +458,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -522,6 +525,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -535,6 +539,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -548,6 +553,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -599,6 +605,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -612,6 +619,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -625,6 +633,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 2,
           cacheHitRatio: null,
         },
@@ -726,6 +735,9 @@ describe("SQLite UsageStore", () => {
           pricedEvents: 0,
           unpricedEvents: 3,
           cacheHitRatio: null,
+          eventsWithoutRun: 0,
+          mainModel: "gpt-5",
+          mainModelCostShare: null,
         },
       ]);
     });
@@ -896,31 +908,6 @@ describe("SQLite UsageStore", () => {
       ]);
     });
 
-    test("summary groups split cost by token type and leave unpriced events out", () => {
-      store.record({ source: "chat", provider: "claude", model: "claude-sonnet-5", ...SONNET });
-      store.record({
-        source: "chat",
-        provider: "codex",
-        model: "gpt-5",
-        inputTokens: 5,
-        outputTokens: 5,
-      });
-      const result = store.summary({ groupBy: "model" });
-      const sonnet = result.groups.find((g) => g.key === "claude-sonnet-5")!;
-      expect(sonnet.costParts!.input).toBeCloseTo(0.002, 10);
-      expect(sonnet.costParts!.output).toBeCloseTo(0.005, 10);
-      expect(sonnet.costParts!.cacheRead).toBeCloseTo(0.0004, 10);
-      expect(sonnet.costParts!.cacheWrite).toBeCloseTo(0.00025, 10);
-      const sum = Object.values(sonnet.costParts!).reduce((a, b) => a + b, 0);
-      expect(sum).toBeCloseTo(SONNET_COST, 10);
-      expect(result.groups.find((g) => g.key === "gpt-5")!.costParts).toEqual({
-        input: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        output: 0,
-      });
-    });
-
     test("all-priced events sum to the exact dollar value across every aggregate", () => {
       store.record({
         ts: "2026-01-01T10:00:00.000Z",
@@ -964,6 +951,63 @@ describe("SQLite UsageStore", () => {
         ["claude-haiku-4.5", HAIKU_COST],
         ["claude-sonnet-5", SONNET_COST],
       ]);
+    });
+
+    test("splits priced cost by token type, leaving unpriced events out", () => {
+      store.record({ source: "chat", provider: "claude", model: "claude-sonnet-5", ...SONNET });
+      store.record({
+        source: "chat",
+        provider: "codex",
+        model: "gpt-5",
+        inputTokens: 5,
+        outputTokens: 5,
+      });
+      const { totals } = store.summary({ groupBy: "model" });
+      const parts = totals.pricedCostByTypeUsd;
+      expect(parts.input).toBeCloseTo(0.002, 9);
+      expect(parts.output).toBeCloseTo(0.005, 9);
+      expect(parts.cacheRead).toBeCloseTo(0.0004, 9);
+      expect(parts.cacheWrite).toBeCloseTo(0.00025, 9);
+      expect(parts.input + parts.cacheRead + parts.cacheWrite + parts.output).toBeCloseTo(
+        totals.pricedCostUsd,
+        9,
+      );
+    });
+
+    test("a job names the model that incurred most of its cost and counts turns recorded without a run", () => {
+      store.record({
+        source: "rib",
+        provider: "claude",
+        model: "claude-sonnet-5",
+        ribId: "swarm",
+        ...SONNET,
+      });
+      store.record({
+        source: "rib",
+        provider: "claude",
+        model: "claude-haiku-4-5",
+        ribId: "swarm",
+        ...HAIKU,
+      });
+      store.record({
+        source: "rib",
+        provider: "claude",
+        model: "claude-haiku-4-5",
+        ribId: "swarm",
+        runId: "swarm-1",
+        ...HAIKU,
+      });
+      const [job] = store.jobs();
+      expect(job).toMatchObject({
+        key: "rib:swarm",
+        runs: 3,
+        eventsWithoutRun: 2,
+        mainModel: "claude-haiku-4-5",
+      });
+      expect(job?.mainModelCostShare).toBeCloseTo(
+        (2 * HAIKU_COST) / (2 * HAIKU_COST + SONNET_COST),
+        9,
+      );
     });
 
     test("a job with one unpriced run reports null cost on both cost fields, with the priced part as a floor", () => {
@@ -1046,6 +1090,7 @@ describe("SQLite UsageStore", () => {
         events: 3,
         costUsd: null,
         pricedCostUsd: 0,
+        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 1,
       });
     });
@@ -1275,6 +1320,7 @@ describe("SQLite UsageStore", () => {
         events: 0,
         costUsd: 0,
         pricedCostUsd: 0,
+        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 0,
         cacheHitRatio: null,
       });

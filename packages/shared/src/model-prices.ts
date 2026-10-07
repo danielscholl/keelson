@@ -123,15 +123,14 @@ export function estimateCostUsd(tokens: PricedTokenCounts, p: ModelPrice): numbe
   );
 }
 
-export interface CostPartsUsd {
+export interface CostByTokenType {
   input: number;
   cacheRead: number;
   cacheWrite: number;
   output: number;
 }
 
-// The same cost as estimateCostUsd, split by what each token type contributed.
-export function estimateCostPartsUsd(tokens: PricedTokenCounts, p: ModelPrice): CostPartsUsd {
+export function costByTokenTypeUsd(tokens: PricedTokenCounts, p: ModelPrice): CostByTokenType {
   const writes = tokens.cacheWriteTokens ?? 0;
   const writes1h = Math.min(tokens.cacheWrite1hTokens ?? 0, writes);
   return {

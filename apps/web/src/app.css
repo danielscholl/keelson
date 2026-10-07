@@ -10978,48 +10978,52 @@ a.cvb-card-title::after {
   letter-spacing: 0.08em;
 }
 
-.usage-spend-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  margin-bottom: 10px;
-  font-size: 12px;
+.usage-typebar-cell {
+  width: 38%;
+  min-width: 260px;
+}
+.usage-typebar {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
   color: var(--muted);
 }
-.usage-spend-swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  flex: none;
+.usage-typebar + .usage-typebar {
+  margin-top: 4px;
 }
-.usage-spend-cell {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  min-width: 180px;
-}
-.usage-spend-bar {
-  display: flex;
-  height: 10px;
-  border-radius: 3px;
+.usage-typebar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 25%, transparent);
   overflow: hidden;
 }
-.usage-spend-seg {
+.usage-typebar-fill {
+  display: flex;
+  height: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.usage-typebar-seg {
   display: block;
   height: 100%;
+  flex-basis: 0;
 }
-.usage-spend-value {
-  min-width: 56px;
-  text-align: right;
-  font-size: 12px;
+.usage-typebar-seg[data-type="cacheRead"] { background: color-mix(in srgb, var(--accent) 50%, var(--card, transparent)); }
+.usage-typebar-seg[data-type="input"] { background: var(--accent); }
+.usage-typebar-seg[data-type="cacheWrite"] { background: var(--orange); }
+.usage-typebar-seg[data-type="output"] { background: var(--green); }
+
+.usage-job-cost {
+  display: grid;
+  grid-template-columns: minmax(80px, 160px) auto;
+  align-items: center;
+  gap: 10px;
 }
-:is(.usage-spend-seg, .usage-spend-swatch)[data-part="cacheRead"] { background: color-mix(in srgb, var(--accent) 32%, transparent); }
-:is(.usage-spend-seg, .usage-spend-swatch)[data-part="input"] { background: var(--muted); }
-:is(.usage-spend-seg, .usage-spend-swatch)[data-part="cacheWrite"] { background: var(--accent); }
-:is(.usage-spend-seg, .usage-spend-swatch)[data-part="output"] { background: var(--orange); }
 .usage-jobs-note {
   margin-top: 10px;
+  font-size: 12px;
 }
 
 /* Recommendation strip — a single accent-toned banner above Pulse, shown only

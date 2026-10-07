@@ -104,6 +104,7 @@ mock.module("../src/api.ts", () => ({
       cacheWriteTokens: 0,
       costUsd: ledgerUnpricedEvents > 0 ? null : 0,
       pricedCostUsd: 0,
+      pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
       unpricedEvents: ledgerUnpricedEvents,
       cacheHitRatio: null,
     },
