@@ -1,0 +1,263 @@
+---
+title: Run the software factory
+description: Install the swarm rib and let a lead, two writers, and a reviewer drain the Cosmos backlog in dependency order, reviewing and merging every bead.
+sidebar:
+  order: 7
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The board from the last stop says one bead is ready and seven wait. Something
+now has to work it the way a team would: take the ready bead, build it, have
+someone else read the change before it lands, merge it, and pick up whatever
+that unblocked. When the graph widens, two people work side by side; when two
+changes touch the same file, one of them rebases.
+
+That is a **swarm**: a lead agent that owns the outcome, workers it spawns as
+the work calls for them, and a channel they coordinate in that you can watch
+and post in. Put it in **Factory mode** and it has no turn or clock budget; it
+runs as long as work keeps landing. This stop installs the swarm rib, points a
+swarm at the board, and lets it build Cosmos.
+
+<Aside type="note" title="Prerequisites">
+Everything from [Plan the backlog with beads](../plan-the-backlog/): the
+`cosmos-factory` clone with no `origin`, its seeded tracker, the beads rib,
+and the project registered. You also need [Bun](https://bun.sh/) on PATH,
+since the writers run the app's tests with it, and a
+[ClickClack](https://github.com/openclaw/clickclack) binary named `clickclack`
+on PATH (or `CLICKCLACK_BIN` set), which is the chat server the agents talk
+over.
+</Aside>
+
+## Install the swarm rib
+
+```sh
+keelson rib add https://github.com/danielscholl/keelson-rib-swarm
+```
+
+The rib starts and stops its own local ClickClack server, so there is nothing
+else to run. Its [install guide](https://danielscholl.github.io/keelson-rib-swarm/guides/install/)
+covers building the binary and pointing the rib at a server you run yourself.
+
+## Let the lead use the tracker
+
+A rib cannot call another rib's tools until you say so. The swarm's lead
+needs the beads tools to read the ready queue, claim beads, and close them as
+they land, so grant them in `~/.keelson/config.json`:
+
+```json
+{
+  "crossRibGrants": {
+    "swarm": {
+      "beads": [
+        "beads_ready",
+        "beads_show",
+        "beads_create",
+        "beads_update",
+        "beads_close",
+        "beads_dep"
+      ]
+    }
+  }
+}
+```
+
+Grants load at boot, so restart, then let `keelson doctor` confirm the server
+holds them:
+
+```sh
+keelson stop && keelson start
+keelson doctor
+```
+
+Without the grant the launcher's **Use the tracker** switch has nothing to
+offer, and a swarm started anyway never sees the board. See
+[cross-rib grants](../../guides/governance/#cross-rib-grants) for why the
+denial is quiet.
+
+## Start the factory
+
+Open the **Swarms** tab and choose **Options** to expand the launcher. Paste
+the prompt the template ships in `factory/PROMPT.md`:
+
+```text
+Build Cosmos from the beads in this project's tracker; spec.md is the brief and each bead's description and acceptance criteria are the contract. Spawn two writers and one read-only reviewer. Writers take ready beads, one at a time; mark each bead in progress when a writer takes it. Writers run bun test and bun run typecheck before reporting. The reviewer reads each writer's diff against its bead's acceptance criteria (every bead's criteria are also in factory/backlog.json) and posts approve or one concrete issue. Merge each reviewed head and close its bead as it lands, so the board drains in dependency order. Conclude with the closed beads and the command to run the app.
+```
+
+Then set it up:
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| Plan | **Crew** | A lead and up to four workers on the plan's models |
+| Factory mode | on | Bounded by progress, not by turns or minutes |
+| Project | `cosmos-factory` | Agents read its checkout |
+| Write | on | The lead may spawn writers, each in its own git worktree |
+| Use the tracker | on | The lead gets the beads tools you granted |
+
+The line beside **Start swarm** says what you are about to run.
+
+<figure class="screenshot">
+  <img
+    src={`${import.meta.env.BASE_URL}assets/screenshots/factory-launcher.png`}
+    alt="The Start a swarm launcher in light mode, expanded. The task holds the factory prompt. Crew is selected with Factory mode on, so each plan card reads until work stops instead of a turn budget. The project is cosmos-factory, Write and Use the tracker are on, and the tracker row lists the six beads tools. The summary beside Start swarm reads 5 agents until work stops landing, reading cosmos-factory and writing on a branch, with beads."
+  />
+  <figcaption>
+    Figure 1. The launcher set up for the factory (light UI). With Factory
+    mode on, the plans run until work stops landing, and the tracker row shows
+    the beads tools your grant let through.
+  </figcaption>
+</figure>
+
+Start it, and open the Beads tab in a second window so you can watch both.
+
+<Aside type="caution" title="Writers run commands on your machine">
+Each writer edits only its own worktree, but its shell is not a sandbox: a
+command can reach anything your user can. Run the factory on a project and a
+machine where that is acceptable. The swarm rib's
+[write guide](https://danielscholl.github.io/keelson-rib-swarm/guides/let-agents-write/)
+has the details.
+</Aside>
+
+## Watch it work
+
+The live card shows the lead spawn its crew within seconds: two writers and a
+reviewer, with handles the lead picks (ours were `w1`, `w2`, and `rev`). From
+there the run follows the graph.
+
+<figure class="screenshot">
+  <img
+    src={`${import.meta.env.BASE_URL}assets/screenshots/factory-swarm-live.png`}
+    alt="The live factory swarm on the Swarms tab in light mode. The budget card reads 49 turns, factory, 0 of 15 since work landed, with no turn budget. The timeline has a lane per agent, lead, rev, w1 and w2, with their turns as bars; the two writer lanes overlap."
+  />
+  <figcaption>
+    Figure 2. The factory mid-run (light UI). Each lane is an agent; the two
+    writer lanes overlap once the graph widens past the scaffold.
+  </figcaption>
+</figure>
+
+1. **The scaffold goes first.** It is the only ready bead, so one writer takes
+   it while the other waits. The writer commits in its own worktree, runs the
+   tests and typecheck, and reports its branch and head to the lead.
+2. **Every change is read before it lands.** The reviewer reads the writer's
+   diff against the bead's acceptance criteria and posts approve or one
+   concrete issue. An issue goes back to the writer, who fixes it, and the new
+   head gets a new review.
+3. **The lead merges and closes.** A reviewed head is merged into `main` with
+   a merge commit naming the writer, and the lead closes the bead. Closing it
+   is what makes its dependents ready.
+4. **The graph widens.** With the scaffold in, the catalog and the reactions
+   store are both ready, and the two writers build them at the same time.
+   When two branches touch the same file, the merge reports the conflict and
+   the second writer rebases and is reviewed again.
+
+On the Beads tab the flow strip moves from waiting to in progress to done.
+**In flight** shows each bead a writer holds, and **Next up** names the bead
+whose close frees the most work.
+
+<figure class="screenshot">
+  <img
+    src={`${import.meta.env.BASE_URL}assets/screenshots/factory-beads-draining.png`}
+    alt="The Beads tab for cosmos-factory in light mode, partway through the run. The flow strip reads 5 waiting, 1 in progress, 2 done. In flight shows the catalog bead claimed, with a stage meter at claimed. The backlog lists each waiting bead with the bead it waits on, and Shipped lists the scaffold and the reactions store."
+  />
+  <figcaption>
+    Figure 3. The board draining (light UI). Closed beads move to Shipped, and
+    each close turns its dependents ready.
+  </figcaption>
+</figure>
+
+Factory mode measures progress, not effort. Every merge and every closed bead
+resets a window of 15 turns, and the budget card shows how many turns have
+passed since work last landed. If a whole window passes with nothing landing,
+the lead is told to wrap up and the swarm ends as `stalled` with what it
+finished. You can post in the channel at any time to steer it.
+
+## Read what it built
+
+The swarm ends when the lead concludes, with the closed beads and the command
+to run the app. The finished row on the Swarms tab opens the report. The
+history is in git:
+
+```sh
+git log --oneline --first-parent main
+```
+
+```text
+a152f84 Merge writer @s7s1v-w2 branch keelson/swarm/s7s1v/w2 into main
+e208c83 Merge writer @s7s1v-w1 branch keelson/swarm/s7s1v/w1 into main
+10327f6 Merge writer @s7s1v-w2 branch keelson/swarm/s7s1v/w2 into main
+3eab870 Merge writer @s7s1v-w1 branch keelson/swarm/s7s1v/w1 into main
+a405b77 Merge writer @s7s1v-w1 branch keelson/swarm/s7s1v/w1 into main
+196bd2d Merge writer @s7s1v-w1 branch keelson/swarm/s7s1v/w1 into main
+2c1c190 Merge writer @s7s1v-w2 branch keelson/swarm/s7s1v/w2 into main
+6a7d7d5 Merge writer @s7s1v-w1 branch keelson/swarm/s7s1v/w1 into main
+0b1cc3b bd init: initialize beads issue tracking
+```
+
+One merge per bead, each naming the writer. Our two runs each took between
+seven and ten minutes and about 60 turns across the four agents; yours will
+differ in both, and in the app it builds.
+
+Read the conclusion before you trust it. A good lead says what it did not
+check: ours reported the writers' test counts but noted that nobody had looked
+at the pages in a browser. So check the claim yourself:
+
+```sh
+bun install
+bun test
+bun run typecheck
+bun run dev
+```
+
+Open `http://localhost:3000`. Filter the catalog and reload to see the filter
+survive, open Jupiter and walk the catalog with the arrow keys, and send
+chills twice to see the calm second answer. Every one of those behaviors was
+an acceptance criterion on a bead, so each one was read by a second agent
+before it merged.
+
+<figure class="screenshot">
+  <img
+    src={`${import.meta.env.BASE_URL}assets/screenshots/factory-cosmos-app.png`}
+    alt="The Cosmos app the factory built, open at the URL with category Nebula. A dark, cinematic landing reads Look up. Go further., with a rendered planet and a card naming today's object, the Orion Nebula. Below it the collection heading A universe to explore. sits above category filter chips with Nebula selected and 2 objects found."
+  />
+  <figcaption>
+    Figure 4. One factory build of Cosmos, loaded with `?category=Nebula`.
+    Another run will design a different app from the same beads.
+    The filter lives in the URL, so a reload or a shared link keeps it.
+  </figcaption>
+</figure>
+
+## Try it
+
+- **Change the graph.** Add a bead to `factory/backlog.json` (a print view, a
+  search-as-you-type, an about page), make it wait on the view it extends,
+  and seed a fresh clone. The factory schedules it without a prompt change.
+- **Keep the remote.** Leave `origin` in place and writers open a draft pull
+  request per bead instead of merging locally. Only you merge pull requests, so
+  a bead's dependents wait for your merge; this is the shape for a repository
+  other people share.
+- **Run a second wave.** `backlog.md` lists improvements for after the build.
+  File a few as beads and start the same prompt again.
+- **Compare with stop 5.** The pipeline and the factory built the same spec.
+  Put the two apps side by side and read which decisions each shape made, and
+  which ones a reviewer pushed back on.
+
+## What you proved
+
+A backlog with dependencies is enough structure for a crew of agents to build
+an app the way a team does: in order where order matters, side by side where it
+does not, and with a second reader on every change. The harness carried the
+run as one durable op you could watch, steer, and stop; the beads rib kept the
+graph and the board; the swarm rib supplied the crew. Every unit of work left a
+bead with its acceptance criteria and a merge commit in git, so the run is as
+auditable as it was fast.
+
+## Related
+
+- [The rib model](../../concepts/the-rib-model/): how two ribs extend the
+  harness and, with a grant, each other.
+- [Governance](../../guides/governance/#cross-rib-grants): the cross-rib grant
+  this page relies on.
+- [keelson-rib-swarm docs](https://danielscholl.github.io/keelson-rib-swarm/):
+  plans, budgets, steering, and workflow dispatch in full.
+- [keelson-rib-beads](https://github.com/danielscholl/keelson-rib-beads): the
+  board and its `beads-work` workflow.

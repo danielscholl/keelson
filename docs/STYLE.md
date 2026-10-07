@@ -64,8 +64,10 @@ onto Starlight.
   page hero h1 and the small uppercase labels the stylesheet already sets.
 - Every figure gets a one-sentence lead-in in the prose above it and a numbered
   figcaption ("Figure 1. ..."). Never drop a figure in cold.
-- Keelson does not document specific ribs (osdu, chamber). Those live in their
-  own repositories. Document only the generic, reusable rib contract.
+- Keelson documents specific ribs only where the tutorial rail puts them to
+  work: the beads and swarm stops. Everything else about a rib (its tools,
+  surfaces, configuration) lives in its own repository; link there rather than
+  restate it. Concept, guide, and reference pages stay generic to the contract.
 
 ## Information architecture
 
@@ -77,7 +79,9 @@ prose, not in cute paths.
 - `guides/` — task-oriented operator how-tos (install, run, install a rib,
   author workflows, configuration).
 - `tutorials/` — a problem-first learning rail, each page handing off to the
-  next. The capstone is the multi-model "one workflow, many models" build.
+  next. Stops 1 to 5 need the harness alone and close on the multi-model "one
+  workflow, many models" build; stops 6 and 7 add the beads and swarm ribs and
+  build the same app as a software factory.
 - `workflows/` — the catalog of bundled starter workflows: an index that groups
   what ships by purpose, plus a node-by-node walkthrough per workflow (the shape
   as a figure, every node in a table, the patterns each one demonstrates). Worked

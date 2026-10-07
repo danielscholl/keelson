@@ -394,23 +394,24 @@ that `caller → target → tool` triple. Grant it in the config file, under
 ```json
 {
   "crossRibGrants": {
-    "chamber": {
-      "osdu": ["*"]
+    "swarm": {
+      "beads": ["beads_ready", "beads_show", "beads_update", "beads_close"]
     }
   }
 }
 ```
 
-That reads as: the Chamber rib may call the OSDU rib's tools. `"*"` covers every
-tool the target owns; list tool names instead to narrow it. A caller with no entry
+That reads as: the Swarm rib may call these four of the Beads rib's tools, so a
+swarm's lead can read the ready queue and close a bead as its work lands. `"*"`
+covers every tool the target owns. A caller with no entry
 is denied, which is the default for every pair.
 
 Keep standing grants here rather than in `KEELSON_CROSS_RIB_GRANTS`. The two
 union, so either works, but an env-only grant lapses the moment the server starts
 from a shell that never exported it, and the capability it enabled goes quiet
 rather than failing loudly. The same grant gates both a rib's `callTool` and the
-tools projected onto a rib's agent turn, so a Chamber Mind that declares a
-capability backed by another rib needs this to reach it.
+tools projected onto a rib's agent turn, so a swarm lead handed the tracker's
+tools needs this to reach them.
 
 Grants are matched by exact string, and a grant that matches nothing is silently
 inert: a misspelled rib id, or a tool name the target renamed since you wrote the
