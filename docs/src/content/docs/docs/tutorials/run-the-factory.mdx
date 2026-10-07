@@ -1,13 +1,13 @@
 ---
 title: Run the software factory
-description: Install the swarm rib and let a lead, two writers, and a reviewer drain the Cosmos backlog in dependency order, reviewing and merging every bead.
+description: Install the swarm rib and let a Fleet of agents drain the Cosmos backlog in dependency order, with a design critic on every page and a reviewer on every merge.
 sidebar:
   order: 7
 ---
 
 import { Aside } from "@astrojs/starlight/components";
 
-The board from the last stop says one bead is ready and seven wait. Something
+The board from the last stop says one bead is ready and ten wait. Something
 now has to work it the way a team would: take the ready bead, build it, have
 someone else read the change before it lands, merge it, and pick up whatever
 that unblocked. When the graph widens, two people work side by side; when two
@@ -77,18 +77,34 @@ denial is quiet.
 
 ## Start the factory
 
+The template ships the prompt in two parts. `factory/BRIEF.md` says what to
+build: the stack, the art direction, the behavior, and what done means.
+`factory/PROMPT.md` says how the factory works. Keeping them apart is what
+lets you measure the factory later, because the brief alone is a fair prompt
+for a single agent.
+
+The factory part asks for three things a single agent cannot do to itself:
+
+- **Critique the plan before building.** The lead refines the seeded beads
+  (or plans its own on an empty tracker), and at least two other agents
+  critique the plan before anyone writes code.
+- **Judge pages by how they look.** For every change a visitor can see, the
+  writer saves full-page screenshots at 1440px and 375px wide, and a design
+  critic opens them and sends back the one change that would most improve the
+  page, until it approves.
+- **Never merge unread work.** An agent other than the writer approves every
+  head before the lead merges it and closes its bead.
+
+The lead staffs the factory itself: writers, the critic, a code reviewer,
+whatever the beads need.
+
 Open the **Swarms** tab and choose **Options** to expand the launcher. Paste
-the prompt the template ships in `factory/PROMPT.md`:
-
-```text
-Build Cosmos from the beads in this project's tracker; spec.md is the brief and each bead's description and acceptance criteria are the contract. Spawn two writers and one read-only reviewer. Writers take ready beads, one at a time; mark each bead in progress when a writer takes it. Writers run bun test and bun run typecheck before reporting. The reviewer reads each writer's diff against its bead's acceptance criteria (every bead's criteria are also in factory/backlog.json) and posts approve or one concrete issue. Merge each reviewed head and close its bead as it lands, so the board drains in dependency order. Conclude with the closed beads and the command to run the app.
-```
-
-Then set it up:
+the brief from `factory/BRIEF.md`, then the factory section of
+`factory/PROMPT.md`, into the task, and set it up:
 
 | Setting | Value | Why |
 | --- | --- | --- |
-| Plan | **Crew** | A lead and up to four workers on the plan's models |
+| Plan | **Fleet** | A lead and up to seven workers on the deepest models |
 | Factory mode | on | Bounded by progress, not by turns or minutes |
 | Project | `cosmos-factory` | Agents read its checkout |
 | Write | on | The lead may spawn writers, each in its own git worktree |
@@ -99,7 +115,7 @@ The line beside **Start swarm** says what you are about to run.
 <figure class="screenshot">
   <img
     src={`${import.meta.env.BASE_URL}assets/screenshots/factory-launcher.png`}
-    alt="The Start a swarm launcher in light mode, expanded. The task holds the factory prompt. Crew is selected with Factory mode on, so each plan card reads until work stops instead of a turn budget. The project is cosmos-factory, Write and Use the tracker are on, and the tracker row lists the six beads tools. The summary beside Start swarm reads 5 agents until work stops landing, reading cosmos-factory and writing on a branch, with beads."
+    alt="The Start a swarm launcher in light mode, expanded. The task holds the brief and the factory prompt. Fleet is selected with Factory mode on, so each plan card reads until work stops instead of a turn budget. The project is cosmos-factory, Write and Use the tracker are on, and the tracker row lists the six beads tools. The summary beside Start swarm reads 8 agents until work stops landing, reading cosmos-factory and writing on a branch, with beads."
   />
   <figcaption>
     Figure 1. The launcher set up for the factory (light UI). With Factory
@@ -120,35 +136,40 @@ has the details.
 
 ## Watch it work
 
-The live card shows the lead spawn its crew within seconds: two writers and a
-reviewer, with handles the lead picks (ours were `w1`, `w2`, and `rev`). From
-there the run follows the graph.
+The lead spends its first turns on the plan: it reads the beads, posts them
+for critique, and revises them before spawning writers. Planning counts as
+progress in Factory mode until the first merge lands, so this phase is safe.
+Then the crew appears on the live card, each agent with a lane.
 
 <figure class="screenshot">
   <img
     src={`${import.meta.env.BASE_URL}assets/screenshots/factory-swarm-live.png`}
-    alt="The live factory swarm on the Swarms tab in light mode. The budget card reads 49 turns, factory, 0 of 15 since work landed, with no turn budget. The timeline has a lane per agent, lead, rev, w1 and w2, with their turns as bars; the two writer lanes overlap."
+    alt="A live Fleet factory swarm on the Swarms tab in light mode. The roster reads lead, reviewer, design-critic, w-found, w-design, w-art-solar and w-art-deep. The budget card reads 71 turns, factory, 3 of 15 since work landed. The timeline shows a lane per agent, with the reviewer and the design critic taking short turns between the writers' long ones."
   />
   <figcaption>
-    Figure 2. The factory mid-run (light UI). Each lane is an agent; the two
-    writer lanes overlap once the graph widens past the scaffold.
+    Figure 2. A Fleet factory mid-run (light UI). The lead staffed a code
+    reviewer, a design critic and writers named for their work; the critics'
+    short turns sit between the writers' long ones.
   </figcaption>
 </figure>
 
-1. **The scaffold goes first.** It is the only ready bead, so one writer takes
-   it while the other waits. The writer commits in its own worktree, runs the
-   tests and typecheck, and reports its branch and head to the lead.
-2. **Every change is read before it lands.** The reviewer reads the writer's
-   diff against the bead's acceptance criteria and posts approve or one
-   concrete issue. An issue goes back to the writer, who fixes it, and the new
-   head gets a new review.
-3. **The lead merges and closes.** A reviewed head is merged into `main` with
-   a merge commit naming the writer, and the lead closes the bead. Closing it
-   is what makes its dependents ready.
-4. **The graph widens.** With the scaffold in, the catalog and the reactions
-   store are both ready, and the two writers build them at the same time.
-   When two branches touch the same file, the merge reports the conflict and
-   the second writer rebases and is reviewed again.
+1. **The foundation goes first.** The scaffold is the only ready bead. A
+   writer builds it in its own worktree, runs the tests and typecheck, and
+   reports its branch and head.
+2. **The critic looks at the pages.** For anything a visitor sees, the critic
+   opens the writer's screenshots and sends back one change at a time. In one
+   of our runs it rejected the catalog because the cards were "mostly empty
+   containers"; the writer enlarged the illustrations, recaptured, and the
+   critic approved that exact commit.
+3. **The reviewer reads the diff.** With the critic's approval in hand, the
+   lead pastes the bead's acceptance criteria into a review request, and the
+   reviewer approves the head or names one concrete issue.
+4. **The lead merges and closes.** The approved head is merged into `main`
+   with a merge commit naming the writer, and closing the bead turns its
+   dependents ready.
+5. **The graph widens.** After the scaffold, the catalog, the store and the
+   design system are built side by side. When two branches touch the same
+   file, the second writer rebases and is reviewed again.
 
 On the Beads tab the flow strip moves from waiting to in progress to done.
 **In flight** shows each bead a writer holds, and **Next up** names the bead
@@ -169,7 +190,8 @@ Factory mode measures progress, not effort. Every merge and every closed bead
 resets a window of 15 turns, and the budget card shows how many turns have
 passed since work last landed. If a whole window passes with nothing landing,
 the lead is told to wrap up and the swarm ends as `stalled` with what it
-finished. You can post in the channel at any time to steer it.
+finished. A fresh-token ceiling backstops it, 6M on Fleet; cache reads do not
+count against it. You can post in the channel at any time to steer.
 
 ## Read what it built
 
@@ -182,24 +204,21 @@ git log --oneline --first-parent main
 ```
 
 ```text
-a152f84 Merge writer @s7s1v-w2 branch keelson/swarm/s7s1v/w2 into main
-e208c83 Merge writer @s7s1v-w1 branch keelson/swarm/s7s1v/w1 into main
-10327f6 Merge writer @s7s1v-w2 branch keelson/swarm/s7s1v/w2 into main
-3eab870 Merge writer @s7s1v-w1 branch keelson/swarm/s7s1v/w1 into main
-a405b77 Merge writer @s7s1v-w1 branch keelson/swarm/s7s1v/w1 into main
-196bd2d Merge writer @s7s1v-w1 branch keelson/swarm/s7s1v/w1 into main
-2c1c190 Merge writer @s7s1v-w2 branch keelson/swarm/s7s1v/w2 into main
-6a7d7d5 Merge writer @s7s1v-w1 branch keelson/swarm/s7s1v/w1 into main
-0b1cc3b bd init: initialize beads issue tracking
+c0bfba2 Merge writer @sgafr-design branch keelson/swarm/sgafr/design into main
+0b1e652 Merge writer @sgafr-backend branch keelson/swarm/sgafr/backend into main
+63e94f7 Merge writer @sgafr-store branch keelson/swarm/sgafr/store into main
+...
+ccd82b1 Merge writer @sgafr-backend branch keelson/swarm/sgafr/backend into main
+deb3d76 bd init: initialize beads issue tracking
 ```
 
-One merge per bead, each naming the writer. Our two runs each took between
-seven and ten minutes and about 60 turns across the four agents; yours will
-differ in both, and in the app it builds.
+One merge per bead, each naming the writer that built it. Our run took 34
+minutes and 138 turns across six agents and finished with 288 tests; yours
+will differ in all three, and in the app it designs.
 
-Read the conclusion before you trust it. A good lead says what it did not
-check: ours reported the writers' test counts but noted that nobody had looked
-at the pages in a browser. So check the claim yourself:
+Read the conclusion before you trust it. The prompt asks the lead to say what
+the reviewers pushed back on and what nobody checked, so you know where to
+look. Then check the claim yourself:
 
 ```sh
 bun install
@@ -217,35 +236,49 @@ before it merged.
 <figure class="screenshot">
   <img
     src={`${import.meta.env.BASE_URL}assets/screenshots/factory-cosmos-app.png`}
-    alt="The Cosmos app the factory built, open at the URL with category Nebula. A dark, cinematic landing reads Look up. Go further., with a rendered planet and a card naming today's object, the Orion Nebula. Below it the collection heading A universe to explore. sits above category filter chips with Nebula selected and 2 objects found."
+    alt="The Cosmos landing page the Fleet factory built. A dark, cinematic hero reads Make room for wonder. beside a glowing Orion Nebula, today's object. Below it, Follow your curiosity. sits over category chips, a search field, and a grid of twelve cards, each with its own illustration: a granulated Sun, a banded Jupiter with its red spot, a ringed Saturn, Mars with a polar cap, a cracked Europa, a hazy Titan, a mottled Betelgeuse, a black hole with a lensed ring, the Orion Nebula, the Pillars of Creation, a spiral Andromeda and the TRAPPIST-1 system."
   />
   <figcaption>
-    Figure 4. One factory build of Cosmos, loaded with `?category=Nebula`.
-    Another run will design a different app from the same beads.
-    The filter lives in the URL, so a reload or a shared link keeps it.
+    Figure 4. The landing page from our Fleet run. Every object has its own
+    illustration, and the critic held the catalog to the art direction before
+    it merged. Another run will design a different app from the same beads.
   </figcaption>
 </figure>
 
+## Measure it
+
+A factory is only worth its cost if it beats one agent on the same brief, so
+measure that. In a second fresh clone, hand `factory/BRIEF.md` alone to a
+single coding agent and let it build. Then compare the two sites, their test
+suites, and what each one checked.
+
+When we ran that comparison, a strong single agent came close on looks for a
+site this size, and the factory won on everything around them: several times
+the tests, a second reader on every change, a critic on every page, and a
+bead and a merge commit for every unit of work. Because the brief is
+model-neutral, the pair is a benchmark you can re-run as models improve.
+
 ## Try it
 
+- **Let the lead plan.** Skip the seeding at the last stop and start the same
+  prompt on an empty tracker. The lead cuts its own beads, has them critiqued,
+  and builds from them.
 - **Change the graph.** Add a bead to `factory/backlog.json` (a print view, a
   search-as-you-type, an about page), make it wait on the view it extends,
   and seed a fresh clone. The factory schedules it without a prompt change.
+- **Change the models.** Pick a lead and workers model under the plans, or a
+  different provider, and compare the sites.
 - **Keep the remote.** Leave `origin` in place and writers open a draft pull
   request per bead instead of merging locally. Only you merge pull requests, so
   a bead's dependents wait for your merge; this is the shape for a repository
   other people share.
-- **Run a second wave.** `backlog.md` lists improvements for after the build.
-  File a few as beads and start the same prompt again.
-- **Compare with stop 5.** The pipeline and the factory built the same spec.
-  Put the two apps side by side and read which decisions each shape made, and
-  which ones a reviewer pushed back on.
 
 ## What you proved
 
 A backlog with dependencies is enough structure for a crew of agents to build
 an app the way a team does: in order where order matters, side by side where it
-does not, and with a second reader on every change. The harness carried the
+does not, with a critic looking at every page and a second reader on every
+change. The harness carried the
 run as one durable op you could watch, steer, and stop; the beads rib kept the
 graph and the board; the swarm rib supplied the crew. Every unit of work left a
 bead with its acceptance criteria and a merge commit in git, so the run is as

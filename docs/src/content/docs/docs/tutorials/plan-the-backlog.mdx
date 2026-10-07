@@ -1,6 +1,6 @@
 ---
 title: Plan the backlog with beads
-description: Install the beads rib, seed the Cosmos build as eight beads with real dependencies, and read the board that says what can start now.
+description: Install the beads rib, seed the Cosmos build as eleven beads with real dependencies, and read the board that says what can start now.
 sidebar:
   order: 6
 ---
@@ -14,7 +14,7 @@ which ones wait on which, and starts whatever is ready. Two people can take two
 ready units at once; nobody starts the detail page before the API it calls
 exists.
 
-This stop gives the Cosmos build that shape. You seed it as a backlog of eight
+This stop gives the Cosmos build that shape. You seed it as a backlog of eleven
 **beads**, each one a unit of work with a description, acceptance criteria and
 its dependencies, and install the rib that shows the backlog as a live board.
 Nothing gets built yet. The point is the graph: once the work is a graph, the
@@ -45,24 +45,30 @@ you to merge them instead.
 ## Read the backlog
 
 The template carries the backlog as data, in `factory/backlog.json`. It is the
-whole Cosmos build from `spec.md`, cut into eight beads:
+whole Cosmos build from `spec.md`, cut into eleven beads:
 
 | Bead | Waits on | What it delivers |
 | --- | --- | --- |
 | Scaffold the Cosmos app | | Bun and TypeScript, the server, `bun test`, a health route |
 | Seed the catalog | Scaffold | The 12 objects with their canonical facts |
 | Store chills reactions | Scaffold | SQLite, one reaction per visitor per day, no race |
+| Lay down the design system | Scaffold | Art direction, tokens, and the shared header, footer and components |
 | Serve the catalog API | Catalog | List, filter, search, categories, object of the day |
+| Render every object as SVG | Catalog, design system | A distinct illustration per object: Saturn's rings, Jupiter's spot |
 | Serve the chills endpoint | Store, catalog API | `200` on a first reaction, a calm `429` on a repeat |
-| Build the landing and browse view | Catalog API | Hero, catalog, a filter that lives in the URL |
-| Build the object detail view | Chills endpoint | Stats, facts, the chills control, keyboard navigation |
-| Prove the spec end to end | Both views | An acceptance test over every capability, and a README |
+| Build the landing and browse view | Catalog API, visuals | Hero, catalog cards, a filter that lives in the URL |
+| Build the object detail view | Chills endpoint, visuals | The object large, stats, facts, chills, keyboard navigation |
+| Polish for phones, keyboards and motion | Both views | 375px layouts, focus rings, contrast, reduced motion |
+| Prove the spec end to end | Polish | An acceptance test over every capability, and a README |
 
 Each bead's description fixes the decisions that writers would otherwise
 argue about (one stack, file names, the date the "object of the day" rolls
 over on), and each carries acceptance criteria a reviewer can check a diff
-against. The dependencies are what make it a factory: after the scaffold, the
-catalog and the store can be built side by side, and so can the two views.
+against. The design system and the visuals beads exist because views built by
+different hands drift apart: with one art direction and one illustration set to
+build from, the landing and the detail page read as the same site. The
+dependencies are what make it a factory: after the scaffold, three beads can be
+built side by side, and so can the two views.
 
 ## Seed the tracker
 
@@ -75,15 +81,18 @@ bd create --graph factory/backlog.json
 ```
 
 ```text
-Created 8 issues
-  acceptance -> cosmos-7fk
-  browse-ui -> cosmos-1km
-  catalog -> cosmos-eay
-  catalog-api -> cosmos-j1c
-  chills-api -> cosmos-wx7
-  detail-ui -> cosmos-6cu
-  scaffold -> cosmos-dbj
-  store -> cosmos-1fr
+Created 11 issues
+  acceptance -> cosmos-c5x
+  browse-ui -> cosmos-2lz
+  catalog -> cosmos-ag9
+  catalog-api -> cosmos-5vp
+  chills-api -> cosmos-tcv
+  design -> cosmos-gw4
+  detail-ui -> cosmos-aa8
+  polish -> cosmos-l1p
+  scaffold -> cosmos-68p
+  store -> cosmos-73i
+  visuals -> cosmos-6qy
 ```
 
 Your ids will differ. Ask the tracker what can start:
@@ -93,12 +102,12 @@ bd ready
 ```
 
 ```text
-○ cosmos-dbj P0 Scaffold the Cosmos app
+○ cosmos-68p P0 Scaffold the Cosmos app
 
 Ready: 1 issues with no active blockers
 ```
 
-One bead out of eight. `bd blocked` lists the other seven with what each one
+One bead out of eleven. `bd blocked` lists the other ten with what each one
 waits on. That ratio is the dependency graph doing its job: until the scaffold
 lands, there is nothing else a second pair of hands could safely start.
 
@@ -123,7 +132,7 @@ ask Chat to "refresh the beads board". Open `http://127.0.0.1:7878`, choose
 <figure class="screenshot">
   <img
     src={`${import.meta.env.BASE_URL}assets/screenshots/beads-board-seeded.png`}
-    alt="The Beads tab in light mode with the seeded tracker. Next up names Scaffold the Cosmos app, ready at P0, and the chains it unlocks. In flight reads nothing is claimed. The backlog lists the scaffold, then each later bead with the bead it waits on, and Shipped is empty."
+    alt="The Beads tab in light mode with the seeded tracker. Next up names Scaffold the Cosmos app, ready at P0, and says it unlocks three beads now and seven more across four levels. In flight reads nothing is claimed. The backlog lists the scaffold, then the illustration bead waiting on the catalog and the design system, and Shipped reads 11 created this week."
   />
   <figcaption>
     Figure 1. The seeded board (light UI). Next up is the one ready bead, ranked
