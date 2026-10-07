@@ -321,6 +321,7 @@ describe("SQLite UsageStore", () => {
         pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 2,
         cacheHitRatio: 2 / 16,
+        priceCards: [],
       });
       expect(result.groups).toEqual([
         {
@@ -335,6 +336,7 @@ describe("SQLite UsageStore", () => {
           pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: 2 / 13,
+          priceCards: [],
         },
         {
           key: "gpt-5",
@@ -348,6 +350,7 @@ describe("SQLite UsageStore", () => {
           pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
+          priceCards: [],
         },
       ]);
     });
@@ -932,6 +935,7 @@ describe("SQLite UsageStore", () => {
       expect(summary.totals.costUsd).toBeCloseTo(total, 6);
       expect(summary.totals.unpricedEvents).toBe(0);
       expect(summary.groups[0]?.costUsd).toBeCloseTo(total, 6);
+      expect(summary.totals.priceCards.map((c) => c.source)).toEqual(["bundled", "bundled"]);
       const series = store.series({ bucket: "hour", groupBy: "source" });
       expect(series).toHaveLength(1);
       expect(series[0]?.costUsd).toBeCloseTo(total, 6);
@@ -1160,6 +1164,17 @@ describe("SQLite UsageStore", () => {
       const groups = new Map(priced.summary({ groupBy: "model" }).groups.map((g) => [g.key, g]));
       expect(groups.get("gemini-3.8-flash")?.costUsd).toBeCloseTo(0.82, 6);
       expect(groups.get("gpt-6-sol")?.costUsd).toBeCloseTo(9, 6);
+      expect(groups.get("gemini-3.8-flash")?.priceCards).toEqual([
+        {
+          provider: "copilot",
+          source: "catalog",
+          inputPerMTok: 0.75,
+          cacheReadPerMTok: 0.07,
+          cacheWritePerMTok: 0,
+          outputPerMTok: 3.75,
+        },
+      ]);
+      expect(groups.get("gpt-6-sol")?.priceCards.map((c) => c.source)).toEqual(["override"]);
     });
 
     test("live catalog prices resolve by provider when model ids collide", () => {
@@ -1202,6 +1217,17 @@ describe("SQLite UsageStore", () => {
       expect(summary.totals.costUsd).toBeCloseTo(6, 6);
       expect(summary.groups[0]?.costUsd).toBeCloseTo(6, 6);
       expect(priced.events().map((event) => event.costUsd)).toEqual([5, 1]);
+      expect(
+        summary.groups[0]?.priceCards.map((c) => [c.provider, c.source, c.inputPerMTok]),
+      ).toEqual([
+        ["copilot", "catalog", 1],
+        ["gateway", "catalog", 5],
+      ]);
+      expect(summary.totals.priceCards).toHaveLength(2);
+      expect(priced.events().map((event) => event.priceCard?.provider)).toEqual([
+        "gateway",
+        "copilot",
+      ]);
     });
 
     test("cacheHitRatio is cacheRead over all prompt tokens, null without reported cache reads", () => {

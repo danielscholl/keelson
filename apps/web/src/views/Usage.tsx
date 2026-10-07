@@ -3,12 +3,12 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import {
-  freshTokens,
   USAGE_PULSE_SNAPSHOT_KEY,
   type UsageBreakdownResponseWire,
   type UsageEventRowWire,
   type UsageEventSourceWire,
   type UsageJobsRowWire,
+  type UsagePriceCardWire,
   type UsageSeriesResponseWire,
   type UsageSummaryResponseWire,
   usagePulseSnapshotSchema,
@@ -93,7 +93,7 @@ export interface SeriesPalette {
   colorOf: (key: string) => string;
 }
 
-// Every chart derives its palette from per-model fresh-token totals over the
+// Every chart derives its palette from per-model token totals over the
 // same window, so a model wears one color across the page. Named slots go in
 // alphabetical order so a model's color doesn't follow its rank.
 export function assignSeriesColors(totals: ReadonlyMap<string, number>): SeriesPalette {
@@ -123,11 +123,49 @@ function otherSeriesLabel(folded: readonly string[]): string {
 const FAILURE_STATUSES = ["error", "aborted", "timeout"] as const;
 const FAILURE_EVENTS_LIMIT = 200;
 
-// The recommendation strip flags a recurring workflow/rib job whose per-run token
-// spend is low enough a smaller model would likely serve it. A job must repeat
-// enough to judge (runs) and stay under the per-run token bar (avg).
-const RIGHT_SIZE_MIN_RUNS = 3;
-const RIGHT_SIZE_MAX_AVG_TOKENS = 500;
+type ChartMetric = "tokens" | "cost";
+const CHART_METRICS: Array<{ id: ChartMetric; label: string }> = [
+  { id: "tokens", label: "Tokens" },
+  { id: "cost", label: "Cost" },
+];
+
+interface TokenCounts {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
+}
+
+function allTokens(t: TokenCounts): number {
+  return t.inputTokens + (t.cacheReadTokens ?? 0) + (t.cacheWriteTokens ?? 0) + t.outputTokens;
+}
+
+function metricValue(row: TokenCounts & { pricedCostUsd: number }, metric: ChartMetric): number {
+  return metric === "tokens" ? allTokens(row) : row.pricedCostUsd;
+}
+
+function formatMetric(metric: ChartMetric): (value: number) => string {
+  return metric === "tokens" ? formatTokens : formatCostUsd;
+}
+
+function countUnpriced(rows: Array<{ unpricedEvents: number }> | null): number {
+  return (rows ?? []).reduce((sum, row) => sum + row.unpricedEvents, 0);
+}
+
+function UnpricedNote({ count }: { count: number }) {
+  return (
+    <p className="page-sub usage-jobs-note">
+      * Lower bound: {count.toLocaleString()} {count === 1 ? "turn" : "turns"} ran on a model with
+      no known price.
+    </p>
+  );
+}
+
+function emptyMetricText(metric: ChartMetric, unpriced: number, fallback: string): string {
+  return metric === "cost" && unpriced > 0
+    ? `No priced spend in this window. ${unpriced.toLocaleString()} ${unpriced === 1 ? "turn" : "turns"} ran on a model with no known price.`
+    : fallback;
+}
 
 export function Usage() {
   const [range, setRange] = useState<UsageWindow>("7d");
@@ -140,7 +178,6 @@ export function Usage() {
       <UsageViewNav value={subView} onChange={setSubView} />
       {subView === "overview" ? (
         <>
-          <RecommendationStrip range={range} onViewJobs={() => setSubView("jobs")} />
           <PulseSection range={range} pulse={pulse} />
           <OverTimeSection range={range} />
           <FlowSection range={range} />
@@ -176,6 +213,33 @@ function UsageViewNav({
             style={VISUALLY_HIDDEN_STYLE}
           />
           {view.label}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function MetricToggle({
+  value,
+  onChange,
+}: {
+  value: ChartMetric;
+  onChange: (metric: ChartMetric) => void;
+}) {
+  const name = useId();
+  return (
+    <div className="layout-toggle" role="radiogroup" aria-label="Measure">
+      {CHART_METRICS.map((m) => (
+        <label key={m.id} className={`layout-toggle-btn${m.id === value ? " active" : ""}`}>
+          <input
+            type="radio"
+            name={name}
+            value={m.id}
+            checked={m.id === value}
+            onChange={() => onChange(m.id)}
+            style={VISUALLY_HIDDEN_STYLE}
+          />
+          {m.label}
         </label>
       ))}
     </div>
@@ -261,7 +325,7 @@ function PulseSection({
         let turns = 0;
         for (const events of eventsByStatus) {
           for (const ev of events) {
-            tokens += freshTokens(ev);
+            tokens += allTokens(ev);
             turns += 1;
           }
         }
@@ -328,17 +392,22 @@ function PulseStats({
   failureBurn: FailureBurn;
 }) {
   const { totals } = summary;
-  const totalTokens = freshTokens(totals);
-  const freshInputTokens = totals.inputTokens + totals.cacheWriteTokens;
-  const totalInputTokens = freshInputTokens + totals.cacheReadTokens;
+  const totalInputTokens = totals.inputTokens + totals.cacheWriteTokens + totals.cacheReadTokens;
+  const tokensByType: ByTokenType = {
+    input: totals.inputTokens,
+    cacheRead: totals.cacheReadTokens,
+    cacheWrite: totals.cacheWriteTokens,
+    output: totals.outputTokens,
+  };
+  const sources = priceSourceLabels(totals.priceCards);
 
   return (
     <div className="usage-stats">
       <div className="usage-stat">
-        <div className="usage-stat-value">{formatTokens(totalTokens)}</div>
+        <div className="usage-stat-value">{formatTokens(allTokens(totals))}</div>
         <div className="usage-stat-label">Tokens</div>
-        <div className="usage-stat-sub usage-mono">
-          ↑ {formatTokens(freshInputTokens)} in · ↓ {formatTokens(totals.outputTokens)} out
+        <div className="usage-stat-sub">
+          <TokenTypeBar label="Tokens" values={tokensByType} format={formatTokens} />
         </div>
       </div>
       <div className="usage-stat">
@@ -356,7 +425,7 @@ function PulseStats({
             ? `${totals.unpricedEvents.toLocaleString()} unpriced ${
                 totals.unpricedEvents === 1 ? "turn" : "turns"
               }`
-            : "list price · priced at read time"}
+            : sources.join(" · ")}
         </div>
       </div>
       <div className="usage-stat">
@@ -398,7 +467,7 @@ function PulseSparkline({ pulse }: { pulse: unknown }) {
   const parsed = usagePulseSnapshotSchema.safeParse(pulse);
   const minuteSeries = parsed.success ? parsed.data.minuteSeries : [];
 
-  const values = useMemo(() => minuteSeries.map((m) => freshTokens(m)), [minuteSeries]);
+  const values = useMemo(() => minuteSeries.map((m) => allTokens(m)), [minuteSeries]);
 
   const hasSignal = values.some((v) => v > 0);
   const last = values.at(-1) ?? 0;
@@ -472,7 +541,10 @@ export interface ChartSeries {
 // Pivots the flat series rows (one row per bucket × model) into per-bucket
 // stacks: the palette's named models in alphabetical order, then one Other
 // series summing the folded tail.
-export function pivotSeries(rows: UsageSeriesResponseWire): {
+export function pivotSeries(
+  rows: UsageSeriesResponseWire,
+  metric: ChartMetric = "tokens",
+): {
   series: ChartSeries[];
   buckets: StackBucket[];
 } {
@@ -481,15 +553,15 @@ export function pivotSeries(rows: UsageSeriesResponseWire): {
   const bucketTotals = new Map<string, number>();
 
   for (const row of rows) {
-    const tokens = freshTokens(row);
+    const value = metricValue(row, metric);
     let perBucket = totalsByModel.get(row.key);
     if (!perBucket) {
       perBucket = new Map();
       totalsByModel.set(row.key, perBucket);
     }
-    perBucket.set(row.bucketIso, (perBucket.get(row.bucketIso) ?? 0) + tokens);
-    modelTotals.set(row.key, (modelTotals.get(row.key) ?? 0) + tokens);
-    bucketTotals.set(row.bucketIso, (bucketTotals.get(row.bucketIso) ?? 0) + tokens);
+    perBucket.set(row.bucketIso, (perBucket.get(row.bucketIso) ?? 0) + value);
+    modelTotals.set(row.key, (modelTotals.get(row.key) ?? 0) + allTokens(row));
+    bucketTotals.set(row.bucketIso, (bucketTotals.get(row.bucketIso) ?? 0) + value);
   }
 
   const palette = assignSeriesColors(modelTotals);
@@ -545,6 +617,7 @@ function niceCeiling(max: number): number {
 }
 
 function OverTimeSection({ range }: { range: UsageWindow }) {
+  const [metric, setMetric] = useState<ChartMetric>("tokens");
   const [series, setSeries] = useState<UsageSeriesResponseWire | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -571,8 +644,9 @@ function OverTimeSection({ range }: { range: UsageWindow }) {
     };
   }, [range, bucket]);
 
-  const pivoted = useMemo(() => (series ? pivotSeries(series) : null), [series]);
+  const pivoted = useMemo(() => (series ? pivotSeries(series, metric) : null), [series, metric]);
   const hasData = !!pivoted && pivoted.buckets.some((b) => b.total > 0);
+  const unpriced = metric === "cost" ? countUnpriced(series) : 0;
 
   return (
     <section className="surface-region usage-stack-region">
@@ -584,6 +658,7 @@ function OverTimeSection({ range }: { range: UsageWindow }) {
           <span className="surface-region-title">Over time</span>
         </span>
         <span className="surface-region-spacer" />
+        <MetricToggle value={metric} onChange={setMetric} />
         <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
@@ -597,10 +672,20 @@ function OverTimeSection({ range }: { range: UsageWindow }) {
             Loading…
           </div>
         ) : pivoted && hasData ? (
-          <StackChart series={pivoted.series} buckets={pivoted.buckets} bucket={bucket} />
+          <>
+            <StackChart
+              series={pivoted.series}
+              buckets={pivoted.buckets}
+              bucket={bucket}
+              metric={metric}
+            />
+            {unpriced > 0 && <UnpricedNote count={unpriced} />}
+          </>
         ) : (
           <div className="usage-stack-empty">
-            <span className="page-sub">No token spend recorded in this window yet.</span>
+            <span className="page-sub">
+              {emptyMetricText(metric, unpriced, "No token spend recorded in this window yet.")}
+            </span>
           </div>
         )}
       </div>
@@ -612,11 +697,15 @@ function StackChart({
   series,
   buckets,
   bucket,
+  metric,
 }: {
   series: ChartSeries[];
   buckets: StackBucket[];
   bucket: UsageSeriesBucket;
+  metric: ChartMetric;
 }) {
+  const format = formatMetric(metric);
+  const measure = metric === "tokens" ? "Tokens" : "Cost";
   const width = 960;
   const height = 300;
   const padL = 46;
@@ -667,14 +756,14 @@ function StackChart({
       <svg
         className="usage-stack-svg"
         viewBox={`0 0 ${width} ${height}`}
-        aria-label={`Tokens over time by model, bucketed by ${bucket}`}
+        aria-label={`${measure} over time by model, bucketed by ${bucket}`}
         onPointerLeave={() => setPointer(null)}
       >
         {gridLines.map(({ value, y }) => (
           <g key={value}>
             <line className="usage-grid-line" x1={padL} x2={width - padR} y1={y} y2={y} />
             <text className="usage-axis-label" x={padL - 8} y={y + 3} textAnchor="end">
-              {value ? formatTokens(value) : "0"}
+              {value ? format(value) : "0"}
             </text>
           </g>
         ))}
@@ -701,7 +790,7 @@ function StackChart({
                 height={plotH}
                 tabIndex={0}
                 role="img"
-                aria-label={`${formatBucketLabel(b.iso, bucket)}: ${formatTokens(b.total)} tokens`}
+                aria-label={`${formatBucketLabel(b.iso, bucket)}: ${format(b.total)}${metric === "tokens" ? " tokens" : ""}`}
                 aria-describedby={hover?.bucket === d ? tooltipId : undefined}
                 onPointerEnter={segmentHover(null)}
                 onFocus={() => {
@@ -761,6 +850,7 @@ function StackChart({
           bucket={hovered}
           activeSeries={hover.series}
           title={formatBucketLabel(hovered.iso, bucket)}
+          format={format}
           anchorPct={((padL + groupW * hover.bucket + groupW / 2) / width) * 100}
         />
       )}
@@ -772,7 +862,13 @@ function StackChart({
           </span>
         ))}
       </div>
-      <StackDataTable series={series} buckets={buckets} bucket={bucket} />
+      <StackDataTable
+        series={series}
+        buckets={buckets}
+        bucket={bucket}
+        measure={measure}
+        format={format}
+      />
     </div>
   );
 }
@@ -783,10 +879,14 @@ function StackDataTable({
   series,
   buckets,
   bucket,
+  measure,
+  format,
 }: {
   series: ChartSeries[];
   buckets: StackBucket[];
   bucket: UsageSeriesBucket;
+  measure: string;
+  format: (value: number) => string;
 }) {
   const rows = buckets.flatMap((b) => {
     const named = series
@@ -799,12 +899,14 @@ function StackDataTable({
   });
   return (
     <table style={VISUALLY_HIDDEN_STYLE}>
-      <caption>Tokens by model per {bucket}</caption>
+      <caption>
+        {measure} by model per {bucket}
+      </caption>
       <thead>
         <tr>
           <th scope="col">{bucket === "hour" ? "Hour" : "Day"}</th>
           <th scope="col">Model</th>
-          <th scope="col">Tokens</th>
+          <th scope="col">{measure}</th>
           <th scope="col">Share</th>
         </tr>
       </thead>
@@ -813,7 +915,7 @@ function StackDataTable({
           <tr key={`${b.iso}\u0000${key}`}>
             <td>{formatBucketLabel(b.iso, bucket)}</td>
             <td>{formatModelLabel(key)}</td>
-            <td>{formatTokens(value)}</td>
+            <td>{format(value)}</td>
             <td>{b.total > 0 ? `${Math.round((value / b.total) * 100)}%` : "—"}</td>
           </tr>
         ))}
@@ -834,12 +936,14 @@ function StackTooltip({
   bucket,
   activeSeries,
   title,
+  format,
   anchorPct,
 }: {
   series: ChartSeries[];
   bucket: StackBucket;
   activeSeries: number | null;
   title: string;
+  format: (value: number) => string;
   anchorPct: number;
   id: string;
 }) {
@@ -859,7 +963,7 @@ function StackTooltip({
     >
       <div className="usage-stack-tooltip-title">
         <span>{title}</span>
-        <span className="usage-mono">{formatTokens(bucket.total)}</span>
+        <span className="usage-mono">{format(bucket.total)}</span>
       </div>
       {rows.map(({ s, j, value }) => (
         <div key={s.key}>
@@ -868,14 +972,14 @@ function StackTooltip({
             <span className="usage-stack-tooltip-label">
               {s.key === OTHER_SERIES_KEY ? "Other" : formatModelLabel(s.label)}
             </span>
-            <span className="usage-stack-tooltip-value">{formatTokens(value)}</span>
+            <span className="usage-stack-tooltip-value">{format(value)}</span>
             <span className="usage-stack-tooltip-share">{share(value)}</span>
           </div>
           {s.key === OTHER_SERIES_KEY &&
             bucket.folded.slice(0, TOOLTIP_FOLDED_ROWS).map((m) => (
               <div key={m.key} className="usage-stack-tooltip-row usage-stack-tooltip-row--sub">
                 <span className="usage-stack-tooltip-label">{formatModelLabel(m.key)}</span>
-                <span className="usage-stack-tooltip-value">{formatTokens(m.value)}</span>
+                <span className="usage-stack-tooltip-value">{format(m.value)}</span>
                 <span className="usage-stack-tooltip-share">{share(m.value)}</span>
               </div>
             ))}
@@ -893,10 +997,10 @@ function StackTooltip({
 }
 
 const TOKEN_TYPES = [
-  { id: "cacheRead", label: "Cache read" },
-  { id: "input", label: "Input" },
-  { id: "cacheWrite", label: "Cache write" },
-  { id: "output", label: "Output" },
+  { id: "cacheRead", label: "Cache read", short: "cached" },
+  { id: "input", label: "Input", short: "in" },
+  { id: "cacheWrite", label: "Cache write", short: "write" },
+  { id: "output", label: "Output", short: "out" },
 ] as const;
 type TokenType = (typeof TOKEN_TYPES)[number]["id"];
 type ByTokenType = Record<TokenType, number>;
@@ -911,14 +1015,81 @@ interface RosterRow {
   costUsd: number | null;
   pricedCostUsd: number;
   unpricedEvents: number;
-  usdPerMTok: number | null;
+  priceCards: UsagePriceCardWire[];
   color: string;
 }
 
-function formatUsdPerMTok(n: number | null): string {
-  if (n === null) return "—";
-  if (n > 0 && n < 0.01) return "<$0.01";
-  return `$${n.toFixed(2)}`;
+function rateOf(card: UsagePriceCardWire, type: TokenType): number {
+  switch (type) {
+    case "cacheRead":
+      return card.cacheReadPerMTok;
+    case "input":
+      return card.inputPerMTok;
+    case "cacheWrite":
+      return card.cacheWritePerMTok;
+    case "output":
+      return card.outputPerMTok;
+  }
+}
+
+// Whole dollars stay whole ($10); otherwise at least cents, and a third
+// decimal only when the rate needs it ($0.025).
+function formatRate(n: number): string {
+  if (Number.isInteger(n)) return `$${n}`;
+  if (n < 0.001) return "<$0.001";
+  const cents = n.toFixed(2);
+  return Number(cents) === n ? `$${cents}` : `$${Number(n.toFixed(3))}`;
+}
+
+function priceSourceLabel(card: UsagePriceCardWire): string {
+  if (card.source === "override") return "Override";
+  if (card.source === "bundled") return "Anthropic list";
+  return card.provider.charAt(0).toUpperCase() + card.provider.slice(1);
+}
+
+function priceSourceLabels(cards: readonly UsagePriceCardWire[]): string[] {
+  return [...new Set(cards.map(priceSourceLabel))];
+}
+
+// `pricedUsd` is what the server charged for this type. Cache writes priced
+// partly at the 1-hour rate differ from tokens × the 5-minute rate, so the
+// 1-hour rate is named and the server's figure shown.
+function costMath(
+  type: TokenType,
+  tokens: number,
+  card: UsagePriceCardWire,
+  pricedUsd?: number,
+): string {
+  const label = TOKEN_TYPES.find((t) => t.id === type)?.label ?? type;
+  const rate = rateOf(card, type);
+  const atBaseRate = (tokens * rate) / 1_000_000;
+  const rate1h = card.cacheWrite1hPerMTok;
+  const hasHourWrites =
+    type === "cacheWrite" &&
+    rate1h !== undefined &&
+    rate1h !== rate &&
+    pricedUsd !== undefined &&
+    Math.abs(pricedUsd - atBaseRate) > 1e-9;
+  const rates = hasHourWrites
+    ? `${formatRate(rate)}/1M (1-hour: ${formatRate(rate1h)}/1M)`
+    : `${formatRate(rate)}/1M`;
+  return `${label}: ${formatTokens(tokens)} × ${rates} = ${formatCostUsd(hasHourWrites ? pricedUsd : atBaseRate)}`;
+}
+
+function PriceCardLine({ card }: { card: UsagePriceCardWire }) {
+  return (
+    <span className="usage-price-card">
+      {TOKEN_TYPES.map(({ id, short }) => (
+        <span key={id} className="usage-price-rate">
+          <span className="usage-typedot" data-type={id} />
+          <span className="usage-price-value">{formatRate(rateOf(card, id))}</span> {short}
+        </span>
+      ))}
+      <span className="usage-price-source" data-source={card.source}>
+        {priceSourceLabel(card)}
+      </span>
+    </span>
+  );
 }
 
 function sumByType(values: ByTokenType): number {
@@ -932,17 +1103,33 @@ function TokenTypeBar({
   values,
   max,
   format,
+  titleOf,
+  showLabel = false,
 }: {
   label: string;
   values: ByTokenType;
-  max: number;
+  max?: number;
   format: (value: number) => string;
+  titleOf?: (type: TokenType) => string;
+  showLabel?: boolean;
 }) {
   const total = sumByType(values);
-  const width = max > 0 ? Math.max(total > 0 ? 1 : 0, (total / max) * 100) : 0;
+  const scale = max ?? total;
+  const width = scale > 0 ? Math.max(total > 0 ? 1 : 0, (total / scale) * 100) : 0;
   return (
-    <span className="usage-typebar" role="img" aria-label={`${label}: ${format(total)}`}>
-      <span className="usage-typebar-label">{label}</span>
+    <span
+      className="usage-typebar"
+      data-labeled={showLabel || undefined}
+      role="img"
+      aria-label={`${label}: ${format(total)}${
+        total > 0
+          ? ` (${TOKEN_TYPES.filter(({ id }) => values[id] > 0)
+              .map(({ id, label: typeLabel }) => `${typeLabel} ${format(values[id])}`)
+              .join(", ")})`
+          : ""
+      }`}
+    >
+      {showLabel && <span className="usage-typebar-label">{label}</span>}
       <span className="usage-typebar-track">
         <span className="usage-typebar-fill" style={{ width: `${width}%` }}>
           {TOKEN_TYPES.map(({ id, label: typeLabel }) =>
@@ -952,7 +1139,7 @@ function TokenTypeBar({
                 className="usage-typebar-seg"
                 data-type={id}
                 style={{ flexGrow: values[id] }}
-                title={`${typeLabel}: ${format(values[id])}`}
+                title={titleOf ? titleOf(id) : `${typeLabel}: ${format(values[id])}`}
               />
             ) : null,
           )}
@@ -988,7 +1175,7 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
 
   const rows = useMemo((): RosterRow[] => {
     if (!summary) return [];
-    const palette = assignSeriesColors(new Map(summary.groups.map((g) => [g.key, freshTokens(g)])));
+    const palette = assignSeriesColors(new Map(summary.groups.map((g) => [g.key, allTokens(g)])));
     return summary.groups
       .map((g) => {
         const tokensByType: ByTokenType = {
@@ -1008,7 +1195,7 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
           costUsd: g.costUsd,
           pricedCostUsd: g.pricedCostUsd,
           unpricedEvents: g.unpricedEvents,
-          usdPerMTok: g.costUsd !== null && tokens > 0 ? (g.costUsd / tokens) * 1_000_000 : null,
+          priceCards: g.priceCards,
           color: palette.colorOf(g.key),
         };
       })
@@ -1050,9 +1237,6 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                     <th>Turns</th>
                     <th>Tokens</th>
                     <th>Cost</th>
-                    <th title="Cost per million tokens handled, cache reads included">
-                      $ / 1M tokens
-                    </th>
                     <th>Cache hit</th>
                     <th>Tokens vs cost</th>
                   </tr>
@@ -1065,6 +1249,20 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                           <span className="usage-sdot" style={{ background: r.color }} />
                           {formatModelLabel(r.key)}
                         </span>
+                        {r.priceCards.map((card) => (
+                          <PriceCardLine
+                            key={[
+                              card.provider,
+                              card.source,
+                              ...TOKEN_TYPES.map(({ id }) => rateOf(card, id)),
+                              card.cacheWrite1hPerMTok,
+                            ].join("|")}
+                            card={card}
+                          />
+                        ))}
+                        {r.priceCards.length === 0 && (
+                          <span className="usage-price-card usage-price-none">No price</span>
+                        )}
                       </td>
                       <td>{r.turns.toLocaleString()}</td>
                       <td>{formatTokens(r.tokens)}</td>
@@ -1076,7 +1274,6 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                           r.turns - r.unpricedEvents,
                         )}
                       </td>
-                      <td>{formatUsdPerMTok(r.usdPerMTok)}</td>
                       <td>{formatCacheHit(r.cacheHitRatio)}</td>
                       <td className="usage-typebar-cell">
                         <TokenTypeBar
@@ -1084,12 +1281,25 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                           values={r.tokensByType}
                           max={maxTokens}
                           format={formatTokens}
+                          showLabel
                         />
                         <TokenTypeBar
                           label="Cost"
                           values={r.costByType}
                           max={maxCost}
                           format={formatCostUsd}
+                          showLabel
+                          titleOf={
+                            r.priceCards.length === 1 && r.unpricedEvents === 0
+                              ? (type) =>
+                                  costMath(
+                                    type,
+                                    r.tokensByType[type],
+                                    r.priceCards[0] as UsagePriceCardWire,
+                                    r.costByType[type],
+                                  )
+                              : undefined
+                          }
                         />
                       </td>
                     </tr>
@@ -1100,10 +1310,11 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
             <div className="usage-legend">
               {TOKEN_TYPES.map(({ id, label }) => (
                 <span className="usage-legend-item" key={id}>
-                  <span className="usage-sdot usage-typebar-seg" data-type={id} />
+                  <span className="usage-typedot" data-type={id} />
                   {label}
                 </span>
               ))}
+              <span className="usage-legend-item">Rates per 1M tokens</span>
             </div>
           </>
         ) : (
@@ -1117,6 +1328,7 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
 }
 
 function FlowSection({ range }: { range: UsageWindow }) {
+  const [metric, setMetric] = useState<ChartMetric>("tokens");
   const [rows, setRows] = useState<UsageBreakdownResponseWire | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1140,6 +1352,8 @@ function FlowSection({ range }: { range: UsageWindow }) {
     };
   }, [range]);
 
+  const unpriced = metric === "cost" ? countUnpriced(rows) : 0;
+
   return (
     <section className="surface-region usage-flow-region">
       <div className="surface-region-head">
@@ -1150,6 +1364,7 @@ function FlowSection({ range }: { range: UsageWindow }) {
           <span className="surface-region-title">Source → model flow</span>
         </span>
         <span className="surface-region-spacer" />
+        <MetricToggle value={metric} onChange={setMetric} />
         <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
@@ -1162,11 +1377,20 @@ function FlowSection({ range }: { range: UsageWindow }) {
           <div className="page-sub" style={{ padding: "20px 0" }}>
             Loading…
           </div>
-        ) : rows?.some((row) => freshTokens(row) > 0) ? (
-          <FlowChart rows={rows} />
+        ) : rows?.some((row) => metricValue(row, metric) > 0) ? (
+          <>
+            <FlowChart rows={rows} metric={metric} />
+            {unpriced > 0 && <UnpricedNote count={unpriced} />}
+          </>
         ) : (
           <div className="usage-stack-empty">
-            <span className="page-sub">No source to model flow recorded in this window yet.</span>
+            <span className="page-sub">
+              {emptyMetricText(
+                metric,
+                unpriced,
+                "No source to model flow recorded in this window yet.",
+              )}
+            </span>
           </div>
         )}
       </div>
@@ -1175,21 +1399,22 @@ function FlowSection({ range }: { range: UsageWindow }) {
 }
 
 // Ribbons wear their model's color, the same palette as the page's other charts.
-function FlowChart({ rows }: { rows: UsageBreakdownResponseWire }) {
+function FlowChart({ rows, metric }: { rows: UsageBreakdownResponseWire; metric: ChartMetric }) {
+  const format = formatMetric(metric);
   const links = rows
     .map((row) => ({
       source: row.key,
       model: row.split,
-      tokens: freshTokens(row),
+      value: metricValue(row, metric),
     }))
-    .filter((row) => row.tokens > 0)
-    .sort((a, b) => b.tokens - a.tokens);
+    .filter((row) => row.value > 0)
+    .sort((a, b) => b.value - a.value);
   const modelTotals = new Map<string, number>();
   for (const row of rows) {
-    modelTotals.set(row.split, (modelTotals.get(row.split) ?? 0) + freshTokens(row));
+    modelTotals.set(row.split, (modelTotals.get(row.split) ?? 0) + allTokens(row));
   }
   const palette = assignSeriesColors(modelTotals);
-  const total = links.reduce((sum, row) => sum + row.tokens, 0);
+  const total = links.reduce((sum, row) => sum + row.value, 0);
   const sources = [...new Set(links.map((row) => row.source))].sort((a, b) => a.localeCompare(b));
   const models = [...new Set(links.map((row) => row.model))].sort((a, b) => a.localeCompare(b));
   const width = 960;
@@ -1200,7 +1425,7 @@ function FlowChart({ rows }: { rows: UsageBreakdownResponseWire }) {
     const idx = Math.max(0, items.indexOf(item));
     return 36 + (idx + 0.5) * ((height - 72) / Math.max(items.length, 1));
   };
-  const maxTokens = Math.max(...links.map((row) => row.tokens), 1);
+  const maxValue = Math.max(...links.map((row) => row.value), Number.MIN_VALUE);
 
   return (
     <div className="usage-flow-wrap">
@@ -1208,13 +1433,13 @@ function FlowChart({ rows }: { rows: UsageBreakdownResponseWire }) {
         className="usage-flow-svg"
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label="Source to model token flow"
+        aria-label={`Source to model ${metric === "tokens" ? "token" : "cost"} flow`}
       >
         {links.map((link) => {
           const y1 = yFor(sources, link.source);
           const y2 = yFor(models, link.model);
-          const strokeWidth = Math.max(3, (link.tokens / maxTokens) * 22);
-          const share = total > 0 ? Math.round((link.tokens / total) * 100) : 0;
+          const strokeWidth = Math.max(3, (link.value / maxValue) * 22);
+          const share = total > 0 ? Math.round((link.value / total) * 100) : 0;
           const color = palette.colorOf(link.model);
           return (
             <path
@@ -1226,8 +1451,7 @@ function FlowChart({ rows }: { rows: UsageBreakdownResponseWire }) {
               strokeWidth={strokeWidth}
             >
               <title>
-                {link.source} → {formatModelLabel(link.model)} · {formatTokens(link.tokens)} ·{" "}
-                {share}%
+                {link.source} → {formatModelLabel(link.model)} · {format(link.value)} · {share}%
               </title>
             </path>
           );
@@ -1330,7 +1554,7 @@ function JobsSection({ range }: { range: UsageWindow }) {
   }, [range]);
 
   const maxCost = Math.max(0, ...(jobs ?? []).map((job) => job.costUsd));
-  const unpriced = (jobs ?? []).reduce((sum, job) => sum + job.unpricedEvents, 0);
+  const unpriced = countUnpriced(jobs);
 
   return (
     <section className="surface-region usage-jobs-region">
@@ -1411,12 +1635,7 @@ function JobsSection({ range }: { range: UsageWindow }) {
                 </tbody>
               </table>
             </div>
-            {unpriced > 0 && (
-              <p className="page-sub usage-jobs-note">
-                * Lower bound: {unpriced.toLocaleString()} {unpriced === 1 ? "turn" : "turns"} ran
-                on a model with no known price.
-              </p>
-            )}
+            {unpriced > 0 && <UnpricedNote count={unpriced} />}
           </>
         ) : (
           <div className="usage-stack-empty">
@@ -1428,88 +1647,27 @@ function JobsSection({ range }: { range: UsageWindow }) {
   );
 }
 
-// A recurring workflow/rib job cheap enough that a smaller model would likely
-// serve it: repeated enough to judge (>= RIGHT_SIZE_MIN_RUNS) and under the
-// per-run token bar (< RIGHT_SIZE_MAX_AVG_TOKENS). Returns null when nothing
-// qualifies — the strip renders only for a real finding, and nothing otherwise.
-interface RightSizeFinding {
-  job: string;
-  runs: number;
-  avgTokensPerRun: number;
-}
-
-function findRightSizeCandidate(jobs: readonly UsageJobsRowWire[]): RightSizeFinding | null {
-  const finding = jobs
-    .filter((j) => j.avgTokensPerRun < RIGHT_SIZE_MAX_AVG_TOKENS && j.runs >= RIGHT_SIZE_MIN_RUNS)
-    .sort((a, b) => b.runs - a.runs)[0];
-  if (!finding) return null;
-  return { job: finding.key, runs: finding.runs, avgTokensPerRun: finding.avgTokensPerRun };
-}
-
-// A single recommendation, above Pulse and only when one exists: metrics are
-// facts (they live in Pulse); a recommendation is a to-do, so it leads the tab
-// as an action and simply doesn't render when there's nothing to act on. The
-// same right-size finding the Jobs sub-view can drill into — the action jumps
-// there. Dismissable for the current window.
-function RecommendationStrip({
-  range,
-  onViewJobs,
-}: {
-  range: UsageWindow;
-  onViewJobs: () => void;
-}) {
-  const [finding, setFinding] = useState<RightSizeFinding | null>(null);
-  const [dismissed, setDismissed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    // A new window is a fresh evaluation: drop any stale finding and un-dismiss.
-    setFinding(null);
-    setDismissed(false);
-    getUsageJobs({ window: range })
-      .then((jobs) => {
-        if (!cancelled) setFinding(findRightSizeCandidate(jobs));
-      })
-      .catch(() => {
-        // A nudge that can't load its data stays silent — the same jobs feed the
-        // Jobs sub-view, where a load error surfaces to the operator.
-        if (!cancelled) setFinding(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [range]);
-
-  if (!finding || dismissed) return null;
-
-  const avg = formatTokens(Math.round(finding.avgTokensPerRun));
-  return (
-    <section className="usage-reco" aria-label="Recommendation">
-      <span className="usage-reco-glyph" aria-hidden="true">
-        ◈
-      </span>
-      <div className="usage-reco-body">
-        <div className="usage-reco-eyebrow">Recommendation · right-size a job</div>
-        <div className="usage-reco-head">
-          <span className="usage-mono">{finding.job}</span> could run on a smaller, cheaper model
-        </div>
-        <div className="usage-reco-why">
-          Ran {finding.runs}× · ~{avg} tok/run — well under the bar where a lighter model keeps up.
-        </div>
-      </div>
-      <button type="button" className="usage-reco-act" onClick={onViewJobs}>
-        View in Jobs →
-      </button>
-      <button
-        type="button"
-        className="usage-reco-dismiss"
-        aria-label="Dismiss recommendation"
-        onClick={() => setDismissed(true)}
-      >
-        ×
-      </button>
-    </section>
-  );
+function ledgerCostMath(ev: UsageEventRowWire): string | undefined {
+  const card = ev.priceCard;
+  if (!card) return undefined;
+  const tokens: ByTokenType = {
+    cacheRead: ev.cacheReadTokens ?? 0,
+    input: ev.inputTokens,
+    cacheWrite: ev.cacheWriteTokens ?? 0,
+    output: ev.outputTokens,
+  };
+  const othersUsd =
+    (tokens.cacheRead * card.cacheReadPerMTok +
+      tokens.input * card.inputPerMTok +
+      tokens.output * card.outputPerMTok) /
+    1_000_000;
+  const cacheWriteUsd = ev.costUsd !== null ? Math.max(0, ev.costUsd - othersUsd) : undefined;
+  return [
+    ...TOKEN_TYPES.filter(({ id }) => tokens[id] > 0).map(({ id }) =>
+      costMath(id, tokens[id], card, id === "cacheWrite" ? cacheWriteUsd : undefined),
+    ),
+    priceSourceLabel(card),
+  ].join("\n");
 }
 
 // Statuses beyond these mapped spellings (the read side accepts any string)
@@ -1684,9 +1842,14 @@ function LedgerSection({ range }: { range: UsageWindow }) {
                     <th>Time</th>
                     <th>Source</th>
                     <th>Model</th>
-                    <th>↑ In</th>
-                    <th>↓ Out</th>
-                    <th>Cache</th>
+                    {TOKEN_TYPES.map(({ id, label }) => (
+                      <th key={id}>
+                        <span className="usage-th-type">
+                          <span className="usage-typedot" data-type={id} />
+                          {label}
+                        </span>
+                      </th>
+                    ))}
                     <th>Cost</th>
                     <th>Dur</th>
                     <th>Status</th>
@@ -1705,10 +1868,13 @@ function LedgerSection({ range }: { range: UsageWindow }) {
                             formatModelLabel(ev.model)}
                         </span>
                       </td>
-                      <td>↑ {formatTokens(ev.inputTokens + (ev.cacheWriteTokens ?? 0))}</td>
-                      <td>↓ {formatTokens(ev.outputTokens)}</td>
                       <td>{ev.cacheReadTokens != null ? formatTokens(ev.cacheReadTokens) : "—"}</td>
-                      <td>{formatCostUsd(ev.costUsd)}</td>
+                      <td>{formatTokens(ev.inputTokens)}</td>
+                      <td>
+                        {ev.cacheWriteTokens != null ? formatTokens(ev.cacheWriteTokens) : "—"}
+                      </td>
+                      <td>{formatTokens(ev.outputTokens)}</td>
+                      <td title={ledgerCostMath(ev)}>{formatCostUsd(ev.costUsd)}</td>
                       <td>{ev.durationMs != null ? formatEventDuration(ev.durationMs) : "—"}</td>
                       <td>
                         <span className={`status-dot ${statusDotClass(ev.status)}`} />

@@ -16,10 +16,12 @@ import {
   type ModelPrice,
   type ModelPrices,
   type PricedTokenCounts,
-  resolveModelPrice,
+  type ResolvedModelPrice,
+  resolveModelPriceWithSource,
   type UsageBreakdownRowWire,
   type UsageEventRowWire,
   type UsageJobsRowWire,
+  type UsagePriceCardWire,
   type UsagePricedTotalsWire,
   type UsagePulseMinuteWire,
   type UsagePulseSnapshotWire,
@@ -278,13 +280,13 @@ interface MinuteRow extends Omit<TotalsRow, "events"> {
   minuteIso: string;
 }
 
-type Pricer = (provider: string, model: string) => ModelPrice | undefined;
+type Pricer = (provider: string, model: string) => ResolvedModelPrice | undefined;
 
 function createPricer(
   overrides: ModelPrices | undefined,
   catalogs: Record<string, ModelPrices> | undefined,
 ): Pricer {
-  const cache = new Map<string, Map<string, ModelPrice | undefined>>();
+  const cache = new Map<string, Map<string, ResolvedModelPrice | undefined>>();
   return (provider, model) => {
     let byModel = cache.get(provider);
     if (!byModel) {
@@ -292,7 +294,7 @@ function createPricer(
       cache.set(provider, byModel);
     }
     if (!byModel.has(model)) {
-      byModel.set(model, resolveModelPrice(model, overrides, catalogs?.[provider]));
+      byModel.set(model, resolveModelPriceWithSource(model, overrides, catalogs?.[provider]));
     }
     return byModel.get(model);
   };
@@ -303,6 +305,35 @@ interface PricedAccumulator extends TotalsRow {
   costUsd: number;
   costByType: CostByTokenType;
   unpricedEvents: number;
+  priceCards: Map<string, UsagePriceCardWire>;
+}
+
+function priceCardOf(provider: string, resolved: ResolvedModelPrice): UsagePriceCardWire {
+  const { price, source } = resolved;
+  return {
+    provider,
+    source,
+    inputPerMTok: price.inputPerMTok,
+    cacheReadPerMTok: price.cacheReadPerMTok,
+    cacheWritePerMTok: price.cacheWritePerMTok,
+    ...(price.cacheWrite1hPerMTok !== undefined
+      ? { cacheWrite1hPerMTok: price.cacheWrite1hPerMTok }
+      : {}),
+    outputPerMTok: price.outputPerMTok,
+  };
+}
+
+function addPriceCard(into: Map<string, UsagePriceCardWire>, card: UsagePriceCardWire): void {
+  const id = [
+    card.provider,
+    card.source,
+    card.inputPerMTok,
+    card.cacheReadPerMTok,
+    card.cacheWritePerMTok,
+    card.cacheWrite1hPerMTok ?? "",
+    card.outputPerMTok,
+  ].join("\u0000");
+  if (!into.has(id)) into.set(id, card);
 }
 
 function addCostByType(into: CostByTokenType, from: CostByTokenType): void {
@@ -323,6 +354,7 @@ function emptyAccumulator(): PricedAccumulator {
     costUsd: 0,
     costByType: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
     unpricedEvents: 0,
+    priceCards: new Map(),
   };
 }
 
@@ -333,10 +365,11 @@ function accumulate(acc: PricedAccumulator, row: ModelTotalsRow, pricer: Pricer)
   acc.cacheReadTokens += row.cacheReadTokens;
   acc.cacheWriteTokens += row.cacheWriteTokens;
   acc.cacheReadReported += row.cacheReadReported;
-  const price = pricer(row.provider, row.model);
-  if (price) {
-    acc.costUsd += estimateCostUsd(row, price);
-    addCostByType(acc.costByType, costByTokenTypeUsd(row, price));
+  const resolved = pricer(row.provider, row.model);
+  if (resolved) {
+    acc.costUsd += estimateCostUsd(row, resolved.price);
+    addCostByType(acc.costByType, costByTokenTypeUsd(row, resolved.price));
+    addPriceCard(acc.priceCards, priceCardOf(row.provider, resolved));
   } else {
     acc.unpricedEvents += row.events;
   }
@@ -591,8 +624,12 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
       const groups = [...foldByKey(groupRows, (row) => row.key, pricer)].map(([key, acc]) => ({
         key,
         ...finishAccumulator(acc),
+        priceCards: [...acc.priceCards.values()],
       }));
-      return { totals: finishAccumulator(totals), groups };
+      return {
+        totals: { ...finishAccumulator(totals), priceCards: [...totals.priceCards.values()] },
+        groups,
+      };
     },
     series(args) {
       const column = GROUP_BY_COLUMN[args.groupBy];
@@ -767,12 +804,16 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
         .all(...params) as UsageEventRow[];
       return rows.map((row): UsageEventRowWire => {
         const event = rowToEvent(row);
-        const price = pricer(event.provider, event.model);
+        const resolved = pricer(event.provider, event.model);
         return {
           ...event,
-          costUsd: price
-            ? estimateCostUsd({ ...event, cacheWrite1hTokens: row.cache_write_1h_tokens }, price)
+          costUsd: resolved
+            ? estimateCostUsd(
+                { ...event, cacheWrite1hTokens: row.cache_write_1h_tokens },
+                resolved.price,
+              )
             : null,
+          priceCard: resolved ? priceCardOf(event.provider, resolved) : null,
         };
       });
     },
@@ -803,8 +844,8 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
       return { composedTotals, minuteSeries };
     },
     price(provider, model, tokens) {
-      const price = pricerForQuery()(provider, model);
-      return price ? estimateCostUsd(tokens, price) : undefined;
+      const resolved = pricerForQuery()(provider, model);
+      return resolved ? estimateCostUsd(tokens, resolved.price) : undefined;
     },
   };
 }

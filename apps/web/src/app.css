@@ -10984,11 +10984,14 @@ a.cvb-card-title::after {
 }
 .usage-typebar {
   display: grid;
-  grid-template-columns: 44px 1fr;
+  grid-template-columns: 1fr;
   align-items: center;
   gap: 8px;
   font-size: 11px;
   color: var(--muted);
+}
+.usage-typebar[data-labeled] {
+  grid-template-columns: 44px 1fr;
 }
 .usage-typebar + .usage-typebar {
   margin-top: 4px;
@@ -11010,10 +11013,52 @@ a.cvb-card-title::after {
   height: 100%;
   flex-basis: 0;
 }
-.usage-typebar-seg[data-type="cacheRead"] { background: color-mix(in srgb, var(--accent) 50%, var(--card, transparent)); }
-.usage-typebar-seg[data-type="input"] { background: var(--accent); }
-.usage-typebar-seg[data-type="cacheWrite"] { background: var(--orange); }
-.usage-typebar-seg[data-type="output"] { background: var(--green); }
+.usage-typedot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: none;
+}
+:is(.usage-typebar-seg, .usage-typedot)[data-type="cacheRead"] { background: color-mix(in srgb, var(--accent) 50%, var(--card, transparent)); }
+:is(.usage-typebar-seg, .usage-typedot)[data-type="input"] { background: var(--accent); }
+:is(.usage-typebar-seg, .usage-typedot)[data-type="cacheWrite"] { background: var(--orange); }
+:is(.usage-typebar-seg, .usage-typedot)[data-type="output"] { background: var(--green); }
+.usage-price-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.usage-price-rate {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.usage-price-value {
+  color: var(--fg);
+}
+.usage-price-source {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--border) 35%, transparent);
+}
+.usage-price-source[data-source="override"] {
+  background: color-mix(in srgb, var(--orange) 22%, transparent);
+  color: var(--fg);
+}
+.usage-price-none {
+  color: var(--orange);
+}
+.usage-th-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 
 .usage-job-cost {
   display: grid;
@@ -11024,101 +11069,6 @@ a.cvb-card-title::after {
 .usage-jobs-note {
   margin-top: 10px;
   font-size: 12px;
-}
-
-/* Recommendation strip — a single accent-toned banner above Pulse, shown only
-   when a real right-size finding exists. An action, not a metric; the metrics
-   live in Pulse. */
-.usage-reco {
-  position: relative;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 15px;
-  margin-bottom: 12px;
-  padding: 13px 40px 13px 17px;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent) 8%, var(--card));
-  overflow: hidden;
-}
-.usage-reco::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: var(--accent);
-}
-.usage-reco-glyph {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  flex: none;
-  border-radius: 9px;
-  font-size: 16px;
-  color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-.usage-reco-body {
-  min-width: 0;
-}
-.usage-reco-eyebrow {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--accent);
-  margin-bottom: 3px;
-}
-.usage-reco-head {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--fg-strong);
-}
-.usage-reco-head .usage-mono {
-  font-weight: 700;
-}
-.usage-reco-why {
-  font-size: 12.5px;
-  color: var(--muted);
-  margin-top: 3px;
-}
-.usage-reco-act {
-  flex: none;
-  cursor: pointer;
-  font-size: 12.5px;
-  font-weight: 600;
-  padding: 8px 13px;
-  border-radius: 8px;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 46%, transparent);
-}
-.usage-reco-act:hover {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-}
-.usage-reco-dismiss {
-  position: absolute;
-  top: 8px;
-  right: 10px;
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
-  border: none;
-  background: transparent;
-  color: var(--dim);
-  cursor: pointer;
-  font-size: 15px;
-  line-height: 1;
-  border-radius: 5px;
-}
-.usage-reco-dismiss:hover {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
 }
 
 .usage-ledger-filters {

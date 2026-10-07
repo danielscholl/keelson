@@ -39,6 +39,7 @@ let getUsageSummaryImpl: typeof realApi.getUsageSummary = async () => ({
     pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
     unpricedEvents: 0,
     cacheHitRatio: null,
+    priceCards: [],
   },
   groups: [],
 });
@@ -81,6 +82,7 @@ function ledgerEvent(id: number): UsageEventRowWire {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     costUsd: null,
+    priceCard: null,
     durationMs: 1000,
     status: "ok",
     conversationId: null,
@@ -777,6 +779,7 @@ describe("Usage page", () => {
         pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 8,
         cacheHitRatio: null,
+        priceCards: [],
       };
       getUsageSummaryImpl = async () => ({
         totals,
@@ -806,7 +809,7 @@ describe("Usage page", () => {
     },
   );
 
-  test("leads the overview with a recommendation strip for a right-size finding", async () => {
+  test("pulse counts every token and the roster flags a model with no price", async () => {
     getUsageSummaryImpl = async () => ({
       totals: {
         events: 1,
@@ -819,6 +822,7 @@ describe("Usage page", () => {
         pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 1,
         cacheHitRatio: 250 / 1250,
+        priceCards: [],
       },
       groups: [
         {
@@ -833,45 +837,22 @@ describe("Usage page", () => {
           pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: 250 / 1250,
+          priceCards: [],
         },
       ],
     });
-    // runs >= 3 and avg < 500 → a real finding, so the strip fires.
-    getUsageJobsImpl = async () => [
-      {
-        key: "standing-lens",
-        runs: 5,
-        totalTokens: 1500,
-        avgTokensPerRun: 300,
-        p95TokensPerRun: 400,
-        totalCostUsd: null,
-        pricedTotalCostUsd: 0,
-        costUsdPerRun: null,
-        pricedEvents: 0,
-        unpricedEvents: 0,
-        cacheHitRatio: null,
-        eventsWithoutRun: 0,
-        mainModel: null,
-        mainModelCostShare: null,
-      },
-    ];
     getUsageEventsImpl = async () => [];
 
     await act(async () => {
       await renderUsagePage();
     });
 
-    // The strip leads the tab: it names the job and states the evidence.
-    await waitFor(() => expect(screen.getByText(/right-size a job/)).toBeDefined());
-    expect(screen.getByText("standing-lens")).toBeDefined();
-    expect(screen.getByText(/Ran 5×/)).toBeDefined();
-    expect(screen.getByText(/well under the bar/)).toBeDefined();
-
-    // Pulse still owns the facts (cache-read share) — no longer duplicated below.
-    expect(screen.getByText("250 of 1.3k input")).toBeDefined();
+    await waitFor(() => expect(screen.getByText("250 of 1.3k input")).toBeDefined());
+    expect(
+      screen.getByLabelText("Tokens: 1.4k (Cache read 250, Input 1k, Output 200)"),
+    ).toBeDefined();
     expect(screen.getAllByText("20%").length).toBeGreaterThan(0);
     // An unpriced model nulls the window's cost; the tile says so and counts it.
-    expect(screen.getByText("Cost")).toBeDefined();
     expect(screen.getAllByText("unpriced").length).toBeGreaterThan(0);
     expect(screen.getByText("1 unpriced turn")).toBeDefined();
 
@@ -880,6 +861,7 @@ describe("Usage page", () => {
     await waitFor(() => expect(screen.getByText("claude-sonnet-5")).toBeDefined());
     expect(screen.getByText("20%")).toBeDefined();
     expect(screen.getByText("unpriced (1)")).toBeDefined();
+    expect(screen.getByText("No price")).toBeDefined();
 
     getUsageSummaryImpl = async () => ({
       totals: {
@@ -893,6 +875,7 @@ describe("Usage page", () => {
         pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 0,
         cacheHitRatio: null,
+        priceCards: [],
       },
       groups: [],
     });
@@ -900,103 +883,7 @@ describe("Usage page", () => {
     getUsageEventsImpl = async () => [];
   });
 
-  test("hides the recommendation strip when no job qualifies", async () => {
-    getUsageSummaryImpl = async () => ({
-      totals: {
-        events: 1,
-        inputTokens: 1000,
-        outputTokens: 200,
-        cacheReadTokens: 250,
-        cacheWriteTokens: 0,
-        costUsd: null,
-        pricedCostUsd: 0,
-        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
-        unpricedEvents: 1,
-        cacheHitRatio: 250 / 1250,
-      },
-      groups: [],
-    });
-    // Cheap (avg < 500) but only 2 runs — under the run bar, so not a finding.
-    getUsageJobsImpl = async () => [
-      {
-        key: "smoke-test",
-        runs: 2,
-        totalTokens: 52,
-        avgTokensPerRun: 26,
-        p95TokensPerRun: 26,
-        totalCostUsd: null,
-        pricedTotalCostUsd: 0,
-        costUsdPerRun: null,
-        pricedEvents: 0,
-        unpricedEvents: 0,
-        cacheHitRatio: null,
-        eventsWithoutRun: 0,
-        mainModel: null,
-        mainModelCostShare: null,
-      },
-    ];
-    getUsageEventsImpl = async () => [];
-
-    await act(async () => {
-      await renderUsagePage();
-    });
-
-    // Pulse leads; nothing renders where the strip would be.
-    await waitFor(() => expect(screen.getByText("Pulse")).toBeDefined());
-    expect(screen.queryByText(/right-size a job/)).toBeNull();
-    expect(screen.queryByRole("button", { name: /View in Jobs/ })).toBeNull();
-
-    getUsageSummaryImpl = async () => ({
-      totals: {
-        events: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-        costUsd: null,
-        pricedCostUsd: 0,
-        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
-        unpricedEvents: 0,
-        cacheHitRatio: null,
-      },
-      groups: [],
-    });
-    getUsageJobsImpl = async () => [];
-  });
-
-  test("recommendation strip action opens the Jobs sub-view", async () => {
-    getUsageJobsImpl = async () => [
-      {
-        key: "repo-triage",
-        runs: 6,
-        totalTokens: 1920,
-        avgTokensPerRun: 320,
-        p95TokensPerRun: 400,
-        totalCostUsd: null,
-        pricedTotalCostUsd: 0,
-        costUsdPerRun: null,
-        pricedEvents: 0,
-        unpricedEvents: 0,
-        cacheHitRatio: null,
-        eventsWithoutRun: 0,
-        mainModel: null,
-        mainModelCostShare: null,
-      },
-    ];
-
-    await act(async () => {
-      await renderUsagePage();
-    });
-
-    fireEvent.click(await screen.findByRole("button", { name: /View in Jobs/ }));
-
-    await waitFor(() => expect(screen.getByText("Cost each")).toBeDefined());
-    expect(screen.getAllByText("repo-triage").length).toBeGreaterThan(0);
-
-    getUsageJobsImpl = async () => [];
-  });
-
-  test("the model roster ranks by cost and shows cost per million tokens", async () => {
+  test("the model roster ranks by cost and shows each model's price card", async () => {
     const original = getUsageSummaryImpl;
     const row = (
       key: string,
@@ -1016,6 +903,7 @@ describe("Usage page", () => {
         pricedCostByTypeUsd: cost,
         unpricedEvents: 0,
         cacheHitRatio: null,
+        priceCards: [],
       };
     };
     const cheap = row(
@@ -1023,11 +911,23 @@ describe("Usage page", () => {
       { input: 0, cacheRead: 300_000_000, cacheWrite: 12_000_000, output: 8_000_000 },
       { input: 0, cacheRead: 30, cacheWrite: 30, output: 20 },
     );
-    const pricey = row(
-      "gpt-6-astra",
-      { input: 0, cacheRead: 24_000_000, cacheWrite: 3_000_000, output: 1_000_000 },
-      { input: 0, cacheRead: 24, cacheWrite: 38, output: 28 },
-    );
+    const pricey = {
+      ...row(
+        "gpt-6-astra",
+        { input: 0, cacheRead: 24_000_000, cacheWrite: 3_000_000, output: 1_000_000 },
+        { input: 0, cacheRead: 24, cacheWrite: 37.5, output: 50 },
+      ),
+      priceCards: [
+        {
+          provider: "copilot",
+          source: "catalog" as const,
+          inputPerMTok: 10,
+          cacheReadPerMTok: 1,
+          cacheWritePerMTok: 12.5,
+          outputPerMTok: 50,
+        },
+      ],
+    };
     getUsageSummaryImpl = async (query) => ({
       totals: { ...cheap, key: undefined } as never,
       groups: query.groupBy === "model" ? [cheap, pricey] : [],
@@ -1038,14 +938,17 @@ describe("Usage page", () => {
     });
 
     fireEvent.click(screen.getByLabelText("Models"));
-    await waitFor(() => expect(screen.getByText("$3.21")).toBeDefined());
-    expect(screen.getByText("$0.25")).toBeDefined();
+    await waitFor(() => expect(screen.getByText("$12.50")).toBeDefined());
+    expect(screen.getByText("Copilot")).toBeDefined();
+    expect(screen.getByText("No price")).toBeDefined();
+    expect(screen.queryByText("$ / 1M tokens")).toBeNull();
     const rows = screen.getAllByRole("row").map((r) => r.textContent ?? "");
     const astra = rows.findIndex((t) => t.includes("gpt-6-astra"));
     const sol = rows.findIndex((t) => t.includes("gpt-6.1-sol"));
     expect(astra).toBeGreaterThan(-1);
     expect(astra).toBeLessThan(sol);
-    expect(screen.getAllByTitle("Cache write: $38.00").length).toBe(1);
+    expect(screen.getByTitle("Cache write: 3M × $12.50/1M = $37.50")).toBeDefined();
+    expect(screen.getByTitle("Cache write: $30.00")).toBeDefined();
     getUsageSummaryImpl = original;
   });
 
@@ -1064,6 +967,7 @@ describe("Usage page", () => {
               pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
               unpricedEvents: 1,
               cacheHitRatio: null,
+              priceCards: [],
             },
             groups: [
               {
@@ -1078,6 +982,7 @@ describe("Usage page", () => {
                 pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
                 unpricedEvents: 1,
                 cacheHitRatio: null,
+                priceCards: [],
               },
             ],
           }
@@ -1093,6 +998,7 @@ describe("Usage page", () => {
               pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
               unpricedEvents: 1,
               cacheHitRatio: null,
+              priceCards: [],
             },
             groups: [],
           };
@@ -1139,10 +1045,88 @@ describe("Usage page", () => {
         pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 0,
         cacheHitRatio: null,
+        priceCards: [],
       },
       groups: [],
     });
     getUsageEventsImpl = async () => [];
+  });
+
+  test("the ledger splits tokens by type and shows the cost math on hover", async () => {
+    const original = getUsageEventsImpl;
+    getUsageEventsImpl = async () => [
+      {
+        ...ledgerEvent(1),
+        model: "gpt-6-astra",
+        inputTokens: 1_000,
+        outputTokens: 2_000,
+        cacheReadTokens: 40_000,
+        cacheWriteTokens: 4_000,
+        costUsd: 0.2,
+        priceCard: {
+          provider: "copilot",
+          source: "catalog",
+          inputPerMTok: 10,
+          cacheReadPerMTok: 1,
+          cacheWritePerMTok: 12.5,
+          outputPerMTok: 50,
+        },
+      },
+    ];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+    fireEvent.click(screen.getByLabelText("Ledger"));
+
+    await waitFor(() => expect(screen.getByText("40k")).toBeDefined());
+    expect(screen.getByRole("columnheader", { name: "Cache write" })).toBeDefined();
+    expect(screen.getByText("$0.2000").getAttribute("title")).toBe(
+      [
+        "Cache read: 40k × $1/1M = $0.0400",
+        "Input: 1k × $10/1M = $0.0100",
+        "Cache write: 4k × $12.50/1M = $0.0500",
+        "Output: 2k × $50/1M = $0.1000",
+        "Copilot",
+      ].join("\n"),
+    );
+    getUsageEventsImpl = original;
+  });
+
+  test("the ledger's cost math names the 1-hour cache write rate when it was charged", async () => {
+    const original = getUsageEventsImpl;
+    getUsageEventsImpl = async () => [
+      {
+        ...ledgerEvent(1),
+        model: "claude-fable-5-1",
+        provider: "claude",
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 4_000,
+        costUsd: 0.07,
+        priceCard: {
+          provider: "claude",
+          source: "bundled",
+          inputPerMTok: 10,
+          cacheReadPerMTok: 0.25,
+          cacheWritePerMTok: 12.5,
+          cacheWrite1hPerMTok: 20,
+          outputPerMTok: 50,
+        },
+      },
+    ];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+    fireEvent.click(screen.getByLabelText("Ledger"));
+
+    await waitFor(() => expect(screen.getByText("$0.0700")).toBeDefined());
+    expect(screen.getByText("$0.0700").getAttribute("title")).toBe(
+      ["Cache write: 4k × $12.50/1M (1-hour: $20/1M) = $0.0700", "Anthropic list"].join("\n"),
+    );
+    getUsageEventsImpl = original;
   });
 
   test("a full ledger page says it is the latest slice and pages on Show more", async () => {
@@ -1193,6 +1177,7 @@ describe("Usage page", () => {
         costUsd: null,
         unpricedEvents: 1,
         cacheHitRatio: null,
+        priceCards: [],
       },
       groups:
         query.groupBy === "model" && query.window === "30d"
@@ -1207,6 +1192,7 @@ describe("Usage page", () => {
                 costUsd: null,
                 unpricedEvents: 1,
                 cacheHitRatio: null,
+                priceCards: [],
               },
             ]
           : [],
@@ -1253,6 +1239,7 @@ describe("Usage page", () => {
           costUsd: null,
           unpricedEvents: 1,
           cacheHitRatio: null,
+          priceCards: [],
         },
         groups:
           query.groupBy === "model"
@@ -1267,6 +1254,7 @@ describe("Usage page", () => {
                   costUsd: null,
                   unpricedEvents: 1,
                   cacheHitRatio: null,
+                  priceCards: [],
                 },
               ]
             : [],
@@ -1313,6 +1301,7 @@ describe("Usage page", () => {
               pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
               unpricedEvents: 1,
               cacheHitRatio: null,
+              priceCards: [],
             },
             groups: [
               {
@@ -1327,6 +1316,7 @@ describe("Usage page", () => {
                 pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
                 unpricedEvents: 1,
                 cacheHitRatio: null,
+                priceCards: [],
               },
             ],
           }
@@ -1342,6 +1332,7 @@ describe("Usage page", () => {
               pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
               unpricedEvents: 1,
               cacheHitRatio: null,
+              priceCards: [],
             },
             groups: [],
           };
@@ -1384,6 +1375,7 @@ describe("Usage page", () => {
         pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 0,
         cacheHitRatio: null,
+        priceCards: [],
       },
       groups: [],
     });

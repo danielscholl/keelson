@@ -313,6 +313,7 @@ describe("fetchRunCostUsd", () => {
       cacheReadTokens: null,
       cacheWriteTokens: null,
       costUsd: 0.001,
+      priceCard: null,
       durationMs: null,
       status: "ok",
       conversationId: null,

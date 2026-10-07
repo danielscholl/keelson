@@ -41,7 +41,9 @@ export const WIRE_PROTOCOL_VERSION = "1.0" as const;
 // 0.13: cost by token type — new `pricedCostByTypeUsd` on usage totals/group/
 // series/breakdown rows; `eventsWithoutRun`, `mainModel`, and
 // `mainModelCostShare` on jobs rows.
-export const SCHEMA_VERSION = "0.13" as const;
+// 0.14: price cards — new `priceCards` on usage summary totals and group rows,
+// `priceCard` on event rows.
+export const SCHEMA_VERSION = "0.14" as const;
 
 // A peer (the server on /api/health + /api/config, or a client's bundle)
 // reports its SCHEMA_VERSION. Any difference from this build's value signals
