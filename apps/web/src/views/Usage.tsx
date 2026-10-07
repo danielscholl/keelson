@@ -1025,10 +1025,29 @@ function priceSourceLabels(cards: readonly UsagePriceCardWire[]): string[] {
   return [...new Set(cards.map(priceSourceLabel))];
 }
 
-function costMath(type: TokenType, tokens: number, card: UsagePriceCardWire): string {
+// `pricedUsd` is what the server charged for this type. Cache writes priced
+// partly at the 1-hour rate differ from tokens × the 5-minute rate, so the
+// 1-hour rate is named and the server's figure shown.
+function costMath(
+  type: TokenType,
+  tokens: number,
+  card: UsagePriceCardWire,
+  pricedUsd?: number,
+): string {
   const label = TOKEN_TYPES.find((t) => t.id === type)?.label ?? type;
   const rate = rateOf(card, type);
-  return `${label}: ${formatTokens(tokens)} × ${formatRate(rate)}/1M = ${formatCostUsd((tokens * rate) / 1_000_000)}`;
+  const atBaseRate = (tokens * rate) / 1_000_000;
+  const rate1h = card.cacheWrite1hPerMTok;
+  const hasHourWrites =
+    type === "cacheWrite" &&
+    rate1h !== undefined &&
+    rate1h !== rate &&
+    pricedUsd !== undefined &&
+    Math.abs(pricedUsd - atBaseRate) > 1e-9;
+  const rates = hasHourWrites
+    ? `${formatRate(rate)}/1M (1-hour: ${formatRate(rate1h)}/1M)`
+    : `${formatRate(rate)}/1M`;
+  return `${label}: ${formatTokens(tokens)} × ${rates} = ${formatCostUsd(hasHourWrites ? pricedUsd : atBaseRate)}`;
 }
 
 function PriceCardLine({ card }: { card: UsagePriceCardWire }) {
@@ -1237,6 +1256,7 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                                     type,
                                     r.tokensByType[type],
                                     r.priceCards[0] as UsagePriceCardWire,
+                                    r.costByType[type],
                                   )
                               : undefined
                           }
@@ -1590,9 +1610,15 @@ function ledgerCostMath(ev: UsageEventRowWire): string | undefined {
     cacheWrite: ev.cacheWriteTokens ?? 0,
     output: ev.outputTokens,
   };
+  const othersUsd =
+    (tokens.cacheRead * card.cacheReadPerMTok +
+      tokens.input * card.inputPerMTok +
+      tokens.output * card.outputPerMTok) /
+    1_000_000;
+  const cacheWriteUsd = ev.costUsd !== null ? Math.max(0, ev.costUsd - othersUsd) : undefined;
   return [
     ...TOKEN_TYPES.filter(({ id }) => tokens[id] > 0).map(({ id }) =>
-      costMath(id, tokens[id], card),
+      costMath(id, tokens[id], card, id === "cacheWrite" ? cacheWriteUsd : undefined),
     ),
     priceSourceLabel(card),
   ].join("\n");

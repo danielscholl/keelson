@@ -1091,6 +1091,42 @@ describe("Usage page", () => {
     getUsageEventsImpl = original;
   });
 
+  test("the ledger's cost math names the 1-hour cache write rate when it was charged", async () => {
+    const original = getUsageEventsImpl;
+    getUsageEventsImpl = async () => [
+      {
+        ...ledgerEvent(1),
+        model: "claude-fable-5-1",
+        provider: "claude",
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 4_000,
+        costUsd: 0.07,
+        priceCard: {
+          provider: "claude",
+          source: "bundled",
+          inputPerMTok: 10,
+          cacheReadPerMTok: 0.25,
+          cacheWritePerMTok: 12.5,
+          cacheWrite1hPerMTok: 20,
+          outputPerMTok: 50,
+        },
+      },
+    ];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+    fireEvent.click(screen.getByLabelText("Ledger"));
+
+    await waitFor(() => expect(screen.getByText("$0.0700")).toBeDefined());
+    expect(screen.getByText("$0.0700").getAttribute("title")).toBe(
+      ["Cache write: 4k × $12.50/1M (1-hour: $20/1M) = $0.0700", "Anthropic list"].join("\n"),
+    );
+    getUsageEventsImpl = original;
+  });
+
   test("a full ledger page says it is the latest slice and pages on Show more", async () => {
     const original = { summary: getUsageSummaryImpl, events: getUsageEventsImpl };
     const limits: Array<number | undefined> = [];
