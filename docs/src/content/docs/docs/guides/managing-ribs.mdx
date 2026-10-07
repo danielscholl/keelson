@@ -20,14 +20,14 @@ Any bun-installable source works:
 
 | Source form | Example |
 | --- | --- |
-| GitHub URL | `https://github.com/danielscholl/keelson-rib-chamber` |
+| GitHub URL | `https://github.com/danielscholl/keelson-rib-beads` |
 | GitHub shorthand | `github:you/keelson-rib-yours` |
 | Git URL | `git@github.com:you/keelson-rib-yours.git` |
 | npm package | `@keelson/rib-yours` |
 | Local path | `./keelson-rib-yours` |
 
 ```sh
-keelson rib add https://github.com/danielscholl/keelson-rib-chamber
+keelson rib add https://github.com/danielscholl/keelson-rib-beads
 ```
 
 A rib installed from a git source is pinned to that repository's newest release
@@ -35,7 +35,7 @@ tag, and the command reports which one it took. Pass `--ref <ref>` to install a
 branch or a commit instead, which is what rib development wants:
 
 ```sh
-keelson rib add https://github.com/danielscholl/keelson-rib-chamber --ref main
+keelson rib add https://github.com/danielscholl/keelson-rib-swarm --ref main
 ```
 
 Discovery happens once, at boot, so a rib installed while the server is running
@@ -69,7 +69,7 @@ Installed and active are distinct states. `KEELSON_RIBS` is the operator's
 filter between them, applied per process:
 
 ```sh
-KEELSON_RIBS=chamber keelson start    # activate only chamber
+KEELSON_RIBS=beads keelson start      # activate only beads
 keelson start                         # unset: activate everything discovered
 ```
 
@@ -94,9 +94,9 @@ advances it until you ask.
 ```sh
 keelson update                        # the harness and every rib, together
 keelson rib update                    # only the ribs
-keelson rib update chamber            # only one
+keelson rib update swarm              # only one
 keelson rib update --check            # report what is available, apply nothing
-keelson rib update chamber --to 0.48.0  # an exact version, including older ones
+keelson rib update swarm --to 0.24.0  # an exact version, including older ones
 ```
 
 Releases are read with `git ls-remote`, so resolution works on any git host, needs
@@ -125,7 +125,7 @@ only a line in the server log.
 ## Remove
 
 ```sh
-keelson rib remove chamber     # by rib id
+keelson rib remove swarm       # by rib id
 ```
 
 ## Related

@@ -221,9 +221,8 @@ One thing the pipeline never does is worth noticing before you move on: it never
 questions that plan. A single model wrote the contract every later phase trusts,
 and a straight line has nowhere to review it, so a wrong assumption gets
 implemented faithfully and validated against itself, green the whole way down.
-Catching that is a different shape of work, a panel of reviewers rather than a
-pipeline, and that kind of capability is exactly what a
-[rib](../../concepts/the-rib-model/) bolts onto the harness.
+Catching that takes a different shape of work, where every change gets a
+second reader, and that shape is where the rail goes after this page.
 
 The app itself is in your working tree, validated and committed. Run it:
 
@@ -265,10 +264,10 @@ test bench. From here you can take it further:
   to compare vendor against vendor instead of model against model.
 - **Rewrite the spec.** `spec.md` is a content-and-intent brief, not a
   wireframe. Describe your own app and the same pipeline builds it.
-- **Work the backlog.** Your clone ships `backlog.md`: six scoped
-  improvements to the app the run just built, written against the spec rather
-  than any one build, since yours differs from everyone else's. Hand one to a
-  chat session, or capture it as a run with the bundled
+- **Work the backlog.** Your clone ships `backlog.md`: scoped improvements
+  to the app the run just built, written against the spec rather than any one
+  build, since yours differs from everyone else's. Hand one to a chat session,
+  or capture it as a run with the bundled
   [plan-act-evaluate](../../workflows/plan-act-evaluate/) or
   [fix-issue](../../workflows/fix-issue/) workflows.
 - **Drive it by hand.** The same repo ships `.agents/skills/frontend-mix-*`
@@ -292,17 +291,15 @@ underneath this page.
 
 ## Where the rail continues
 
-This is the last stop on the harness rail, but not the end of the project.
-Two things ride out of this page: an app in your working tree with a
-[backlog](https://github.com/danielscholl/keelson-sample/blob/main/backlog.md)
-waiting on it, and an observation the pipeline could not act on, that no
-phase ever questioned the plan every later phase trusted.
+This is the last stop that needs the harness alone. It leaves you holding an
+observation the pipeline could not act on: one model wrote the plan, every
+later phase trusted it, and nothing in a straight line could split the work,
+run pieces side by side, or have a second agent read each change before it
+landed.
 
-Both are picked up by installable ribs, each with its own tutorial rail on
-the same project. The [Chamber rail](https://danielscholl.github.io/keelson-rib-chamber/tutorials/)
-convenes a review panel on this build's own plan and watches it catch what
-the straight line shipped, then puts agents in a coding room on your
-backlog. The [Squad rail](https://danielscholl.github.io/keelson-rib-squad/tutorials/)
-casts a persistent team from a scan of your clone and works the backlog
-with review gates and a memory that compounds across runs. The harness you
-just proved carries both; the ribs only add the crew.
+The next two stops build the same app again in that other shape. [Plan the
+backlog with beads](../plan-the-backlog/) turns the Cosmos build into a graph
+of small, dependent units of work, and [Run the software
+factory](../run-the-factory/) hands that graph to a swarm of agents that work
+it in dependency order, review every change, and merge it. Both add a
+[rib](../../concepts/the-rib-model/); the harness you just proved carries them.

@@ -54,6 +54,13 @@ body {
   background: rgba(255, 255, 255, 0.7);
 }
 
+/* app screenshots: one dark frame that reads against both docs themes */
+.sl-markdown-content figure.screenshot :is(img, svg) {
+  padding: 8px;
+  border-color: rgba(15, 27, 45, 0.6);
+  background: #0f1b2d;
+}
+
 .sl-markdown-content figure figcaption {
   margin-top: 10px;
   color: var(--sl-color-gray-3);

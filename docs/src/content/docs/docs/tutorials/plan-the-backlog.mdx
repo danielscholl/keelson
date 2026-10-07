@@ -1,0 +1,176 @@
+---
+title: Plan the backlog with beads
+description: Install the beads rib, seed the Cosmos build as eleven beads with real dependencies, and read the board that says what can start now.
+sidebar:
+  order: 6
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The pipeline at stop 5 had one plan and one order: explore, plan, build,
+integrate, check. That suits a model routing experiment, but it is not how a
+team builds software. A team keeps a backlog of small units of work, knows
+which ones wait on which, and starts whatever is ready. Two people can take two
+ready units at once; nobody starts the detail page before the API it calls
+exists.
+
+This stop gives the Cosmos build that shape. You seed it as a backlog of eleven
+**beads**, each one a unit of work with a description, acceptance criteria and
+its dependencies, and install the rib that shows the backlog as a live board.
+Nothing gets built yet. The point is the graph: once the work is a graph, the
+next stop can hand it to agents that work it the way a team would.
+
+<Aside type="note" title="Prerequisites">
+A running keelson server with a signed-in provider (stops 1 to 4), `git`, and
+the [beads](https://github.com/steveyegge/beads) CLI, `bd`, at 1.2 or later
+(`brew install beads`). You do not need stop 5's build: this leg starts from a
+fresh copy of the same template.
+</Aside>
+
+## Get a fresh copy
+
+Clone the sample into a new directory and drop its `origin` remote:
+
+```sh
+git clone https://github.com/danielscholl/keelson-sample cosmos-factory
+cd cosmos-factory
+git remote remove origin
+```
+
+The remote matters at the next stop. A swarm whose project has no `origin`
+reviews and merges each change locally, so the whole graph drains in one
+sitting. With `origin` it opens a draft pull request per change and waits for
+you to merge them instead.
+
+## Read the backlog
+
+The template carries the backlog as data, in `factory/backlog.json`. It is the
+whole Cosmos build from `spec.md`, cut into eleven beads:
+
+| Bead | Waits on | What it delivers |
+| --- | --- | --- |
+| Scaffold the Cosmos app | | Bun and TypeScript, the server, `bun test`, a health route |
+| Seed the catalog | Scaffold | The 12 objects with their canonical facts |
+| Store chills reactions | Scaffold | SQLite, one reaction per visitor per day, no race |
+| Lay down the design system | Scaffold | Art direction, tokens, and the shared header, footer and components |
+| Serve the catalog API | Catalog | List, filter, search, categories, object of the day |
+| Render every object as SVG | Catalog, design system | A distinct illustration per object: Saturn's rings, Jupiter's spot |
+| Serve the chills endpoint | Store, catalog API | `200` on a first reaction, a calm `429` on a repeat |
+| Build the landing and browse view | Catalog API, visuals | Hero, catalog cards, a filter that lives in the URL |
+| Build the object detail view | Chills endpoint, visuals | The object large, stats, facts, chills, keyboard navigation |
+| Polish for phones, keyboards and motion | Both views | 375px layouts, focus rings, contrast, reduced motion |
+| Prove the spec end to end | Polish | An acceptance test over every capability, and a README |
+
+Each bead's description fixes the decisions that writers would otherwise
+argue about (one stack, file names, the date the "object of the day" rolls
+over on), and each carries acceptance criteria a reviewer can check a diff
+against. The design system and the visuals beads exist because views built by
+different hands drift apart: with one art direction and one illustration set to
+build from, the landing and the detail page read as the same site. The
+dependencies are what make it a factory: after the scaffold, three beads can be
+built side by side, and so can the two views.
+
+## Seed the tracker
+
+`bd init` creates the tracker inside the repository, and `bd create --graph`
+files the whole plan in one transaction, dependencies included:
+
+```sh
+bd init --skip-agents --skip-hooks --non-interactive --prefix cosmos
+bd create --graph factory/backlog.json
+```
+
+```text
+Created 11 issues
+  acceptance -> cosmos-c5x
+  browse-ui -> cosmos-2lz
+  catalog -> cosmos-ag9
+  catalog-api -> cosmos-5vp
+  chills-api -> cosmos-tcv
+  design -> cosmos-gw4
+  detail-ui -> cosmos-aa8
+  polish -> cosmos-l1p
+  scaffold -> cosmos-68p
+  store -> cosmos-73i
+  visuals -> cosmos-6qy
+```
+
+Your ids will differ. Ask the tracker what can start:
+
+```sh
+bd ready
+```
+
+```text
+○ cosmos-68p P0 Scaffold the Cosmos app
+
+Ready: 1 issues with no active blockers
+```
+
+One bead out of eleven. `bd blocked` lists the other ten with what each one
+waits on. That ratio is the dependency graph doing its job: until the scaffold
+lands, there is nothing else a second pair of hands could safely start.
+
+## Install the beads rib
+
+The `bd` CLI is the tracker. The beads [rib](../../concepts/the-rib-model/)
+puts it inside keelson: a Beads tab with a live board for every registered
+project that carries a tracker, and tools that let an agent read the ready
+queue and update beads.
+
+```sh
+keelson rib add https://github.com/danielscholl/keelson-rib-beads
+keelson stop && keelson start
+keelson project add cosmos-factory "$(pwd)"
+```
+
+The rib finds trackers by project, so registering the clone is what puts it
+on the board. It sweeps every five minutes; to see the new tracker at once,
+ask Chat to "refresh the beads board". Open `http://127.0.0.1:7878`, choose
+**Beads**, and pick `cosmos-factory` in the tracker strip.
+
+<figure class="screenshot">
+  <img
+    src={`${import.meta.env.BASE_URL}assets/screenshots/beads-board-seeded.png`}
+    alt="The Beads tab in light mode with the seeded tracker. Next up names Scaffold the Cosmos app, ready at P0, and says it unlocks three beads now and seven more across four levels. In flight reads nothing is claimed. The backlog lists the scaffold, then the illustration bead waiting on the catalog and the design system, and Shipped reads 11 created this week."
+  />
+  <figcaption>
+    Figure 1. The seeded board (light UI). Next up is the one ready bead, ranked
+    by how much it unlocks; every other bead names what it waits on.
+  </figcaption>
+</figure>
+
+**Next up** is the board's pick: the ready bead whose close unblocks the most
+work, with what it unlocks. The backlog lists everything else by priority with
+the bead each one waits on. The board refreshes as the tracker changes, so
+leave this tab open: at the next stop it is how you watch the factory work.
+
+Try the tools from Chat as well. Ask "what can start now in cosmos-factory,
+and what does it unlock?" and the agent answers from `beads_ready` rather than
+from reading your files.
+
+## What you have
+
+A repository with a spec, a tracker holding the build as a dependency graph,
+and a board that says what can start now. Nothing in it has been built, and
+nothing needed a model to plan it: the plan is data you can read, edit, and
+seed again.
+
+Edit it before you run it if you like. Add a bead, change an acceptance
+criterion, or rewire a dependency in `factory/backlog.json`, then `bd init` a
+fresh clone and seed again. The factory at the next stop builds whatever graph
+you hand it.
+
+## Continue to
+
+[Run the software factory](../run-the-factory/): hand this board to a swarm
+that works it in dependency order, reviews every change, and merges it.
+
+## Related
+
+- [Managing ribs](../../guides/managing-ribs/): install, update, and remove
+  ribs like the one on this page.
+- [The rib model](../../concepts/the-rib-model/): how a rib adds a tab and
+  tools without changing the harness.
+- [keelson-rib-beads](https://github.com/danielscholl/keelson-rib-beads): the
+  board, its tools, and the `beads-work` workflow in full.
