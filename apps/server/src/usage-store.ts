@@ -13,6 +13,7 @@ import {
   freshTokens,
   type ModelPrice,
   type ModelPrices,
+  type PricedTokenCounts,
   resolveModelPrice,
   type UsageBreakdownRowWire,
   type UsageEventRowWire,
@@ -142,6 +143,9 @@ export interface UsageStore {
   // zero-filled per-minute series over the trailing 60 minutes. `now` is
   // injectable for tests; defaults to the wall clock.
   pulse(now?: Date): UsagePulseSnapshotWire;
+  // Prices counts that are not (yet) ledger rows with the same price resolution
+  // the queries use; undefined when the model has no price.
+  price(provider: string, model: string, tokens: PricedTokenCounts): number | undefined;
 }
 
 interface UsageEventRow {
@@ -731,6 +735,10 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
       }
 
       return { composedTotals, minuteSeries };
+    },
+    price(provider, model, tokens) {
+      const price = pricerForQuery()(provider, model);
+      return price ? estimateCostUsd(tokens, price) : undefined;
     },
   };
 }

@@ -41,6 +41,7 @@ import type {
   MutationLock,
   OpenChatSeed,
   OpHandle,
+  PricedTokenCounts,
   Project,
   RegisterOpRequest,
   RespondToRunResult,
@@ -956,6 +957,12 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     available,
     ctx,
     runAgentTurn,
+    ...(options.getUsageStore
+      ? {
+          priceTokens: (provider: string, model: string, tokens: PricedTokenCounts) =>
+            options.getUsageStore!()?.price(provider, model, tokens),
+        }
+      : {}),
     ...(snapshotManager ? { snapshotManager } : {}),
     ...(options.getRibCredential ? { getRibCredential: options.getRibCredential } : {}),
     ...(options.getRibDataDir ? { getRibDataDir: options.getRibDataDir } : {}),

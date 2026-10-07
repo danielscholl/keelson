@@ -1565,6 +1565,7 @@ function fakeUsageStore() {
     breakdown: () => [],
     jobs: () => [],
     events: () => [],
+    price: () => undefined,
     pulse: () => ({
       composedTotals: {
         events: 0,
@@ -1618,6 +1619,20 @@ describe("makeRibAgentTurn — usage capture", () => {
       inputTokens: 5,
       outputTokens: 7,
     });
+  });
+
+  it("records the request's usageRunId as the event's runId", async () => {
+    const { store, events } = fakeUsageStore();
+    const run = makeRun(
+      fakeProvider({
+        chunks: [{ type: "usage", usage: { inputTokens: 1, outputTokens: 1 } }, { type: "done" }],
+      }),
+      { getUsageStore: () => store },
+    );
+    await run("swarm", { prompt: "hi", usageRunId: "sfnd9" }).result;
+    await run("swarm", { prompt: "hi" }).result;
+    expect(events[0]?.runId).toBe("sfnd9");
+    expect(events[1]?.runId).toBeUndefined();
   });
 
   it("falls back to 'unknown' model when the request names none", async () => {

@@ -313,6 +313,7 @@ async function runTurn(
           : {}),
         status: result.status,
         ribId,
+        ...(req.usageRunId ? { runId: req.usageRunId } : {}),
       });
     }
     const publicProviderStopReason =

@@ -24,6 +24,7 @@ import type {
 import type { CommandCompletion, CommandInvokeResult, RibCommandDescriptor } from "./commands.ts";
 import type { RibDocsSource } from "./docs.ts";
 import type { MemoryTools } from "./memory.ts";
+import type { PricedTokenCounts } from "./model-prices.ts";
 import type { Policy } from "./policy.ts";
 import type { CloneProjectBody, CreateProjectBody, Project } from "./projects.ts";
 import type { ToolDefinition } from "./tools.ts";
@@ -131,6 +132,9 @@ export interface RibAgentTurnRequest {
   // Resume a prior turn by passing that turn's sessionId; providers without
   // sessionResume support ignore it.
   resumeSessionId?: string;
+  // Groups this turn's usage ledger row with the rib's other turns of the same
+  // run, so Usage › Jobs counts that run once (a swarm passes its id).
+  usageRunId?: string;
 }
 
 export interface RibAgentTurnResult {
@@ -381,6 +385,10 @@ export interface RibContext {
   // needs rooms but finds it absent fails closed. Provider routing is global,
   // not namespace-scoped. See RibAgentTurn for the stream/result contract.
   runAgentTurn?: (req: RibAgentTurnRequest) => RibAgentTurn;
+  // List-price USD for token counts a provider reported, priced the way the
+  // Usage page prices them; undefined when the model has no price. Optional so
+  // a rib built against an older harness shows tokens without a cost.
+  priceTokens?: (provider: string, model: string, tokens: PricedTokenCounts) => number | undefined;
   // Add a region (a snapshot-backed panel) to one of THIS rib's statically
   // declared surfaces at runtime, returning an unregister handle. Layout-only:
   // the rib still registers the region's snapshot key itself. The harness
