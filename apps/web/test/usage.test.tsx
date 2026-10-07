@@ -36,6 +36,7 @@ let getUsageSummaryImpl: typeof realApi.getUsageSummary = async () => ({
     cacheWriteTokens: 0,
     costUsd: null,
     pricedCostUsd: 0,
+    pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
     unpricedEvents: 0,
     cacheHitRatio: null,
   },
@@ -612,6 +613,7 @@ describe("Usage page", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 2,
           cacheHitRatio: null,
         },
@@ -629,7 +631,7 @@ describe("Usage page", () => {
     getUsageBreakdownImpl = async () => [];
   });
 
-  test("renders recurring jobs table and burn bars", async () => {
+  test("renders jobs with runs, cost each, and the main model", async () => {
     getUsageJobsImpl = async () => [
       {
         key: "smoke-test",
@@ -637,12 +639,15 @@ describe("Usage page", () => {
         totalTokens: 1200,
         avgTokensPerRun: 400,
         p95TokensPerRun: 700,
-        totalCostUsd: null,
-        pricedTotalCostUsd: 0,
-        costUsdPerRun: null,
-        pricedEvents: 0,
+        totalCostUsd: 6,
+        pricedTotalCostUsd: 6,
+        costUsdPerRun: 2,
+        pricedEvents: 9,
         unpricedEvents: 0,
         cacheHitRatio: null,
+        eventsWithoutRun: 0,
+        mainModel: "gpt-6.1-sol",
+        mainModelCostShare: 0.62,
       },
     ];
 
@@ -652,12 +657,45 @@ describe("Usage page", () => {
 
     fireEvent.click(screen.getByLabelText("Jobs"));
     await waitFor(() => expect(screen.getAllByText("smoke-test").length).toBeGreaterThan(0));
-    expect(screen.getByText("Avg tokens/run")).toBeDefined();
-    expect(screen.getByLabelText("Burn by job, 7d")).toBeDefined();
+    expect(screen.getByText("3 runs")).toBeDefined();
+    expect(screen.getByText("$6.00")).toBeDefined();
+    expect(screen.getByText("$2.00 / run")).toBeDefined();
+    expect(screen.getByText("gpt-6.1-sol · 62%")).toBeDefined();
+    expect(screen.queryByText("Avg tokens/run")).toBeNull();
     getUsageJobsImpl = async () => [];
   });
 
-  test("a fully unpriced job says how many rows kept its cost null", async () => {
+  test("a job whose turns carry no run id is measured per turn", async () => {
+    getUsageJobsImpl = async () => [
+      {
+        key: "rib:swarm",
+        runs: 4,
+        totalTokens: 1200,
+        avgTokensPerRun: 300,
+        p95TokensPerRun: 400,
+        totalCostUsd: 2,
+        pricedTotalCostUsd: 2,
+        costUsdPerRun: 0.5,
+        pricedEvents: 4,
+        unpricedEvents: 0,
+        cacheHitRatio: null,
+        eventsWithoutRun: 4,
+        mainModel: "gpt-6-sol",
+        mainModelCostShare: 1,
+      },
+    ];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    fireEvent.click(screen.getByLabelText("Jobs"));
+    await waitFor(() => expect(screen.getByText("4 turns")).toBeDefined());
+    expect(screen.getByText("$0.5000 / turn")).toBeDefined();
+    getUsageJobsImpl = async () => [];
+  });
+
+  test("a fully unpriced job is footnoted as a lower bound", async () => {
     getUsageJobsImpl = async () => [
       {
         key: "mixed-job",
@@ -671,6 +709,9 @@ describe("Usage page", () => {
         pricedEvents: 0,
         unpricedEvents: 2,
         cacheHitRatio: null,
+        eventsWithoutRun: 0,
+        mainModel: null,
+        mainModelCostShare: null,
       },
     ];
 
@@ -680,14 +721,15 @@ describe("Usage page", () => {
 
     fireEvent.click(screen.getByLabelText("Jobs"));
     await waitFor(() => expect(screen.getAllByText("mixed-job").length).toBeGreaterThan(0));
-    expect(screen.getAllByText("unpriced (2)")).toHaveLength(2);
+    expect(screen.getByText("$0.0000 *")).toBeDefined();
+    expect(screen.getByText(/2 turns ran on a model with no known price/)).toBeDefined();
     getUsageJobsImpl = async () => [];
   });
 
   test.each([
-    { pricedCostUsd: 155.03, perRun: "≥ $77.52 (8)", window: "≥ $155.03 (8)" },
-    { pricedCostUsd: 0, perRun: "≥ $0.0000 (8)", window: "≥ $0.0000 (8)" },
-  ])("mixed jobs preserve counts with $window", async ({ pricedCostUsd, perRun, window }) => {
+    { pricedCostUsd: 155.03, perRun: "$77.52 * / run", window: "$155.03 *" },
+    { pricedCostUsd: 0, perRun: "$0.0000 * / run", window: "$0.0000 *" },
+  ])("mixed jobs mark $window as a lower bound", async ({ pricedCostUsd, perRun, window }) => {
     getUsageJobsImpl = async () => [
       {
         key: "mixed-job",
@@ -701,6 +743,9 @@ describe("Usage page", () => {
         pricedEvents: 1,
         unpricedEvents: 8,
         cacheHitRatio: null,
+        eventsWithoutRun: 0,
+        mainModel: null,
+        mainModelCostShare: null,
       },
     ];
 
@@ -711,7 +756,7 @@ describe("Usage page", () => {
     fireEvent.click(screen.getByLabelText("Jobs"));
     await waitFor(() => expect(screen.getAllByText(window).length).toBeGreaterThan(0));
     expect(screen.getAllByText(perRun).length).toBeGreaterThan(0);
-    expect(screen.queryByText("unpriced (8)")).toBeNull();
+    expect(screen.getByText(/8 turns ran on a model with no known price/)).toBeDefined();
     getUsageJobsImpl = async () => [];
   });
 
@@ -729,6 +774,7 @@ describe("Usage page", () => {
         cacheWriteTokens: 0,
         costUsd: null,
         pricedCostUsd,
+        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 8,
         cacheHitRatio: null,
       };
@@ -752,6 +798,7 @@ describe("Usage page", () => {
           inputTokens: 0,
           outputTokens: 0,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 0,
         },
         groups: [],
@@ -769,6 +816,7 @@ describe("Usage page", () => {
         cacheWriteTokens: 0,
         costUsd: null,
         pricedCostUsd: 0,
+        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 1,
         cacheHitRatio: 250 / 1250,
       },
@@ -782,6 +830,7 @@ describe("Usage page", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: 250 / 1250,
         },
@@ -801,6 +850,9 @@ describe("Usage page", () => {
         pricedEvents: 0,
         unpricedEvents: 0,
         cacheHitRatio: null,
+        eventsWithoutRun: 0,
+        mainModel: null,
+        mainModelCostShare: null,
       },
     ];
     getUsageEventsImpl = async () => [];
@@ -838,6 +890,7 @@ describe("Usage page", () => {
         cacheWriteTokens: 0,
         costUsd: null,
         pricedCostUsd: 0,
+        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 0,
         cacheHitRatio: null,
       },
@@ -857,6 +910,7 @@ describe("Usage page", () => {
         cacheWriteTokens: 0,
         costUsd: null,
         pricedCostUsd: 0,
+        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 1,
         cacheHitRatio: 250 / 1250,
       },
@@ -876,6 +930,9 @@ describe("Usage page", () => {
         pricedEvents: 0,
         unpricedEvents: 0,
         cacheHitRatio: null,
+        eventsWithoutRun: 0,
+        mainModel: null,
+        mainModelCostShare: null,
       },
     ];
     getUsageEventsImpl = async () => [];
@@ -898,6 +955,7 @@ describe("Usage page", () => {
         cacheWriteTokens: 0,
         costUsd: null,
         pricedCostUsd: 0,
+        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 0,
         cacheHitRatio: null,
       },
@@ -920,6 +978,9 @@ describe("Usage page", () => {
         pricedEvents: 0,
         unpricedEvents: 0,
         cacheHitRatio: null,
+        eventsWithoutRun: 0,
+        mainModel: null,
+        mainModelCostShare: null,
       },
     ];
 
@@ -929,10 +990,63 @@ describe("Usage page", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /View in Jobs/ }));
 
-    await waitFor(() => expect(screen.getByText("Avg tokens/run")).toBeDefined());
+    await waitFor(() => expect(screen.getByText("Cost each")).toBeDefined());
     expect(screen.getAllByText("repo-triage").length).toBeGreaterThan(0);
 
     getUsageJobsImpl = async () => [];
+  });
+
+  test("the model roster ranks by cost and shows cost per million tokens", async () => {
+    const original = getUsageSummaryImpl;
+    const row = (
+      key: string,
+      tokens: { input: number; cacheRead: number; cacheWrite: number; output: number },
+      cost: { input: number; cacheRead: number; cacheWrite: number; output: number },
+    ) => {
+      const priced = cost.input + cost.cacheRead + cost.cacheWrite + cost.output;
+      return {
+        key,
+        events: 10,
+        inputTokens: tokens.input,
+        outputTokens: tokens.output,
+        cacheReadTokens: tokens.cacheRead,
+        cacheWriteTokens: tokens.cacheWrite,
+        costUsd: priced,
+        pricedCostUsd: priced,
+        pricedCostByTypeUsd: cost,
+        unpricedEvents: 0,
+        cacheHitRatio: null,
+      };
+    };
+    const cheap = row(
+      "gpt-6.1-sol",
+      { input: 0, cacheRead: 300_000_000, cacheWrite: 12_000_000, output: 8_000_000 },
+      { input: 0, cacheRead: 30, cacheWrite: 30, output: 20 },
+    );
+    const pricey = row(
+      "gpt-6-astra",
+      { input: 0, cacheRead: 24_000_000, cacheWrite: 3_000_000, output: 1_000_000 },
+      { input: 0, cacheRead: 24, cacheWrite: 38, output: 28 },
+    );
+    getUsageSummaryImpl = async (query) => ({
+      totals: { ...cheap, key: undefined } as never,
+      groups: query.groupBy === "model" ? [cheap, pricey] : [],
+    });
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    fireEvent.click(screen.getByLabelText("Models"));
+    await waitFor(() => expect(screen.getByText("$3.21")).toBeDefined());
+    expect(screen.getByText("$0.25")).toBeDefined();
+    const rows = screen.getAllByRole("row").map((r) => r.textContent ?? "");
+    const astra = rows.findIndex((t) => t.includes("gpt-6-astra"));
+    const sol = rows.findIndex((t) => t.includes("gpt-6.1-sol"));
+    expect(astra).toBeGreaterThan(-1);
+    expect(astra).toBeLessThan(sol);
+    expect(screen.getAllByTitle("Cache write: $38.00").length).toBe(1);
+    getUsageSummaryImpl = original;
   });
 
   test("labels auto model rows as unresolved", async () => {
@@ -947,6 +1061,7 @@ describe("Usage page", () => {
               cacheWriteTokens: 0,
               costUsd: null,
               pricedCostUsd: 0,
+              pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
               unpricedEvents: 1,
               cacheHitRatio: null,
             },
@@ -960,6 +1075,7 @@ describe("Usage page", () => {
                 cacheWriteTokens: 0,
                 costUsd: null,
                 pricedCostUsd: 0,
+                pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
                 unpricedEvents: 1,
                 cacheHitRatio: null,
               },
@@ -974,6 +1090,7 @@ describe("Usage page", () => {
               cacheWriteTokens: 0,
               costUsd: null,
               pricedCostUsd: 0,
+              pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
               unpricedEvents: 1,
               cacheHitRatio: null,
             },
@@ -1019,6 +1136,7 @@ describe("Usage page", () => {
         cacheWriteTokens: 0,
         costUsd: null,
         pricedCostUsd: 0,
+        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 0,
         cacheHitRatio: null,
       },
@@ -1192,6 +1310,7 @@ describe("Usage page", () => {
               cacheWriteTokens: 0,
               costUsd: null,
               pricedCostUsd: 0,
+              pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
               unpricedEvents: 1,
               cacheHitRatio: null,
             },
@@ -1205,6 +1324,7 @@ describe("Usage page", () => {
                 cacheWriteTokens: 0,
                 costUsd: null,
                 pricedCostUsd: 0,
+                pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
                 unpricedEvents: 1,
                 cacheHitRatio: null,
               },
@@ -1219,6 +1339,7 @@ describe("Usage page", () => {
               cacheWriteTokens: 0,
               costUsd: null,
               pricedCostUsd: 0,
+              pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
               unpricedEvents: 1,
               cacheHitRatio: null,
             },
@@ -1260,6 +1381,7 @@ describe("Usage page", () => {
         cacheWriteTokens: 0,
         costUsd: null,
         pricedCostUsd: 0,
+        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 0,
         cacheHitRatio: null,
       },

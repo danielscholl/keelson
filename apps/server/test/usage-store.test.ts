@@ -318,6 +318,7 @@ describe("SQLite UsageStore", () => {
         cacheWriteTokens: 1,
         costUsd: null,
         pricedCostUsd: 0,
+        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 2,
         cacheHitRatio: 2 / 16,
       });
@@ -331,6 +332,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 1,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: 2 / 13,
         },
@@ -343,6 +345,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -441,6 +444,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 2,
           cacheHitRatio: null,
         },
@@ -454,6 +458,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -520,6 +525,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -533,6 +539,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -546,6 +553,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -597,6 +605,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -610,6 +619,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 1,
           cacheHitRatio: null,
         },
@@ -623,6 +633,7 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
           costUsd: null,
           pricedCostUsd: 0,
+          pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
           unpricedEvents: 2,
           cacheHitRatio: null,
         },
@@ -724,6 +735,9 @@ describe("SQLite UsageStore", () => {
           pricedEvents: 0,
           unpricedEvents: 3,
           cacheHitRatio: null,
+          eventsWithoutRun: 0,
+          mainModel: "gpt-5",
+          mainModelCostShare: null,
         },
       ]);
     });
@@ -939,6 +953,63 @@ describe("SQLite UsageStore", () => {
       ]);
     });
 
+    test("splits priced cost by token type, leaving unpriced events out", () => {
+      store.record({ source: "chat", provider: "claude", model: "claude-sonnet-5", ...SONNET });
+      store.record({
+        source: "chat",
+        provider: "codex",
+        model: "gpt-5",
+        inputTokens: 5,
+        outputTokens: 5,
+      });
+      const { totals } = store.summary({ groupBy: "model" });
+      const parts = totals.pricedCostByTypeUsd;
+      expect(parts.input).toBeCloseTo(0.002, 9);
+      expect(parts.output).toBeCloseTo(0.005, 9);
+      expect(parts.cacheRead).toBeCloseTo(0.0004, 9);
+      expect(parts.cacheWrite).toBeCloseTo(0.00025, 9);
+      expect(parts.input + parts.cacheRead + parts.cacheWrite + parts.output).toBeCloseTo(
+        totals.pricedCostUsd,
+        9,
+      );
+    });
+
+    test("a job names the model that incurred most of its cost and counts turns recorded without a run", () => {
+      store.record({
+        source: "rib",
+        provider: "claude",
+        model: "claude-sonnet-5",
+        ribId: "swarm",
+        ...SONNET,
+      });
+      store.record({
+        source: "rib",
+        provider: "claude",
+        model: "claude-haiku-4-5",
+        ribId: "swarm",
+        ...HAIKU,
+      });
+      store.record({
+        source: "rib",
+        provider: "claude",
+        model: "claude-haiku-4-5",
+        ribId: "swarm",
+        runId: "swarm-1",
+        ...HAIKU,
+      });
+      const [job] = store.jobs();
+      expect(job).toMatchObject({
+        key: "rib:swarm",
+        runs: 3,
+        eventsWithoutRun: 2,
+        mainModel: "claude-haiku-4-5",
+      });
+      expect(job?.mainModelCostShare).toBeCloseTo(
+        (2 * HAIKU_COST) / (2 * HAIKU_COST + SONNET_COST),
+        9,
+      );
+    });
+
     test("a job with one unpriced run reports null cost on both cost fields, with the priced part as a floor", () => {
       store.record({
         source: "workflow",
@@ -1019,6 +1090,7 @@ describe("SQLite UsageStore", () => {
         events: 3,
         costUsd: null,
         pricedCostUsd: 0,
+        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 1,
       });
     });
@@ -1248,6 +1320,7 @@ describe("SQLite UsageStore", () => {
         events: 0,
         costUsd: 0,
         pricedCostUsd: 0,
+        pricedCostByTypeUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         unpricedEvents: 0,
         cacheHitRatio: null,
       });
