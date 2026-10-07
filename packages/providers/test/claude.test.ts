@@ -1165,6 +1165,42 @@ describe("ClaudeProvider — error paths", () => {
   });
 });
 
+describe("ClaudeProvider — assistant error detail", () => {
+  it("keeps the API's message when the SDK error code is unknown", async () => {
+    const sdk = makeMockSdk({
+      scenario: async (push) => {
+        await push({
+          type: "assistant",
+          error: "unknown",
+          message: {
+            content: [
+              {
+                type: "text",
+                text: "API Error: 400 Claude Code 2.1.220 does not support this model; version 2.1.251 or newer is required.",
+              },
+            ],
+          },
+          uuid: "a1",
+          session_id: "sess-id",
+        });
+      },
+    });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const collected: MessageChunk[] = [];
+    try {
+      for await (const c of provider.sendQuery("hi", "/tmp")) collected.push(c);
+    } catch {}
+
+    const first = collected[0] as { type: string; message: string };
+    expect(first.type).toBe("error");
+    expect(first.message).toContain("version 2.1.251 or newer is required");
+  });
+});
+
 describe("ClaudeProvider — abort", () => {
   it("returns immediately and skips SDK load when signal is pre-aborted", async () => {
     const sdk = makeMockSdk({ scenario: pushSuccess });
