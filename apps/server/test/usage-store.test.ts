@@ -1289,6 +1289,20 @@ describe("SQLite UsageStore", () => {
       expect(afterRestart.get("gemini-3.7-flash")).toBeCloseTo(3, 6);
     });
 
+    test("1-hour cache writes on a ledger row price at the 1-hour rate", () => {
+      store.record({
+        source: "rib",
+        provider: "claude",
+        model: "claude-fable-5-1",
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheWriteTokens: 1_000_000,
+        cacheWrite1hTokens: 1_000_000,
+      });
+      expect(store.summary({ groupBy: "model" }).totals.costUsd).toBeCloseTo(20, 6);
+      expect(store.events()[0]?.costUsd).toBeCloseTo(20, 6);
+    });
+
     test("price() resolves unrecorded counts the way the ledger queries do", () => {
       const priced = createUsageStore(db, {
         catalogPrices: () => ({

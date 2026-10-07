@@ -399,6 +399,13 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 21,
+    description: "record 1-hour cache writes so they price at their own rate",
+    up: (db) => {
+      db.exec("ALTER TABLE usage_events ADD COLUMN cache_write_1h_tokens INTEGER;");
+    },
+  },
 ];
 
 // The lowest version this build can apply. A database stamped below it was

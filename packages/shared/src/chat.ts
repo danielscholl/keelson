@@ -76,6 +76,9 @@ export const tokenUsageSchema = z
     outputTokens: z.number().int().nonnegative(),
     cacheReadInputTokens: z.number().int().nonnegative().optional(),
     cacheCreationInputTokens: z.number().int().nonnegative().optional(),
+    // The part of cacheCreationInputTokens written to the 1-hour cache, which
+    // bills at a higher rate than the 5-minute default.
+    cacheCreation1hInputTokens: z.number().int().nonnegative().optional(),
     contextTokens: z.number().int().nonnegative().optional(),
     contextWindow: z.number().int().positive().optional(),
   })
@@ -102,6 +105,8 @@ export function coerceTokenUsage(u: unknown): TokenUsage | undefined {
   if (cacheRead !== undefined) out.cacheReadInputTokens = cacheRead;
   const cacheCreation = count(rec.cacheCreationInputTokens);
   if (cacheCreation !== undefined) out.cacheCreationInputTokens = cacheCreation;
+  const cacheCreation1h = count(rec.cacheCreation1hInputTokens);
+  if (cacheCreation1h !== undefined) out.cacheCreation1hInputTokens = cacheCreation1h;
   const contextTokens = count(rec.contextTokens);
   if (contextTokens !== undefined) out.contextTokens = contextTokens;
   const contextWindow = count(rec.contextWindow);

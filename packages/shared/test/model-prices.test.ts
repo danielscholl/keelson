@@ -122,6 +122,26 @@ describe("estimateCostUsd", () => {
       ),
     ).toBeCloseTo(0.007, 10);
   });
+
+  test("1-hour cache writes price at their own rate, else at the 5-minute rate", () => {
+    const tokens = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheWriteTokens: 1_000_000,
+      cacheWrite1hTokens: 400_000,
+    };
+    const fable = resolveModelPrice("claude-fable-5-1");
+    expect(fable?.cacheWrite1hPerMTok).toBe(20);
+    // 600k at $12.50 + 400k at $20
+    expect(estimateCostUsd(tokens, fable!)).toBeCloseTo(15.5, 10);
+    const noHourRate = {
+      inputPerMTok: 2,
+      outputPerMTok: 10,
+      cacheReadPerMTok: 0.1,
+      cacheWritePerMTok: 2.5,
+    };
+    expect(estimateCostUsd(tokens, noHourRate)).toBeCloseTo(2.5, 10);
+  });
 });
 
 describe("cacheHitRatio", () => {

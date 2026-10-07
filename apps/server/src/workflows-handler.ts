@@ -4161,6 +4161,9 @@ function recordNodeUsage(args: {
     ...(usage.cacheCreationInputTokens !== undefined
       ? { cacheWriteTokens: usage.cacheCreationInputTokens }
       : {}),
+    ...(usage.cacheCreation1hInputTokens !== undefined
+      ? { cacheWrite1hTokens: usage.cacheCreation1hInputTokens }
+      : {}),
     ...(durationMs !== null && Number.isFinite(durationMs) ? { durationMs } : {}),
     // Node statuses fold onto the ledger's turn vocabulary so one query
     // never meets two spellings ('succeeded' vs 'ok') of the same state.

@@ -15,6 +15,8 @@ export const modelPriceSchema = z
     outputPerMTok: z.number().nonnegative(),
     cacheReadPerMTok: z.number().nonnegative(),
     cacheWritePerMTok: z.number().nonnegative(),
+    // 1-hour cache writes; absent prices them at cacheWritePerMTok.
+    cacheWrite1hPerMTok: z.number().nonnegative().optional(),
   })
   .strict();
 export type ModelPrice = z.infer<typeof modelPriceSchema>;
@@ -22,18 +24,25 @@ export type ModelPrice = z.infer<typeof modelPriceSchema>;
 export const modelPricesSchema = z.record(z.string().min(1), modelPriceSchema);
 export type ModelPrices = z.infer<typeof modelPricesSchema>;
 
+// Anthropic bills a 1-hour cache write at twice the base input rate.
 function price(
   inputPerMTok: number,
   outputPerMTok: number,
   cacheReadPerMTok: number,
   cacheWritePerMTok: number,
 ): ModelPrice {
-  return { inputPerMTok, outputPerMTok, cacheReadPerMTok, cacheWritePerMTok };
+  return {
+    inputPerMTok,
+    outputPerMTok,
+    cacheReadPerMTok,
+    cacheWritePerMTok,
+    cacheWrite1hPerMTok: inputPerMTok * 2,
+  };
 }
 
 // Anthropic first-party API list prices (platform.claude.com/docs/en/about-claude/pricing).
-// Cache write is the 5-minute TTL rate; the ledger does not record which TTL a
-// turn used, so the cheaper, default tier is the one priced.
+// Cache write is the 5-minute TTL rate; writes a provider reports as 1-hour
+// price at cacheWrite1hPerMTok.
 export const BUNDLED_MODEL_PRICES: Readonly<Record<string, ModelPrice>> = Object.freeze({
   "claude-fable-5-1": price(10, 50, 0.25, 12.5),
   "claude-fable-5": price(10, 50, 1, 12.5),
@@ -95,16 +104,21 @@ export interface PricedTokenCounts {
   outputTokens: number;
   cacheReadTokens?: number | null;
   cacheWriteTokens?: number | null;
+  // The part of cacheWriteTokens written to the 1-hour cache.
+  cacheWrite1hTokens?: number | null;
 }
 
 // Cache columns the provider never reported contribute nothing: the cost of
 // what was measured is still true, and null stays "not reported", not zero.
 export function estimateCostUsd(tokens: PricedTokenCounts, p: ModelPrice): number {
+  const writes = tokens.cacheWriteTokens ?? 0;
+  const writes1h = Math.min(tokens.cacheWrite1hTokens ?? 0, writes);
   return (
     (tokens.inputTokens * p.inputPerMTok +
       tokens.outputTokens * p.outputPerMTok +
       (tokens.cacheReadTokens ?? 0) * p.cacheReadPerMTok +
-      (tokens.cacheWriteTokens ?? 0) * p.cacheWritePerMTok) /
+      (writes - writes1h) * p.cacheWritePerMTok +
+      writes1h * (p.cacheWrite1hPerMTok ?? p.cacheWritePerMTok)) /
     1_000_000
   );
 }

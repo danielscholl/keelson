@@ -311,6 +311,9 @@ async function runTurn(
         ...(turnUsage.cacheCreationInputTokens !== undefined
           ? { cacheWriteTokens: turnUsage.cacheCreationInputTokens }
           : {}),
+        ...(turnUsage.cacheCreation1hInputTokens !== undefined
+          ? { cacheWrite1hTokens: turnUsage.cacheCreation1hInputTokens }
+          : {}),
         status: result.status,
         ribId,
         ...(req.usageRunId ? { runId: req.usageRunId } : {}),

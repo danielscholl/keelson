@@ -30,7 +30,7 @@ describe("migrations", () => {
         version: number;
       }>
     ).map((r) => r.version);
-    expect(versions).toEqual([12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    expect(versions).toEqual([12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
 
     expect(tableNames(db)).toContain("conversations");
     expect(tableNames(db)).toContain("memories");
@@ -61,6 +61,7 @@ describe("migrations", () => {
     db.exec("CREATE TABLE schema_version (version INTEGER PRIMARY KEY);");
     db.exec("CREATE TABLE workflow_runs (id TEXT PRIMARY KEY, worktree_path TEXT);");
     db.exec("CREATE TABLE workflow_node_outputs (run_id TEXT, node_id TEXT);");
+    db.exec("CREATE TABLE usage_events (id INTEGER PRIMARY KEY);");
     for (let v = 1; v <= 12; v += 1) {
       db.prepare("INSERT INTO schema_version(version) VALUES (?)").run(v);
     }
@@ -74,7 +75,7 @@ describe("migrations", () => {
     }>;
     expect(nodeColumns.map((column) => column.name)).toContain("approval_json");
     expect(db.query("SELECT MAX(version) AS v FROM schema_version").get() as { v: number }).toEqual(
-      { v: 20 },
+      { v: 21 },
     );
     db.close();
   });
@@ -101,7 +102,7 @@ describe("migrations", () => {
 
     expect(tableNames(db)).toEqual(before);
     expect(db.query("SELECT count(*) AS c FROM schema_version").get() as { c: number }).toEqual({
-      c: 9,
+      c: 10,
     });
     db.close();
   });
@@ -113,6 +114,7 @@ describe("migrations", () => {
       INSERT INTO schema_version VALUES (13);
       CREATE TABLE workflow_runs (id TEXT PRIMARY KEY, worktree_path TEXT);
       CREATE TABLE workflow_node_outputs (run_id TEXT, node_id TEXT);
+      CREATE TABLE usage_events (id INTEGER PRIMARY KEY);
       INSERT INTO workflow_runs VALUES ('existing-run', NULL);
       INSERT INTO workflow_runs VALUES ('retained-worktree', '/repo/.worktrees/retained');
     `);

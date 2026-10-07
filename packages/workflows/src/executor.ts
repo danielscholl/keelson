@@ -130,6 +130,7 @@ export interface NodeTokenUsage {
   outputTokens: number;
   cacheReadInputTokens?: number;
   cacheCreationInputTokens?: number;
+  cacheCreation1hInputTokens?: number;
   contextTokens?: number;
   contextWindow?: number;
 }
