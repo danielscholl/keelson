@@ -3,7 +3,6 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import {
-  freshTokens,
   USAGE_PULSE_SNAPSHOT_KEY,
   type UsageBreakdownResponseWire,
   type UsageEventRowWire,
@@ -94,7 +93,7 @@ export interface SeriesPalette {
   colorOf: (key: string) => string;
 }
 
-// Every chart derives its palette from per-model fresh-token totals over the
+// Every chart derives its palette from per-model token totals over the
 // same window, so a model wears one color across the page. Named slots go in
 // alphabetical order so a model's color doesn't follow its rank.
 export function assignSeriesColors(totals: ReadonlyMap<string, number>): SeriesPalette {
@@ -449,7 +448,7 @@ function PulseSparkline({ pulse }: { pulse: unknown }) {
   const parsed = usagePulseSnapshotSchema.safeParse(pulse);
   const minuteSeries = parsed.success ? parsed.data.minuteSeries : [];
 
-  const values = useMemo(() => minuteSeries.map((m) => freshTokens(m)), [minuteSeries]);
+  const values = useMemo(() => minuteSeries.map((m) => allTokens(m)), [minuteSeries]);
 
   const hasSignal = values.some((v) => v > 0);
   const last = values.at(-1) ?? 0;
@@ -542,7 +541,7 @@ export function pivotSeries(
       totalsByModel.set(row.key, perBucket);
     }
     perBucket.set(row.bucketIso, (perBucket.get(row.bucketIso) ?? 0) + value);
-    modelTotals.set(row.key, (modelTotals.get(row.key) ?? 0) + freshTokens(row));
+    modelTotals.set(row.key, (modelTotals.get(row.key) ?? 0) + allTokens(row));
     bucketTotals.set(row.bucketIso, (bucketTotals.get(row.bucketIso) ?? 0) + value);
   }
 
@@ -1125,7 +1124,7 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
 
   const rows = useMemo((): RosterRow[] => {
     if (!summary) return [];
-    const palette = assignSeriesColors(new Map(summary.groups.map((g) => [g.key, freshTokens(g)])));
+    const palette = assignSeriesColors(new Map(summary.groups.map((g) => [g.key, allTokens(g)])));
     return summary.groups
       .map((g) => {
         const tokensByType: ByTokenType = {
@@ -1341,7 +1340,7 @@ function FlowChart({ rows, metric }: { rows: UsageBreakdownResponseWire; metric:
     .sort((a, b) => b.value - a.value);
   const modelTotals = new Map<string, number>();
   for (const row of rows) {
-    modelTotals.set(row.split, (modelTotals.get(row.split) ?? 0) + freshTokens(row));
+    modelTotals.set(row.split, (modelTotals.get(row.split) ?? 0) + allTokens(row));
   }
   const palette = assignSeriesColors(modelTotals);
   const total = links.reduce((sum, row) => sum + row.value, 0);
