@@ -2,12 +2,12 @@
 // Keelson records (tokens and estimated cost) with the raw per-call SDK usage,
 // including GitHub's own billed cost (copilotUsage.totalNanoAiu).
 //
-//   bun scripts/copilot-usage-audit.ts [model ...] > audit.json
+//   bun packages/providers/scripts/copilot-usage-audit.ts [model ...] > audit.json
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CopilotClientFactory, CopilotProvider } from "../packages/providers/src/index.ts";
-import { estimateCostUsd, type ModelPrice } from "../packages/shared/src/index.ts";
+import { CopilotClientFactory, CopilotProvider } from "../src/index.ts";
+import { estimateCostUsd, type ModelPrice } from "../../shared/src/index.ts";
 
 const MODELS = process.argv.slice(2).length
   ? process.argv.slice(2)
