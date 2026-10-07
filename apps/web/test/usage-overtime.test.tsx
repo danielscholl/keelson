@@ -201,7 +201,11 @@ describe("Usage — token series", () => {
     });
 
     await waitFor(() => expect(screen.getByText("3.1M")).toBeDefined());
-    expect(screen.getByLabelText("Tokens: 3.1M")).toBeDefined();
+    expect(
+      screen.getByLabelText(
+        /^Tokens: 3.1M \(Cache read 1M, Input 2.3k, Cache write 2.1M, Output 50k\)$/,
+      ),
+    ).toBeDefined();
     expect(screen.getByText("1M of 3.1M input")).toBeDefined();
   });
 });

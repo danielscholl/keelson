@@ -148,6 +148,25 @@ function formatMetric(metric: ChartMetric): (value: number) => string {
   return metric === "tokens" ? formatTokens : formatCostUsd;
 }
 
+function countUnpriced(rows: Array<{ unpricedEvents: number }> | null): number {
+  return (rows ?? []).reduce((sum, row) => sum + row.unpricedEvents, 0);
+}
+
+function UnpricedNote({ count }: { count: number }) {
+  return (
+    <p className="page-sub usage-jobs-note">
+      * Lower bound: {count.toLocaleString()} {count === 1 ? "turn" : "turns"} ran on a model with
+      no known price.
+    </p>
+  );
+}
+
+function emptyMetricText(metric: ChartMetric, unpriced: number, fallback: string): string {
+  return metric === "cost" && unpriced > 0
+    ? `No priced spend in this window. ${unpriced.toLocaleString()} ${unpriced === 1 ? "turn" : "turns"} ran on a model with no known price.`
+    : fallback;
+}
+
 export function Usage() {
   const [range, setRange] = useState<UsageWindow>("7d");
   const [subView, setSubView] = useState<UsageSubView>("overview");
@@ -627,6 +646,7 @@ function OverTimeSection({ range }: { range: UsageWindow }) {
 
   const pivoted = useMemo(() => (series ? pivotSeries(series, metric) : null), [series, metric]);
   const hasData = !!pivoted && pivoted.buckets.some((b) => b.total > 0);
+  const unpriced = metric === "cost" ? countUnpriced(series) : 0;
 
   return (
     <section className="surface-region usage-stack-region">
@@ -652,15 +672,20 @@ function OverTimeSection({ range }: { range: UsageWindow }) {
             Loading…
           </div>
         ) : pivoted && hasData ? (
-          <StackChart
-            series={pivoted.series}
-            buckets={pivoted.buckets}
-            bucket={bucket}
-            metric={metric}
-          />
+          <>
+            <StackChart
+              series={pivoted.series}
+              buckets={pivoted.buckets}
+              bucket={bucket}
+              metric={metric}
+            />
+            {unpriced > 0 && <UnpricedNote count={unpriced} />}
+          </>
         ) : (
           <div className="usage-stack-empty">
-            <span className="page-sub">No token spend recorded in this window yet.</span>
+            <span className="page-sub">
+              {emptyMetricText(metric, unpriced, "No token spend recorded in this window yet.")}
+            </span>
           </div>
         )}
       </div>
@@ -1096,7 +1121,13 @@ function TokenTypeBar({
       className="usage-typebar"
       data-labeled={showLabel || undefined}
       role="img"
-      aria-label={`${label}: ${format(total)}`}
+      aria-label={`${label}: ${format(total)}${
+        total > 0
+          ? ` (${TOKEN_TYPES.filter(({ id }) => values[id] > 0)
+              .map(({ id, label: typeLabel }) => `${typeLabel} ${format(values[id])}`)
+              .join(", ")})`
+          : ""
+      }`}
     >
       {showLabel && <span className="usage-typebar-label">{label}</span>}
       <span className="usage-typebar-track">
@@ -1259,7 +1290,7 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                           format={formatCostUsd}
                           showLabel
                           titleOf={
-                            r.priceCards.length === 1
+                            r.priceCards.length === 1 && r.unpricedEvents === 0
                               ? (type) =>
                                   costMath(
                                     type,
@@ -1321,6 +1352,8 @@ function FlowSection({ range }: { range: UsageWindow }) {
     };
   }, [range]);
 
+  const unpriced = metric === "cost" ? countUnpriced(rows) : 0;
+
   return (
     <section className="surface-region usage-flow-region">
       <div className="surface-region-head">
@@ -1345,10 +1378,19 @@ function FlowSection({ range }: { range: UsageWindow }) {
             Loading…
           </div>
         ) : rows?.some((row) => metricValue(row, metric) > 0) ? (
-          <FlowChart rows={rows} metric={metric} />
+          <>
+            <FlowChart rows={rows} metric={metric} />
+            {unpriced > 0 && <UnpricedNote count={unpriced} />}
+          </>
         ) : (
           <div className="usage-stack-empty">
-            <span className="page-sub">No source to model flow recorded in this window yet.</span>
+            <span className="page-sub">
+              {emptyMetricText(
+                metric,
+                unpriced,
+                "No source to model flow recorded in this window yet.",
+              )}
+            </span>
           </div>
         )}
       </div>
@@ -1512,7 +1554,7 @@ function JobsSection({ range }: { range: UsageWindow }) {
   }, [range]);
 
   const maxCost = Math.max(0, ...(jobs ?? []).map((job) => job.costUsd));
-  const unpriced = (jobs ?? []).reduce((sum, job) => sum + job.unpricedEvents, 0);
+  const unpriced = countUnpriced(jobs);
 
   return (
     <section className="surface-region usage-jobs-region">
@@ -1593,12 +1635,7 @@ function JobsSection({ range }: { range: UsageWindow }) {
                 </tbody>
               </table>
             </div>
-            {unpriced > 0 && (
-              <p className="page-sub usage-jobs-note">
-                * Lower bound: {unpriced.toLocaleString()} {unpriced === 1 ? "turn" : "turns"} ran
-                on a model with no known price.
-              </p>
-            )}
+            {unpriced > 0 && <UnpricedNote count={unpriced} />}
           </>
         ) : (
           <div className="usage-stack-empty">

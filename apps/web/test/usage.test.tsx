@@ -848,7 +848,9 @@ describe("Usage page", () => {
     });
 
     await waitFor(() => expect(screen.getByText("250 of 1.3k input")).toBeDefined());
-    expect(screen.getByLabelText("Tokens: 1.4k")).toBeDefined();
+    expect(
+      screen.getByLabelText("Tokens: 1.4k (Cache read 250, Input 1k, Output 200)"),
+    ).toBeDefined();
     expect(screen.getAllByText("20%").length).toBeGreaterThan(0);
     // An unpriced model nulls the window's cost; the tile says so and counts it.
     expect(screen.getAllByText("unpriced").length).toBeGreaterThan(0);
