@@ -68,9 +68,21 @@ export type UsagePricedTotalsWire = z.infer<typeof usagePricedTotalsSchema>;
 
 // (a) GET /api/usage/summary — overall totals plus a per-group (source,
 // provider, model, etc. — grouping is a query param) breakdown.
+// Priced events' cost split by token type; unpriced events contribute nothing.
+export const usageCostPartsSchema = z
+  .object({
+    input: z.number().nonnegative(),
+    cacheRead: z.number().nonnegative(),
+    cacheWrite: z.number().nonnegative(),
+    output: z.number().nonnegative(),
+  })
+  .strict();
+export type UsageCostPartsWire = z.infer<typeof usageCostPartsSchema>;
+
 export const usageGroupRowSchema = usagePricedTotalsSchema
   .extend({
     key: z.string(),
+    costParts: usageCostPartsSchema.optional(),
   })
   .strict();
 export type UsageGroupRowWire = z.infer<typeof usageGroupRowSchema>;

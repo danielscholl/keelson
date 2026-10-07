@@ -892,18 +892,58 @@ function StackTooltip({
   );
 }
 
+// One stacking order for both bars, so a token segment and the cost it drove
+// sit in the same place on a row.
+const SPEND_PARTS = [
+  { id: "cacheRead", label: "Cache read" },
+  { id: "input", label: "New input" },
+  { id: "cacheWrite", label: "Cache write" },
+  { id: "output", label: "Output" },
+] as const;
+type SpendPart = (typeof SPEND_PARTS)[number]["id"];
+type SpendSplit = Record<SpendPart, number>;
+
 interface RosterRow {
   key: string;
   turns: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheHitRatio: number | null;
+  tokens: SpendSplit;
+  totalTokens: number;
+  cost: SpendSplit | null;
   costUsd: number | null;
   pricedCostUsd: number;
   unpricedEvents: number;
-  avgPerTurn: number;
-  share: number;
   color: string;
+}
+
+function SpendBar({
+  split,
+  max,
+  label,
+  format,
+}: {
+  split: SpendSplit;
+  max: number;
+  label: string;
+  format: (n: number) => string;
+}) {
+  const detail = SPEND_PARTS.map((p) => `${p.label} ${format(split[p.id])}`).join(" · ");
+  return (
+    <span className="usage-spend-cell">
+      <span className="usage-spend-bar" role="img" aria-label={detail} title={detail}>
+        {SPEND_PARTS.map((p) =>
+          split[p.id] > 0 ? (
+            <span
+              key={p.id}
+              className="usage-spend-seg"
+              data-part={p.id}
+              style={{ width: `${(split[p.id] / max) * 100}%` }}
+            />
+          ) : null,
+        )}
+      </span>
+      <span className="usage-spend-value usage-mono">{label}</span>
+    </span>
+  );
 }
 
 function ModelRosterSection({ range }: { range: UsageWindow }) {
@@ -933,26 +973,31 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
   const rows = useMemo((): RosterRow[] => {
     if (!summary) return [];
     const palette = assignSeriesColors(new Map(summary.groups.map((g) => [g.key, freshTokens(g)])));
-    const grandTotal = summary.groups.reduce((sum, g) => sum + freshTokens(g), 0);
-    return [...summary.groups]
-      .sort((a, b) => freshTokens(b) - freshTokens(a))
+    return summary.groups
       .map((g) => {
-        const tokens = freshTokens(g);
+        const tokens: SpendSplit = {
+          cacheRead: g.cacheReadTokens,
+          input: g.inputTokens,
+          cacheWrite: g.cacheWriteTokens,
+          output: g.outputTokens,
+        };
         return {
           key: g.key,
           turns: g.events,
-          inputTokens: g.inputTokens + g.cacheWriteTokens,
-          outputTokens: g.outputTokens,
-          cacheHitRatio: g.cacheHitRatio,
+          tokens,
+          totalTokens: tokens.cacheRead + tokens.input + tokens.cacheWrite + tokens.output,
+          cost: g.costParts ?? null,
           costUsd: g.costUsd,
           pricedCostUsd: g.pricedCostUsd,
           unpricedEvents: g.unpricedEvents,
-          avgPerTurn: g.events > 0 ? tokens / g.events : 0,
-          share: grandTotal > 0 ? Math.round((tokens / grandTotal) * 100) : 0,
           color: palette.colorOf(g.key),
         };
-      });
+      })
+      .sort((a, b) => b.pricedCostUsd - a.pricedCostUsd || b.totalTokens - a.totalTokens);
   }, [summary]);
+
+  const maxTokens = Math.max(1, ...rows.map((r) => r.totalTokens));
+  const maxCost = Math.max(1e-9, ...rows.map((r) => r.pricedCostUsd));
 
   return (
     <section className="surface-region usage-roster-region">
@@ -977,58 +1022,76 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
             Loading…
           </div>
         ) : rows.length > 0 ? (
-          <div className="canvas-view-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Model</th>
-                  <th>Turns</th>
-                  <th>↑ In</th>
-                  <th>↓ Out</th>
-                  <th>Cache hit</th>
-                  <th>Cost</th>
-                  <th>Avg / turn</th>
-                  <th>Share</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.key}>
-                    <td>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                        <span className="usage-sdot" style={{ background: r.color }} />
-                        {formatModelLabel(r.key)}
-                      </span>
-                    </td>
-                    <td>{r.turns.toLocaleString()}</td>
-                    <td>↑ {formatTokens(r.inputTokens)}</td>
-                    <td>↓ {formatTokens(r.outputTokens)}</td>
-                    <td>{formatCacheHit(r.cacheHitRatio)}</td>
-                    <td>
-                      {formatAggregateCost(
-                        r.costUsd,
-                        r.pricedCostUsd,
-                        r.unpricedEvents,
-                        r.turns - r.unpricedEvents,
-                      )}
-                    </td>
-                    <td>{formatTokens(r.avgPerTurn)}</td>
-                    <td>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                        <span className="usage-popover-meter" style={{ width: 72 }}>
-                          <span
-                            className="usage-popover-meter-fill"
-                            style={{ width: `${r.share}%`, background: r.color }}
-                          />
-                        </span>
-                        <span>{r.share}%</span>
-                      </span>
-                    </td>
+          <>
+            <div className="usage-spend-legend">
+              {SPEND_PARTS.map((p) => (
+                <span key={p.id} className="usage-legend-item">
+                  <span className="usage-spend-swatch" data-part={p.id} />
+                  {p.label}
+                </span>
+              ))}
+            </div>
+            <div className="canvas-view-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>Turns</th>
+                    <th>Tokens</th>
+                    <th>Cost</th>
+                    <th>$ / 1M tokens</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {rows.map((r) => {
+                    const pricedTurns = r.turns - r.unpricedEvents;
+                    const costLabel = formatAggregateCost(
+                      r.costUsd,
+                      r.pricedCostUsd,
+                      r.unpricedEvents,
+                      pricedTurns,
+                    );
+                    return (
+                      <tr key={r.key}>
+                        <td>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                            <span className="usage-sdot" style={{ background: r.color }} />
+                            {formatModelLabel(r.key)}
+                          </span>
+                        </td>
+                        <td>{r.turns.toLocaleString()}</td>
+                        <td>
+                          <SpendBar
+                            split={r.tokens}
+                            max={maxTokens}
+                            label={formatTokens(r.totalTokens)}
+                            format={formatTokens}
+                          />
+                        </td>
+                        <td>
+                          {r.cost && pricedTurns > 0 ? (
+                            <SpendBar
+                              split={r.cost}
+                              max={maxCost}
+                              label={costLabel}
+                              format={formatCostUsd}
+                            />
+                          ) : (
+                            costLabel
+                          )}
+                        </td>
+                        <td className="usage-mono">
+                          {r.costUsd !== null && r.totalTokens > 0
+                            ? `$${((r.costUsd / r.totalTokens) * 1_000_000).toFixed(2)}`
+                            : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         ) : (
           <div className="usage-stack-empty">
             <span className="page-sub">No model spend recorded in this window yet.</span>
@@ -1207,7 +1270,14 @@ function JobsSection({ range }: { range: UsageWindow }) {
     setError(null);
     getUsageJobs({ window: range })
       .then((res) => {
-        if (!cancelled) setJobs([...res].sort((a, b) => b.totalTokens - a.totalTokens));
+        if (!cancelled) {
+          setJobs(
+            [...res].sort(
+              (a, b) =>
+                b.pricedTotalCostUsd - a.pricedTotalCostUsd || b.totalTokens - a.totalTokens,
+            ),
+          );
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -1220,7 +1290,8 @@ function JobsSection({ range }: { range: UsageWindow }) {
     };
   }, [range]);
 
-  const maxTokens = Math.max(...(jobs ?? []).map((job) => job.totalTokens), 1);
+  const maxCost = Math.max(1e-9, ...(jobs ?? []).map((job) => job.pricedTotalCostUsd));
+  const unpricedTurns = (jobs ?? []).reduce((sum, job) => sum + job.unpricedEvents, 0);
 
   return (
     <section className="surface-region usage-jobs-region">
@@ -1252,66 +1323,54 @@ function JobsSection({ range }: { range: UsageWindow }) {
                   <tr>
                     <th>Job</th>
                     <th>Runs</th>
-                    <th>Avg tokens/run</th>
-                    <th>p95</th>
-                    <th>Window total</th>
-                    <th>Cost/run</th>
-                    <th>Window cost</th>
-                    <th>Cache hit</th>
+                    <th>Cost</th>
+                    <th>Cost / run</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {jobs.map((job) => (
-                    <tr key={job.key}>
-                      <td>{job.key}</td>
-                      <td>{job.runs.toLocaleString()}</td>
-                      <td>{formatTokens(job.avgTokensPerRun)}</td>
-                      <td>{formatTokens(job.p95TokensPerRun)}</td>
-                      <td>{formatTokens(job.totalTokens)}</td>
-                      <td>
-                        {formatAggregateCost(
-                          job.costUsdPerRun,
-                          job.runs > 0 ? job.pricedTotalCostUsd / job.runs : 0,
-                          job.unpricedEvents,
-                          job.pricedEvents,
-                        )}
-                      </td>
-                      <td>
-                        {formatAggregateCost(
-                          job.totalCostUsd,
-                          job.pricedTotalCostUsd,
-                          job.unpricedEvents,
-                          job.pricedEvents,
-                        )}
-                      </td>
-                      <td>{formatCacheHit(job.cacheHitRatio)}</td>
-                    </tr>
-                  ))}
+                  {jobs.map((job) => {
+                    const priced = job.pricedEvents > 0;
+                    return (
+                      <tr key={job.key}>
+                        <td className="usage-mono">{job.key}</td>
+                        <td>{job.runs.toLocaleString()}</td>
+                        <td>
+                          {priced ? (
+                            <span className="usage-spend-cell">
+                              <span className="usage-spend-bar">
+                                <span
+                                  className="usage-spend-seg"
+                                  style={{
+                                    width: `${(job.pricedTotalCostUsd / maxCost) * 100}%`,
+                                    background: "var(--accent)",
+                                  }}
+                                />
+                              </span>
+                              <span className="usage-spend-value usage-mono">
+                                {formatCostUsd(job.pricedTotalCostUsd)}
+                              </span>
+                            </span>
+                          ) : (
+                            "unpriced"
+                          )}
+                        </td>
+                        <td className="usage-mono">
+                          {priced && job.runs > 0
+                            ? formatCostUsd(job.pricedTotalCostUsd / job.runs)
+                            : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
-            <section className="usage-burn-list" aria-label={`Burn by job, ${WINDOW_LABEL[range]}`}>
-              {jobs.map((job) => {
-                const pct = Math.max(2, Math.round((job.totalTokens / maxTokens) * 100));
-                return (
-                  <div className="usage-burn-row" key={`${job.key}-burn`}>
-                    <span className="usage-burn-label">{job.key}</span>
-                    <span className="usage-popover-meter">
-                      <span
-                        className="usage-popover-meter-fill"
-                        style={{
-                          width: `${pct}%`,
-                          background: "var(--accent)",
-                        }}
-                      />
-                    </span>
-                    <span className="usage-burn-value usage-mono">
-                      {formatTokens(job.totalTokens)}
-                    </span>
-                  </div>
-                );
-              })}
-            </section>
+            {unpricedTurns > 0 ? (
+              <p className="page-sub usage-jobs-note">
+                {unpricedTurns.toLocaleString()} {unpricedTurns === 1 ? "turn has" : "turns have"}{" "}
+                no price and {unpricedTurns === 1 ? "isn't" : "aren't"} counted in these costs.
+              </p>
+            ) : null}
           </>
         ) : (
           <div className="usage-stack-empty">

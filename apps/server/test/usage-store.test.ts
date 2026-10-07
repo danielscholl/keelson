@@ -333,6 +333,7 @@ describe("SQLite UsageStore", () => {
           pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: 2 / 13,
+          costParts: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         },
         {
           key: "gpt-5",
@@ -345,6 +346,7 @@ describe("SQLite UsageStore", () => {
           pricedCostUsd: 0,
           unpricedEvents: 1,
           cacheHitRatio: null,
+          costParts: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
         },
       ]);
     });
@@ -892,6 +894,31 @@ describe("SQLite UsageStore", () => {
         ["claude-sonnet-5", SONNET_COST, 0],
         ["gpt-5", null, 1],
       ]);
+    });
+
+    test("summary groups split cost by token type and leave unpriced events out", () => {
+      store.record({ source: "chat", provider: "claude", model: "claude-sonnet-5", ...SONNET });
+      store.record({
+        source: "chat",
+        provider: "codex",
+        model: "gpt-5",
+        inputTokens: 5,
+        outputTokens: 5,
+      });
+      const result = store.summary({ groupBy: "model" });
+      const sonnet = result.groups.find((g) => g.key === "claude-sonnet-5")!;
+      expect(sonnet.costParts!.input).toBeCloseTo(0.002, 10);
+      expect(sonnet.costParts!.output).toBeCloseTo(0.005, 10);
+      expect(sonnet.costParts!.cacheRead).toBeCloseTo(0.0004, 10);
+      expect(sonnet.costParts!.cacheWrite).toBeCloseTo(0.00025, 10);
+      const sum = Object.values(sonnet.costParts!).reduce((a, b) => a + b, 0);
+      expect(sum).toBeCloseTo(SONNET_COST, 10);
+      expect(result.groups.find((g) => g.key === "gpt-5")!.costParts).toEqual({
+        input: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        output: 0,
+      });
     });
 
     test("all-priced events sum to the exact dollar value across every aggregate", () => {

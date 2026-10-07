@@ -9,6 +9,7 @@
 import type { Database } from "bun:sqlite";
 import {
   cacheHitRatio,
+  estimateCostPartsUsd,
   estimateCostUsd,
   freshTokens,
   type ModelPrice,
@@ -16,6 +17,7 @@ import {
   type PricedTokenCounts,
   resolveModelPrice,
   type UsageBreakdownRowWire,
+  type UsageCostPartsWire,
   type UsageEventRowWire,
   type UsageJobsRowWire,
   type UsagePricedTotalsWire,
@@ -299,6 +301,7 @@ function createPricer(
 interface PricedAccumulator extends TotalsRow {
   cacheReadReported: number;
   costUsd: number;
+  costParts: UsageCostPartsWire;
   unpricedEvents: number;
 }
 
@@ -311,6 +314,7 @@ function emptyAccumulator(): PricedAccumulator {
     cacheWriteTokens: 0,
     cacheReadReported: 0,
     costUsd: 0,
+    costParts: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
     unpricedEvents: 0,
   };
 }
@@ -323,8 +327,16 @@ function accumulate(acc: PricedAccumulator, row: ModelTotalsRow, pricer: Pricer)
   acc.cacheWriteTokens += row.cacheWriteTokens;
   acc.cacheReadReported += row.cacheReadReported;
   const price = pricer(row.provider, row.model);
-  if (price) acc.costUsd += estimateCostUsd(row, price);
-  else acc.unpricedEvents += row.events;
+  if (price) {
+    acc.costUsd += estimateCostUsd(row, price);
+    const parts = estimateCostPartsUsd(row, price);
+    acc.costParts.input += parts.input;
+    acc.costParts.cacheRead += parts.cacheRead;
+    acc.costParts.cacheWrite += parts.cacheWrite;
+    acc.costParts.output += parts.output;
+  } else {
+    acc.unpricedEvents += row.events;
+  }
 }
 
 function finishAccumulator(acc: PricedAccumulator): UsagePricedTotalsWire {
@@ -551,6 +563,7 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
       const groups = [...foldByKey(groupRows, (row) => row.key, pricer)].map(([key, acc]) => ({
         key,
         ...finishAccumulator(acc),
+        costParts: acc.costParts,
       }));
       return { totals: finishAccumulator(totals), groups };
     },

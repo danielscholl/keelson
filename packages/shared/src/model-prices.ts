@@ -123,6 +123,28 @@ export function estimateCostUsd(tokens: PricedTokenCounts, p: ModelPrice): numbe
   );
 }
 
+export interface CostPartsUsd {
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  output: number;
+}
+
+// The same cost as estimateCostUsd, split by what each token type contributed.
+export function estimateCostPartsUsd(tokens: PricedTokenCounts, p: ModelPrice): CostPartsUsd {
+  const writes = tokens.cacheWriteTokens ?? 0;
+  const writes1h = Math.min(tokens.cacheWrite1hTokens ?? 0, writes);
+  return {
+    input: (tokens.inputTokens * p.inputPerMTok) / 1_000_000,
+    cacheRead: ((tokens.cacheReadTokens ?? 0) * p.cacheReadPerMTok) / 1_000_000,
+    cacheWrite:
+      ((writes - writes1h) * p.cacheWritePerMTok +
+        writes1h * (p.cacheWrite1hPerMTok ?? p.cacheWritePerMTok)) /
+      1_000_000,
+    output: (tokens.outputTokens * p.outputPerMTok) / 1_000_000,
+  };
+}
+
 // Tokens the model newly processed. Cache writes count: providers that split
 // them out report most new prompt tokens there, not in inputTokens.
 export function freshTokens(tokens: PricedTokenCounts): number {

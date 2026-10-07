@@ -629,7 +629,7 @@ describe("Usage page", () => {
     getUsageBreakdownImpl = async () => [];
   });
 
-  test("renders recurring jobs table and burn bars", async () => {
+  test("renders the recurring jobs table", async () => {
     getUsageJobsImpl = async () => [
       {
         key: "smoke-test",
@@ -652,12 +652,59 @@ describe("Usage page", () => {
 
     fireEvent.click(screen.getByLabelText("Jobs"));
     await waitFor(() => expect(screen.getAllByText("smoke-test").length).toBeGreaterThan(0));
-    expect(screen.getByText("Avg tokens/run")).toBeDefined();
-    expect(screen.getByLabelText("Burn by job, 7d")).toBeDefined();
+    expect(screen.getByText("Cost / run")).toBeDefined();
+    expect(screen.queryByText("Avg tokens/run")).toBeNull();
     getUsageJobsImpl = async () => [];
   });
 
-  test("a fully unpriced job says how many rows kept its cost null", async () => {
+  test("model roster pairs token and cost bars and prices a million tokens", async () => {
+    const group = {
+      key: "gpt-6.1-sol",
+      events: 4,
+      inputTokens: 1_000,
+      outputTokens: 100_000,
+      cacheReadTokens: 3_000_000,
+      cacheWriteTokens: 899_000,
+      costUsd: 4.55,
+      pricedCostUsd: 4.55,
+      unpricedEvents: 0,
+      cacheHitRatio: 0.77,
+      costParts: { input: 0.002, cacheRead: 0.3, cacheWrite: 2.248, output: 2 },
+    };
+    const { key: _key, costParts: _parts, ...totals } = group;
+    getUsageSummaryImpl = async () => ({ totals, groups: [group] });
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    fireEvent.click(screen.getByLabelText("Models"));
+    await waitFor(() => expect(screen.getByText("$ / 1M tokens")).toBeDefined());
+    expect(screen.getByText("4M")).toBeDefined();
+    expect(screen.getByText("$4.55")).toBeDefined();
+    expect(screen.getByText("$1.14")).toBeDefined();
+    expect(
+      screen.getByRole("img", {
+        name: "Cache read $0.3000 · New input $0.0020 · Cache write $2.25 · Output $2.00",
+      }),
+    ).toBeDefined();
+    getUsageSummaryImpl = async () => ({
+      totals: {
+        ...totals,
+        events: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: null,
+        pricedCostUsd: 0,
+        cacheHitRatio: null,
+      },
+      groups: [],
+    });
+  });
+
+  test("a fully unpriced job reads unpriced and the footnote counts its turns", async () => {
     getUsageJobsImpl = async () => [
       {
         key: "mixed-job",
@@ -680,40 +727,48 @@ describe("Usage page", () => {
 
     fireEvent.click(screen.getByLabelText("Jobs"));
     await waitFor(() => expect(screen.getAllByText("mixed-job").length).toBeGreaterThan(0));
-    expect(screen.getAllByText("unpriced (2)")).toHaveLength(2);
+    expect(screen.getByText("unpriced")).toBeDefined();
+    expect(
+      screen.getByText("2 turns have no price and aren't counted in these costs."),
+    ).toBeDefined();
     getUsageJobsImpl = async () => [];
   });
 
   test.each([
-    { pricedCostUsd: 155.03, perRun: "≥ $77.52 (8)", window: "≥ $155.03 (8)" },
-    { pricedCostUsd: 0, perRun: "≥ $0.0000 (8)", window: "≥ $0.0000 (8)" },
-  ])("mixed jobs preserve counts with $window", async ({ pricedCostUsd, perRun, window }) => {
-    getUsageJobsImpl = async () => [
-      {
-        key: "mixed-job",
-        runs: 2,
-        totalTokens: 900,
-        avgTokensPerRun: 450,
-        p95TokensPerRun: 500,
-        totalCostUsd: null,
-        pricedTotalCostUsd: pricedCostUsd,
-        costUsdPerRun: null,
-        pricedEvents: 1,
-        unpricedEvents: 8,
-        cacheHitRatio: null,
-      },
-    ];
+    { pricedCostUsd: 155.03, perRun: "$77.52", window: "$155.03" },
+    { pricedCostUsd: 0, perRun: "$0.0000", window: "$0.0000" },
+  ])(
+    "mixed jobs show the priced cost $window and footnote the rest",
+    async ({ pricedCostUsd, perRun, window }) => {
+      getUsageJobsImpl = async () => [
+        {
+          key: "mixed-job",
+          runs: 2,
+          totalTokens: 900,
+          avgTokensPerRun: 450,
+          p95TokensPerRun: 500,
+          totalCostUsd: null,
+          pricedTotalCostUsd: pricedCostUsd,
+          costUsdPerRun: null,
+          pricedEvents: 1,
+          unpricedEvents: 8,
+          cacheHitRatio: null,
+        },
+      ];
 
-    await act(async () => {
-      await renderUsagePage();
-    });
+      await act(async () => {
+        await renderUsagePage();
+      });
 
-    fireEvent.click(screen.getByLabelText("Jobs"));
-    await waitFor(() => expect(screen.getAllByText(window).length).toBeGreaterThan(0));
-    expect(screen.getAllByText(perRun).length).toBeGreaterThan(0);
-    expect(screen.queryByText("unpriced (8)")).toBeNull();
-    getUsageJobsImpl = async () => [];
-  });
+      fireEvent.click(screen.getByLabelText("Jobs"));
+      await waitFor(() => expect(screen.getAllByText(window).length).toBeGreaterThan(0));
+      expect(screen.getAllByText(perRun).length).toBeGreaterThan(0);
+      expect(
+        screen.getByText("8 turns have no price and aren't counted in these costs."),
+      ).toBeDefined();
+      getUsageJobsImpl = async () => [];
+    },
+  );
 
   test.each([
     { pricedCostUsd: 155.03, expected: "≥ $155.03" },
@@ -823,10 +878,8 @@ describe("Usage page", () => {
     expect(screen.getAllByText("unpriced").length).toBeGreaterThan(0);
     expect(screen.getByText("1 unpriced turn")).toBeDefined();
 
-    // The share meter still renders on the Models sub-view.
     fireEvent.click(screen.getByLabelText("Models"));
     await waitFor(() => expect(screen.getByText("claude-sonnet-5")).toBeDefined());
-    expect(screen.getByText("20%")).toBeDefined();
     expect(screen.getByText("unpriced (1)")).toBeDefined();
 
     getUsageSummaryImpl = async () => ({
@@ -929,7 +982,7 @@ describe("Usage page", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /View in Jobs/ }));
 
-    await waitFor(() => expect(screen.getByText("Avg tokens/run")).toBeDefined());
+    await waitFor(() => expect(screen.getByText("Cost / run")).toBeDefined());
     expect(screen.getAllByText("repo-triage").length).toBeGreaterThan(0);
 
     getUsageJobsImpl = async () => [];
