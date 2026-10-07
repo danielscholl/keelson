@@ -6,8 +6,8 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CopilotClientFactory, CopilotProvider } from "@keelson/providers";
-import { estimateCostUsd, type ModelPrice } from "@keelson/shared";
+import { CopilotClientFactory, CopilotProvider } from "../packages/providers/src/index.ts";
+import { estimateCostUsd, type ModelPrice } from "../packages/shared/src/index.ts";
 
 const MODELS = process.argv.slice(2).length
   ? process.argv.slice(2)
