@@ -8,7 +8,9 @@
 
 import type { Database } from "bun:sqlite";
 import {
+  type CostByTokenType,
   cacheHitRatio,
+  costByTokenTypeUsd,
   estimateCostUsd,
   freshTokens,
   type ModelPrice,
@@ -299,7 +301,15 @@ function createPricer(
 interface PricedAccumulator extends TotalsRow {
   cacheReadReported: number;
   costUsd: number;
+  costByType: CostByTokenType;
   unpricedEvents: number;
+}
+
+function addCostByType(into: CostByTokenType, from: CostByTokenType): void {
+  into.input += from.input;
+  into.cacheRead += from.cacheRead;
+  into.cacheWrite += from.cacheWrite;
+  into.output += from.output;
 }
 
 function emptyAccumulator(): PricedAccumulator {
@@ -311,6 +321,7 @@ function emptyAccumulator(): PricedAccumulator {
     cacheWriteTokens: 0,
     cacheReadReported: 0,
     costUsd: 0,
+    costByType: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
     unpricedEvents: 0,
   };
 }
@@ -323,8 +334,12 @@ function accumulate(acc: PricedAccumulator, row: ModelTotalsRow, pricer: Pricer)
   acc.cacheWriteTokens += row.cacheWriteTokens;
   acc.cacheReadReported += row.cacheReadReported;
   const price = pricer(row.provider, row.model);
-  if (price) acc.costUsd += estimateCostUsd(row, price);
-  else acc.unpricedEvents += row.events;
+  if (price) {
+    acc.costUsd += estimateCostUsd(row, price);
+    addCostByType(acc.costByType, costByTokenTypeUsd(row, price));
+  } else {
+    acc.unpricedEvents += row.events;
+  }
 }
 
 function finishAccumulator(acc: PricedAccumulator): UsagePricedTotalsWire {
@@ -336,6 +351,7 @@ function finishAccumulator(acc: PricedAccumulator): UsagePricedTotalsWire {
     cacheWriteTokens: acc.cacheWriteTokens,
     costUsd: acc.unpricedEvents > 0 ? null : acc.costUsd,
     pricedCostUsd: acc.costUsd,
+    pricedCostByTypeUsd: { ...acc.costByType },
     unpricedEvents: acc.unpricedEvents,
     cacheHitRatio:
       acc.cacheReadReported > 0
@@ -376,6 +392,30 @@ function minuteFloor(d: Date): Date {
 // per the spec — distinct from the UTC-bucketed minuteSeries below.
 function startOfLocalDayIso(now: Date): string {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString();
+}
+
+const EVENT_RUN_PREFIX = "event:";
+
+function mainModelOf(
+  models: Map<string, PricedAccumulator> | undefined,
+  jobCostUsd: number,
+): { model: string | null; costShare: number | null } {
+  let best: [string, PricedAccumulator] | undefined;
+  for (const entry of models ?? []) {
+    const [, acc] = entry;
+    if (
+      !best ||
+      acc.costUsd > best[1].costUsd ||
+      (acc.costUsd === best[1].costUsd && acc.events > best[1].events)
+    ) {
+      best = entry;
+    }
+  }
+  if (!best) return { model: null, costShare: null };
+  return {
+    model: best[0],
+    costShare: jobCostUsd > 0 ? Math.min(1, best[1].costUsd / jobCostUsd) : null,
+  };
 }
 
 function percentile(sorted: number[], pct: number): number {
@@ -623,7 +663,7 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
       const rows = db
         .query(
           `SELECT COALESCE(workflow_name, 'rib:' || rib_id, source) AS key,
-                 COALESCE(run_id, printf('event:%d', id)) AS runId,
+                 COALESCE(run_id, printf('${EVENT_RUN_PREFIX}%d', id)) AS runId,
                  ${MODEL_TOTALS_SELECT}
              FROM usage_events
             WHERE ${clauses.join(" AND ")}
@@ -634,11 +674,22 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
 
       // Job burn is freshTokens per run; cache reads feed only cost and hit ratio.
       const runsByJob = new Map<string, PricedAccumulator[]>();
+      const eventsWithoutRunByJob = new Map<string, number>();
       for (const [fold, acc] of foldByKey(rows, (row) => `${row.key}\u0000${row.runId}`, pricer)) {
         const key = fold.slice(0, fold.indexOf("\u0000"));
         const runs = runsByJob.get(key) ?? [];
         runs.push(acc);
         runsByJob.set(key, runs);
+        if (fold.slice(key.length + 1).startsWith(EVENT_RUN_PREFIX)) {
+          eventsWithoutRunByJob.set(key, (eventsWithoutRunByJob.get(key) ?? 0) + acc.events);
+        }
+      }
+      const modelsByJob = new Map<string, Map<string, PricedAccumulator>>();
+      for (const [fold, acc] of foldByKey(rows, (row) => `${row.key}\u0000${row.model}`, pricer)) {
+        const key = fold.slice(0, fold.indexOf("\u0000"));
+        const models = modelsByJob.get(key) ?? new Map<string, PricedAccumulator>();
+        models.set(fold.slice(key.length + 1), acc);
+        modelsByJob.set(key, models);
       }
 
       return [...runsByJob.entries()]
@@ -659,6 +710,7 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
             job.unpricedEvents += acc.unpricedEvents;
           }
           const priced = finishAccumulator(job);
+          const main = mainModelOf(modelsByJob.get(key), job.costUsd);
           return {
             key,
             runs,
@@ -671,6 +723,9 @@ export function createUsageStore(db: Database, options: UsageStoreOptions = {}):
             pricedEvents: priced.events - priced.unpricedEvents,
             unpricedEvents: priced.unpricedEvents,
             cacheHitRatio: priced.cacheHitRatio,
+            eventsWithoutRun: eventsWithoutRunByJob.get(key) ?? 0,
+            mainModel: main.model,
+            mainModelCostShare: main.costShare,
           };
         })
         .sort((a, b) => a.key.localeCompare(b.key));
