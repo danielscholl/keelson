@@ -11,6 +11,10 @@ import {
 } from "../../lib/boardTimelineLayout.ts";
 import { useClockNow } from "../../lib/relativeClock.ts";
 
+// A bar narrower than this shows only a sliver of its title, so it keeps the
+// title in its tooltip and accessible name instead.
+const MIN_TITLE_WIDTH = 48;
+
 function timeText(iso: string) {
   return formatTimelineTimestamp(Date.parse(iso));
 }
@@ -196,14 +200,16 @@ function TimelineContents({
                     fill={`url(#${id}-hatch)`}
                   />
                 )}
-                <text
-                  className="cvb-timeline-span-title"
-                  x={x + 8}
-                  y={y + 4}
-                  clipPath={`url(#${id}-span-${index})`}
-                >
-                  {span.title}
-                </text>
+                {spanWidth >= MIN_TITLE_WIDTH && (
+                  <text
+                    className="cvb-timeline-span-title"
+                    x={x + 8}
+                    y={y + 4}
+                    clipPath={`url(#${id}-span-${index})`}
+                  >
+                    {span.title}
+                  </text>
+                )}
               </g>
             ))}
             {layout.marks.map(({ mark, index, laneIndex, x, y }) => (
@@ -214,7 +220,7 @@ function TimelineContents({
                 aria-label={`${section.lanes[laneIndex]!.label}, ${markDescription(mark)}`}
               >
                 <title>{markDescription(mark)}</title>
-                <text x={x} y={y + 22} textAnchor="middle">
+                <text x={x} y={y + 28} textAnchor="middle">
                   {mark.glyph}
                 </text>
               </g>
