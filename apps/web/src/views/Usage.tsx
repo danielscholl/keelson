@@ -1011,6 +1011,7 @@ function rateOf(card: UsagePriceCardWire, type: TokenType): number {
 // decimal only when the rate needs it ($0.025).
 function formatRate(n: number): string {
   if (Number.isInteger(n)) return `$${n}`;
+  if (n < 0.001) return "<$0.001";
   const cents = n.toFixed(2);
   return Number(cents) === n ? `$${cents}` : `$${Number(n.toFixed(3))}`;
 }
@@ -1218,7 +1219,15 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                           {formatModelLabel(r.key)}
                         </span>
                         {r.priceCards.map((card) => (
-                          <PriceCardLine key={`${card.provider}-${card.source}`} card={card} />
+                          <PriceCardLine
+                            key={[
+                              card.provider,
+                              card.source,
+                              ...TOKEN_TYPES.map(({ id }) => rateOf(card, id)),
+                              card.cacheWrite1hPerMTok,
+                            ].join("|")}
+                            card={card}
+                          />
                         ))}
                         {r.priceCards.length === 0 && (
                           <span className="usage-price-card usage-price-none">No price</span>
@@ -1335,7 +1344,7 @@ function FlowSection({ range }: { range: UsageWindow }) {
           <div className="page-sub" style={{ padding: "20px 0" }}>
             Loading…
           </div>
-        ) : rows?.some((row) => allTokens(row) > 0) ? (
+        ) : rows?.some((row) => metricValue(row, metric) > 0) ? (
           <FlowChart rows={rows} metric={metric} />
         ) : (
           <div className="usage-stack-empty">
