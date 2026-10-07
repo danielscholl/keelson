@@ -327,7 +327,12 @@ export class ClaudeProvider implements IAgentProvider {
           }
 
           if (msg.type === "assistant" && typeof msg.error === "string") {
-            const errMsg = buildFriendlyClaudeError(new Error(msg.error));
+            // The error field can be a bare code like "unknown"; the API's own
+            // message rides in the assistant text.
+            const said = stringifyToolResultContent(msg.message?.content).trim();
+            const errMsg = buildFriendlyClaudeError(
+              new Error(said.length > 0 ? `${msg.error}: ${said}` : msg.error),
+            );
             queue.push({ type: "error", message: errMsg });
             terminalError = new Error(errMsg);
             return;
