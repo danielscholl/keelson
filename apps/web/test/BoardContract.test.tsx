@@ -383,3 +383,97 @@ describe("card edge", () => {
     expect(cards.map((c) => c.getAttribute("data-edge"))).toEqual(["warn", null, null]);
   });
 });
+
+describe("tabs section", () => {
+  test("shows one tab's sections and switches on click", () => {
+    render(
+      <BoardView
+        view={board([
+          {
+            kind: "tabs",
+            tabs: [
+              { label: "Timeline", sections: [{ kind: "rows", items: [{ text: "first panel" }] }] },
+              {
+                label: "Map",
+                badge: "8",
+                sections: [{ kind: "rows", items: [{ text: "second panel" }] }],
+              },
+            ],
+          },
+        ])}
+      />,
+    );
+    expect(screen.getByText("first panel")).toBeTruthy();
+    expect(screen.queryByText("second panel")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: /Map/ }));
+    expect(screen.getByText("second panel")).toBeTruthy();
+    expect(screen.queryByText("first panel")).toBeNull();
+    expect(screen.getByRole("tab", { name: /Map/ }).getAttribute("aria-selected")).toBe("true");
+  });
+});
+
+describe("faces and stacked bars", () => {
+  test("a person with a face renders the initials, status and hover hint", () => {
+    const { container } = render(
+      <BoardView
+        view={board([
+          {
+            kind: "cards",
+            items: [
+              {
+                title: "crew",
+                fields: [
+                  {
+                    people: [
+                      {
+                        name: "lead",
+                        tone: "id-blue",
+                        face: "Le",
+                        status: "busy",
+                        lead: true,
+                        hint: "turn 9",
+                      },
+                      { name: "open seat", face: "+", status: "open" },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ])}
+      />,
+    );
+    const faces = container.querySelectorAll(".cvb-person--face");
+    expect(faces.length).toBe(2);
+    expect(faces[0]?.getAttribute("data-status")).toBe("busy");
+    expect(faces[0]?.getAttribute("title")).toBe("turn 9");
+    expect(faces[0]?.querySelector(".cvb-face[data-lead]")?.textContent).toBe("Le");
+    expect(faces[1]?.textContent).toBe("+open seat");
+  });
+
+  test("a bar with segments draws one fill per segment against the total", () => {
+    const { container } = render(
+      <BoardView
+        view={board([
+          {
+            kind: "bars",
+            items: [
+              {
+                label: "Cost",
+                value: 30,
+                total: 60,
+                trailing: "$30 / $60",
+                segments: [
+                  { label: "input", n: 6, tone: "accent" },
+                  { label: "output", n: 24, tone: "ok" },
+                ],
+              },
+            ],
+          },
+        ])}
+      />,
+    );
+    const parts = container.querySelectorAll<HTMLElement>(".cvb-bar-fill--part");
+    expect([...parts].map((p) => p.style.width)).toEqual(["10%", "40%"]);
+  });
+});

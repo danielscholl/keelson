@@ -292,8 +292,18 @@ const canvasPillSchema = z
 // One entry in a `people` field — a name wearing a tone (canonically an id-*
 // identity hue). The name is required so identity colour never renders without
 // it (the id-* accompaniment rule); a bare dot can't be authored.
+// With `face` the person renders as an avatar carrying those initials, the
+// name beside it; `status` marks the face (busy pulses, waiting badges, idle
+// fades, open draws an empty seat) and `hint` is its hover text.
 const canvasPersonSchema = z
-  .object({ name: z.string().min(1), tone: canvasToneSchema.optional() })
+  .object({
+    name: z.string().min(1),
+    tone: canvasToneSchema.optional(),
+    face: z.string().min(1).max(2).optional(),
+    status: z.enum(["busy", "waiting", "idle", "open"]).optional(),
+    lead: z.boolean().optional(),
+    hint: z.string().min(1).max(200).optional(),
+  })
   .strict();
 export type CanvasPerson = z.infer<typeof canvasPersonSchema>;
 
@@ -693,6 +703,9 @@ const barsSectionSchema = z
           value: z.number().nullable(),
           total: z.number(),
           tone: canvasToneSchema.optional(),
+          // Stacked fills inside the same track, each `n` of `total` (a cost
+          // split by kind); `value` stays the sum the trailing reads.
+          segments: z.array(canvasSegmentSchema).min(1).optional(),
           trailing: z.string().optional(),
           href: z.string().optional(),
         })
@@ -1159,6 +1172,27 @@ const columnsBoardSectionSchema = z
   })
   .strict();
 
+// `tabs` shows one group of leaf sections at a time behind a tab strip; the
+// host keeps the open tab across frames. `badge` is a short count or total.
+const tabsBoardSectionSchema = z
+  .object({
+    kind: z.literal("tabs"),
+    title: z.string().optional(),
+    tabs: z
+      .array(
+        z
+          .object({
+            label: z.string().min(1),
+            badge: z.string().min(1).max(24).optional(),
+            sections: z.array(leafBoardSectionSchema),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+export type CanvasTabsSection = z.infer<typeof tabsBoardSectionSchema>;
+
 const canvasBoardSectionSchema = z.discriminatedUnion("kind", [
   statsSectionSchema,
   segmentsSectionSchema,
@@ -1174,6 +1208,7 @@ const canvasBoardSectionSchema = z.discriminatedUnion("kind", [
   graphSectionSchema,
   timelineSectionSchema,
   columnsBoardSectionSchema,
+  tabsBoardSectionSchema,
 ]);
 
 export const canvasBoardViewSchema = z
@@ -1316,6 +1351,12 @@ export const canvasViewSchema = z
         section.columns.forEach((col, c) => {
           col.sections.forEach((leaf, s) => {
             assertLeafSectionUniqueness(leaf, ctx, ["sections", i, "columns", c, "sections", s]);
+          });
+        });
+      } else if (section.kind === "tabs") {
+        section.tabs.forEach((tab, t) => {
+          tab.sections.forEach((leaf, s) => {
+            assertLeafSectionUniqueness(leaf, ctx, ["sections", i, "tabs", t, "sections", s]);
           });
         });
       } else {

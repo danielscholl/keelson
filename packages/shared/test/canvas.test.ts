@@ -2432,3 +2432,90 @@ describe("card edge", () => {
     ).toThrow();
   });
 });
+
+describe("tabs board section", () => {
+  const tabs = (sections: unknown[]) => ({
+    kind: "tabs",
+    tabs: [
+      { label: "Timeline", sections },
+      { label: "Spend", badge: "$4.79", sections: [] },
+    ],
+  });
+
+  it("parses tabs of leaf sections", () => {
+    const view = { view: "board", sections: [tabs([{ kind: "rows", items: [{ text: "a" }] }])] };
+    expect(canvasViewSchema.safeParse(view).success).toBe(true);
+  });
+
+  it("walks tab contents for the cross-item rules", () => {
+    const graph = {
+      kind: "graph",
+      nodes: [{ id: "a", label: "A" }],
+      edges: [{ source: "a", target: "b" }],
+    };
+    const result = canvasViewSchema.safeParse({ view: "board", sections: [tabs([graph])] });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual([
+      "sections",
+      0,
+      "tabs",
+      0,
+      "sections",
+      0,
+      "edges",
+      0,
+      "target",
+    ]);
+  });
+
+  it("rejects a layout nested in a tab", () => {
+    const columns = { kind: "columns", columns: [{ sections: [] }] };
+    expect(canvasViewSchema.safeParse({ view: "board", sections: [tabs([columns])] }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe("faces and stacked bars", () => {
+  const card = (people: unknown[]) => ({
+    view: "board",
+    sections: [{ kind: "cards", items: [{ title: "crew", fields: [{ people }] }] }],
+  });
+
+  it("parses a person with a face and status", () => {
+    const view = card([
+      { name: "lead", tone: "id-blue", face: "Le", status: "busy", lead: true, hint: "turn 9" },
+    ]);
+    expect(canvasViewSchema.safeParse(view).success).toBe(true);
+  });
+
+  it("caps a face at two characters and knows its statuses", () => {
+    expect(canvasViewSchema.safeParse(card([{ name: "lead", face: "Lea" }])).success).toBe(false);
+    expect(canvasViewSchema.safeParse(card([{ name: "lead", status: "asleep" }])).success).toBe(
+      false,
+    );
+  });
+
+  it("parses a bar split into segments", () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "bars",
+          items: [
+            {
+              label: "Cost",
+              value: 4.79,
+              total: 60,
+              segments: [
+                { label: "cache read", n: 1.25, tone: "ramp-1" },
+                { label: "output", n: 0.8, tone: "ok" },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    expect(canvasViewSchema.safeParse(view).success).toBe(true);
+  });
+});

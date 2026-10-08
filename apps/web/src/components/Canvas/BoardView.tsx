@@ -3,6 +3,7 @@ import type {
   CanvasCardAction,
   CanvasClock,
   CanvasItemBar,
+  CanvasPerson,
   CanvasStatDelta,
   CanvasTone,
   RibAction,
@@ -988,9 +989,19 @@ function BarRow({ bar, inline }: { bar: BarItem; inline: boolean }) {
   // looks like good news.
   const pct = bar.value === null ? null : barPct(bar.value, bar.total);
   const track = (
-    <div className="cvb-bar-track">
+    <div className={`cvb-bar-track${bar.segments ? " cvb-bar-track--parts" : ""}`}>
       {pct === null ? (
         <div className="cvb-bar-fill cvb-bar-fill--unmeasured" />
+      ) : bar.segments ? (
+        bar.segments.map((seg) => (
+          <div
+            key={seg.label}
+            className="cvb-bar-fill cvb-bar-fill--part"
+            data-tone={seg.tone ?? "neutral"}
+            title={`${seg.label} ${seg.n ?? "?"}`}
+            style={{ width: `${barPct(seg.n ?? 0, bar.total)}%` }}
+          />
+        ))
       ) : (
         <div className="cvb-bar-fill" data-tone={bar.tone} style={{ width: `${pct}%` }} />
       )}
@@ -1020,6 +1031,80 @@ function BarRow({ bar, inline }: { bar: BarItem; inline: boolean }) {
     </a>
   ) : (
     <div className="cvb-bar">{body}</div>
+  );
+}
+
+// A named person, or with `face` an avatar wearing the person's tone and status.
+function Person({ person: p }: { person: CanvasPerson }) {
+  if (!p.face) {
+    return (
+      <span className="cvb-person" data-tone={p.tone}>
+        {p.name}
+      </span>
+    );
+  }
+  const open = p.status === "open";
+  return (
+    <span
+      className="cvb-person cvb-person--face"
+      data-tone={open ? undefined : p.tone}
+      data-status={p.status}
+      title={p.hint ?? p.name}
+    >
+      <span className="cvb-face" data-lead={p.lead || undefined} aria-hidden="true">
+        {open ? "+" : p.face}
+      </span>
+      {open ? <span className="cvb-sr-only">{p.name}</span> : p.name}
+    </span>
+  );
+}
+
+function TabsSection({ section }: { section: Extract<BoardSection, { kind: "tabs" }> }) {
+  const [open, setOpen] = useState(0);
+  const id = useId();
+  const active = Math.min(open, section.tabs.length - 1);
+  const tabKey = makeKeyer();
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (step === 0) return;
+    e.preventDefault();
+    const next = (active + step + section.tabs.length) % section.tabs.length;
+    setOpen(next);
+    document.getElementById(`${id}-tab-${next}`)?.focus();
+  };
+  const tab = section.tabs[active];
+  const sectionKey = makeKeyer();
+  return (
+    <div className="cvb-tabs">
+      <div className="cvb-tabs-strip" role="tablist" onKeyDown={onKey}>
+        {section.tabs.map((t, i) => (
+          <button
+            key={tabKey(t.label)}
+            id={`${id}-tab-${i}`}
+            type="button"
+            role="tab"
+            className="cvb-tab"
+            aria-selected={i === active}
+            aria-controls={`${id}-panel`}
+            tabIndex={i === active ? 0 : -1}
+            onClick={() => setOpen(i)}
+          >
+            {t.label}
+            {t.badge && <span className="cvb-tab-badge">{t.badge}</span>}
+          </button>
+        ))}
+      </div>
+      <div
+        id={`${id}-panel`}
+        className="cvb-tabs-panel"
+        role="tabpanel"
+        aria-labelledby={`${id}-tab-${active}`}
+      >
+        {tab?.sections.map((s) => (
+          <SectionBlock key={sectionKey(s.kind)} section={s} />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1269,13 +1354,7 @@ function Section({ section }: { section: BoardSection }) {
                         {f.people ? (
                           <span className="cvb-people">
                             {f.people.map((p) => (
-                              <span
-                                key={fieldKey(JSON.stringify(p))}
-                                className="cvb-person"
-                                data-tone={p.tone}
-                              >
-                                {p.name}
-                              </span>
+                              <Person key={fieldKey(JSON.stringify(p))} person={p} />
                             ))}
                           </span>
                         ) : f.clock ? (
@@ -1526,6 +1605,8 @@ function Section({ section }: { section: BoardSection }) {
         </div>
       );
     }
+    case "tabs":
+      return <TabsSection section={section} />;
     default: {
       const exhaustive: never = section;
       return exhaustive;
