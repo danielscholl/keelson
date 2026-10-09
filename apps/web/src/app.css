@@ -5938,6 +5938,9 @@ a.cvb-card-title::after {
   stroke: var(--muted);
   stroke-width: 1.5;
 }
+.cvb-flow-node[data-folded] .cvb-flow-dot {
+  fill: var(--s-other);
+}
 .cvb-flow-node[data-selected] .cvb-flow-dot {
   fill: var(--accent);
   stroke: var(--accent);

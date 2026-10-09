@@ -1,15 +1,12 @@
 import type { CanvasFlowSection } from "@keelson/shared";
 import { type PointerEvent as ReactPointerEvent, useEffect, useId, useMemo, useState } from "react";
 
-// The Usage page's source-to-model flow as a board section: ribbons wear their
-// left node's --s* slot, and the hover card opens a folded node into its members.
 const WIDTH = 720;
 const LEFT_X = 250;
 const RIGHT_X = 470;
 const ROW_H = 42;
 const HEAD_H = 34;
 const LABEL_CHARS = 30;
-const SERIES_COLOR_COUNT = 6;
 const MIN_RIBBON = 2.5;
 const MAX_RIBBON = 24;
 // Past this many, a folded node's card ends in "+N more" so it stays inside the region.
@@ -47,10 +44,7 @@ export function FlowSection({ section }: { section: CanvasFlowSection }) {
     let slot = 0;
     const colors = new Map<string, string>();
     for (const node of lefts) {
-      colors.set(
-        node.id,
-        node.folded ? "var(--s-other)" : `var(--s${(slot++ % SERIES_COLOR_COUNT) + 1})`,
-      );
+      colors.set(node.id, node.folded ? "var(--s-other)" : `var(--s${++slot})`);
     }
     const max = Math.max(...section.links.map((l) => l.n));
     const selected = new Set(section.nodes.filter((n) => n.selected).map((n) => n.id));
@@ -94,6 +88,7 @@ export function FlowSection({ section }: { section: CanvasFlowSection }) {
         key={n.id}
         className="cvb-flow-node"
         data-selected={on || undefined}
+        data-folded={n.folded ? true : undefined}
         tabIndex={0}
         role="img"
         aria-label={`${n.label}${n.sublabel ? `, ${n.sublabel}` : ""}`}
@@ -155,16 +150,18 @@ export function FlowSection({ section }: { section: CanvasFlowSection }) {
       .filter((l) => (left ? l.source === n.id : l.target === n.id))
       .sort((a, b) => b.n - a.n);
     const folded = [...(n.folded ?? [])].sort((a, b) => b.n - a.n);
+    const foldedTotal = folded.reduce((sum, m) => sum + m.n, 0);
     return {
       title: n.label,
       total,
       body: (
         <>
-          {folded.slice(0, CARD_FOLDED_ROWS).map((m) => (
-            <div key={m.label} className="cvb-chart-tooltip-row cvb-flow-sub">
+          {folded.slice(0, CARD_FOLDED_ROWS).map((m, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: labels may repeat, and the rows are a sorted read-only list rebuilt per hover
+            <div key={`${m.label}\u0000${i}`} className="cvb-chart-tooltip-row cvb-flow-sub">
               <span className="cvb-chart-tooltip-label">{m.label}</span>
               <span className="cvb-chart-tooltip-value">{m.n.toLocaleString()}</span>
-              <span className="cvb-flow-share">{share(m.n, total)}</span>
+              <span className="cvb-flow-share">{share(m.n, foldedTotal)}</span>
             </div>
           ))}
           {folded.length > CARD_FOLDED_ROWS && (
@@ -191,10 +188,11 @@ export function FlowSection({ section }: { section: CanvasFlowSection }) {
 
   return (
     <div className="cvb-flow" onPointerLeave={() => setHover(null)}>
+      {/* biome-ignore lint/a11y/useSemanticElements: an svg can't be a fieldset; group keeps each focusable node exposed with its own label */}
       <svg
         className="cvb-flow-svg"
         viewBox={`0 0 ${WIDTH} ${height}`}
-        role="img"
+        role="group"
         aria-label={`${section.title || `${section.left} to ${section.right}`}: ${section.links
           .map((l) => `${label(l.source)} to ${label(l.target)} ${l.n.toLocaleString()}`)
           .join(", ")}`}

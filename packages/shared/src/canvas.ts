@@ -1367,6 +1367,14 @@ function assertLeafSectionUniqueness(
         path: [...path, "nodes"],
       });
     }
+    // Six palette slots and no cycling: a seventh left node folds into a `folded` node.
+    if (leaf.nodes.filter((node) => node.side === "left" && !node.folded).length > 6) {
+      ctx.addIssue({
+        code: "custom",
+        message: "at most 6 unfolded left nodes; fold the rest into one node",
+        path: [...path, "nodes"],
+      });
+    }
     const pairs = new Set<string>();
     leaf.links.forEach((link, i) => {
       if (sides.get(link.source) !== "left") {
@@ -1387,7 +1395,7 @@ function assertLeafSectionUniqueness(
       if (pairs.has(pair)) {
         ctx.addIssue({
           code: "custom",
-          message: "a source and target pair appears once",
+          message: "duplicate source and target pair; each pair may appear only once",
           path: [...path, "links", i],
         });
       }

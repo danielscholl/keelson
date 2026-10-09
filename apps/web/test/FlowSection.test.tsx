@@ -95,6 +95,36 @@ describe("flow board section", () => {
     expect(container.querySelector(".cvb-flow-card")).toBeNull();
   });
 
+  test("a folded node's members share their own total, and a folded right node wears the other color", () => {
+    const view = flowBoard({
+      nodes: [
+        { id: "usa", side: "left", label: "usa-dataset" },
+        { id: "a", side: "right", label: "data.default.viewers" },
+        {
+          id: "rest",
+          side: "right",
+          label: "2 more groups",
+          folded: [
+            { label: "x", n: 300 },
+            { label: "x", n: 100 },
+          ],
+        },
+      ],
+      links: [
+        { source: "usa", target: "a", n: 900 },
+        { source: "usa", target: "rest", n: 100 },
+      ],
+    });
+    const { container } = render(<BoardView view={view} />);
+    const rest = container.querySelectorAll(".cvb-flow-node")[2] as Element;
+    expect(rest.hasAttribute("data-folded")).toBe(true);
+    fireEvent.pointerEnter(rest);
+    const subs = [...container.querySelectorAll(".cvb-flow-card .cvb-flow-sub")].map(
+      (r) => r.textContent,
+    );
+    expect(subs).toEqual(["x30075%", "x10025%"]);
+  });
+
   test("keyboard focus on a node opens its card", () => {
     const { container } = render(<BoardView view={flowBoard()} />);
     const usa = container.querySelectorAll(".cvb-flow-node")[0] as Element;
