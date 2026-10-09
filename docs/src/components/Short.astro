@@ -1,0 +1,28 @@
+---
+import { getShort } from "../lib/shorts";
+
+interface Props {
+  fig: string;
+  /** The page's figure number, for the "Figure N." caption. */
+  n: number;
+}
+
+const { fig, n } = Astro.props;
+const s = getShort(fig);
+---
+
+<figure class="short-figure" not-content>
+  <video
+    controls
+    preload="metadata"
+    playsinline
+    crossorigin="anonymous"
+    poster={s.poster}
+    src={s.video}
+  >
+    <track kind="captions" srclang="en" label="English" src={s.captions} default />
+  </video>
+  <figcaption>
+    Figure {n}. FIG. {s.fig} · {s.title} ({s.length}). {s.problem}
+  </figcaption>
+</figure>
