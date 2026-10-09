@@ -1437,6 +1437,7 @@ function Section({ section }: { section: BoardSection }) {
                   </span>
                 )}
                 {r.glyph && <span className="cvb-glyph" data-tone={r.glyph} />}
+                {r.person && <Person person={r.person} />}
                 {r.chip && (
                   <span className="cvb-chip" data-tone={r.chip.tone}>
                     {r.chip.label}

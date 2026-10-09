@@ -67,7 +67,16 @@ function TimelineContents({
                 {(laneIndex === 0 || divider) && lane.group && (
                   <div className="cvb-timeline-group">{lane.group}</div>
                 )}
-                <h3 className="cvb-timeline-lane-name" data-tone={lane.tone ?? "neutral"}>
+                <h3
+                  className="cvb-timeline-lane-name"
+                  data-tone={lane.tone ?? "neutral"}
+                  data-face={lane.face ? true : undefined}
+                >
+                  {lane.face && (
+                    <span className="cvb-face" aria-hidden="true">
+                      {lane.face}
+                    </span>
+                  )}
                   {lane.label}
                 </h3>
                 {spans.length + marks.length === 0 ? (
@@ -161,8 +170,14 @@ function TimelineContents({
                   <div
                     className="cvb-timeline-lane-name"
                     data-tone={lane.tone ?? "neutral"}
+                    data-face={lane.face ? true : undefined}
                     title={lane.label}
                   >
+                    {lane.face && (
+                      <span className="cvb-face" aria-hidden="true">
+                        {lane.face}
+                      </span>
+                    )}
                     {lane.label}
                   </div>
                 </div>
