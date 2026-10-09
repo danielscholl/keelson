@@ -252,12 +252,22 @@ each figure (number, title, act, the problem it answers, the docs pages it
 covers, duration) and the media base URL; each figure's folder there holds
 `fig-NN.mp4`, `poster.jpg`, and `captions.vtt`.
 
-- The docs front page plays the whole series through `ShortLibrary`.
-- Any page embeds one figure with `<Short fig="14" n={2} />`, which renders the
-  native player with captions and a numbered figcaption, so the lead-in and
+- The landing's hero plays FIG. 00 inside the drawing viewport, in place of the
+  frame, from a "Watch the intro" action. It is the only video on the landing.
+- The series has its own page, `/docs/watch/`, which plays every figure through
+  `ShortLibrary`; `#fig-NN` selects one. The Overview links to it as a tier card
+  rather than carrying the library itself.
+- A page listed in a figure's `docs` gets that figure under its title, folded
+  shut until opened, through the `PageTitle` override. Map a figure to a page in
+  `shorts.json`, not by editing the page.
+- Any page can still embed one figure inline with `<Short fig="14" n={2} />`,
+  which renders the native player and a numbered figcaption, so the lead-in and
   caption rules above still apply.
-- Moving the media (to object storage, say) changes only `base` in
-  `shorts.json`.
+- Captions are burned into the films, so every player carries `captions.vtt` as
+  an optional track and never marks it `default`, which would draw them twice.
+- Moving the media (to object storage, say) changes `base` in `shorts.json` and
+  the three FIG. 00 URLs in `public/index.html`, which is static and cannot read
+  the index.
 
 ### Icon family
 

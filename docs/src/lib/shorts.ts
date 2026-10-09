@@ -43,3 +43,16 @@ export function getShort(fig: string): ShortMedia {
   if (!short) throw new Error(`No short for FIG. ${fig} in src/data/shorts.json`);
   return short;
 }
+
+// `docs` entries are slugs under docs/ (an optional #anchor names the section a
+// figure covers); a route id is the page's content path, with index pages
+// reduced to their directory.
+export function shortsForPage(routeId: string): ShortMedia[] {
+  const page = routeId.replace(/^docs\//, "").replace(/\/$/, "");
+  return shorts.filter((s) =>
+    s.docs.some((d) => {
+      const slug = d.split("#")[0].replace(/\/index$/, "");
+      return slug === page;
+    }),
+  );
+}

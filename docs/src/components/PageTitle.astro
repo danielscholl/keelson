@@ -1,0 +1,51 @@
+---
+import Default from "@astrojs/starlight/components/PageTitle.astro";
+import { shortsForPage } from "../lib/shorts";
+
+const route = Astro.locals.starlightRoute;
+const films = route.id === "docs/watch" ? [] : shortsForPage(route.id);
+---
+
+<Default />
+{
+  films.length > 0 && (
+    <div class="page-shorts">
+      {films.map((s) => (
+        <details class="page-short">
+          <summary>
+            <span class="page-short-play" aria-hidden="true" />
+            <span class="short-tag">FIG. {s.fig}</span>
+            <span class="page-short-title">Watch: {s.title}</span>
+            <span class="page-short-length">{s.length}</span>
+          </summary>
+          <figure class="short-figure">
+            <video
+              controls
+              preload="none"
+              playsinline
+              crossorigin="anonymous"
+              poster={s.poster}
+              src={s.video}
+            >
+              <track kind="captions" srclang="en" label="English" src={s.captions} />
+            </video>
+            <figcaption>
+              {s.problem} <a href={`/docs/watch/#fig-${s.fig}`}>See it in the series</a>.
+            </figcaption>
+          </figure>
+        </details>
+      ))}
+    </div>
+  )
+}
+
+<script>
+  for (const details of document.querySelectorAll<HTMLDetailsElement>(".page-short")) {
+    details.addEventListener("toggle", () => {
+      const video = details.querySelector("video");
+      if (!video) return;
+      if (details.open) video.play().catch(() => {});
+      else video.pause();
+    });
+  }
+</script>

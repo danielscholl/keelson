@@ -33,6 +33,9 @@ export default defineConfig({
       description: "A local agent harness. Pluggable ribs, deterministic workflows.",
       favicon: "/assets/keelson-mark.svg",
       customCss: ["./src/styles/keelson-theme.css"],
+      components: {
+        PageTitle: "./src/components/PageTitle.astro",
+      },
       // Emits /llms.txt, /llms-full.txt, /llms-small.txt at build (llmstxt.org).
       plugins: [
         starlightLlmsTxt({
@@ -46,6 +49,7 @@ export default defineConfig({
       ],
       sidebar: [
         { label: "Overview", link: "/docs/" },
+        { label: "Watch the series", link: "/docs/watch/" },
         { label: "Concepts", items: [{ autogenerate: { directory: "docs/concepts" } }] },
         { label: "Guides", items: [{ autogenerate: { directory: "docs/guides" } }] },
         { label: "Tutorials", items: [{ autogenerate: { directory: "docs/tutorials" } }] },

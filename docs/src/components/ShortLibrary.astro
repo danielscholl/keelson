@@ -15,7 +15,7 @@ const first = shorts[0];
       poster={first.poster}
       src={first.video}
     >
-      <track kind="captions" srclang="en" label="English" src={first.captions} default />
+      <track kind="captions" srclang="en" label="English" src={first.captions} />
     </video>
     <figcaption id="short-caption">
       <span class="short-tag">FIG. {first.fig}</span>
@@ -61,22 +61,34 @@ const first = shorts[0];
 <script>
   const player = document.getElementById("short-player") as HTMLVideoElement | null;
   const caption = document.getElementById("short-caption");
+  const select = (card: HTMLAnchorElement) => {
+    if (!player || !caption) return;
+    const d = card.dataset;
+    player.poster = d.poster ?? "";
+    player.src = d.video ?? "";
+    const track = player.querySelector("track");
+    if (track) track.src = d.captions ?? "";
+    caption.querySelector(".short-tag")!.textContent = `FIG. ${d.fig}`;
+    caption.querySelector(".short-title")!.textContent = d.title ?? "";
+    caption.querySelector(".short-problem")!.textContent = d.problem ?? "";
+    for (const c of document.querySelectorAll(".short-card")) c.removeAttribute("aria-current");
+    card.setAttribute("aria-current", "true");
+  };
   for (const card of document.querySelectorAll<HTMLAnchorElement>(".short-card")) {
     card.addEventListener("click", (event) => {
-      if (!player || !caption) return;
+      if (!player) return;
       event.preventDefault();
-      const d = card.dataset;
-      player.poster = d.poster ?? "";
-      player.src = d.video ?? "";
-      const track = player.querySelector("track");
-      if (track) track.src = d.captions ?? "";
-      caption.querySelector(".short-tag")!.textContent = `FIG. ${d.fig}`;
-      caption.querySelector(".short-title")!.textContent = d.title ?? "";
-      caption.querySelector(".short-problem")!.textContent = d.problem ?? "";
-      for (const c of document.querySelectorAll(".short-card")) c.removeAttribute("aria-current");
-      card.setAttribute("aria-current", "true");
+      select(card);
       player.scrollIntoView({ behavior: "smooth", block: "center" });
       player.play().catch(() => {});
     });
+  }
+  const fig = /^#fig-(\d+)$/.exec(location.hash)?.[1];
+  const linked = fig
+    ? document.querySelector<HTMLAnchorElement>(`.short-card[data-fig="${fig}"]`)
+    : null;
+  if (linked) {
+    select(linked);
+    player?.scrollIntoView({ block: "center" });
   }
 </script>

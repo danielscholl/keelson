@@ -315,3 +315,50 @@ body {
   line-height: 1.25;
   color: var(--sl-color-white);
 }
+
+/* A page's own films, folded under its title until asked for. */
+.page-shorts {
+  margin-top: 0.9rem;
+  display: grid;
+  gap: 0.5rem;
+}
+.page-short summary {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: fit-content;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 6px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.85rem;
+}
+.page-short summary::-webkit-details-marker {
+  display: none;
+}
+.page-short summary:hover,
+.page-short[open] summary {
+  border-color: var(--sl-color-accent);
+}
+.page-short-play {
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid var(--sl-color-accent);
+}
+.page-short[open] .page-short-play {
+  border-left-color: var(--sl-color-gray-3);
+}
+.page-short-title {
+  color: var(--sl-color-white);
+}
+.page-short-length {
+  font-family: var(--sl-font-mono);
+  font-size: 0.75rem;
+  color: var(--sl-color-gray-3);
+}
+.page-short .short-figure {
+  margin: 0.75rem 0 0.5rem;
+}
