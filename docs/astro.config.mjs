@@ -3,6 +3,7 @@ import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 import remarkGfm from "remark-gfm";
 import starlightLlmsTxt from "starlight-llms-txt";
+import rehypeFilmRefs from "./src/lib/rehype-film-refs.ts";
 
 // Served from the custom domain in public/CNAME, so the site lives at the root.
 // The bespoke landing in public/ uses relative links, so it rides whatever base
@@ -21,6 +22,7 @@ export default defineConfig({
   // reads. (Piggybacks on the remarkPlugins deprecation Starlight already emits.)
   markdown: {
     remarkPlugins: [remarkGfm],
+    rehypePlugins: [rehypeFilmRefs],
   },
   // The Starter workflows page builds its cards from the bundled workflow YAML in
   // packages/workflows/, outside this project's root. Let the dev server read it.

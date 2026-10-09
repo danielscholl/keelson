@@ -1,94 +1,169 @@
 ---
-import { acts, shorts } from "../lib/shorts";
+import { actOf, acts, docsSlug, shorts } from "../lib/shorts";
+
+type SidebarEntry = { type: string; href?: string; label: string; entries?: SidebarEntry[] };
+const titles = new Map<string, string>();
+const collect = (entries: SidebarEntry[]) => {
+  for (const e of entries) {
+    if (e.type === "link" && e.href) titles.set(e.href, e.label);
+    if (e.entries) collect(e.entries);
+  }
+};
+// llms-full.txt renders this page outside a Starlight route, where reading it throws.
+try {
+  collect(Astro.locals.starlightRoute.sidebar as SidebarEntry[]);
+} catch {}
+
+const readLinks = (docs: string[]) =>
+  docs.map((d) => {
+    const { page, anchor } = docsSlug(d);
+    const title = titles.get(`/docs/${page}/`) ?? page;
+    return { href: `/docs/${page}/${anchor ? `#${anchor}` : ""}`, title };
+  });
 
 const first = shorts[0];
 ---
 
-<section class="short-library" not-content>
-  <figure class="short-figure short-stage">
-    <video
-      id="short-player"
-      controls
-      preload="metadata"
-      playsinline
-      crossorigin="anonymous"
-      poster={first.poster}
-      src={first.video}
-    >
-      <track kind="captions" srclang="en" label="English" src={first.captions} />
-    </video>
-    <figcaption id="short-caption">
-      <span class="short-tag">FIG. {first.fig}</span>
-      <span class="short-title">{first.title}</span>
-      <span class="short-problem">{first.problem}</span>
-    </figcaption>
-  </figure>
+<section class="film-library" not-content>
+  <header class="film-head">
+    <p class="film-eyebrow">Watch the series</p>
+    <h1 id="_top" class="film-display">The Keelson films</h1>
+    <p class="film-lede">Twenty short films. One system, built piece by piece.</p>
+    <div class="film-intro"><slot /></div>
+  </header>
+
+  <div class="film-stage">
+    <div class="film-screen">
+      <video
+        id="film-player"
+        controls
+        preload="metadata"
+        playsinline
+        crossorigin="anonymous"
+        poster={first.poster}
+        src={first.video}
+      >
+        <track kind="captions" srclang="en" label="English" src={first.captions} />
+      </video>
+    </div>
+    {
+      shorts.map((s, i) => {
+        const act = actOf(s);
+        const prev = shorts[i - 1];
+        const next = shorts[i + 1];
+        return (
+          <div class="film-now" data-now={s.fig} hidden={i !== 0}>
+            <p class="film-now-kicker">{i === 0 ? "Start here" : "Now playing"}</p>
+            <p class="film-now-fig">FIG. {s.fig}</p>
+            <h2 class="film-now-title">{s.title}</h2>
+            <p class="film-now-problem">{s.problem}</p>
+            <p class="film-now-meta">
+              {s.length} · {act.label} · {act.title}
+            </p>
+            <ul class="film-now-read">
+              {readLinks(s.docs).map((link) => (
+                <li>
+                  <a href={link.href}>Read: {link.title}</a>
+                </li>
+              ))}
+            </ul>
+            <div class="film-now-step">
+              {prev ? (
+                <button type="button" data-step={prev.fig}>
+                  ← FIG. {prev.fig}
+                </button>
+              ) : (
+                <span />
+              )}
+              {next && (
+                <button type="button" data-step={next.fig}>
+                  Next: FIG. {next.fig} →
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })
+    }
+  </div>
 
   {
     acts
       .filter((act) => act.shorts.length > 0)
       .map((act) => (
-        <div class="short-act">
-          <div class="short-act-label">
-            {act.id === "Coda" ? "Codas" : `Act ${act.id}`} · {act.title}
-          </div>
-          <div class="short-grid">
+        <section class="film-act" aria-labelledby={`act-${act.id}`}>
+          <header class="film-act-head">
+            <h2 id={`act-${act.id}`}>
+              <span class="film-act-label">{act.label}</span>
+              <span class="film-act-title">{act.title}</span>
+            </h2>
+            <p>{act.line}</p>
+          </header>
+          <div class="film-grid">
             {act.shorts.map((s) => (
               <a
-                class="short-card"
+                class="film-card"
                 href={s.video}
+                data-fig={s.fig}
                 data-video={s.video}
                 data-poster={s.poster}
                 data-captions={s.captions}
-                data-fig={s.fig}
-                data-title={s.title}
-                data-problem={s.problem}
+                aria-current={s.fig === first.fig ? "true" : undefined}
               >
-                <img src={s.thumb} alt="" loading="lazy" width="320" height="180" />
-                <span class="short-card-meta">
-                  <span class="short-tag">FIG. {s.fig}</span>
-                  <span class="short-length">{s.length}</span>
+                <span class="film-frame">
+                  <img src={s.thumb} alt="" loading="lazy" width="640" height="360" />
+                  <span class="film-chip film-chip-fig">FIG. {s.fig}</span>
+                  <span class="film-chip film-chip-len">{s.length}</span>
                 </span>
-                <span class="short-card-title">{s.title}</span>
+                <span class="film-card-title">{s.title}</span>
+                <span class="film-card-problem">{s.problem}</span>
               </a>
             ))}
           </div>
-        </div>
+        </section>
       ))
   }
 </section>
 
 <script>
-  const player = document.getElementById("short-player") as HTMLVideoElement | null;
-  const caption = document.getElementById("short-caption");
-  const select = (card: HTMLAnchorElement) => {
-    if (!player || !caption) return;
+  const player = document.getElementById("film-player") as HTMLVideoElement | null;
+  const cards = [...document.querySelectorAll<HTMLAnchorElement>(".film-card")];
+
+  const select = (fig: string, play: boolean) => {
+    const card = cards.find((c) => c.dataset.fig === fig);
+    if (!player || !card) return;
     const d = card.dataset;
     player.poster = d.poster ?? "";
     player.src = d.video ?? "";
     const track = player.querySelector("track");
     if (track) track.src = d.captions ?? "";
-    caption.querySelector(".short-tag")!.textContent = `FIG. ${d.fig}`;
-    caption.querySelector(".short-title")!.textContent = d.title ?? "";
-    caption.querySelector(".short-problem")!.textContent = d.problem ?? "";
-    for (const c of document.querySelectorAll(".short-card")) c.removeAttribute("aria-current");
+    for (const panel of document.querySelectorAll<HTMLElement>(".film-now")) {
+      panel.hidden = panel.dataset.now !== fig;
+    }
+    for (const c of cards) c.removeAttribute("aria-current");
     card.setAttribute("aria-current", "true");
-  };
-  for (const card of document.querySelectorAll<HTMLAnchorElement>(".short-card")) {
-    card.addEventListener("click", (event) => {
-      if (!player) return;
-      event.preventDefault();
-      select(card);
+    history.replaceState(null, "", `#fig-${fig}`);
+    if (play) {
       player.scrollIntoView({ behavior: "smooth", block: "center" });
       player.play().catch(() => {});
+    }
+  };
+
+  for (const card of cards) {
+    card.addEventListener("click", (event) => {
+      event.preventDefault();
+      select(card.dataset.fig ?? "", true);
     });
   }
-  const fig = /^#fig-(\d+)$/.exec(location.hash)?.[1];
-  const linked = fig
-    ? document.querySelector<HTMLAnchorElement>(`.short-card[data-fig="${fig}"]`)
-    : null;
-  if (linked) {
-    select(linked);
-    player?.scrollIntoView({ block: "center" });
+  for (const step of document.querySelectorAll<HTMLButtonElement>("[data-step]")) {
+    step.addEventListener("click", () => select(step.dataset.step ?? "", true));
   }
+  player?.addEventListener("ended", () => {
+    const current = cards.findIndex((c) => c.getAttribute("aria-current") === "true");
+    const next = cards[current + 1];
+    if (next) select(next.dataset.fig ?? "", false);
+  });
+
+  const linked = /^#fig-(\d+)$/.exec(location.hash)?.[1];
+  if (linked) select(linked, false);
 </script>

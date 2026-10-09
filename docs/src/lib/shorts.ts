@@ -33,10 +33,20 @@ const media = (s: Short): ShortMedia => {
 
 export const shorts: ShortMedia[] = data.shorts.map(media);
 
+const actLabel = (id: string): string =>
+  id === "0" ? "Prologue" : id === "Coda" ? "Codas" : `Act ${id}`;
+
 export const acts = data.acts.map((act) => ({
   ...act,
+  label: actLabel(act.id),
   shorts: shorts.filter((s) => s.act === act.id),
 }));
+
+export function actOf(short: Short) {
+  const act = acts.find((a) => a.id === short.act);
+  if (!act) throw new Error(`FIG. ${short.fig} names unknown act '${short.act}'`);
+  return act;
+}
 
 export function getShort(fig: string): ShortMedia {
   const short = shorts.find((s) => s.fig === fig.padStart(2, "0"));
@@ -44,15 +54,14 @@ export function getShort(fig: string): ShortMedia {
   return short;
 }
 
-// `docs` entries are slugs under docs/ (an optional #anchor names the section a
-// figure covers); a route id is the page's content path, with index pages
-// reduced to their directory.
+// `docs` entries are slugs under docs/; an optional #anchor names the section a
+// figure covers. Index pages reduce to their directory, as route ids do.
+export function docsSlug(entry: string): { page: string; anchor?: string } {
+  const [path, anchor] = entry.split("#");
+  return { page: path.replace(/\/index$/, ""), anchor };
+}
+
 export function shortsForPage(routeId: string): ShortMedia[] {
   const page = routeId.replace(/^docs\//, "").replace(/\/$/, "");
-  return shorts.filter((s) =>
-    s.docs.some((d) => {
-      const slug = d.split("#")[0].replace(/\/index$/, "");
-      return slug === page;
-    }),
-  );
+  return shorts.filter((s) => s.docs.some((d) => docsSlug(d).page === page));
 }
