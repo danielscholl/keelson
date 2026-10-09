@@ -112,6 +112,73 @@
         width: 100%;
         height: auto;
       }
+      .viewport video {
+        display: block;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        background: #eef2f7;
+      }
+      .viewport video[hidden],
+      .viewport img[hidden] {
+        display: none;
+      }
+
+      /* the intro film plays inside the drawing viewport, in place of the frame */
+      .button-watch {
+        gap: 10px;
+        border-color: rgba(30, 58, 95, 0.32);
+        color: var(--keel);
+        cursor: pointer;
+      }
+      .button-watch:hover {
+        border-color: var(--brass);
+      }
+      .button-watch .play {
+        width: 0;
+        height: 0;
+        border-top: 5px solid transparent;
+        border-bottom: 5px solid transparent;
+        border-left: 8px solid var(--brass);
+      }
+      .button-watch .len {
+        color: rgba(15, 27, 45, 0.5);
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+      }
+      .viewport-play {
+        position: absolute;
+        right: -1px;
+        top: calc(100% + 10px);
+        z-index: 2;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 11px;
+        border: 1px solid rgba(30, 58, 95, 0.32);
+        background: rgba(255, 255, 255, 0.86);
+        color: var(--keel);
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .viewport-play:hover {
+        border-color: var(--brass);
+      }
+      .viewport-play .play {
+        width: 0;
+        height: 0;
+        border-top: 4px solid transparent;
+        border-bottom: 4px solid transparent;
+        border-left: 7px solid var(--brass);
+      }
+      .viewport.is-playing .viewport-play {
+        display: none;
+      }
 
       .features {
         display: grid;
@@ -284,13 +351,30 @@
             </p>
             <div class="actions">
               <a class="button button-primary" href="docs/">Read the Docs</a>
-              <a class="button" href="https://github.com/danielscholl/keelson">View on GitHub</a>
+              <a class="button button-watch" href="docs/watch/" data-play-intro>
+                <span class="play" aria-hidden="true"></span>Watch the intro<span class="len">2:01</span>
+              </a>
             </div>
             <p class="platform-note">Apache 2.0 &middot; Beta &middot; runs locally on Bun</p>
           </div>
 
-          <figure class="viewport" aria-label="Keelson architecture, drawn as a hull">
-            <span class="figtag">FIG. 01 &middot; THE FRAME</span>
+          <figure class="viewport" id="hero-viewport" aria-label="Keelson architecture, drawn as a hull">
+            <span class="figtag" id="hero-figtag">FIG. 01 &middot; THE FRAME</span>
+            <video
+              id="intro-video"
+              hidden
+              controls
+              playsinline
+              preload="none"
+              crossorigin="anonymous"
+              poster="https://danielscholl.github.io/keelson-media/fig-00/poster.jpg"
+              src="https://danielscholl.github.io/keelson-media/fig-00/fig-00.mp4"
+            >
+              <track kind="captions" srclang="en" label="English" src="https://danielscholl.github.io/keelson-media/fig-00/captions.vtt" />
+            </video>
+            <a class="viewport-play" href="docs/watch/" data-play-intro>
+              <span class="play" aria-hidden="true"></span>FIG. 00 &middot; What Keelson is &middot; 2:01
+            </a>
             <img
               src="assets/figures/the-frame-ship.svg"
               alt="A blueprint side elevation of a hull. The keelson beam is the harness; three brass frames rise from it, bolted to the beam, each labeled as a keelson-rib package. A midship section inset shows one rib bolted to the keelson. The CLI is the rudder, the browser SPA a surface, and a dashed superstructure (wheelhouse, mast, and rigging) marks structure still under construction."
@@ -433,5 +517,23 @@
         </div>
       </footer>
     </div>
+    <script>
+      const viewport = document.getElementById("hero-viewport");
+      const video = document.getElementById("intro-video");
+      const frame = viewport.querySelector("img");
+      const figtag = document.getElementById("hero-figtag");
+      for (const trigger of document.querySelectorAll("[data-play-intro]")) {
+        trigger.addEventListener("click", (event) => {
+          event.preventDefault();
+          frame.hidden = true;
+          video.hidden = false;
+          viewport.classList.add("is-playing");
+          viewport.setAttribute("aria-label", "Keelson, the two-minute introduction");
+          figtag.textContent = "FIG. 00 \u00b7 WHAT KEELSON IS";
+          viewport.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          video.play().catch(() => {});
+        });
+      }
+    </script>
   </body>
 </html>

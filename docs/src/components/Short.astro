@@ -20,7 +20,7 @@ const s = getShort(fig);
     poster={s.poster}
     src={s.video}
   >
-    <track kind="captions" srclang="en" label="English" src={s.captions} default />
+    <track kind="captions" srclang="en" label="English" src={s.captions} />
   </video>
   <figcaption>
     Figure {n}. FIG. {s.fig} · {s.title} ({s.length}). {s.problem}
