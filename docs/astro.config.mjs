@@ -4,18 +4,17 @@ import { defineConfig } from "astro/config";
 import remarkGfm from "remark-gfm";
 import starlightLlmsTxt from "starlight-llms-txt";
 
-// Deploy defaults target this repo's GitHub Pages project URL
-// (https://danielscholl.github.io/keelson/). For a custom domain, set base to
-// "/" and add a CNAME. The bespoke landing in public/ uses relative links, so it
-// rides whatever base is set here.
+// Served from the custom domain in public/CNAME, so the site lives at the root.
+// The bespoke landing in public/ uses relative links, so it rides whatever base
+// is set here.
 export default defineConfig({
-  site: "https://danielscholl.github.io",
-  base: "/keelson",
+  site: "https://keelsonrib.ai",
+  base: "/",
   trailingSlash: "always",
   // Installing a rib is an operator how-to, not a tutorial rung, so it lives in
   // the guides tier; this preserves the old tutorial URL for bookmarks and search.
   redirects: {
-    "/docs/tutorials/install-a-rib": "/keelson/docs/guides/managing-ribs/",
+    "/docs/tutorials/install-a-rib": "/docs/guides/managing-ribs/",
   },
   // Astro 6 dropped GFM from the MDX pipeline that Starlight uses, which silently
   // breaks Markdown tables in .mdx; re-add it on the channel the MDX integration

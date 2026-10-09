@@ -62,7 +62,7 @@ keelson rib update --check   # what rib releases are available
 keelson update               # apply both
 ```
 
-Rerunning the installer works too. Upgrades preserve installed ribs and local data. See [Installing and removing Keelson](https://danielscholl.github.io/keelson/docs/guides/installation/) for platform details and the Windows `PATH` behavior.
+Rerunning the installer works too. Upgrades preserve installed ribs and local data. See [Installing and removing Keelson](https://keelsonrib.ai/docs/guides/installation/) for platform details and the Windows `PATH` behavior.
 
 ## Quick start
 
@@ -116,7 +116,7 @@ keelson rib update              # every rib, to its newest release
 keelson rib update --check      # report what is available, apply nothing
 ```
 
-Track a branch during development with `keelson rib add <source> --ref main`; both update commands leave a `--ref` pin alone. [Managing ribs](https://danielscholl.github.io/keelson/docs/guides/managing-ribs/) has the full lifecycle.
+Track a branch during development with `keelson rib add <source> --ref main`; both update commands leave a `--ref` pin alone. [Managing ribs](https://keelsonrib.ai/docs/guides/managing-ribs/) has the full lifecycle.
 
 ## Providers and gateways
 
@@ -141,7 +141,7 @@ For an OpenAI-compatible endpoint, add a gateway:
 keelson gateway add ollama http://localhost:11434/v1 --model qwen3
 ```
 
-Which providers load and which one chat defaults to are also editable in `config.json`. See [Configuration](https://danielscholl.github.io/keelson/docs/guides/configuration/).
+Which providers load and which one chat defaults to are also editable in `config.json`. See [Configuration](https://keelsonrib.ai/docs/guides/configuration/).
 
 ## Use Keelson from other agents with MCP
 
@@ -160,7 +160,7 @@ keelson connect --list      # show what's connected
 keelson disconnect claude   # or: keelson connect claude --undo
 ```
 
-Prefer to wire it by hand, or use another client? The endpoint is `http://127.0.0.1:7878/api/mcp` over streamable HTTP; [Using Keelson over MCP](https://danielscholl.github.io/keelson/docs/guides/using-mcp/) has the client config.
+Prefer to wire it by hand, or use another client? The endpoint is `http://127.0.0.1:7878/api/mcp` over streamable HTTP; [Using Keelson over MCP](https://keelsonrib.ai/docs/guides/using-mcp/) has the client config.
 
 Once connected, an agent can call `keelson_docs` to learn how Keelson behaves (no source checkout required) and `workflow_list` / `workflow_run` to drive automations. The endpoint is local by default, but it can expose state-changing tools. Add a token, restrict tools, or make the endpoint read-only before proxying it outside your machine.
 
@@ -183,13 +183,13 @@ keelson uninstall --purge   # the above plus the home: database, workflows, rib 
 
 `keelson uninstall` stops the server, revokes the keychain entries Keelson wrote, reverses every connection `keelson connect` recorded, removes the launcher, and deletes the program files at the root of the home (`node_modules`, `package.json`, `bun.lock`, `.npmrc`). Your data stays put unless you pass `--purge`.
 
-A plain run removes the `keelson` command itself, so there is nothing left to type a second time: pass `--purge` up front if you want the data gone too. [Installing and removing Keelson](https://danielscholl.github.io/keelson/docs/guides/installation/) covers the flags, manual removal on each platform, and why provider credentials outlive the home.
+A plain run removes the `keelson` command itself, so there is nothing left to type a second time: pass `--purge` up front if you want the data gone too. [Installing and removing Keelson](https://keelsonrib.ai/docs/guides/installation/) covers the flags, manual removal on each platform, and why provider credentials outlive the home.
 
 ## Documentation
 
-- [Keelson docs](https://danielscholl.github.io/keelson/): concepts, guides, workflow reference, and rib contract.
-- [CLI reference](https://danielscholl.github.io/keelson/docs/reference/cli/): every command and flag, plus the `--json` envelope and stable exit codes for scripting.
-- [Installing and removing Keelson](https://danielscholl.github.io/keelson/docs/guides/installation/): platform details, upgrades, and clean removal.
+- [Keelson docs](https://keelsonrib.ai/): concepts, guides, workflow reference, and rib contract.
+- [CLI reference](https://keelsonrib.ai/docs/reference/cli/): every command and flag, plus the `--json` envelope and stable exit codes for scripting.
+- [Installing and removing Keelson](https://keelsonrib.ai/docs/guides/installation/): platform details, upgrades, and clean removal.
 - [Writing ribs](WRITING-RIBS.md): the five-minute rib authoring quickstart.
 - [CONTRIBUTING.md](CONTRIBUTING.md): local setup and required checks.
 - [SECURITY.md](SECURITY.md): threat model and reporting process.
