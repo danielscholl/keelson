@@ -35,6 +35,7 @@ export default defineConfig({
       customCss: ["./src/styles/keelson-theme.css"],
       components: {
         PageTitle: "./src/components/PageTitle.astro",
+        SiteTitle: "./src/components/SiteTitle.astro",
       },
       // Emits /llms.txt, /llms-full.txt, /llms-small.txt at build (llmstxt.org).
       plugins: [

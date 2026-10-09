@@ -113,6 +113,13 @@ a {
   letter-spacing: 0.46em;
 }
 
+/* the domain's "rib", carried as a brass frame member the name still outweighs */
+.brand-rib {
+  color: var(--brass);
+  font-weight: 300;
+  opacity: 0.6;
+}
+
 .nav {
   display: flex;
   gap: clamp(18px, 3vw, 44px);

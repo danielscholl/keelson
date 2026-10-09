@@ -1,0 +1,22 @@
+---
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
+---
+
+<a href={siteTitleHref} class="site-title sl-flex">
+  <span translate="no">
+    {siteTitle}<span class="site-title-rib" aria-hidden="true">rib</span>
+  </span>
+</a>
+
+<style>
+  .site-title {
+    align-items: center;
+    font-size: var(--sl-text-h4);
+    text-decoration: none;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  span {
+    overflow: hidden;
+  }
+</style>
