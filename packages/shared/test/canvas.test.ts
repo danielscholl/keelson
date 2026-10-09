@@ -956,6 +956,65 @@ describe("canvasViewSchema", () => {
     ).toThrow();
   });
 
+  const flow = () => ({
+    kind: "flow",
+    left: "Legal tag",
+    right: "Who can read",
+    nodes: [
+      { id: "usa", side: "left", label: "usa-dataset", sublabel: "61,204", selected: true },
+      { id: "more", side: "left", label: "15 more tags", folded: [{ label: "segy", n: 1688 }] },
+      { id: "default", side: "right", label: "data.default.viewers" },
+    ],
+    links: [
+      { source: "usa", target: "default", n: 61204 },
+      { source: "more", target: "default", n: 922 },
+    ],
+  });
+
+  it("parses a flow section, top-level and nested in columns", () => {
+    expect(canvasViewSchema.parse({ view: "board", sections: [flow()] }).view).toBe("board");
+    expect(
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "columns", columns: [{ sections: [flow()] }] }],
+      }).view,
+    ).toBe("board");
+  });
+
+  it("accepts six unfolded left nodes beside a folded one", () => {
+    const f = flow();
+    for (let i = 0; i < 5; i++) f.nodes.push({ id: `t${i}`, side: "left", label: `t${i}` });
+    expect(canvasViewSchema.safeParse({ view: "board", sections: [f] }).success).toBe(true);
+  });
+
+  it("rejects a flow whose links do not run left to right between named nodes", () => {
+    const board = (mutate: (f: ReturnType<typeof flow>) => void) => {
+      const f = flow();
+      mutate(f);
+      return { view: "board", sections: [{ kind: "columns", columns: [{ sections: [f] }] }] };
+    };
+    const cases: [string, (f: ReturnType<typeof flow>) => void][] = [
+      ["dangling source", (f) => (f.links[0]!.source = "nope")],
+      ["source on the right", (f) => (f.links[0]!.source = "default")],
+      ["target on the left", (f) => (f.links[0]!.target = "more")],
+      ["duplicate pair", (f) => f.links.push({ source: "usa", target: "default", n: 1 })],
+      ["duplicate node id", (f) => f.nodes.push({ id: "usa", side: "right", label: "x" })],
+      ["zero link", (f) => (f.links[0]!.n = 0)],
+      [
+        "seventh unfolded left node",
+        (f) => {
+          for (let i = 0; i < 6; i++) f.nodes.push({ id: `t${i}`, side: "left", label: `t${i}` });
+        },
+      ],
+    ];
+    for (const [name, mutate] of cases) {
+      expect(canvasViewSchema.safeParse(board(mutate)).success, name).toBe(false);
+    }
+    expect(
+      canvasViewSchema.safeParse({ view: "board", sections: [{ ...flow(), extra: true }] }).success,
+    ).toBe(false);
+  });
+
   it("rejects a chart with no series or more than six", () => {
     expect(() =>
       canvasViewSchema.parse({

@@ -1010,6 +1010,50 @@ const journeySectionSchema = z
   .strict();
 export type CanvasJourneySection = z.infer<typeof journeySectionSchema>;
 
+// Two columns of nodes joined by ribbons whose width is a quantity: which
+// legal tag's records each group can read, which source spent on which model.
+// Links run left to right; a node that folds a tail lists it in `folded`.
+const flowSectionSchema = z
+  .object({
+    kind: z.literal("flow"),
+    title: z.string().optional(),
+    left: z.string().min(1),
+    right: z.string().min(1),
+    nodes: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            side: z.enum(["left", "right"]),
+            label: z.string().min(1),
+            sublabel: z.string().min(1).optional(),
+            selected: z.boolean().optional(),
+            folded: z
+              .array(z.object({ label: z.string().min(1), n: z.number().min(0) }).strict())
+              .min(1)
+              .max(200)
+              .optional(),
+          })
+          .strict(),
+      )
+      .min(2)
+      .max(24),
+    links: z
+      .array(
+        z
+          .object({
+            source: z.string().min(1),
+            target: z.string().min(1),
+            n: z.number().positive(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(150),
+  })
+  .strict();
+export type CanvasFlowSection = z.infer<typeof flowSectionSchema>;
+
 const graphSectionSchema = z
   .object({
     kind: z.literal("graph"),
@@ -1151,6 +1195,7 @@ const leafBoardSectionSchema = z.discriminatedUnion("kind", [
   chartSectionSchema,
   seatsSectionSchema,
   journeySectionSchema,
+  flowSectionSchema,
   graphSectionSchema,
   timelineSectionSchema,
 ]);
@@ -1209,6 +1254,7 @@ const canvasBoardSectionSchema = z.discriminatedUnion("kind", [
   chartSectionSchema,
   seatsSectionSchema,
   journeySectionSchema,
+  flowSectionSchema,
   graphSectionSchema,
   timelineSectionSchema,
   columnsBoardSectionSchema,
@@ -1312,6 +1358,49 @@ function assertLeafSectionUniqueness(
         }
       });
     }
+  } else if (leaf.kind === "flow") {
+    const sides = new Map(leaf.nodes.map((node) => [node.id, node.side]));
+    if (sides.size !== leaf.nodes.length) {
+      ctx.addIssue({
+        code: "custom",
+        message: "node ids must be unique",
+        path: [...path, "nodes"],
+      });
+    }
+    // Six palette slots and no cycling: a seventh left node folds into a `folded` node.
+    if (leaf.nodes.filter((node) => node.side === "left" && !node.folded).length > 6) {
+      ctx.addIssue({
+        code: "custom",
+        message: "at most 6 unfolded left nodes; fold the rest into one node",
+        path: [...path, "nodes"],
+      });
+    }
+    const pairs = new Set<string>();
+    leaf.links.forEach((link, i) => {
+      if (sides.get(link.source) !== "left") {
+        ctx.addIssue({
+          code: "custom",
+          message: `link source "${link.source}" names no left node`,
+          path: [...path, "links", i, "source"],
+        });
+      }
+      if (sides.get(link.target) !== "right") {
+        ctx.addIssue({
+          code: "custom",
+          message: `link target "${link.target}" names no right node`,
+          path: [...path, "links", i, "target"],
+        });
+      }
+      const pair = `${link.source}\u0000${link.target}`;
+      if (pairs.has(pair)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "duplicate source and target pair; each pair may appear only once",
+          path: [...path, "links", i],
+        });
+      }
+      pairs.add(pair);
+    });
   } else if (leaf.kind === "graph") {
     const ids = new Set(leaf.nodes.map((node) => node.id));
     if (ids.size !== leaf.nodes.length) {

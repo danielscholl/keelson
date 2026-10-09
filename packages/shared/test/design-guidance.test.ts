@@ -73,6 +73,12 @@ describe("design guide placement", () => {
     );
   });
 
+  test("guides set-to-set quantities toward flow sections", () => {
+    const board = CANVAS_DESIGN_GUIDE_SECTIONS.board;
+    expect(board).toContain("→ flow: left and right nodes, links { source, target, n }");
+    expect(board).toContain("flow carries no actions");
+  });
+
   test("guides bounded timelines with local time, host ticking, and text fallback", () => {
     const board = CANVAS_DESIGN_GUIDE_SECTIONS.board;
     for (const phrase of [
