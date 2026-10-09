@@ -22,6 +22,7 @@ import { isSafeLinkScheme } from "../../lib/safeLink.ts";
 import { ConfirmModal, type ConfirmModalMode } from "../ConfirmModal.tsx";
 import { useBoardActions, useCardActionDispatch } from "./BoardActionContext.tsx";
 import { ChartSection } from "./ChartSection.tsx";
+import { FlowSection } from "./FlowSection.tsx";
 import { GraphSection } from "./GraphSection.tsx";
 import { ModelCatalogPopover, ModelFieldPicker } from "./ModelFieldPicker.tsx";
 import { TableView } from "./TableView.tsx";
@@ -1501,6 +1502,8 @@ function Section({ section }: { section: BoardSection }) {
       return <ActionsSection section={section} />;
     case "chart":
       return <ChartSection section={section} />;
+    case "flow":
+      return <FlowSection section={section} />;
     case "graph":
       return <GraphSection section={section} />;
     case "timeline":
