@@ -11283,13 +11283,16 @@ a.cvb-card-title::after {
 
 /* faces on timeline lanes and feed rows, in the same tone as the lane or person */
 .cvb-timeline-lane-name[data-face] {
-  --id-tone: var(--tl-tone, var(--muted));
   display: flex;
   align-items: center;
   gap: 6px;
 }
 .cvb-timeline-lane-name[data-face]::before {
   content: none;
+}
+.cvb-timeline-lane-name[data-face] .cvb-face {
+  border-color: var(--tl-tone, var(--muted));
+  background: color-mix(in srgb, var(--tl-tone, var(--muted)) 22%, var(--card, transparent));
 }
 .cvb-timeline-lane-name .cvb-face,
 .cvb-row .cvb-face {
