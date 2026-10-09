@@ -3,49 +3,55 @@ import Default from "@astrojs/starlight/components/PageTitle.astro";
 import { shortsForPage } from "../lib/shorts";
 
 const route = Astro.locals.starlightRoute;
-const films = route.id === "docs/watch" ? [] : shortsForPage(route.id);
+const isFilmsPage = route.id === "docs/watch";
+const hasFilms = !isFilmsPage && shortsForPage(route.id).length > 0;
 ---
 
-<Default />
+{!isFilmsPage && <Default />}
 {
-  films.length > 0 && (
-    <div class="page-shorts">
-      {films.map((s) => (
-        <details class="page-short">
-          <summary>
-            <span class="page-short-play" aria-hidden="true" />
-            <span class="short-tag">FIG. {s.fig}</span>
-            <span class="page-short-title">Watch: {s.title}</span>
-            <span class="page-short-length">{s.length}</span>
-          </summary>
-          <figure class="short-figure">
-            <video
-              controls
-              preload="none"
-              playsinline
-              crossorigin="anonymous"
-              poster={s.poster}
-              src={s.video}
-            >
-              <track kind="captions" srclang="en" label="English" src={s.captions} />
-            </video>
-            <figcaption>
-              {s.problem} <a href={`/docs/watch/#fig-${s.fig}`}>See it in the series</a>.
-            </figcaption>
-          </figure>
-        </details>
-      ))}
-    </div>
+  hasFilms && (
+    <dialog class="film-dialog" aria-labelledby="film-dialog-title">
+      <div class="film-dialog-head">
+        <span class="film-dialog-fig" />
+        <span id="film-dialog-title" class="film-dialog-title" />
+        <button type="button" class="film-dialog-close" aria-label="Close film">
+          ✕
+        </button>
+      </div>
+      <video controls playsinline preload="none" crossorigin="anonymous">
+        <track kind="captions" srclang="en" label="English" />
+      </video>
+      <a class="film-dialog-series" href="/docs/watch/">
+        Continue in the series →
+      </a>
+    </dialog>
   )
 }
 
 <script>
-  for (const details of document.querySelectorAll<HTMLDetailsElement>(".page-short")) {
-    details.addEventListener("toggle", () => {
-      const video = details.querySelector("video");
-      if (!video) return;
-      if (details.open) video.play().catch(() => {});
-      else video.pause();
+  const dialog = document.querySelector<HTMLDialogElement>(".film-dialog");
+  const video = dialog?.querySelector("video");
+  if (dialog && video) {
+    const close = () => dialog.close();
+    for (const opener of document.querySelectorAll<HTMLButtonElement>("[data-film-open]")) {
+      opener.addEventListener("click", () => {
+        const d = opener.dataset;
+        dialog.querySelector(".film-dialog-fig")!.textContent = `FIG. ${d.fig}`;
+        dialog.querySelector(".film-dialog-title")!.textContent = d.title ?? "";
+        dialog.querySelector<HTMLAnchorElement>(".film-dialog-series")!.href =
+          `/docs/watch/#fig-${d.fig}`;
+        video.poster = d.poster ?? "";
+        video.src = d.video ?? "";
+        const track = video.querySelector("track");
+        if (track) track.src = d.captions ?? "";
+        dialog.showModal();
+        video.play().catch(() => {});
+      });
+    }
+    dialog.querySelector(".film-dialog-close")?.addEventListener("click", close);
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) close();
     });
+    dialog.addEventListener("close", () => video.pause());
   }
 </script>

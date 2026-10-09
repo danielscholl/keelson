@@ -3,27 +3,33 @@
   "acts": [
     {
       "id": "0",
-      "title": "The plate"
+      "title": "The plate",
+      "line": "What the harness is, and what it keeps on your machine."
     },
     {
       "id": "I",
-      "title": "Chat and projects"
+      "title": "Chat and projects",
+      "line": "Talk to the agent from anywhere, and give it a place to work."
     },
     {
       "id": "II",
-      "title": "Workflows"
+      "title": "Workflows",
+      "line": "From a conversation to a run you can repeat, gate, and hand to any model."
     },
     {
       "id": "III",
-      "title": "What the harness keeps"
+      "title": "What the harness keeps",
+      "line": "Memory that carries across sessions, and a ledger of where the tokens went."
     },
     {
       "id": "IV",
-      "title": "Raise the ribs"
+      "title": "Raise the ribs",
+      "line": "Bolt capability on as packages, then let it build software."
     },
     {
       "id": "Coda",
-      "title": "Codas"
+      "title": "Short explorations",
+      "line": "Running without paid keys, reports, measuring a change, and how these films were made."
     }
   ],
   "shorts": [

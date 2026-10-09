@@ -254,12 +254,17 @@ covers, duration) and the media base URL; each figure's folder there holds
 
 - The landing's hero plays FIG. 00 inside the drawing viewport, in place of the
   frame, from a "Watch the intro" action. It is the only video on the landing.
-- The series has its own page, `/docs/watch/`, which plays every figure through
-  `ShortLibrary`; `#fig-NN` selects one. The Overview links to it as a tier card
-  rather than carrying the library itself.
-- A page listed in a figure's `docs` gets that figure under its title, folded
-  shut until opened, through the `PageTitle` override. Map a figure to a page in
-  `shorts.json`, not by editing the page.
+- The series has its own page, `/docs/watch/` ("The Keelson films"), wider than a
+  reading page and without the right-hand contents. A featured stage plays one
+  film beside a now-playing panel (its act, the docs it covers, previous and
+  next), and the acts below are chapters with a one-line description each
+  (`line` in `shorts.json`). `#fig-NN` selects a film. The Overview links to it
+  as a tier card, and the sidebar carries one link to it, never per-film entries.
+- A page listed in a film's `docs` gets a "From the film series" card after its
+  opening paragraph; a `page#section` entry places it after that section's first
+  paragraph instead. The card plays the film in a dialog, so a reader never
+  leaves the page. `src/lib/rehype-film-refs.ts` places it: map films to pages in
+  `shorts.json`, not by editing pages.
 - Any page can still embed one figure inline with `<Short fig="14" n={2} />`,
   which renders the native player and a numbered figcaption, so the lead-in and
   caption rules above still apply.
