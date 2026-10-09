@@ -11280,3 +11280,29 @@ a.cvb-card-title::after {
   flex-direction: column;
   gap: 16px;
 }
+
+/* faces on timeline lanes and feed rows, in the same tone as the lane or person */
+.cvb-timeline-lane-name[data-face] {
+  --id-tone: var(--tl-tone, var(--muted));
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cvb-timeline-lane-name[data-face]::before {
+  content: none;
+}
+.cvb-timeline-lane-name .cvb-face,
+.cvb-row .cvb-face {
+  width: 18px;
+  height: 18px;
+  font-size: 8.5px;
+  border-width: 1.25px;
+}
+.cvb-person[data-tone="brand"] {
+  --id-tone: var(--magenta);
+}
+.cvb-row .cvb-person--face {
+  flex: none;
+  gap: 6px;
+  font-size: 12px;
+}

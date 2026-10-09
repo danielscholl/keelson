@@ -835,6 +835,8 @@ const rowsSectionSchema = z
           icon: z.string().min(1).optional(),
           glyph: canvasToneSchema.optional(),
           chip: canvasPillSchema.optional(),
+          // Who the row is by, as a person (a face when it carries one), in place of a chip.
+          person: canvasPersonSchema.optional(),
           text: z
             .string()
             .min(1)
@@ -1077,6 +1079,8 @@ const timelineLaneSchema = z
   .object({
     id: z.string().min(1),
     label: z.string().min(1),
+    // Initials drawn as a face in the lane's tone beside the label.
+    face: z.string().min(1).max(2).optional(),
     tone: canvasToneSchema
       .extract([
         "id-blue",

@@ -477,3 +477,51 @@ describe("faces and stacked bars", () => {
     expect([...parts].map((p) => p.style.width)).toEqual(["10%", "40%"]);
   });
 });
+
+describe("faces on rows and timeline lanes", () => {
+  test("a row's person renders as a face with its name", () => {
+    const { container } = render(
+      <BoardView
+        view={board([
+          {
+            kind: "rows",
+            items: [
+              {
+                person: { name: "seams", tone: "id-blue", face: "S" },
+                text: "@lead checking callers",
+              },
+            ],
+          },
+        ])}
+      />,
+    );
+    const face = container.querySelector(".cvb-row .cvb-person--face");
+    expect(face?.textContent).toBe("Sseams");
+    expect(face?.getAttribute("data-tone")).toBe("id-blue");
+  });
+
+  test("a lane with a face draws it beside the label", () => {
+    const { container } = render(
+      <BoardView
+        view={board([
+          {
+            kind: "timeline",
+            window: { from: "2026-10-08T13:00:00.000Z", to: "2026-10-08T14:00:00.000Z" },
+            lanes: [
+              { id: "lead", label: "@lead", tone: "brand", face: "Le" },
+              { id: "w1", label: "@w1", tone: "id-blue" },
+            ],
+            spans: [],
+            marks: [],
+          },
+        ])}
+      />,
+    );
+    const names = [...container.querySelectorAll(".cvb-timeline-lane-name")];
+    const lead = names.find((n) => n.textContent?.includes("@lead"));
+    expect(lead?.querySelector(".cvb-face")?.textContent).toBe("Le");
+    expect(lead?.hasAttribute("data-face")).toBe(true);
+    const w1 = names.find((n) => n.textContent?.includes("@w1"));
+    expect(w1?.querySelector(".cvb-face")).toBeNull();
+  });
+});

@@ -2519,3 +2519,27 @@ describe("faces and stacked bars", () => {
     expect(canvasViewSchema.safeParse(view).success).toBe(true);
   });
 });
+
+describe("faces on rows and lanes", () => {
+  it("parses a row person and a lane face, and caps the lane face at two characters", () => {
+    const rows = {
+      kind: "rows",
+      items: [{ person: { name: "seams", face: "S", status: "busy" }, text: "x" }],
+    };
+    expect(canvasViewSchema.safeParse({ view: "board", sections: [rows] }).success).toBe(true);
+    const lane = (face: string) => ({
+      view: "board",
+      sections: [
+        {
+          kind: "timeline",
+          window: { from: "2026-10-08T13:00:00.000Z", to: "2026-10-08T14:00:00.000Z" },
+          lanes: [{ id: "a", label: "@a", face }],
+          spans: [],
+          marks: [],
+        },
+      ],
+    });
+    expect(canvasViewSchema.safeParse(lane("Le")).success).toBe(true);
+    expect(canvasViewSchema.safeParse(lane("Lea")).success).toBe(false);
+  });
+});
