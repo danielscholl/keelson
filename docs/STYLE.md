@@ -115,6 +115,15 @@ aside), `guide-layout` with sticky `side-nav`, `card-grid` + `link-card` (a hub)
 `info-table`, `diagram-figure` (light frame, for diagrams) and `screenshot-figure`
 (dark frame, for app screenshots), `code-sample`, `related`, `page-footer`.
 
+### The wordmark
+
+The lockup on the landing and in the docs header is the name plus the domain's
+"rib": `KEELSON` in ink at full weight, then `RIB` (`rib` in the docs) in brass
+at weight 300 and 60% opacity, set as one word to read as keelsonrib.ai. The
+name must always outweigh the trailer. The lockup is the site's brand only; the
+product is Keelson everywhere else (titles, prose, the CLI, packages), never
+"Keelson Rib", which would cast the harness as a rib.
+
 ### Layout widths
 
 A wide container with a readable measure, the documentation standard.
