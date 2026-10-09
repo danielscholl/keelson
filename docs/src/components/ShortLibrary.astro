@@ -1,0 +1,82 @@
+---
+import { acts, shorts } from "../lib/shorts";
+
+const first = shorts[0];
+---
+
+<section class="short-library" not-content>
+  <figure class="short-figure short-stage">
+    <video
+      id="short-player"
+      controls
+      preload="metadata"
+      playsinline
+      crossorigin="anonymous"
+      poster={first.poster}
+      src={first.video}
+    >
+      <track kind="captions" srclang="en" label="English" src={first.captions} default />
+    </video>
+    <figcaption id="short-caption">
+      <span class="short-tag">FIG. {first.fig}</span>
+      <span class="short-title">{first.title}</span>
+      <span class="short-problem">{first.problem}</span>
+    </figcaption>
+  </figure>
+
+  {
+    acts
+      .filter((act) => act.shorts.length > 0)
+      .map((act) => (
+        <div class="short-act">
+          <div class="short-act-label">
+            {act.id === "Coda" ? "Codas" : `Act ${act.id}`} · {act.title}
+          </div>
+          <div class="short-grid">
+            {act.shorts.map((s) => (
+              <a
+                class="short-card"
+                href={s.video}
+                data-video={s.video}
+                data-poster={s.poster}
+                data-captions={s.captions}
+                data-fig={s.fig}
+                data-title={s.title}
+                data-problem={s.problem}
+              >
+                <img src={s.thumb} alt="" loading="lazy" width="320" height="180" />
+                <span class="short-card-meta">
+                  <span class="short-tag">FIG. {s.fig}</span>
+                  <span class="short-length">{s.length}</span>
+                </span>
+                <span class="short-card-title">{s.title}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      ))
+  }
+</section>
+
+<script>
+  const player = document.getElementById("short-player") as HTMLVideoElement | null;
+  const caption = document.getElementById("short-caption");
+  for (const card of document.querySelectorAll<HTMLAnchorElement>(".short-card")) {
+    card.addEventListener("click", (event) => {
+      if (!player || !caption) return;
+      event.preventDefault();
+      const d = card.dataset;
+      player.poster = d.poster ?? "";
+      player.src = d.video ?? "";
+      const track = player.querySelector("track");
+      if (track) track.src = d.captions ?? "";
+      caption.querySelector(".short-tag")!.textContent = `FIG. ${d.fig}`;
+      caption.querySelector(".short-title")!.textContent = d.title ?? "";
+      caption.querySelector(".short-problem")!.textContent = d.problem ?? "";
+      for (const c of document.querySelectorAll(".short-card")) c.removeAttribute("aria-current");
+      card.setAttribute("aria-current", "true");
+      player.scrollIntoView({ behavior: "smooth", block: "center" });
+      player.play().catch(() => {});
+    });
+  }
+</script>

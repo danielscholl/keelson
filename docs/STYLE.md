@@ -243,6 +243,22 @@ swap with the active theme. Never drop an unframed dark-UI shot onto a light pag
 or the reverse. Add screenshots only once a surface is visually stable, and keep
 them current with the UI.
 
+### Video
+
+The shorts series (one numbered figure per concept, in viewing order) plays in
+the docs from a separate media repository, never from this one: an mp4 is about
+6 MB, so the keelson repo carries only the index. `src/data/shorts.json` lists
+each figure (number, title, act, the problem it answers, the docs pages it
+covers, duration) and the media base URL; each figure's folder there holds
+`fig-NN.mp4`, `poster.jpg`, and `captions.vtt`.
+
+- The docs front page plays the whole series through `ShortLibrary`.
+- Any page embeds one figure with `<Short fig="14" n={2} />`, which renders the
+  native player with captions and a numbered figcaption, so the lead-in and
+  caption rules above still apply.
+- Moving the media (to object storage, say) changes only `base` in
+  `shorts.json`.
+
 ### Icon family
 
 The feature-tile icons are inline navy line SVGs, one consistent family: 30x30

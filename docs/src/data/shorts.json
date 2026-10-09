@@ -1,0 +1,250 @@
+{
+  "base": "https://danielscholl.github.io/keelson-media/",
+  "acts": [
+    {
+      "id": "0",
+      "title": "The plate"
+    },
+    {
+      "id": "I",
+      "title": "Chat and projects"
+    },
+    {
+      "id": "II",
+      "title": "Workflows"
+    },
+    {
+      "id": "III",
+      "title": "What the harness keeps"
+    },
+    {
+      "id": "IV",
+      "title": "Raise the ribs"
+    },
+    {
+      "id": "Coda",
+      "title": "Codas"
+    }
+  ],
+  "shorts": [
+    {
+      "fig": "00",
+      "title": "What Keelson is",
+      "act": "0",
+      "problem": "What is Keelson, and what does it keep on your machine?",
+      "docs": [
+        "concepts/what-keelson-is",
+        "concepts/architecture"
+      ],
+      "duration": 121
+    },
+    {
+      "fig": "01",
+      "title": "First run",
+      "act": "I",
+      "problem": "What does Keelson put on your machine, how do you know it is healthy, and what happens when you talk to it?",
+      "docs": [
+        "tutorials/first-run",
+        "guides/installation",
+        "guides/operating-the-server"
+      ],
+      "duration": 99
+    },
+    {
+      "fig": "02",
+      "title": "Chat three ways",
+      "act": "I",
+      "problem": "If you can talk to the agent from the browser, a terminal, and a script, where does the conversation actually live?",
+      "docs": [
+        "tutorials/talk-to-the-agent",
+        "concepts/chat"
+      ],
+      "duration": 122
+    },
+    {
+      "fig": "03",
+      "title": "A place to work",
+      "act": "I",
+      "problem": "Where does agent work happen, and how does the next chat know what the last one learned?",
+      "docs": [
+        "concepts/projects",
+        "concepts/memory-and-state#projects-and-notebooks"
+      ],
+      "duration": 122
+    },
+    {
+      "fig": "04",
+      "title": "First workflow",
+      "act": "II",
+      "problem": "What does it mean to take the control flow away from the agent, and what does a run leave behind?",
+      "docs": [
+        "tutorials/run-a-workflow",
+        "concepts/workflows"
+      ],
+      "duration": 115
+    },
+    {
+      "fig": "05",
+      "title": "Write a workflow",
+      "act": "II",
+      "problem": "How do you turn work you want done the same way every time into something Keelson can check and run?",
+      "docs": [
+        "tutorials/run-a-workflow",
+        "guides/authoring-workflows",
+        "reference/workflow-nodes"
+      ],
+      "duration": 122
+    },
+    {
+      "fig": "06",
+      "title": "The approval gate",
+      "act": "II",
+      "problem": "How do you keep an agent from taking a step you can't undo until a person says yes?",
+      "docs": [
+        "guides/governance",
+        "reference/workflow-nodes"
+      ],
+      "duration": 120
+    },
+    {
+      "fig": "07",
+      "title": "Many models",
+      "act": "II",
+      "problem": "Which model should do which job, and how do you find out without arguing about it?",
+      "docs": [
+        "tutorials/frontend-mix",
+        "concepts/providers"
+      ],
+      "duration": 124
+    },
+    {
+      "fig": "08",
+      "title": "Issue to draft PR",
+      "act": "II",
+      "problem": "How do you hand an agent real code work without letting it loose on your checkout?",
+      "docs": [
+        "workflows/fix-issue",
+        "workflows/index",
+        "concepts/projects#worktree-isolation-for-runs"
+      ],
+      "duration": 136
+    },
+    {
+      "fig": "09",
+      "title": "Make it remember",
+      "act": "III",
+      "problem": "How does a fresh session learn what an earlier run found, without an unattended run teaching it something wrong?",
+      "docs": [
+        "tutorials/remember-across-sessions",
+        "guides/managing-memory",
+        "concepts/memory-and-state"
+      ],
+      "duration": 122
+    },
+    {
+      "fig": "10",
+      "title": "Where the tokens went",
+      "act": "III",
+      "problem": "After all that work, which turns spent what, on which model, and what did it cost?",
+      "docs": [
+        "concepts/usage"
+      ],
+      "duration": 124
+    },
+    {
+      "fig": "11",
+      "title": "The rib model",
+      "act": "IV",
+      "problem": "How do you add capability to Keelson without changing Keelson?",
+      "docs": [
+        "concepts/the-rib-model",
+        "concepts/snapshots-and-surfaces"
+      ],
+      "duration": 139
+    },
+    {
+      "fig": "12",
+      "title": "Add a capability",
+      "act": "IV",
+      "problem": "What does it take to give Keelson a capability it didn't ship with?",
+      "docs": [
+        "guides/managing-ribs",
+        "concepts/snapshots-and-surfaces"
+      ],
+      "duration": 112
+    },
+    {
+      "fig": "13",
+      "title": "Plan the backlog",
+      "act": "IV",
+      "problem": "How do you hand agents a build the way a team would work it, one ready unit at a time?",
+      "docs": [
+        "tutorials/plan-the-backlog"
+      ],
+      "duration": 126
+    },
+    {
+      "fig": "14",
+      "title": "The software factory",
+      "act": "IV",
+      "problem": "Something has to work the board the way a team would, with someone else reading every change before it lands.",
+      "docs": [
+        "tutorials/run-the-factory"
+      ],
+      "duration": 155
+    },
+    {
+      "fig": "15",
+      "title": "Your agent drives it",
+      "act": "IV",
+      "problem": "How does the coding agent you already use reach Keelson's workflows and ribs?",
+      "docs": [
+        "guides/using-mcp"
+      ],
+      "duration": 106
+    },
+    {
+      "fig": "16",
+      "title": "No paid keys",
+      "act": "Coda",
+      "problem": "Can Keelson run on a model you host yourself, with no account and no key?",
+      "docs": [
+        "guides/configuration",
+        "concepts/providers"
+      ],
+      "duration": 115
+    },
+    {
+      "fig": "17",
+      "title": "Ask for a report",
+      "act": "Coda",
+      "problem": "How does a chat answer become a designed page someone will read, keep, or share?",
+      "docs": [
+        "guides/canvas-artifacts"
+      ],
+      "duration": 110
+    },
+    {
+      "fig": "18",
+      "title": "Did that change help?",
+      "act": "Coda",
+      "problem": "When you change a workflow's prompt, how do you know it got better and not just different?",
+      "docs": [
+        "guides/evaluating-workflows",
+        "workflows/hillclimb"
+      ],
+      "duration": 125
+    },
+    {
+      "fig": "19",
+      "title": "Shorts, by Keelson",
+      "act": "Coda",
+      "problem": "How do you make every short the same way, and still have a person decide what ships?",
+      "docs": [
+        "workflows/index",
+        "reference/workflow-nodes"
+      ],
+      "duration": 134
+    }
+  ]
+}
