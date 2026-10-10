@@ -22,7 +22,17 @@ describe("snapshotToMarkdown", () => {
   test("renders any other shape as a fenced JSON block", () => {
     const out = snapshotToMarkdown({ a: 1 });
     expect(out).toContain("```json");
-    expect(out).toContain('"a": 1');
+    expect(out).toContain('"a":1');
+  });
+
+  test("keeps the JSON fence compact", () => {
+    const out = snapshotToMarkdown({
+      view: "board",
+      sections: [{ kind: "cards", items: [{ title: "x" }] }],
+    });
+    expect(out).toBe(
+      '```json\n{"view":"board","sections":[{"kind":"cards","items":[{"title":"x"}]}]}\n```',
+    );
   });
 });
 
