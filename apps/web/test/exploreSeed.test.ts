@@ -22,14 +22,14 @@ describe("snapshotToMarkdown", () => {
   test("renders any other shape as a fenced JSON block", () => {
     const out = snapshotToMarkdown({ a: 1 });
     expect(out).toContain("```json");
-    expect(out).toContain('"a":1');
+    expect(out).toContain('"a": 1');
   });
 
-  test("keeps the JSON fence compact", () => {
-    const out = snapshotToMarkdown({
-      view: "board",
-      sections: [{ kind: "cards", items: [{ title: "x" }] }],
-    });
+  test("keeps the JSON fence compact when asked", () => {
+    const out = snapshotToMarkdown(
+      { view: "board", sections: [{ kind: "cards", items: [{ title: "x" }] }] },
+      { compact: true },
+    );
     expect(out).toBe(
       '```json\n{"view":"board","sections":[{"kind":"cards","items":[{"title":"x"}]}]}\n```',
     );
@@ -77,9 +77,21 @@ describe("buildExploreSeedForPanel", () => {
     expect(seed.name.length).toBeLessThanOrEqual(120);
     expect(seed.systemPrompt.endsWith("===END PANEL DATA===")).toBe(true);
   });
+  test("seeds a structured snapshot as compact JSON", () => {
+    const seed = buildExploreSeedForPanel("X", { view: "board", sections: [] });
+    expect(seed.systemPrompt).toContain('{"view":"board","sections":[]}');
+  });
 });
 
 describe("buildExploreSeed", () => {
+  test("seeds each structured panel as compact JSON", () => {
+    const seed = buildExploreSeed([
+      { name: "A", data: { view: "board", sections: [] } },
+      { name: "B", data: { view: "board", sections: [] } },
+    ]);
+    expect(seed.systemPrompt.match(/\{"view":"board","sections":\[\]\}/g)?.length).toBe(2);
+  });
+
   test("wraps multiple panels in one fenced envelope", () => {
     const seed = buildExploreSeed([
       { name: "Quality", data: { markdown: "3 failing services" } },
