@@ -525,3 +525,133 @@ describe("faces on rows and timeline lanes", () => {
     expect(w1?.querySelector(".cvb-face")).toBeNull();
   });
 });
+
+describe("series item bars", () => {
+  test("a quiet cells bar draws one slot per entry with hollow outlines and a tone summary", () => {
+    const { container } = render(
+      <BoardView
+        view={board([
+          {
+            kind: "rows",
+            items: [
+              {
+                text: "refresh",
+                bar: {
+                  quiet: true,
+                  cells: [
+                    { label: "10-11 green", tone: "ok" },
+                    { label: "10-12 failed", tone: "error" },
+                    { label: "10-10 nothing due", hollow: true },
+                    { label: "10-09 missed", tone: "error", hollow: true },
+                  ],
+                },
+              },
+            ],
+          },
+        ])}
+      />,
+    );
+    const series = container.querySelector(".cvb-series--cells");
+    expect(series?.classList.contains("is-quiet")).toBe(true);
+    const cells = series?.querySelectorAll(".cvb-series-cell") ?? [];
+    expect(cells.length).toBe(4);
+    expect(cells[1]?.getAttribute("data-tone")).toBe("error");
+    expect(cells[2]?.getAttribute("data-tone")).toBe("neutral");
+    expect(cells[3]?.classList.contains("is-hollow")).toBe(true);
+    expect(cells[3]?.getAttribute("title")).toBe("10-09 missed");
+    expect(series?.getAttribute("aria-label")).toBe(
+      "4 slots: 1 ok, 1 error, 1 hollow neutral, 1 hollow error",
+    );
+  });
+
+  test("a columns bar stacks segments as a share of total, tints the rest and hatches unmeasured", () => {
+    const { container } = render(
+      <BoardView
+        view={board([
+          {
+            kind: "rows",
+            items: [
+              {
+                text: "template",
+                bar: {
+                  total: 10,
+                  rest: "ok",
+                  columns: [
+                    {
+                      label: "10-08",
+                      segments: [
+                        { label: "waiting", n: 4, tone: "info" },
+                        { label: "failing", n: 1, tone: "warn" },
+                      ],
+                    },
+                    { label: "10-09", segments: [] },
+                    { label: "10-10", segments: [{ label: "waiting", n: null }] },
+                  ],
+                },
+              },
+            ],
+          },
+        ])}
+      />,
+    );
+    const columns = container.querySelectorAll(".cvb-series-column");
+    expect(columns.length).toBe(3);
+    const fills = columns[0]?.querySelectorAll<HTMLElement>(".cvb-series-fill") ?? [];
+    expect([...fills].map((f) => f.style.height)).toEqual(["40%", "10%"]);
+    expect(columns[0]?.getAttribute("data-tone")).toBe("ok");
+    expect(columns[0]?.getAttribute("title")).toBe("10-08: 4 waiting, 1 failing");
+    expect(columns[1]?.querySelectorAll(".cvb-series-fill").length).toBe(0);
+    expect(columns[2]?.classList.contains("is-unmeasured")).toBe(true);
+    expect(columns[2]?.hasAttribute("data-tone")).toBe(false);
+  });
+
+  test("a row with a series bar takes the series layout; a plain meter row does not", () => {
+    const { container } = render(
+      <BoardView
+        view={board([
+          {
+            kind: "rows",
+            items: [
+              { text: "smoke", bar: { cells: [{ label: "10-13 green", tone: "ok" }] } },
+              { text: "epic-4", bar: { value: 1, total: 2 } },
+            ],
+          },
+        ])}
+      />,
+    );
+    const rows = container.querySelectorAll(".cvb-row");
+    expect(rows[0]?.classList.contains("cvb-row--series")).toBe(true);
+    expect(rows[0]?.querySelector(".cvb-row-bar--series")).toBeTruthy();
+    expect(rows[1]?.classList.contains("cvb-row--series")).toBe(false);
+  });
+
+  test("a table cell carries a bar beside or instead of its value", () => {
+    const { container } = render(
+      <BoardView
+        view={board([
+          {
+            kind: "table",
+            columns: [{ key: "service" }, { key: "days" }],
+            rows: [
+              {
+                service: "legal",
+                days: {
+                  bar: {
+                    quiet: true,
+                    cells: [
+                      { label: "10-12 caught up", tone: "ok" },
+                      { label: "10-13 PR fails", tone: "warn" },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ])}
+      />,
+    );
+    const cell = container.querySelectorAll("td")[1];
+    expect(cell?.querySelector(".canvas-cell-bar .cvb-series--cells")).toBeTruthy();
+    expect(cell?.textContent).not.toContain("—");
+  });
+});

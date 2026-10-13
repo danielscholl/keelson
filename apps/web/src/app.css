@@ -6281,6 +6281,127 @@ a.cvb-card-title::after {
   font-size: 10px;
 }
 
+/* Series bars — one slot per day or run. Each slot resolves its tone to
+   --series-tone once, so fills, quiet tints and hollow outlines share it. */
+.cvb-series {
+  display: grid;
+  grid-template-columns: repeat(var(--series-n, 1), minmax(0, 1fr));
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+  background: none;
+}
+.cvb-series--cells {
+  height: 10px;
+}
+.cvb-series--columns {
+  height: 26px;
+}
+.cvb-series [data-tone] {
+  --series-tone: var(--dim);
+}
+.cvb-series [data-tone="ok"] {
+  --series-tone: var(--green);
+}
+.cvb-series [data-tone="warn"] {
+  --series-tone: var(--yellow);
+}
+.cvb-series [data-tone="error"] {
+  --series-tone: var(--red);
+}
+.cvb-series [data-tone="info"] {
+  --series-tone: var(--cyan);
+}
+.cvb-series [data-tone="caution"] {
+  --series-tone: var(--orange);
+}
+.cvb-series [data-tone="brand"] {
+  --series-tone: var(--magenta);
+}
+.cvb-series [data-tone="accent"] {
+  --series-tone: var(--accent);
+}
+.cvb-series [data-tone^="id-"] {
+  --series-tone: var(--id-tone);
+}
+.cvb-series [data-tone^="ramp-"] {
+  --series-tone: var(--ramp-tone);
+}
+.cvb-series-cell {
+  display: block;
+  min-width: 0;
+  border-radius: 2px;
+  background: var(--series-tone);
+}
+.cvb-series.is-quiet .cvb-series-cell[data-tone="ok"]:not(.is-hollow) {
+  background: color-mix(in srgb, var(--green) 18%, var(--card));
+}
+.cvb-series-cell.is-hollow {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--series-tone);
+}
+.cvb-series-cell.is-hollow[data-tone="neutral"] {
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.cvb-series-column {
+  display: flex;
+  flex-direction: column-reverse;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--card-2);
+}
+.cvb-series-column[data-tone] {
+  background: color-mix(in srgb, var(--series-tone) 12%, var(--card));
+}
+.cvb-series-column.is-unmeasured {
+  background: repeating-linear-gradient(-45deg, var(--dim) 0 2px, transparent 2px 5px);
+}
+.cvb-series-fill {
+  display: block;
+  flex: none;
+  width: 100%;
+  background: var(--series-tone);
+}
+/* A series row sets its text in a fixed label column and lets the series fill
+   the rest, so slots line up across rows, sections and equal-width regions. */
+.cvb-row--series {
+  --cvb-series-label: 168px;
+}
+.cvb-row--series .cvb-row-text {
+  flex: 0 0 var(--cvb-series-label);
+  min-width: 0;
+}
+.cvb-row-bar--series {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.cvb-row-bar--series .cvb-item-bar {
+  width: 100%;
+}
+/* In a table a cells strip keeps fixed slots, so a 21-day strip stays compact. */
+.canvas-cell-bar {
+  display: inline-flex;
+  vertical-align: middle;
+  min-width: 64px;
+}
+.canvas-cell-value + .canvas-cell-bar,
+.canvas-cell-badges + .canvas-cell-bar {
+  margin-left: 6px;
+}
+.canvas-cell-bar .cvb-series--cells {
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: 5px;
+  gap: 2px;
+  height: 9px;
+  width: auto;
+}
+.canvas-cell-bar .cvb-series--columns {
+  width: 160px;
+}
+
 /* Selectable rows — the cards click contract at row density. The constant
    left inset reserves room for the selection bar so choosing a row never
    shifts its content; selection reads by bar + weight, not tint alone. */

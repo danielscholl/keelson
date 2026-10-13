@@ -1,5 +1,12 @@
-import type { CanvasCell, CanvasCellBadge, CanvasTableView, CanvasTone } from "@keelson/shared";
+import type {
+  CanvasCell,
+  CanvasCellBadge,
+  CanvasItemBar,
+  CanvasTableView,
+  CanvasTone,
+} from "@keelson/shared";
 import { isSafeLinkScheme } from "../../lib/safeLink";
+import { ItemBar } from "./ItemBar.tsx";
 
 type Tone = CanvasTone;
 
@@ -8,18 +15,22 @@ function normalizeCell(cell: CanvasCell | undefined): {
   tone?: Tone;
   badges?: CanvasCellBadge[];
   href?: string;
+  bar?: CanvasItemBar;
 } {
   const obj = cell !== null && typeof cell === "object" ? cell : null;
   const value = obj ? obj.value : cell;
   const badges = obj?.badges?.length ? obj.badges : undefined;
   const href = obj?.href;
-  // A badge-only cell shows no dash placeholder; an empty value otherwise reads "—".
-  const display = value === null || value === undefined ? (badges ? "" : "—") : String(value);
+  const bar = obj?.bar;
+  // A badge- or bar-only cell shows no dash placeholder; an empty value otherwise reads "—".
+  const display =
+    value === null || value === undefined ? (badges || bar ? "" : "—") : String(value);
   return {
     display,
     ...(obj?.tone ? { tone: obj.tone } : {}),
     ...(badges ? { badges } : {}),
     ...(href ? { href } : {}),
+    ...(bar ? { bar } : {}),
   };
 }
 
@@ -74,7 +85,7 @@ export function TableView({ view }: { view: CanvasTableView }) {
           {keyedRows.map(({ key, row }) => (
             <tr key={key}>
               {view.columns.map((col) => {
-                const { display, tone, badges, href } = normalizeCell(row[col.key]);
+                const { display, tone, badges, href, bar } = normalizeCell(row[col.key]);
                 const displayNode = isSafeLinkScheme(href) ? (
                   <a
                     className="cvb-link"
@@ -90,10 +101,15 @@ export function TableView({ view }: { view: CanvasTableView }) {
                 );
                 return (
                   <td key={col.key} data-tone={tone}>
-                    {badges ? (
+                    {badges || bar ? (
                       <>
                         {display && <span className="canvas-cell-value">{displayNode}</span>}
-                        <CellBadges badges={badges} />
+                        {badges && <CellBadges badges={badges} />}
+                        {bar && (
+                          <span className="canvas-cell-bar">
+                            <ItemBar bar={bar} />
+                          </span>
+                        )}
                       </>
                     ) : (
                       displayNode
