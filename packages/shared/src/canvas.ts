@@ -197,6 +197,66 @@ export const canvasToneSchema = z.enum([
 ]);
 export type CanvasTone = z.infer<typeof canvasToneSchema>;
 
+// Composite "board" view — an ordered stack of generic dashboard sections, so
+// one payload renders KPI tiles, summary pulses, bars, a table, cards, and
+// status rows together. Every piece is domain-free; a rib supplies the data.
+// `n: null` means UNMEASURED — the collector behind this segment failed, which
+// is a different fact from a real zero. The renderer hatches it (never a
+// zero-width or zero-count fill), so a broken read can't pose as good news.
+const canvasSegmentSchema = z
+  .object({ label: z.string().min(1), n: z.number().nullable(), tone: canvasToneSchema.optional() })
+  .strict();
+
+// A compact per-item meter shared by cards and rows: either a plain
+// value-of-total fill or the header strip's segmented composition at item
+// scale — same proportional fills, same tone vocabulary, labels and counts
+// on hover instead of a legend.
+// `label`/`trailing` caption the meter itself (what it measures, then its
+// reading) and join its accessible name, so the reading needn't ride a field.
+const canvasItemBarCaption = {
+  label: z.string().min(1).max(120).optional(),
+  trailing: z.string().min(1).max(120).optional(),
+};
+// One slot of a time series (a day, a run). `hollow` outlines it in its tone:
+// neutral hollow reads "nothing due", a toned hollow reads "missed".
+const canvasSeriesCellSchema = z
+  .object({
+    label: z.string().min(1),
+    tone: canvasToneSchema.optional(),
+    hollow: z.boolean().optional(),
+  })
+  .strict();
+export type CanvasSeriesCell = z.infer<typeof canvasSeriesCellSchema>;
+// One column of a stacked series, its segments rising from the baseline as
+// `n` of the bar's `total`; an `n: null` segment hatches the whole column.
+const canvasSeriesColumnSchema = z
+  .object({ label: z.string().min(1), segments: z.array(canvasSegmentSchema) })
+  .strict();
+export type CanvasSeriesColumn = z.infer<typeof canvasSeriesColumnSchema>;
+const canvasItemBarSchema = z.union([
+  // `value: null` = unmeasured, matching the bars section — hatched, never 0%.
+  z.object({ value: z.number().nullable(), total: z.number(), ...canvasItemBarCaption }).strict(),
+  z.object({ segments: z.array(canvasSegmentSchema).min(1), ...canvasItemBarCaption }).strict(),
+  // `quiet` tints ok cells faintly so the ink goes to the exceptions.
+  z
+    .object({
+      cells: z.array(canvasSeriesCellSchema).min(1),
+      quiet: z.boolean().optional(),
+      ...canvasItemBarCaption,
+    })
+    .strict(),
+  // `rest` faintly tints each column's uncovered remainder (e.g. ok = caught up).
+  z
+    .object({
+      columns: z.array(canvasSeriesColumnSchema).min(1),
+      total: z.number().positive(),
+      rest: canvasToneSchema.optional(),
+      ...canvasItemBarCaption,
+    })
+    .strict(),
+]);
+export type CanvasItemBar = z.infer<typeof canvasItemBarSchema>;
+
 // A cell is a bare scalar, or a scalar wrapped with a `tone` and/or small toned
 // `badges` — a coverage % beside R/S/M grade chips, a filled pass/skip/fail count
 // chip. Badges carry their own tone so they ride the full ramp the bare `td` tone
@@ -213,11 +273,12 @@ const canvasCellSchema = z.union([
       tone: canvasToneSchema.optional(),
       badges: z.array(canvasCellBadgeSchema).optional(),
       href: z.string().optional(),
+      bar: canvasItemBarSchema.optional(),
     })
     .strict()
-    // A wrapped cell must render something: a value, or at least one badge.
-    .refine((c) => c.value !== undefined || (c.badges?.length ?? 0) > 0, {
-      message: "a cell needs a value or at least one badge",
+    // A wrapped cell must render something: a value, a badge, or a bar.
+    .refine((c) => c.value !== undefined || (c.badges?.length ?? 0) > 0 || c.bar !== undefined, {
+      message: "a cell needs a value, at least one badge, or a bar",
     }),
 ]);
 export type CanvasCell = z.infer<typeof canvasCellSchema>;
@@ -259,32 +320,6 @@ export const canvasGraphViewSchema = z
   })
   .strict();
 
-// Composite "board" view — an ordered stack of generic dashboard sections, so
-// one payload renders KPI tiles, summary pulses, bars, a table, cards, and
-// status rows together. Every piece is domain-free; a rib supplies the data.
-// `n: null` means UNMEASURED — the collector behind this segment failed, which
-// is a different fact from a real zero. The renderer hatches it (never a
-// zero-width or zero-count fill), so a broken read can't pose as good news.
-const canvasSegmentSchema = z
-  .object({ label: z.string().min(1), n: z.number().nullable(), tone: canvasToneSchema.optional() })
-  .strict();
-
-// A compact per-item meter shared by cards and rows: either a plain
-// value-of-total fill or the header strip's segmented composition at item
-// scale — same proportional fills, same tone vocabulary, labels and counts
-// on hover instead of a legend.
-// `label`/`trailing` caption the meter itself (what it measures, then its
-// reading) and join its accessible name, so the reading needn't ride a field.
-const canvasItemBarCaption = {
-  label: z.string().min(1).max(120).optional(),
-  trailing: z.string().min(1).max(120).optional(),
-};
-const canvasItemBarSchema = z.union([
-  // `value: null` = unmeasured, matching the bars section — hatched, never 0%.
-  z.object({ value: z.number().nullable(), total: z.number(), ...canvasItemBarCaption }).strict(),
-  z.object({ segments: z.array(canvasSegmentSchema).min(1), ...canvasItemBarCaption }).strict(),
-]);
-export type CanvasItemBar = z.infer<typeof canvasItemBarSchema>;
 const canvasPillSchema = z
   .object({ label: z.string().min(1), tone: canvasToneSchema.optional() })
   .strict();

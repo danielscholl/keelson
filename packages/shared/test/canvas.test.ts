@@ -769,6 +769,66 @@ describe("canvasViewSchema", () => {
     }
   });
 
+  it("parses the series item bars (cells, columns) on rows, cards and table cells", () => {
+    const cells = {
+      quiet: true,
+      cells: [
+        { label: "10-12 refresh failed", tone: "error" },
+        { label: "10-11 nothing due", hollow: true },
+      ],
+    };
+    const columns = {
+      total: 10,
+      rest: "ok",
+      columns: [
+        { label: "10-08", segments: [{ label: "waiting", n: 4, tone: "info" }] },
+        { label: "10-09", segments: [] },
+      ],
+    };
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "rows",
+          items: [
+            { text: "refresh", bar: cells },
+            { text: "fleet", bar: columns },
+          ],
+        },
+        { kind: "cards", items: [{ title: "smoke", bar: cells }] },
+        {
+          kind: "table",
+          columns: [{ key: "days" }],
+          rows: [{ days: { bar: cells } }, { days: { value: "v1.2.0", bar: columns } }],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+    const bad = [
+      { cells: [] },
+      { cells: [{ tone: "ok" }] },
+      { cells: [{ label: "x", n: 1 }] },
+      { columns: [{ label: "x", segments: [] }] },
+      { columns: [{ label: "x", segments: [] }], total: 0 },
+      { columns: [], total: 1 },
+      { cells: [{ label: "x" }], columns: [{ label: "x", segments: [] }], total: 1 },
+    ];
+    for (const b of bad) {
+      expect(() =>
+        canvasViewSchema.parse({
+          view: "board",
+          sections: [{ kind: "rows", items: [{ text: "x", bar: b }] }],
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "table", columns: [{ key: "a" }], rows: [{ a: { tone: "ok" } }] }],
+      }),
+    ).toThrow();
+  });
+
   it("parses an optional label/trailing caption on both item bar forms", () => {
     const v = canvasViewSchema.parse({
       view: "board",
