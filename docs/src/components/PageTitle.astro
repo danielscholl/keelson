@@ -1,9 +1,9 @@
 ---
 import Default from "@astrojs/starlight/components/PageTitle.astro";
-import { shortsForPage } from "../lib/shorts";
+import { isWatchRoute, shortsForPage, watchHref } from "../lib/shorts";
 
 const route = Astro.locals.starlightRoute;
-const isFilmsPage = route.id === "docs/watch";
+const isFilmsPage = isWatchRoute(route.id);
 const hasFilms = !isFilmsPage && shortsForPage(route.id).length > 0;
 ---
 
@@ -21,7 +21,7 @@ const hasFilms = !isFilmsPage && shortsForPage(route.id).length > 0;
       <video controls playsinline preload="none" crossorigin="anonymous">
         <track kind="captions" srclang="en" label="English" />
       </video>
-      <a class="film-dialog-series" href="/docs/watch/">
+      <a class="film-dialog-series" href={watchHref} data-watch={watchHref}>
         Continue in the series →
       </a>
     </dialog>
@@ -36,10 +36,10 @@ const hasFilms = !isFilmsPage && shortsForPage(route.id).length > 0;
     for (const opener of document.querySelectorAll<HTMLButtonElement>("[data-film-open]")) {
       opener.addEventListener("click", () => {
         const d = opener.dataset;
-        dialog.querySelector(".film-dialog-fig")!.textContent = `FIG. ${d.fig}`;
+        dialog.querySelector(".film-dialog-fig")!.textContent = d.tag ?? "";
         dialog.querySelector(".film-dialog-title")!.textContent = d.title ?? "";
-        dialog.querySelector<HTMLAnchorElement>(".film-dialog-series")!.href =
-          `/docs/watch/#fig-${d.fig}`;
+        const series = dialog.querySelector<HTMLAnchorElement>(".film-dialog-series")!;
+        series.href = `${series.dataset.watch}#${d.fig}`;
         video.poster = d.poster ?? "";
         video.src = d.video ?? "";
         const track = video.querySelector("track");

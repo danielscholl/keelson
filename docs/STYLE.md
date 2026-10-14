@@ -279,6 +279,14 @@ covers, duration) and the media base URL; each figure's folder there holds
   caption rules above still apply.
 - Captions are burned into the films, so every player carries `captions.vtt` as
   an optional track and never marks it `default`, which would draw them twice.
+- The film code (`lib/shorts.ts`, `lib/rehype-film-refs.ts`, `Short.astro`,
+  `ShortLibrary.astro`, the `PageTitle.astro` dialog, `styles/films.css`) is
+  shared verbatim with rib docs sites that play their own series, such as the
+  Swarm rib's detail sheets. Everything that differs per site lives in `series`
+  in `shorts.json`: the on-screen label (`FIG.`), the media file prefix (`fig`),
+  the route the docs live under, the docs URL base, and the watch page's title
+  and lede. A film borrowed from another series sets its own `base`, `label`
+  and `prefix`. Change the shared files here first, then copy them across.
 - Moving the media (to object storage, say) changes `base` in `shorts.json` and
   the three FIG. 00 URLs in `public/index.html`, which is static and cannot read
   the index.

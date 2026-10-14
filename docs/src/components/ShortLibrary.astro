@@ -1,5 +1,5 @@
 ---
-import { actOf, acts, docsSlug, shorts } from "../lib/shorts";
+import { actOf, acts, docsSlug, series, shorts } from "../lib/shorts";
 
 type SidebarEntry = { type: string; href?: string; label: string; entries?: SidebarEntry[] };
 const titles = new Map<string, string>();
@@ -17,8 +17,8 @@ try {
 const readLinks = (docs: string[]) =>
   docs.map((d) => {
     const { page, anchor } = docsSlug(d);
-    const title = titles.get(`/docs/${page}/`) ?? page;
-    return { href: `/docs/${page}/${anchor ? `#${anchor}` : ""}`, title };
+    const href = `${series.href}${page}/`;
+    return { href: `${href}${anchor ? `#${anchor}` : ""}`, title: titles.get(href) ?? page };
   });
 
 const first = shorts[0];
@@ -27,8 +27,8 @@ const first = shorts[0];
 <section class="film-library not-content">
   <header class="film-head">
     <p class="film-eyebrow">Watch the series</p>
-    <h1 id="_top" class="film-display">The Keelson films</h1>
-    <p class="film-lede">Twenty short films. One system, built piece by piece.</p>
+    <h1 id="_top" class="film-display">{series.title}</h1>
+    <p class="film-lede">{series.lede}</p>
     <div class="film-intro"><slot /></div>
   </header>
 
@@ -52,9 +52,9 @@ const first = shorts[0];
         const prev = shorts[i - 1];
         const next = shorts[i + 1];
         return (
-          <div class="film-now" data-now={s.fig} hidden={i !== 0}>
+          <div class="film-now" data-now={s.key} hidden={i !== 0}>
             <p class="film-now-kicker">{i === 0 ? "Start here" : "Now playing"}</p>
-            <p class="film-now-fig">FIG. {s.fig}</p>
+            <p class="film-now-fig">{s.tag}</p>
             <h2 class="film-now-title">{s.title}</h2>
             <p class="film-now-problem">{s.problem}</p>
             <p class="film-now-meta">
@@ -69,15 +69,15 @@ const first = shorts[0];
             </ul>
             <div class="film-now-step">
               {prev ? (
-                <button type="button" data-step={prev.fig}>
-                  ← FIG. {prev.fig}
+                <button type="button" data-step={prev.key}>
+                  ← {prev.tag}
                 </button>
               ) : (
                 <span />
               )}
               {next && (
-                <button type="button" data-step={next.fig}>
-                  Next: FIG. {next.fig} →
+                <button type="button" data-step={next.key}>
+                  Next: {next.tag} →
                 </button>
               )}
             </div>
@@ -104,15 +104,15 @@ const first = shorts[0];
               <a
                 class="film-card"
                 href={s.video}
-                data-fig={s.fig}
+                data-fig={s.key}
                 data-video={s.video}
                 data-poster={s.poster}
                 data-captions={s.captions}
-                aria-current={s.fig === first.fig ? "true" : undefined}
+                aria-current={s.key === first.key ? "true" : undefined}
               >
                 <span class="film-frame">
                   <img src={s.thumb} alt="" loading="lazy" width="640" height="360" />
-                  <span class="film-chip film-chip-fig">FIG. {s.fig}</span>
+                  <span class="film-chip film-chip-fig">{s.tag}</span>
                   <span class="film-chip film-chip-len">{s.length}</span>
                 </span>
                 <span class="film-card-title">{s.title}</span>
@@ -142,7 +142,7 @@ const first = shorts[0];
     }
     for (const c of cards) c.removeAttribute("aria-current");
     card.setAttribute("aria-current", "true");
-    history.replaceState(null, "", `#fig-${fig}`);
+    history.replaceState(null, "", `#${fig}`);
     if (play) {
       player.scrollIntoView({ behavior: "smooth", block: "center" });
       player.play().catch(() => {});
@@ -164,6 +164,6 @@ const first = shorts[0];
     if (next) select(next.dataset.fig ?? "", false);
   });
 
-  const linked = /^#fig-(\d+)$/.exec(location.hash)?.[1];
+  const linked = location.hash.slice(1);
   if (linked) select(linked, false);
 </script>

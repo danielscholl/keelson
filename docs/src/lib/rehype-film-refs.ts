@@ -1,7 +1,7 @@
 import type { Element, ElementContent, Root, RootContent } from "hast";
-import { docsSlug, type ShortMedia, shorts } from "./shorts";
+import { docsSlug, type ShortMedia, series, shorts, watchHref } from "./shorts";
 
-const CONTENT_DIR = "/src/content/docs/docs/";
+const CONTENT_DIR = `/src/content/docs/${series.route}`;
 
 type Props = Record<string, string | string[] | boolean | undefined>;
 const el = (tagName: string, properties: Props, children: ElementContent[] = []): Element => ({
@@ -33,7 +33,8 @@ function filmRow(s: ShortMedia): Element {
   const open = {
     type: "button",
     "data-film-open": "",
-    "data-fig": s.fig,
+    "data-fig": s.key,
+    "data-tag": s.tag,
     "data-title": s.title,
     "data-video": s.video,
     "data-poster": s.poster,
@@ -45,7 +46,7 @@ function filmRow(s: ShortMedia): Element {
       el("span", { className: ["film-ref-play"], ariaHidden: "true" }),
     ]),
     el("div", { className: ["film-ref-body"] }, [
-      el("span", { className: ["film-ref-fig"] }, [text(`FIG. ${s.fig}`)]),
+      el("span", { className: ["film-ref-fig"] }, [text(s.tag)]),
       el("span", { className: ["film-ref-title"] }, [text(s.title)]),
       el("span", { className: ["film-ref-problem"] }, [text(s.problem)]),
       el("span", { className: ["film-ref-actions"] }, [
@@ -53,7 +54,7 @@ function filmRow(s: ShortMedia): Element {
           text("Watch film"),
           el("span", { className: ["film-ref-len"] }, [text(s.length)]),
         ]),
-        el("a", { href: `/docs/watch/#fig-${s.fig}`, className: ["film-ref-series"] }, [
+        el("a", { href: `${watchHref}#${s.key}`, className: ["film-ref-series"] }, [
           text("In the series"),
         ]),
       ]),

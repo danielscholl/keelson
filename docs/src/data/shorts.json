@@ -1,5 +1,13 @@
 {
   "base": "https://danielscholl.github.io/keelson-media/",
+  "series": {
+    "label": "FIG.",
+    "prefix": "fig",
+    "route": "docs/",
+    "href": "/docs/",
+    "title": "The Keelson films",
+    "lede": "Twenty short films. One system, built piece by piece."
+  },
   "acts": [
     {
       "id": "0",
