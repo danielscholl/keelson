@@ -282,10 +282,11 @@ covers, duration) and the media base URL; each figure's folder there holds
 - The film code (`lib/shorts.ts`, `lib/rehype-film-refs.ts`, `Short.astro`,
   `ShortLibrary.astro`, the `PageTitle.astro` dialog, `styles/films.css`) is
   shared verbatim with rib docs sites that play their own series, such as the
-  Swarm rib's detail sheets. Everything that differs per site lives in `series`
-  in `shorts.json`: the on-screen label (`FIG.`), the media file prefix (`fig`),
+  Swarm rib's detail sheets. Each site keeps its own `shorts.json`: the media
+  base URL in the top-level `base`, its own `acts` and `shorts`, and the player
+  settings in `series` (the on-screen label `FIG.`, the media file prefix `fig`,
   the route the docs live under, the docs URL base, and the watch page's title
-  and lede. A film borrowed from another series sets its own `base`, `label`
+  and lede). A film borrowed from another series sets its own `base`, `label`
   and `prefix`. Change the shared files here first, then copy them across.
 - Moving the media (to object storage, say) changes `base` in `shorts.json` and
   the three FIG. 00 URLs in `public/index.html`, which is static and cannot read
