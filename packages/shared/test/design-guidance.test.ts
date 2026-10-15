@@ -13,7 +13,7 @@ import {
   CANVAS_PUBLISH_CONTRACT,
   designTokenCssBlock,
 } from "../src/design-guidance.ts";
-import { DESIGN_TOKENS } from "../src/design-tokens.ts";
+import { DESIGN_TOKENS, designTokenFrameVars } from "../src/design-tokens.ts";
 
 const block = designTokenCssBlock();
 const kit = CANVAS_DESIGN_GUIDE_SECTIONS.kit ?? "";
@@ -29,12 +29,20 @@ describe("designTokenCssBlock", () => {
       [darkRoot, "dark"],
       [lightRoot, "light"],
     ] as const) {
-      const ids = Object.values(DESIGN_TOKENS[theme].identity);
-      ids.forEach((hex, i) => {
-        expect(css, `${theme} --id-${i + 1}`).toContain(`--id-${i + 1}: ${hex}`);
+      Object.entries(DESIGN_TOKENS[theme].identity).forEach(([tone, hex], i) => {
+        expect(css, `${theme} --id-${i + 1}`).toContain(
+          `--id-${i + 1}: var(--keelson-id-${tone}, ${hex})`,
+        );
       });
     }
     expect(block).toMatch(/body \{[^}]*background: var\(--bg\)/);
+  });
+
+  test("every host hook it reads is one the host stamps into the frame", () => {
+    const stamped = new Set(Object.keys(designTokenFrameVars("dark")));
+    const hooks = [...block.matchAll(/var\((--keelson-[a-z0-9-]+),/g)].map((m) => m[1] as string);
+    expect(hooks.length).toBeGreaterThan(0);
+    for (const name of hooks) expect(stamped.has(name), name).toBe(true);
   });
 });
 
@@ -42,7 +50,10 @@ describe("design guide kit", () => {
   test("reads only tokens the token block or the kit declares", () => {
     const known = new Set([...declared(block), ...declared(kit)]);
     const used = new Set([...kit.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1] as string));
-    for (const name of used) expect(known.has(name), name).toBe(true);
+    for (const name of used) {
+      if (name.startsWith("--keelson-")) continue;
+      expect(known.has(name), name).toBe(true);
+    }
   });
 
   test("opens with the token block, then styles through tokens, never a raw hex", () => {

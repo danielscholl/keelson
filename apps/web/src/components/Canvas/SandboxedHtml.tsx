@@ -4,10 +4,15 @@ import {
   CANVAS_HTML_STATE_CHANNEL,
   CANVAS_HTML_STATE_MAX_BYTES,
   CANVAS_HTML_THEME_CHANNEL,
+  CANVAS_HTML_TOKEN_NAME,
+  CANVAS_HTML_TOKEN_VALUE,
   type CanvasHtmlAction,
   canvasHtmlActionSchema,
   canvasHtmlSizeSchema,
   canvasHtmlStateSchema,
+  DESIGN_PALETTE_NAMES,
+  type DesignPaletteName,
+  designTokenFrameVars,
   isCanvasHtmlState,
 } from "@keelson/shared";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -31,6 +36,8 @@ const FRAME_CSP = [
   "child-src 'none'",
 ].join("; ");
 
+const TOKENS_STYLE_ID = "keelson-tokens";
+
 // The bridge the host injects first inside the frame: gives rib markup an
 // ergonomic `keelson.action(type, payload)` and a declarative `[data-canvas-action]`
 // click path, both posting the one canonical wire shape. It is NOT a trust
@@ -42,6 +49,9 @@ const BRIDGE_SCRIPT = `
 (function () {
   var CHANNEL = ${JSON.stringify(CANVAS_HTML_ACTION_CHANNEL)};
   var THEME_CHANNEL = ${JSON.stringify(CANVAS_HTML_THEME_CHANNEL)};
+  var TOKENS_ID = ${JSON.stringify(TOKENS_STYLE_ID)};
+  var TOKEN_NAME = ${CANVAS_HTML_TOKEN_NAME.toString()};
+  var TOKEN_VALUE = ${CANVAS_HTML_TOKEN_VALUE.toString()};
   var STATE_CHANNEL = ${JSON.stringify(CANVAS_HTML_STATE_CHANNEL)};
   var isState = ${isCanvasHtmlState.toString()};
   var restoreHandler;
@@ -108,6 +118,23 @@ const BRIDGE_SCRIPT = `
     if (d.theme !== "light" && d.theme !== "dark") return;
     document.documentElement.setAttribute("data-theme", d.theme);
     document.documentElement.style.colorScheme = d.theme;
+    var tokens = d.tokens;
+    if (!tokens || typeof tokens !== "object") return;
+    var css = "";
+    for (var name in tokens) {
+      if (!Object.prototype.hasOwnProperty.call(tokens, name)) continue;
+      var value = tokens[name];
+      if (TOKEN_NAME.test(name) && typeof value === "string" && TOKEN_VALUE.test(value)) {
+        css += name + ":" + value + ";";
+      }
+    }
+    var style = document.getElementById(TOKENS_ID);
+    if (!style) {
+      style = document.createElement("style");
+      style.id = TOKENS_ID;
+      document.head.prepend(style);
+    }
+    style.textContent = ":root{" + css + "}";
   });
   // Report content height so the host can size the frame to fit. Measured from
   // body (margins added back) because documentElement.scrollHeight floors at the
@@ -181,10 +208,30 @@ const BRIDGE_SCRIPT = `
 
 export type CanvasFrameTheme = "light" | "dark";
 
+interface FrameStyle {
+  theme: CanvasFrameTheme;
+  palette: DesignPaletteName;
+}
+
 // The SPA always resolves data-theme to "light" | "dark" on the root element
-// (App.tsx); dark is the :root default, so anything else reads as dark.
-function readDocumentTheme(): CanvasFrameTheme {
-  return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+// (App.tsx); dark is the :root default, so anything else reads as dark. A missing
+// or unknown data-palette reads as the default palette the same way.
+function readDocumentStyle(): FrameStyle {
+  const root = document.documentElement;
+  const palette = root.getAttribute("data-palette");
+  return {
+    theme: root.getAttribute("data-theme") === "light" ? "light" : "dark",
+    palette: (DESIGN_PALETTE_NAMES as readonly string[]).includes(palette ?? "")
+      ? (palette as DesignPaletteName)
+      : "keelson",
+  };
+}
+
+function tokenStyle(theme: CanvasFrameTheme, palette: DesignPaletteName): string {
+  const vars = Object.entries(designTokenFrameVars(theme, palette))
+    .map(([name, value]) => `${name}:${value};`)
+    .join("");
+  return `<style id="${TOKENS_STYLE_ID}">:root{${vars}}</style>`;
 }
 
 // Compose the sandboxed document from a rib-supplied body fragment. The host owns
@@ -194,8 +241,14 @@ function readDocumentTheme(): CanvasFrameTheme {
 // `theme` stamps the initial data-theme + color-scheme on <html> so token-level
 // markup renders in the SPA's resolved theme from first paint; later toggles
 // arrive over the theme channel without a reload. The value is a closed union,
-// never free text, so the interpolation cannot break out of the attribute.
-export function composeCanvasHtmlDoc(fragment: string, theme?: CanvasFrameTheme): string {
+// never free text, so the interpolation cannot break out of the attribute. The
+// palette's tokens go in a <style> ahead of the fragment so they act as defaults
+// that any `:root` rule the fragment declares overrides.
+export function composeCanvasHtmlDoc(
+  fragment: string,
+  theme?: CanvasFrameTheme,
+  palette: DesignPaletteName = "keelson",
+): string {
   const htmlTag = theme ? `<html data-theme="${theme}" style="color-scheme: ${theme}">` : "<html>";
   return [
     "<!doctype html>",
@@ -203,6 +256,7 @@ export function composeCanvasHtmlDoc(fragment: string, theme?: CanvasFrameTheme)
     "<head>",
     `<meta http-equiv="Content-Security-Policy" content="${FRAME_CSP}">`,
     '<meta charset="utf-8">',
+    ...(theme ? [tokenStyle(theme, palette)] : []),
     `<script>${BRIDGE_SCRIPT}</script>`,
     "</head>",
     "<body>",
@@ -249,7 +303,7 @@ function HtmlFrame({
   viewKey?: string;
 }) {
   const ref = useRef<HTMLIFrameElement>(null);
-  const themeRef = useRef<CanvasFrameTheme>(readDocumentTheme());
+  const styleRef = useRef<FrameStyle>(readDocumentStyle());
   const localState = useRef<string | undefined>(undefined);
   const delivery = useMemo(() => ({ html, done: false }), [html]);
 
@@ -257,14 +311,21 @@ function HtmlFrame({
   // (that reloads the frame and loses scroll/state); toggles ride postMessage.
   // The stamp uses whatever theme is current when the fragment changes; the
   // frame's load handler re-posts the live value, so a stale stamp self-corrects.
-  const srcDoc = useMemo(() => composeCanvasHtmlDoc(html, themeRef.current), [html]);
+  const srcDoc = useMemo(
+    () => composeCanvasHtmlDoc(html, styleRef.current.theme, styleRef.current.palette),
+    [html],
+  );
 
   const postTheme = useCallback(() => {
     const win = ref.current?.contentWindow;
     if (typeof win?.postMessage !== "function") return;
     // Opaque-origin frames have no targetable origin, so "*" is required; the
-    // payload is just a theme name, nothing sensitive rides this channel.
-    win.postMessage({ channel: CANVAS_HTML_THEME_CHANNEL, theme: themeRef.current }, "*");
+    // payload is a theme name and public palette colors, nothing sensitive.
+    const { theme, palette } = styleRef.current;
+    win.postMessage(
+      { channel: CANVAS_HTML_THEME_CHANNEL, theme, tokens: designTokenFrameVars(theme, palette) },
+      "*",
+    );
   }, []);
 
   const onLoad = useCallback(() => {
@@ -312,14 +373,15 @@ function HtmlFrame({
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
-      const theme = readDocumentTheme();
-      if (theme === themeRef.current) return;
-      themeRef.current = theme;
+      const next = readDocumentStyle();
+      const prev = styleRef.current;
+      if (next.theme === prev.theme && next.palette === prev.palette) return;
+      styleRef.current = next;
       postTheme();
     });
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-theme"],
+      attributeFilter: ["data-theme", "data-palette"],
     });
     return () => observer.disconnect();
   }, [postTheme]);
