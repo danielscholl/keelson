@@ -81,6 +81,33 @@ describe("TopBar", () => {
     expect(picks).toEqual(["shore"]);
   });
 
+  test("the palette picker is one Tab stop and arrow keys move selection and focus", () => {
+    const picks: string[] = [];
+    renderBar({ palettePreference: "keelson", onPaletteChange: (p) => picks.push(p) });
+    fireEvent.click(screen.getByRole("button", { name: /Harness/ }));
+    const group = screen.getByRole("radiogroup", { name: "Palette" });
+    const keelson = within(group).getByRole("radio", { name: "Keelson palette" });
+    const shore = within(group).getByRole("radio", { name: "Shore palette" });
+    expect(keelson.tabIndex).toBe(0);
+    expect(shore.tabIndex).toBe(-1);
+    fireEvent.keyDown(keelson, { key: "ArrowRight" });
+    expect(picks).toEqual(["shore"]);
+    expect(document.activeElement).toBe(shore);
+    fireEvent.keyDown(keelson, { key: "ArrowLeft" });
+    expect(picks).toEqual(["shore", "shore"]);
+  });
+
+  test("the theme picker answers arrow keys the same way", () => {
+    const picks: string[] = [];
+    renderBar({ themePreference: "system", onThemeChange: (t) => picks.push(t) });
+    fireEvent.click(screen.getByRole("button", { name: /Harness/ }));
+    const group = screen.getByRole("radiogroup", { name: "Theme" });
+    fireEvent.keyDown(within(group).getByRole("radio", { name: "System theme" }), {
+      key: "ArrowLeft",
+    });
+    expect(picks).toEqual(["light"]);
+  });
+
   test("a pending memory count rides the trigger as a dot and the row as a pip", () => {
     const { container } = renderBar({ pendingMemoryCount: 3 });
     expect(container.querySelector(".instruments-dot")).not.toBeNull();
