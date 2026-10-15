@@ -55,6 +55,10 @@
   /* Channels for translucent accent tints; both Keelson modes share the dark
      accent's, which is how the tints have always rendered. */
   --accent-rgb: 155 142 255;
+  /* Text in a warning or brand tone reads these, so a palette can keep a softer
+     fill color and still clear 4.5:1 for normal-size text. */
+  --yellow-ink: var(--yellow);
+  --magenta-ink: var(--magenta);
   --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.4);
   --shadow-card:    0 2px 6px rgba(0, 0, 0, 0.4);
 
@@ -223,6 +227,8 @@
 
   --danger:  #bb4a2b;
   --accent-rgb: 42 157 143;
+  --yellow-ink: #8f6207;
+  --magenta-ink: #8152b5;
   --shadow-popover: 0 12px 32px rgba(92, 72, 40, 0.14);
   --shadow-card:    0 10px 28px rgba(92, 72, 40, 0.07);
   --shadow-topbar:  0 2px 10px rgba(92, 72, 40, 0.04);
@@ -689,7 +695,7 @@ body {
   border-color: color-mix(in srgb, var(--green) 32%, transparent);
 }
 .new-mr-chip.tone-3 {
-  color: var(--magenta);
+  color: var(--magenta-ink);
   background: color-mix(in srgb, var(--magenta) 14%, transparent);
   border-color: color-mix(in srgb, var(--magenta) 32%, transparent);
 }
@@ -1077,7 +1083,7 @@ button.tab:focus-visible {
   border-radius: 999px;
   background: rgba(245, 195, 82, 0.08);
   border: 1px solid rgba(245, 195, 82, 0.3);
-  color: var(--yellow);
+  color: var(--yellow-ink);
   font-size: 11px;
   line-height: 1.4;
 }
@@ -1761,12 +1767,12 @@ button.tab:focus-visible {
 .chat-sidebar-wf-badge {
   font-size: 9px;
   padding: 1px 6px;
-  color: var(--magenta);
+  color: var(--magenta-ink);
   background: color-mix(in srgb, var(--magenta) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--magenta) 40%, transparent);
 }
 .chat-sidebar-group-workflow .chat-sidebar-group-label {
-  color: var(--magenta);
+  color: var(--magenta-ink);
 }
 
 .chat-sidebar-rename {
@@ -2705,11 +2711,11 @@ button.tab:focus-visible {
 }
 
 .model-picker-popover-fav[aria-pressed="true"] {
-  color: var(--yellow);
+  color: var(--yellow-ink);
 }
 
 .model-picker-popover-fav:hover {
-  color: var(--yellow);
+  color: var(--yellow-ink);
   background: rgba(245, 195, 82, 0.08);
 }
 
@@ -3419,7 +3425,7 @@ button.tab:focus-visible {
   color: var(--green);
 }
 .canvas-view-table td[data-tone="warn"] {
-  color: var(--yellow);
+  color: var(--yellow-ink);
 }
 .canvas-view-table td[data-tone="error"] {
   color: var(--red);
@@ -3459,7 +3465,7 @@ button.tab:focus-visible {
   background: color-mix(in srgb, var(--cyan) 18%, transparent);
 }
 .canvas-cell-badge[data-tone="warn"] {
-  color: var(--yellow);
+  color: var(--yellow-ink);
   background: color-mix(in srgb, var(--yellow) 18%, transparent);
 }
 .canvas-cell-badge[data-tone="caution"] {
@@ -3471,7 +3477,7 @@ button.tab:focus-visible {
   background: color-mix(in srgb, var(--red) 22%, transparent);
 }
 .canvas-cell-badge[data-tone="brand"] {
-  color: var(--magenta);
+  color: var(--magenta-ink);
   background: color-mix(in srgb, var(--magenta) 18%, transparent);
 }
 .canvas-cell-badge[data-tone="accent"] {
@@ -3558,7 +3564,7 @@ button.tab:focus-visible {
   background: color-mix(in srgb, var(--green) 8%, transparent);
 }
 .cvb-header-status[data-tone="warn"] {
-  color: var(--yellow);
+  color: var(--yellow-ink);
   border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
   background: color-mix(in srgb, var(--yellow) 8%, transparent);
 }
@@ -3847,7 +3853,7 @@ button.tab:focus-visible {
   color: var(--fg);
 }
 .surface-region-glyph-chip[data-tone="brand"] {
-  color: var(--magenta);
+  color: var(--magenta-ink);
 }
 .surface-region-glyph-chip[data-tone="info"] {
   color: var(--cyan);
@@ -3859,7 +3865,7 @@ button.tab:focus-visible {
   color: var(--green);
 }
 .surface-region-glyph-chip[data-tone="warn"] {
-  color: var(--yellow);
+  color: var(--yellow-ink);
 }
 .surface-region-glyph-chip[data-tone="error"] {
   color: var(--red);
@@ -3933,7 +3939,7 @@ button.tab:focus-visible {
   white-space: nowrap;
 }
 .surface-region-freshness[data-tone="warn"] {
-  color: var(--yellow);
+  color: var(--yellow-ink);
 }
 .surface-region-freshness[data-tone="error"] {
   color: var(--red);
@@ -4398,7 +4404,7 @@ button.cvb-action-field-model:disabled {
   color: var(--green);
 }
 .cvb-stat-value[data-tone="warn"] {
-  color: var(--yellow);
+  color: var(--yellow-ink);
 }
 .cvb-stat-value[data-tone="error"] {
   color: var(--red);
@@ -4442,7 +4448,7 @@ button.cvb-action-field-model:disabled {
   color: var(--green);
 }
 .cvb-stat-delta[data-tone="warn"] {
-  color: var(--yellow);
+  color: var(--yellow-ink);
 }
 .cvb-stat-delta[data-tone="error"] {
   color: var(--red);
@@ -4461,7 +4467,7 @@ button.cvb-action-field-model:disabled {
   color: var(--green);
 }
 .cvb-stat-spark[data-tone="warn"] {
-  color: var(--yellow);
+  color: var(--yellow-ink);
 }
 .cvb-stat-spark[data-tone="error"] {
   color: var(--red);
@@ -4473,7 +4479,7 @@ button.cvb-action-field-model:disabled {
   color: var(--orange);
 }
 .cvb-stat-spark[data-tone="brand"] {
-  color: var(--magenta);
+  color: var(--magenta-ink);
 }
 .cvb-stat-spark[data-tone="accent"] {
   color: var(--accent);
@@ -5195,7 +5201,7 @@ a.cvb-card-title::after {
 }
 .cvb-field-value[data-tone="warn"],
 .cvb-link[data-tone="warn"] {
-  color: var(--yellow);
+  color: var(--yellow-ink);
 }
 .cvb-field-value[data-tone="error"],
 .cvb-link[data-tone="error"] {
@@ -5470,7 +5476,7 @@ a.cvb-card-title::after {
 }
 .cvb-rows--boxed .cvb-glyph[data-tone="warn"]::before {
   content: "!";
-  color: var(--yellow);
+  color: var(--yellow-ink);
 }
 .cvb-rows--boxed .cvb-glyph[data-tone="error"]::before {
   content: "✕";
@@ -5486,7 +5492,7 @@ a.cvb-card-title::after {
 }
 .cvb-rows--boxed .cvb-glyph[data-tone="brand"]::before {
   content: "•";
-  color: var(--magenta);
+  color: var(--magenta-ink);
 }
 /* 96px is the floor the labels align on, not a ceiling: a longer label must be
    able to claim width, or it wraps a word per line against `overflow-wrap:
@@ -5530,7 +5536,7 @@ a.cvb-card-title::after {
   border-color: color-mix(in srgb, var(--green) 32%, transparent);
 }
 .cvb-pill[data-tone="warn"] {
-  color: var(--yellow);
+  color: var(--yellow-ink);
   border-color: color-mix(in srgb, var(--yellow) 32%, transparent);
 }
 .cvb-pill[data-tone="error"] {
@@ -5548,7 +5554,7 @@ a.cvb-card-title::after {
   color: var(--orange);
 }
 .canvas-view-table td[data-tone="brand"] {
-  color: var(--magenta);
+  color: var(--magenta-ink);
 }
 .cvb-stat-value[data-tone="info"] {
   color: var(--cyan);
@@ -5557,7 +5563,7 @@ a.cvb-card-title::after {
   color: var(--orange);
 }
 .cvb-stat-value[data-tone="brand"] {
-  color: var(--magenta);
+  color: var(--magenta-ink);
 }
 .cvb-field-value[data-tone="info"],
 .cvb-link[data-tone="info"] {
@@ -5569,7 +5575,7 @@ a.cvb-card-title::after {
 }
 .cvb-field-value[data-tone="brand"],
 .cvb-link[data-tone="brand"] {
-  color: var(--magenta);
+  color: var(--magenta-ink);
 }
 .cvb-bar-fill[data-tone="info"],
 .cvb-strip-fill[data-tone="info"] {
@@ -5601,7 +5607,7 @@ a.cvb-card-title::after {
   border-color: color-mix(in srgb, var(--orange) 32%, transparent);
 }
 .cvb-pill[data-tone="brand"] {
-  color: var(--magenta);
+  color: var(--magenta-ink);
   border-color: color-mix(in srgb, var(--magenta) 32%, transparent);
 }
 
@@ -5614,7 +5620,7 @@ a.cvb-card-title::after {
   background: color-mix(in srgb, var(--green) 14%, transparent);
 }
 .cvb-chip[data-tone="warn"] {
-  color: var(--yellow);
+  color: var(--yellow-ink);
   border-color: color-mix(in srgb, var(--yellow) 30%, transparent);
   background: color-mix(in srgb, var(--yellow) 14%, transparent);
 }
@@ -5634,7 +5640,7 @@ a.cvb-card-title::after {
   background: color-mix(in srgb, var(--orange) 14%, transparent);
 }
 .cvb-chip[data-tone="brand"] {
-  color: var(--magenta);
+  color: var(--magenta-ink);
   border-color: color-mix(in srgb, var(--magenta) 30%, transparent);
   background: color-mix(in srgb, var(--magenta) 14%, transparent);
 }
@@ -5649,7 +5655,7 @@ a.cvb-card-title::after {
   background: color-mix(in srgb, var(--orange) 8%, transparent);
 }
 .cvb-header-status[data-tone="brand"] {
-  color: var(--magenta);
+  color: var(--magenta-ink);
   border-color: color-mix(in srgb, var(--magenta) 45%, transparent);
   background: color-mix(in srgb, var(--magenta) 8%, transparent);
 }
@@ -5698,7 +5704,7 @@ a.cvb-card-title::after {
   color: var(--green);
 }
 .cvb-card-title[data-tone="warn"] {
-  color: var(--yellow);
+  color: var(--yellow-ink);
 }
 .cvb-card-title[data-tone="error"] {
   color: var(--red);
@@ -5710,7 +5716,7 @@ a.cvb-card-title::after {
   color: var(--orange);
 }
 .cvb-card-title[data-tone="brand"] {
-  color: var(--magenta);
+  color: var(--magenta-ink);
 }
 .cvb-card-title[data-tone="accent"] {
   color: var(--accent);
@@ -5773,7 +5779,7 @@ a.cvb-card-title::after {
   background: color-mix(in srgb, var(--cyan) 18%, transparent);
 }
 .cvb-grid-badge[data-tone="warn"] {
-  color: var(--yellow);
+  color: var(--yellow-ink);
   background: color-mix(in srgb, var(--yellow) 18%, transparent);
 }
 .cvb-grid-badge[data-tone="caution"] {
@@ -5785,7 +5791,7 @@ a.cvb-card-title::after {
   background: color-mix(in srgb, var(--red) 22%, transparent);
 }
 .cvb-grid-badge[data-tone="brand"] {
-  color: var(--magenta);
+  color: var(--magenta-ink);
   background: color-mix(in srgb, var(--magenta) 18%, transparent);
 }
 .cvb-grid-badge[data-tone="accent"] {
@@ -5873,7 +5879,7 @@ a.cvb-card-title::after {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  color: var(--magenta);
+  color: var(--magenta-ink);
   background: color-mix(in srgb, var(--magenta) 14%, transparent);
   font-family: ui-monospace, monospace;
   font-size: 11px;
@@ -6691,7 +6697,7 @@ a.cvb-card-title::after {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--magenta);
+  color: var(--magenta-ink);
 }
 
 .approval-dock-sub {
@@ -7815,7 +7821,7 @@ a.cvb-card-title::after {
   background: rgba(240, 135, 147, 0.08);
 }
 .icc-indicator-message.severity-warn {
-  color: var(--yellow);
+  color: var(--yellow-ink);
   border-color: rgba(245, 195, 82, 0.45);
   background: rgba(245, 195, 82, 0.08);
 }
@@ -9543,7 +9549,7 @@ a.cvb-card-title::after {
   border-color: color-mix(in srgb, var(--green) 32%, transparent);
 }
 .svc-chip.tone-3 {
-  color: var(--magenta);
+  color: var(--magenta-ink);
   background: color-mix(in srgb, var(--magenta) 14%, transparent);
   border-color: color-mix(in srgb, var(--magenta) 32%, transparent);
 }
@@ -9756,7 +9762,7 @@ a.cvb-card-title::after {
   letter-spacing: 0.02em;
 }
 .wc-type-pill.bash {
-  color: var(--yellow); border-color: var(--yellow);
+  color: var(--yellow-ink); border-color: var(--yellow);
   background: color-mix(in srgb, var(--yellow) 16%, transparent);
 }
 .wc-type-pill.prompt {
@@ -9764,7 +9770,7 @@ a.cvb-card-title::after {
   background: color-mix(in srgb, var(--cyan) 14%, transparent);
 }
 .wc-type-pill.approval {
-  color: var(--magenta); border-color: var(--magenta);
+  color: var(--magenta-ink); border-color: var(--magenta);
   background: color-mix(in srgb, var(--magenta) 14%, transparent);
 }
 .btn-run {
@@ -10266,7 +10272,7 @@ a.cvb-card-title::after {
   font-size: 12px;
 }
 .run-warning-row .run-warning-glyph {
-  color: var(--yellow);
+  color: var(--yellow-ink);
   font-weight: 700;
 }
 .run-warning-row strong { color: var(--fg-strong); margin-right: 2px; }
@@ -10316,7 +10322,7 @@ a.cvb-card-title::after {
 .approval-callout .callout-head {
   font-size: 11px;
   font-weight: 700;
-  color: var(--magenta);
+  color: var(--magenta-ink);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   margin-bottom: 6px;
@@ -10339,7 +10345,7 @@ a.cvb-card-title::after {
 }
 .reviewer-note .reviewer-note-head {
   font-weight: 700;
-  color: var(--magenta);
+  color: var(--magenta-ink);
 }
 .reviewer-note.answered {
   border-left-color: color-mix(in srgb, var(--ok) 60%, transparent);
@@ -10418,12 +10424,12 @@ a.cvb-card-title::after {
 .start-composer-spacer { flex: 1 1 auto; }
 
 .dag-node .awaiting-glyph {
-  color: var(--magenta);
+  color: var(--magenta-ink);
   margin-right: 4px;
   font-weight: 700;
 }
 .trace-head .dur.awaiting {
-  color: var(--magenta);
+  color: var(--magenta-ink);
   font-weight: 600;
 }
 
@@ -10442,7 +10448,7 @@ a.cvb-card-title::after {
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: var(--magenta);
+  color: var(--magenta-ink);
   font-family: ui-monospace, monospace;
 }
 .chat-composer .chat-composer-row {
@@ -10863,7 +10869,7 @@ a.cvb-card-title::after {
   font-size: 12px;
 }
 .runs-row .run-project .run-isolated {
-  color: var(--magenta); font-style: italic; font-weight: 500;
+  color: var(--magenta-ink); font-style: italic; font-weight: 500;
   font-size: 11px;
 }
 
@@ -10879,7 +10885,7 @@ a.cvb-card-title::after {
   margin-right: 6px;
 }
 .run-target .run-target-isolated {
-  color: var(--magenta); margin-left: 8px;
+  color: var(--magenta-ink); margin-left: 8px;
 }
 
 .project-edit-row .project-edit-fields {
