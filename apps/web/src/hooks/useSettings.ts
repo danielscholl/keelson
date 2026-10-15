@@ -2,6 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { DESIGN_PALETTE_NAMES, type DesignPaletteName } from "@keelson/shared";
 import { useCallback, useSyncExternalStore } from "react";
 
 // Versioned so a shape change abandons stale payloads cleanly.
@@ -15,6 +16,8 @@ export interface ModelRef {
 // "system" means follow prefers-color-scheme; the picker shows three states
 // but the rendered `data-theme` attribute is always "light" or "dark".
 export type ThemePreference = "light" | "dark" | "system";
+// The color family, independent of light/dark: each palette defines both modes.
+export type PalettePreference = DesignPaletteName;
 export type WorkflowsViewMode = "both" | "workflows" | "runs";
 // The host's per-region head controls, addressable one at a time so a viewer can
 // keep the ones they use. Mirrors the ✦ / ◻ / ⤢ trio Surface renders.
@@ -29,6 +32,8 @@ export interface Settings {
   sidebarCollapsed?: boolean;
   // Missing = "system".
   theme?: ThemePreference;
+  // Missing = "keelson".
+  palette?: PalettePreference;
   // Missing = "both".
   workflowsViewMode?: WorkflowsViewMode;
   // Rib ids whose workflows are hidden from the catalog + runs feed. View-only:
@@ -59,6 +64,10 @@ function isThemePreference(v: unknown): v is ThemePreference {
   return typeof v === "string" && (THEME_VALUES as readonly string[]).includes(v);
 }
 
+function isPalettePreference(v: unknown): v is PalettePreference {
+  return typeof v === "string" && (DESIGN_PALETTE_NAMES as readonly string[]).includes(v);
+}
+
 const WORKFLOWS_VIEW_MODE_VALUES = ["both", "workflows", "runs"] as const;
 function isWorkflowsViewMode(v: unknown): v is WorkflowsViewMode {
   return typeof v === "string" && (WORKFLOWS_VIEW_MODE_VALUES as readonly string[]).includes(v);
@@ -85,6 +94,7 @@ function isSettings(v: unknown): v is Settings {
     return false;
   }
   if (o.theme !== undefined && !isThemePreference(o.theme)) return false;
+  if (o.palette !== undefined && !isPalettePreference(o.palette)) return false;
   if (o.workflowsViewMode !== undefined && !isWorkflowsViewMode(o.workflowsViewMode)) return false;
   if (
     o.hiddenWorkflowSources !== undefined &&
@@ -177,6 +187,7 @@ export interface UseSettingsResult {
   setLastUsed: (ref: ModelRef) => void;
   setSidebarCollapsed: (value: boolean) => void;
   setTheme: (value: ThemePreference) => void;
+  setPalette: (value: PalettePreference) => void;
   setWorkflowsViewMode: (value: WorkflowsViewMode) => void;
   // Toggle a rib's workflows in/out of the catalog + runs view (view-only).
   toggleHiddenWorkflowSource: (ribId: string) => void;
@@ -222,6 +233,13 @@ export function useSettings(): UseSettingsResult {
     update((prev) => {
       if ((prev.theme ?? "system") === value) return prev;
       return { ...prev, theme: value };
+    });
+  }, []);
+
+  const setPalette = useCallback((value: PalettePreference) => {
+    update((prev) => {
+      if ((prev.palette ?? "keelson") === value) return prev;
+      return { ...prev, palette: value };
     });
   }, []);
 
@@ -286,6 +304,7 @@ export function useSettings(): UseSettingsResult {
     setLastUsed,
     setSidebarCollapsed,
     setTheme,
+    setPalette,
     setWorkflowsViewMode,
     toggleHiddenWorkflowSource,
     isWorkflowSourceHidden,

@@ -8,6 +8,8 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  DESIGN_PALETTE_NAMES,
+  DESIGN_PALETTES,
   DESIGN_TOKEN_CSS_VARS,
   DESIGN_TOKENS,
   type DesignThemeName,
@@ -18,13 +20,21 @@ const THEMES: DesignThemeName[] = ["dark", "light"];
 const HEX = /^#[0-9a-f]{6}$/;
 
 describe("DESIGN_TOKENS", () => {
-  test("every mapped token resolves to a hex color in both themes", () => {
-    for (const theme of THEMES) {
-      for (const path of Object.keys(DESIGN_TOKEN_CSS_VARS)) {
-        const value = designTokenAt(theme, path);
-        expect(value, `${theme} ${path}`).toMatch(HEX);
+  test("every mapped token resolves to a hex color in every palette and theme", () => {
+    for (const palette of DESIGN_PALETTE_NAMES) {
+      for (const theme of THEMES) {
+        for (const path of Object.keys(DESIGN_TOKEN_CSS_VARS)) {
+          const value = designTokenAt(theme, path, palette);
+          expect(value, `${palette} ${theme} ${path}`).toMatch(HEX);
+        }
       }
     }
+  });
+
+  test("the keelson palette is DESIGN_TOKENS and is the designTokenAt default", () => {
+    expect(DESIGN_PALETTES.keelson).toBe(DESIGN_TOKENS);
+    expect(designTokenAt("light", "accent")).toBe(DESIGN_TOKENS.light.accent);
+    expect(designTokenAt("light", "accent", "shore")).toBe(DESIGN_PALETTES.shore.light.accent);
   });
 
   test("the css-var map is complete: every token leaf is mapped exactly once", () => {

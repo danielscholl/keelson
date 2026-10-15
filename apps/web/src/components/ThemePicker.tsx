@@ -1,5 +1,6 @@
+import { DESIGN_PALETTES } from "@keelson/shared";
 import type React from "react";
-import type { ThemePreference } from "../hooks/useSettings.ts";
+import type { PalettePreference, ThemePreference } from "../hooks/useSettings.ts";
 
 interface ThemePickerProps {
   value: ThemePreference;
@@ -16,9 +17,34 @@ const OPTIONS: Array<{
   { value: "dark", label: "Dark", icon: MoonIcon },
 ];
 
+// The radio-group keyboard contract: one Tab stop on the checked option, and the
+// arrow keys move both selection and focus, wrapping at the ends.
+function onRadioKeyDown<T extends string>(
+  event: React.KeyboardEvent<HTMLElement>,
+  values: readonly T[],
+  value: T,
+  onChange: (value: T) => void,
+) {
+  const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
+  const back = event.key === "ArrowLeft" || event.key === "ArrowUp";
+  if (!forward && !back) return;
+  event.preventDefault();
+  const at = Math.max(values.indexOf(value), 0);
+  const index = (at + (forward ? 1 : -1) + values.length) % values.length;
+  onChange(values[index] as T);
+  event.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[index]?.focus();
+}
+
+const THEME_VALUES = OPTIONS.map((opt) => opt.value);
+
 export function ThemePicker({ value, onChange }: ThemePickerProps) {
   return (
-    <div className="theme-picker" role="radiogroup" aria-label="Theme">
+    <div
+      className="theme-picker"
+      role="radiogroup"
+      aria-label="Theme"
+      onKeyDown={(event) => onRadioKeyDown(event, THEME_VALUES, value, onChange)}
+    >
       {OPTIONS.map((opt) => {
         const Icon = opt.icon;
         const active = value === opt.value;
@@ -31,10 +57,61 @@ export function ThemePicker({ value, onChange }: ThemePickerProps) {
             onClick={() => onChange(opt.value)}
             role="radio"
             aria-checked={active}
+            tabIndex={active ? 0 : -1}
             aria-label={`${opt.label} theme`}
             title={opt.label}
           >
             <Icon />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const PALETTE_OPTIONS: Array<{ value: PalettePreference; label: string }> = [
+  { value: "keelson", label: "Keelson" },
+  { value: "shore", label: "Shore" },
+];
+
+interface PalettePickerProps {
+  value: PalettePreference;
+  onChange: (value: PalettePreference) => void;
+}
+
+const PALETTE_VALUES = PALETTE_OPTIONS.map((opt) => opt.value);
+
+export function PalettePicker({ value, onChange }: PalettePickerProps) {
+  return (
+    <div
+      className="theme-picker"
+      role="radiogroup"
+      aria-label="Palette"
+      onKeyDown={(event) => onRadioKeyDown(event, PALETTE_VALUES, value, onChange)}
+    >
+      {PALETTE_OPTIONS.map((opt) => {
+        const active = value === opt.value;
+        // Each swatch shows its own palette, so it reads fixed values rather than the live tokens.
+        const { accent, magenta } = DESIGN_PALETTES[opt.value].dark;
+        return (
+          // biome-ignore lint/a11y/useSemanticElements: same custom radio pattern as ThemePicker
+          <button
+            key={opt.value}
+            type="button"
+            className={`theme-picker-btn palette-picker-btn${active ? " active" : ""}`}
+            onClick={() => onChange(opt.value)}
+            role="radio"
+            aria-checked={active}
+            tabIndex={active ? 0 : -1}
+            aria-label={`${opt.label} palette`}
+            title={opt.label}
+          >
+            <span
+              className="palette-swatch"
+              aria-hidden="true"
+              style={{ background: `linear-gradient(135deg, ${accent}, ${magenta})` }}
+            />
+            {opt.label}
           </button>
         );
       })}
