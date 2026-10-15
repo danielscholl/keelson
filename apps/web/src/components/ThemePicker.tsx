@@ -1,5 +1,6 @@
+import { DESIGN_PALETTES } from "@keelson/shared";
 import type React from "react";
-import type { ThemePreference } from "../hooks/useSettings.ts";
+import type { PalettePreference, ThemePreference } from "../hooks/useSettings.ts";
 
 interface ThemePickerProps {
   value: ThemePreference;
@@ -35,6 +36,48 @@ export function ThemePicker({ value, onChange }: ThemePickerProps) {
             title={opt.label}
           >
             <Icon />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const PALETTE_OPTIONS: Array<{ value: PalettePreference; label: string }> = [
+  { value: "keelson", label: "Keelson" },
+  { value: "shore", label: "Shore" },
+];
+
+interface PalettePickerProps {
+  value: PalettePreference;
+  onChange: (value: PalettePreference) => void;
+}
+
+export function PalettePicker({ value, onChange }: PalettePickerProps) {
+  return (
+    <div className="theme-picker" role="radiogroup" aria-label="Palette">
+      {PALETTE_OPTIONS.map((opt) => {
+        const active = value === opt.value;
+        // Each swatch shows its own palette, so it reads fixed values rather than the live tokens.
+        const { accent, magenta } = DESIGN_PALETTES[opt.value].dark;
+        return (
+          // biome-ignore lint/a11y/useSemanticElements: same custom radio pattern as ThemePicker
+          <button
+            key={opt.value}
+            type="button"
+            className={`theme-picker-btn palette-picker-btn${active ? " active" : ""}`}
+            onClick={() => onChange(opt.value)}
+            role="radio"
+            aria-checked={active}
+            aria-label={`${opt.label} palette`}
+            title={opt.label}
+          >
+            <span
+              className="palette-swatch"
+              aria-hidden="true"
+              style={{ background: `linear-gradient(135deg, ${accent}, ${magenta})` }}
+            />
+            {opt.label}
           </button>
         );
       })}

@@ -52,6 +52,9 @@
   --id-olive: #5f6e0a;
 
   --danger:  #e06666;
+  /* Channels for translucent accent tints; both Keelson modes share the dark
+     accent's, which is how the tints have always rendered. */
+  --accent-rgb: 155 142 255;
   --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.4);
   --shadow-card:    0 2px 6px rgba(0, 0, 0, 0.4);
 
@@ -117,6 +120,116 @@
   --danger:  #d9385e;
   --shadow-popover: 0 12px 32px rgba(57, 43, 92, 0.16);
   --shadow-card:    0 10px 28px rgba(57, 43, 92, 0.08);
+  --shadow-topbar:  0 2px 10px rgba(57, 43, 92, 0.04);
+  /* Tinted paper for chat bubbles, the composer, and markdown tables. */
+  --paper: #faf8ff;
+  --paper-head: #efeaf7;
+  --paper-ink: #6f6685;
+  --paper-border: #d8d0ee;
+  --brand-flat: #6f58d9;
+
+  color-scheme: light;
+}
+
+:root[data-palette="shore"]:not([data-theme="light"]) {
+  --bg: #0f1a1b;
+  --bg-soft: #132021;
+  --card: #162324;
+  --card-2: #1d2d2e;
+  --border: #2b3d3d;
+  --border-soft: #213132;
+
+  --fg: #e4dfd1;
+  --fg-strong: #f6f2e6;
+  --muted: #a59d8a;
+  --dim: #7d7666;
+
+  --accent:  #5cc4b2;
+  --green:   #8fcf86;
+  --yellow:  #e2b45c;
+  --red:     #ec8a6e;
+  --magenta: #c3a2e8;
+  --cyan:    #7fb8e6;
+  --orange:  #eba06a;
+  --ramp-1:  #cfeee8;
+  --ramp-2:  #97d8cc;
+  --ramp-3:  #5cc4b2;
+  --ramp-4:  #2f9f8d;
+  --ramp-5:  #1a7769;
+
+  --s1: #3fb8a5;
+  --s2: #c9a05a;
+  --s3: #a884de;
+  --s4: #d66c5c;
+  --s5: #66aacc;
+  --s6: #d65c85;
+  --s-other: #7d7666;
+
+  --id-blue: #5b8def;
+  --id-amber: #e0922f;
+  --id-teal: #2fbfa8;
+  --id-rose: #d0628e;
+  --id-olive: #a9b25c;
+
+  --danger:  #e06a50;
+  --accent-rgb: 92 196 178;
+  --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-card:    0 2px 6px rgba(0, 0, 0, 0.35);
+
+  color-scheme: dark;
+}
+
+/* Shore: sand and sea glass. Same token set as Keelson, warmer neutrals, teal
+   accent; series and identity sets pass palette.ts against this --card. */
+:root[data-theme="light"][data-palette="shore"] {
+  --bg: #f3efe4;
+  --bg-soft: #ece6d7;
+  --card: #fbf9f3;
+  --card-2: #f2ede1;
+  --border: #dcd3bf;
+  --border-soft: #e8e1d0;
+
+  --fg: #23211c;
+  --fg-strong: #15130f;
+  --muted: #665f4f;
+  --dim: #8a8170;
+
+  --accent:  #1d7a6c;
+  --green:   #3a7633;
+  --yellow:  #8f6207;
+  --red:     #bb4a2b;
+  --magenta: #8152b5;
+  --cyan:    #2a6ea3;
+  --orange:  #a85715;
+  --ramp-1:  #6ab5a6;
+  --ramp-2:  #46a08f;
+  --ramp-3:  #2b8a79;
+  --ramp-4:  #1d7066;
+  --ramp-5:  #13534b;
+
+  --s1: #1d8a7a;
+  --s2: #a07b3a;
+  --s3: #8a5cc0;
+  --s4: #ca5e16;
+  --s5: #387ba8;
+  --s6: #566321;
+  --s-other: #8a8170;
+
+  --id-blue: #2f6fc0;
+  --id-amber: #c07a14;
+  --id-teal: #13897c;
+  --id-rose: #a63a68;
+  --id-olive: #55691a;
+
+  --danger:  #bb4a2b;
+  --accent-rgb: 42 157 143;
+  --shadow-popover: 0 12px 32px rgba(92, 72, 40, 0.14);
+  --shadow-card:    0 10px 28px rgba(92, 72, 40, 0.07);
+  --shadow-topbar:  0 2px 10px rgba(92, 72, 40, 0.04);
+  --paper: #f8f5ee;
+  --paper-head: #efe9dc;
+  --paper-ink: #6b6453;
+  --paper-border: #ddd4c0;
 
   color-scheme: light;
 }
@@ -131,7 +244,7 @@
 }
 :root[data-theme="light"] .topbar {
   border-bottom-color: var(--border);
-  box-shadow: 0 2px 10px rgba(57, 43, 92, 0.04);
+  box-shadow: var(--shadow-topbar);
 }
 /* Anchor the scan path on actual P0 urgency, not row position — a uniform
    list of P1s shouldn't fake an anchor on whichever row landed first. */
@@ -439,6 +552,19 @@ body {
   height: 14px;
   display: block;
 }
+.palette-picker-btn {
+  width: auto;
+  gap: 6px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+}
+.palette-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
 .dot {
   display: inline-block;
   width: 8px; height: 8px;
@@ -618,7 +744,7 @@ body {
 }
 .col-toggle:hover {
   color: var(--accent);
-  border-color: rgba(155, 142, 255, 0.5);
+  border-color: rgb(var(--accent-rgb) / 0.5);
 }
 .col:not(.is-collapsed) .col-toggle {
   transform: rotate(180deg);
@@ -809,7 +935,7 @@ body {
   margin-left: 4px;
   vertical-align: middle;
 }
-.badge-running   { color: var(--accent);   border-color: rgba(155,142,255,0.3); }
+.badge-running   { color: var(--accent);   border-color: rgb(var(--accent-rgb) / 0.3); }
 .badge-pending   { color: var(--cyan);     border-color: rgba(124,192,255,0.3); }
 .badge-stuck     { color: var(--yellow);   border-color: rgba(245,195,82,0.3); }
 .badge-failed    { color: var(--red);      border-color: rgba(240,135,147,0.3); }
@@ -1015,8 +1141,8 @@ button.tab:focus-visible {
 }
 
 .chat-message.user .chat-bubble {
-  background: rgba(155, 142, 255, 0.12);
-  border: 1px solid rgba(155, 142, 255, 0.25);
+  background: rgb(var(--accent-rgb) / 0.12);
+  border: 1px solid rgb(var(--accent-rgb) / 0.25);
   color: var(--fg);
 }
 
@@ -1112,8 +1238,8 @@ button.tab:focus-visible {
 }
 
 .chat-composer:focus-within {
-  border-color: rgba(155, 142, 255, 0.6);
-  box-shadow: 0 0 0 3px rgba(155, 142, 255, 0.18);
+  border-color: rgb(var(--accent-rgb) / 0.6);
+  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.18);
 }
 
 .chat-composer-chips {
@@ -1197,8 +1323,8 @@ button.tab:focus-visible {
 }
 
 .chat-model-chip:hover:not(:disabled) {
-  border-color: rgba(155, 142, 255, 0.4);
-  background: rgba(155, 142, 255, 0.06);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+  background: rgb(var(--accent-rgb) / 0.06);
 }
 
 .chat-model-chip:focus-visible {
@@ -1242,9 +1368,9 @@ button.tab:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: rgba(155, 142, 255, 0.28);
+  background: rgb(var(--accent-rgb) / 0.28);
   color: var(--accent);
-  border: 1px solid rgba(155, 142, 255, 0.7);
+  border: 1px solid rgb(var(--accent-rgb) / 0.7);
   border-radius: 999px;
   padding: 3px 10px;
   font: inherit;
@@ -1254,12 +1380,12 @@ button.tab:focus-visible {
   transition: border-color 80ms ease, background 80ms ease,
     color 80ms ease, opacity 80ms ease;
   /* Subtle inner glow reinforces the "on / lit" affordance. */
-  box-shadow: inset 0 0 0 1px rgba(155, 142, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.08);
 }
 
 .chat-thinking-chip:hover:not(:disabled) {
-  border-color: rgba(155, 142, 255, 0.95);
-  background: rgba(155, 142, 255, 0.36);
+  border-color: rgb(var(--accent-rgb) / 0.95);
+  background: rgb(var(--accent-rgb) / 0.36);
 }
 
 .chat-thinking-chip:focus-visible {
@@ -1305,9 +1431,9 @@ button.tab:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: rgba(155, 142, 255, 0.28);
+  background: rgb(var(--accent-rgb) / 0.28);
   color: var(--accent);
-  border: 1px solid rgba(155, 142, 255, 0.7);
+  border: 1px solid rgb(var(--accent-rgb) / 0.7);
   border-radius: 999px;
   padding: 3px 10px;
   font: inherit;
@@ -1315,12 +1441,12 @@ button.tab:focus-visible {
   font-weight: 600;
   cursor: pointer;
   transition: border-color 80ms ease, background 80ms ease;
-  box-shadow: inset 0 0 0 1px rgba(155, 142, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.08);
 }
 
 .chat-reasoning-effort-chip:hover:not(:disabled) {
-  border-color: rgba(155, 142, 255, 0.95);
-  background: rgba(155, 142, 255, 0.36);
+  border-color: rgb(var(--accent-rgb) / 0.95);
+  background: rgb(var(--accent-rgb) / 0.36);
 }
 
 .chat-reasoning-effort-chip:focus-visible {
@@ -1364,8 +1490,8 @@ button.tab:focus-visible {
 }
 
 .chat-tools-chip:hover:not(:disabled) {
-  border-color: rgba(155, 142, 255, 0.4);
-  background: rgba(155, 142, 255, 0.06);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+  background: rgb(var(--accent-rgb) / 0.06);
 }
 
 .chat-tools-chip:focus-visible {
@@ -1391,9 +1517,9 @@ button.tab:focus-visible {
 }
 
 .chat-send {
-  background: rgba(155, 142, 255, 0.15);
+  background: rgb(var(--accent-rgb) / 0.15);
   color: var(--accent);
-  border: 1px solid rgba(155, 142, 255, 0.3);
+  border: 1px solid rgb(var(--accent-rgb) / 0.3);
   border-radius: 8px;
   padding: 10px 18px;
   font: inherit;
@@ -1405,8 +1531,8 @@ button.tab:focus-visible {
 }
 
 .chat-send:hover:not(:disabled) {
-  background: rgba(155, 142, 255, 0.22);
-  border-color: rgba(155, 142, 255, 0.5);
+  background: rgb(var(--accent-rgb) / 0.22);
+  border-color: rgb(var(--accent-rgb) / 0.5);
 }
 
 .chat-send:disabled {
@@ -1501,8 +1627,8 @@ button.tab:focus-visible {
   transition: background 80ms ease, border-color 80ms ease;
 }
 .chat-sidebar-new:hover {
-  background: rgba(155, 142, 255, 0.08);
-  border-color: rgba(155, 142, 255, 0.3);
+  background: rgb(var(--accent-rgb) / 0.08);
+  border-color: rgb(var(--accent-rgb) / 0.3);
 }
 
 /* --------------------------------------------------------------------- */
@@ -1588,8 +1714,8 @@ button.tab:focus-visible {
 }
 
 .chat-sidebar-item.active {
-  border-color: rgba(155, 142, 255, 0.4);
-  background: rgba(155, 142, 255, 0.08);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+  background: rgb(var(--accent-rgb) / 0.08);
 }
 
 .chat-sidebar-link {
@@ -1647,7 +1773,7 @@ button.tab:focus-visible {
   flex: 1 1 0;
   background: var(--card);
   color: var(--fg);
-  border: 1px solid rgba(155, 142, 255, 0.5);
+  border: 1px solid rgb(var(--accent-rgb) / 0.5);
   border-radius: 4px;
   padding: 6px 8px;
   font: inherit;
@@ -1688,7 +1814,7 @@ button.tab:focus-visible {
 
 .chat-sidebar-collapse-toggle:hover {
   color: var(--fg);
-  background: rgba(155, 142, 255, 0.08);
+  background: rgb(var(--accent-rgb) / 0.08);
 }
 
 .chat-sidebar-collapse-toggle:focus-visible {
@@ -1760,8 +1886,8 @@ button.tab:focus-visible {
 
 .chat-sidebar-new-rail:hover {
   color: var(--fg);
-  border-color: rgba(155, 142, 255, 0.4);
-  background: rgba(155, 142, 255, 0.08);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+  background: rgb(var(--accent-rgb) / 0.08);
 }
 
 /* --- Skeleton placeholders --- */
@@ -1997,7 +2123,7 @@ button.tab:focus-visible {
 }
 
 .markdown-content code {
-  background: rgba(155, 142, 255, 0.1);
+  background: rgb(var(--accent-rgb) / 0.1);
   border-radius: 3px;
   padding: 1px 4px;
   font-size: 0.92em;
@@ -2486,7 +2612,7 @@ button.tab:focus-visible {
 }
 
 .model-picker-popover-search:focus {
-  border-color: rgba(155, 142, 255, 0.5);
+  border-color: rgb(var(--accent-rgb) / 0.5);
 }
 
 .model-picker-popover-body {
@@ -2555,11 +2681,11 @@ button.tab:focus-visible {
 }
 
 .model-picker-popover-row:hover:not(.disabled) {
-  background: rgba(155, 142, 255, 0.06);
+  background: rgb(var(--accent-rgb) / 0.06);
 }
 
 .model-picker-popover-row.active {
-  background: rgba(155, 142, 255, 0.12);
+  background: rgb(var(--accent-rgb) / 0.12);
 }
 
 .model-picker-popover-row.disabled {
@@ -2788,11 +2914,11 @@ button.tab:focus-visible {
 }
 
 .reasoning-effort-popover-row:hover {
-  background: rgba(155, 142, 255, 0.10);
+  background: rgb(var(--accent-rgb) / 0.10);
 }
 
 .reasoning-effort-popover-row.active {
-  background: rgba(155, 142, 255, 0.18);
+  background: rgb(var(--accent-rgb) / 0.18);
   color: var(--accent);
   font-weight: 600;
 }
@@ -2884,7 +3010,7 @@ button.tab:focus-visible {
 }
 
 .tools-popover-row:hover {
-  background: rgba(155, 142, 255, 0.06);
+  background: rgb(var(--accent-rgb) / 0.06);
 }
 
 .tools-popover-row-name {
@@ -2956,7 +3082,7 @@ button.tab:focus-visible {
 
 .slash-popover-row:hover,
 .slash-popover-row[aria-selected="true"] {
-  background: rgba(155, 142, 255, 0.1);
+  background: rgb(var(--accent-rgb) / 0.1);
 }
 
 .slash-popover-row-name {
@@ -3185,7 +3311,7 @@ button.tab:focus-visible {
 
 .canvas-drawer-close:hover {
   color: var(--fg);
-  background: rgba(155, 142, 255, 0.08);
+  background: rgb(var(--accent-rgb) / 0.08);
 }
 
 .canvas-drawer-body {
@@ -6717,7 +6843,7 @@ a.cvb-card-title::after {
 
 .trace-canvas-btn:hover {
   color: var(--fg);
-  background: rgba(155, 142, 255, 0.08);
+  background: rgb(var(--accent-rgb) / 0.08);
 }
 
 /* A node that published a canvas artifact carries it on the collapsed head —
@@ -6771,7 +6897,7 @@ a.cvb-card-title::after {
 }
 
 .canvas-open-link {
-  background: rgba(155, 142, 255, 0.08);
+  background: rgb(var(--accent-rgb) / 0.08);
   border: 1px solid var(--border-soft);
   color: var(--accent);
   cursor: pointer;
@@ -6782,7 +6908,7 @@ a.cvb-card-title::after {
 }
 
 .canvas-open-link:hover {
-  background: rgba(155, 142, 255, 0.16);
+  background: rgb(var(--accent-rgb) / 0.16);
 }
 
 .credentials-drawer-backdrop {
@@ -6848,7 +6974,7 @@ a.cvb-card-title::after {
 
 .credentials-drawer-close:hover {
   color: var(--fg);
-  background: rgba(155, 142, 255, 0.08);
+  background: rgb(var(--accent-rgb) / 0.08);
 }
 
 .credentials-drawer-body {
@@ -6964,8 +7090,8 @@ a.cvb-card-title::after {
 
 .credentials-drawer-action:hover:not(:disabled) {
   color: var(--fg);
-  border-color: rgba(155, 142, 255, 0.4);
-  background: rgba(155, 142, 255, 0.08);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+  background: rgb(var(--accent-rgb) / 0.08);
 }
 
 .credentials-drawer-action:disabled {
@@ -7105,12 +7231,12 @@ a.cvb-card-title::after {
 }
 
 .confirm-modal-confirm {
-  background: rgba(155, 142, 255, 0.18);
-  border-color: rgba(155, 142, 255, 0.5);
+  background: rgb(var(--accent-rgb) / 0.18);
+  border-color: rgb(var(--accent-rgb) / 0.5);
 }
 
 .confirm-modal-confirm:hover:not(:disabled) {
-  background: rgba(155, 142, 255, 0.3);
+  background: rgb(var(--accent-rgb) / 0.3);
 }
 
 .confirm-modal-confirm.danger {
@@ -7230,7 +7356,7 @@ a.cvb-card-title::after {
 
 .cluster-op-drawer-progress-fill {
   height: 100%;
-  background: rgba(155, 142, 255, 0.7);
+  background: rgb(var(--accent-rgb) / 0.7);
   transition: width 180ms ease;
 }
 
@@ -7402,8 +7528,8 @@ a.cvb-card-title::after {
 
 .cluster-op-drawer-cancel:hover,
 .cluster-op-drawer-close-btn:hover {
-  border-color: rgba(155, 142, 255, 0.5);
-  background: rgba(155, 142, 255, 0.08);
+  border-color: rgb(var(--accent-rgb) / 0.5);
+  background: rgb(var(--accent-rgb) / 0.08);
 }
 
 /* ---------------- Phase 3.8: cimpl version pill + popover + toast ---------------- */
@@ -7432,8 +7558,8 @@ a.cvb-card-title::after {
 
 .cimpl-version-pill-update-available {
   color: var(--accent);
-  border-color: rgba(155, 142, 255, 0.5);
-  background: rgba(155, 142, 255, 0.08);
+  border-color: rgb(var(--accent-rgb) / 0.5);
+  background: rgb(var(--accent-rgb) / 0.08);
 }
 
 .cimpl-version-pill-not-detected {
@@ -7555,8 +7681,8 @@ a.cvb-card-title::after {
 }
 
 .cimpl-update-popover-check:hover:not(:disabled) {
-  border-color: rgba(155, 142, 255, 0.5);
-  background: rgba(155, 142, 255, 0.08);
+  border-color: rgb(var(--accent-rgb) / 0.5);
+  background: rgb(var(--accent-rgb) / 0.08);
 }
 
 .cimpl-update-toast {
@@ -7568,7 +7694,7 @@ a.cvb-card-title::after {
   gap: 4px;
   padding: 0;
   background: var(--card);
-  border: 1px solid rgba(155, 142, 255, 0.5);
+  border: 1px solid rgb(var(--accent-rgb) / 0.5);
   border-radius: 8px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   z-index: 60;
@@ -7667,8 +7793,8 @@ a.cvb-card-title::after {
 }
 .icc-indicator-pill.status-pending {
   color: var(--accent);
-  border-color: rgba(155, 142, 255, 0.45);
-  background: rgba(155, 142, 255, 0.08);
+  border-color: rgb(var(--accent-rgb) / 0.45);
+  background: rgb(var(--accent-rgb) / 0.08);
 }
 .icc-indicator-pill.status-pending .icc-indicator-glyph {
   letter-spacing: -1px;
@@ -7676,8 +7802,8 @@ a.cvb-card-title::after {
 }
 .icc-indicator-pill.status-updating {
   color: var(--accent);
-  border-color: rgba(155, 142, 255, 0.45);
-  background: rgba(155, 142, 255, 0.08);
+  border-color: rgb(var(--accent-rgb) / 0.45);
+  background: rgb(var(--accent-rgb) / 0.08);
 }
 .icc-indicator-pill.status-updating .icc-indicator-glyph {
   display: inline-block;
@@ -7767,7 +7893,7 @@ a.cvb-card-title::after {
 .icc-refresh:hover:not(:disabled),
 .icc-expand-toggle:hover {
   color: var(--accent);
-  border-color: rgba(155, 142, 255, 0.5);
+  border-color: rgb(var(--accent-rgb) / 0.5);
 }
 .icc-refresh:disabled { opacity: 0.55; cursor: progress; }
 .icc-refresh.is-spinning .icc-refresh-glyph {
@@ -7800,7 +7926,7 @@ a.cvb-card-title::after {
   transform: translate(-50%, -50%);
   z-index: 5;
   background: var(--card);
-  border: 1px solid rgba(155, 142, 255, 0.45);
+  border: 1px solid rgb(var(--accent-rgb) / 0.45);
   color: var(--accent);
   font-size: 11px;
   font-weight: 600;
@@ -7897,8 +8023,8 @@ a.cvb-card-title::after {
   justify-content: flex-start;
 }
 .icc-action:hover:not(:disabled) {
-  border-color: rgba(155, 142, 255, 0.5);
-  background: rgba(155, 142, 255, 0.08);
+  border-color: rgb(var(--accent-rgb) / 0.5);
+  background: rgb(var(--accent-rgb) / 0.08);
 }
 .icc-action:disabled {
   opacity: 0.45;
@@ -8011,7 +8137,7 @@ a.cvb-card-title::after {
   flex: 0 0 auto;
 }
 .icc-service-link:hover {
-  background: rgba(155, 142, 255, 0.12);
+  background: rgb(var(--accent-rgb) / 0.12);
   color: var(--accent);
 }
 
@@ -8071,8 +8197,8 @@ a.cvb-card-title::after {
   transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
 }
 .icc-service-copy:hover:not(:disabled) {
-  border-color: rgba(155, 142, 255, 0.5);
-  background: rgba(155, 142, 255, 0.08);
+  border-color: rgb(var(--accent-rgb) / 0.5);
+  background: rgb(var(--accent-rgb) / 0.08);
   color: var(--accent);
 }
 .icc-service-copy:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -8544,7 +8670,14 @@ a.cvb-card-title::after {
 :root[data-theme="light"] .brand {
   background: none;
   -webkit-text-fill-color: initial;
-  color: #6f58d9;
+  color: var(--brand-flat);
+}
+/* Shore keeps the gradient: sea glass to sea lavender. */
+:root[data-theme="light"][data-palette="shore"] .brand {
+  background: linear-gradient(135deg, var(--accent), var(--magenta));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 /* Options row gets the same lavender border treatment as the other dividers
@@ -8579,13 +8712,13 @@ a.cvb-card-title::after {
    Headings/strong already pick up the light --fg-strong (#0b0f1e) via
    the cascading var; tables get a soft lavender card. */
 :root[data-theme="light"] .markdown-content table {
-  background: #faf8ff;
+  background: var(--paper);
   border-color: var(--border);
   color: var(--fg);
 }
 :root[data-theme="light"] .markdown-content th {
-  background: #efeaf7;
-  color: #6f6685;
+  background: var(--paper-head);
+  color: var(--paper-ink);
 }
 :root[data-theme="light"] .markdown-content td,
 :root[data-theme="light"] .markdown-content th {
@@ -8596,7 +8729,7 @@ a.cvb-card-title::after {
    wash. Border picks up the lavender border var so it doesn't read as
    a hard line on the lavender app shell. */
 :root[data-theme="light"] .chat-message.assistant .chat-bubble {
-  background: linear-gradient(180deg, #ffffff, #faf8ff);
+  background: linear-gradient(180deg, var(--card), var(--paper));
   border-color: var(--border-soft);
   color: var(--fg);
 }
@@ -8605,8 +8738,8 @@ a.cvb-card-title::after {
    object on the light theme. Soft lavender paper matches the assistant
    card without competing for attention. */
 :root[data-theme="light"] .chat-composer {
-  background: #fbfaff;
-  border-color: #d8d0ee;
+  background: var(--paper);
+  border-color: var(--paper-border);
 }
 
 /* ---------------- Release identity strip (slim hero) -------------------- *
@@ -10866,8 +10999,8 @@ a.cvb-card-title::after {
   transition: border-color 80ms ease, background 80ms ease;
 }
 .chat-usage-chip:hover {
-  border-color: rgba(155, 142, 255, 0.4);
-  background: rgba(155, 142, 255, 0.06);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+  background: rgb(var(--accent-rgb) / 0.06);
 }
 .chat-usage-chip:focus-visible {
   outline: 2px solid var(--accent);

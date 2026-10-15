@@ -133,3 +133,29 @@ describe("useSettings — hiddenRegionActions", () => {
     expect(result.current.settings.hiddenRegionActions).toBeUndefined();
   });
 });
+
+describe("useSettings — palette", () => {
+  beforeEach(() => {
+    seedAndSync();
+  });
+
+  test("defaults to keelson when nothing is persisted", () => {
+    const { result } = renderHook(() => useSettings());
+    expect(result.current.settings.palette ?? "keelson").toBe("keelson");
+  });
+
+  test("setPalette persists shore", () => {
+    const { result } = renderHook(() => useSettings());
+    act(() => {
+      result.current.setPalette("shore");
+    });
+    expect(result.current.settings.palette).toBe("shore");
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) as string).palette).toBe("shore");
+  });
+
+  test("rejects an unknown palette in a persisted payload (whole-settings guard)", () => {
+    seedAndSync({ favorites: [], lastUsed: null, palette: "neon" });
+    const { result } = renderHook(() => useSettings());
+    expect(result.current.settings.palette).toBeUndefined();
+  });
+});

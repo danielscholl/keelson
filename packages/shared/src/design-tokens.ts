@@ -120,6 +120,78 @@ export const DESIGN_TOKENS: Readonly<Record<DesignThemeName, DesignThemeTokens>>
   light: LIGHT,
 };
 
+// Values mirror apps/web/src/app.css `:root[data-palette="shore"]:not([data-theme="light"])`.
+const SHORE_DARK: DesignThemeTokens = {
+  bg: "#0f1a1b",
+  bgSoft: "#132021",
+  card: "#162324",
+  card2: "#1d2d2e",
+  border: "#2b3d3d",
+  borderSoft: "#213132",
+  fg: "#e4dfd1",
+  fgStrong: "#f6f2e6",
+  muted: "#a59d8a",
+  dim: "#7d7666",
+  accent: "#5cc4b2",
+  green: "#8fcf86",
+  yellow: "#e2b45c",
+  red: "#ec8a6e",
+  magenta: "#c3a2e8",
+  cyan: "#7fb8e6",
+  orange: "#eba06a",
+  danger: "#e06a50",
+  series: ["#3fb8a5", "#c9a05a", "#a884de", "#d66c5c", "#66aacc", "#d65c85"],
+  identity: {
+    blue: "#5b8def",
+    amber: "#e0922f",
+    teal: "#2fbfa8",
+    rose: "#d0628e",
+    olive: "#a9b25c",
+  },
+};
+
+// Values mirror apps/web/src/app.css `:root[data-theme="light"][data-palette="shore"]`.
+const SHORE_LIGHT: DesignThemeTokens = {
+  bg: "#f3efe4",
+  bgSoft: "#ece6d7",
+  card: "#fbf9f3",
+  card2: "#f2ede1",
+  border: "#dcd3bf",
+  borderSoft: "#e8e1d0",
+  fg: "#23211c",
+  fgStrong: "#15130f",
+  muted: "#665f4f",
+  dim: "#8a8170",
+  accent: "#1d7a6c",
+  green: "#3a7633",
+  yellow: "#8f6207",
+  red: "#bb4a2b",
+  magenta: "#8152b5",
+  cyan: "#2a6ea3",
+  orange: "#a85715",
+  danger: "#bb4a2b",
+  series: ["#1d8a7a", "#a07b3a", "#8a5cc0", "#ca5e16", "#387ba8", "#566321"],
+  identity: {
+    blue: "#2f6fc0",
+    amber: "#c07a14",
+    teal: "#13897c",
+    rose: "#a63a68",
+    olive: "#55691a",
+  },
+};
+
+// A palette is the color family; the theme is its light or dark mode.
+export type DesignPaletteName = "keelson" | "shore";
+
+export const DESIGN_PALETTE_NAMES: readonly DesignPaletteName[] = ["keelson", "shore"];
+
+export const DESIGN_PALETTES: Readonly<
+  Record<DesignPaletteName, Readonly<Record<DesignThemeName, DesignThemeTokens>>>
+> = {
+  keelson: DESIGN_TOKENS,
+  shore: { dark: SHORE_DARK, light: SHORE_LIGHT },
+};
+
 // The app.css custom-property name for each token key — the shared vocabulary
 // the drift guard walks so a token added here without a matching var (or vice
 // versa) fails the build rather than silently forking the palette.
@@ -156,8 +228,12 @@ export const DESIGN_TOKEN_CSS_VARS: Readonly<Record<string, string>> = {
 };
 
 /** Read one token by its DESIGN_TOKEN_CSS_VARS key path (e.g. "series.2"). */
-export function designTokenAt(theme: DesignThemeName, path: string): string | undefined {
-  const tokens = DESIGN_TOKENS[theme];
+export function designTokenAt(
+  theme: DesignThemeName,
+  path: string,
+  palette: DesignPaletteName = "keelson",
+): string | undefined {
+  const tokens = DESIGN_PALETTES[palette][theme];
   const [head, tail] = path.split(".", 2) as [string, string | undefined];
   if (tail === undefined) {
     const value = (tokens as unknown as Record<string, unknown>)[head];

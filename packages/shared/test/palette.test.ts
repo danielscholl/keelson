@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { describe, expect, test } from "bun:test";
-import { DESIGN_TOKENS } from "../src/design-tokens.ts";
+import { DESIGN_PALETTE_NAMES, DESIGN_PALETTES, DESIGN_TOKENS } from "../src/design-tokens.ts";
 import {
   formatPaletteReport,
   oklch,
@@ -41,26 +41,32 @@ describe("oklch", () => {
 });
 
 describe("validateCategoricalPalette", () => {
-  test("the keelson series palettes pass in both modes (all-pairs)", () => {
-    for (const mode of ["dark", "light"] as const) {
-      const report = validateCategoricalPalette([...DESIGN_TOKENS[mode].series], {
-        mode,
-        pairs: "all",
-      });
-      expect(report.ok).toBe(true);
-      expect(report.checks.some((c) => c.status === "fail")).toBe(false);
-    }
-  });
+  for (const palette of DESIGN_PALETTE_NAMES) {
+    test(`the ${palette} series palettes pass in both modes (all-pairs)`, () => {
+      for (const mode of ["dark", "light"] as const) {
+        const tokens = DESIGN_PALETTES[palette][mode];
+        const report = validateCategoricalPalette([...tokens.series], {
+          mode,
+          surface: tokens.card,
+          pairs: "all",
+        });
+        expect(report.ok).toBe(true);
+        expect(report.checks.some((c) => c.status === "fail")).toBe(false);
+      }
+    });
 
-  test("the keelson identity tones pass in both modes (all-pairs)", () => {
-    for (const mode of ["dark", "light"] as const) {
-      const report = validateCategoricalPalette(Object.values(DESIGN_TOKENS[mode].identity), {
-        mode,
-        pairs: "all",
-      });
-      expect(report.ok).toBe(true);
-    }
-  });
+    test(`the ${palette} identity tones pass in both modes (all-pairs)`, () => {
+      for (const mode of ["dark", "light"] as const) {
+        const tokens = DESIGN_PALETTES[palette][mode];
+        const report = validateCategoricalPalette(Object.values(tokens.identity), {
+          mode,
+          surface: tokens.card,
+          pairs: "all",
+        });
+        expect(report.ok).toBe(true);
+      }
+    });
+  }
 
   test("near-identical hues fail CVD separation", () => {
     const report = validateCategoricalPalette(["#4f7df0", "#5580ee", "#4a79e8"], { mode: "dark" });

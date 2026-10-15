@@ -8,6 +8,8 @@ function renderBar(overrides: Partial<Parameters<typeof TopBar>[0]> = {}) {
     onTabChange: () => {},
     themePreference: "system" as const,
     onThemeChange: () => {},
+    palettePreference: "keelson" as const,
+    onPaletteChange: () => {},
     isRegionActionHidden: () => false,
     onToggleRegionAction: () => {},
     ...overrides,
@@ -34,6 +36,8 @@ describe("TopBar", () => {
         onTabChange={() => {}}
         themePreference="system"
         onThemeChange={() => {}}
+        palettePreference="keelson"
+        onPaletteChange={() => {}}
         isRegionActionHidden={() => false}
         onToggleRegionAction={() => {}}
         surfaceTabs={[{ id: "surface:chamber:home", title: "Chamber" }]}
@@ -63,6 +67,18 @@ describe("TopBar", () => {
     expect(tabs).toEqual(["memory"]);
     expect(screen.queryByLabelText("Harness")).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  test("the palette picker marks the current palette and reports a pick", () => {
+    const picks: string[] = [];
+    renderBar({ palettePreference: "keelson", onPaletteChange: (p) => picks.push(p) });
+    fireEvent.click(screen.getByRole("button", { name: /Harness/ }));
+    const group = screen.getByRole("radiogroup", { name: "Palette" });
+    expect(
+      within(group).getByRole("radio", { name: "Keelson palette" }).getAttribute("aria-checked"),
+    ).toBe("true");
+    fireEvent.click(within(group).getByRole("radio", { name: "Shore palette" }));
+    expect(picks).toEqual(["shore"]);
   });
 
   test("a pending memory count rides the trigger as a dot and the row as a pip", () => {

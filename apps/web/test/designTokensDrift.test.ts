@@ -14,7 +14,13 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DESIGN_TOKEN_CSS_VARS, type DesignThemeName, designTokenAt } from "@keelson/shared";
+import {
+  DESIGN_PALETTE_NAMES,
+  DESIGN_TOKEN_CSS_VARS,
+  type DesignPaletteName,
+  type DesignThemeName,
+  designTokenAt,
+} from "@keelson/shared";
 
 const css = readFileSync(join(import.meta.dir, "../src/app.css"), "utf8");
 
@@ -26,23 +32,34 @@ function cssVarsIn(block: string): Map<string, string> {
   return vars;
 }
 
-function themeBlock(theme: DesignThemeName): string {
-  const pattern =
-    theme === "dark"
-      ? /(?:^|\n):root\s*\{([\s\S]*?)\}/
-      : /:root\[data-theme="light"\]\s*\{([\s\S]*?)\}/;
-  const block = pattern.exec(css)?.[1];
-  if (!block) throw new Error(`could not locate the ${theme} :root block in app.css`);
+const BLOCKS: Record<DesignPaletteName, Record<DesignThemeName, RegExp>> = {
+  keelson: {
+    dark: /(?:^|\n):root\s*\{([\s\S]*?)\}/,
+    light: /:root\[data-theme="light"\]\s*\{([\s\S]*?)\}/,
+  },
+  shore: {
+    dark: /:root\[data-palette="shore"\]:not\(\[data-theme="light"\]\)\s*\{([\s\S]*?)\}/,
+    light: /:root\[data-theme="light"\]\[data-palette="shore"\]\s*\{([\s\S]*?)\}/,
+  },
+};
+
+function themeBlock(palette: DesignPaletteName, theme: DesignThemeName): string {
+  const block = BLOCKS[palette][theme].exec(css)?.[1];
+  if (!block) throw new Error(`could not locate the ${palette} ${theme} block in app.css`);
   return block;
 }
 
 describe("design token drift guard", () => {
-  for (const theme of ["dark", "light"] as DesignThemeName[]) {
-    test(`${theme}: every shared token matches its app.css custom property`, () => {
-      const vars = cssVarsIn(themeBlock(theme));
-      for (const [path, varName] of Object.entries(DESIGN_TOKEN_CSS_VARS)) {
-        expect(vars.get(varName), `${varName} (${path})`).toBe(designTokenAt(theme, path));
-      }
-    });
+  for (const palette of DESIGN_PALETTE_NAMES) {
+    for (const theme of ["dark", "light"] as DesignThemeName[]) {
+      test(`${palette} ${theme}: every shared token matches its app.css custom property`, () => {
+        const vars = cssVarsIn(themeBlock(palette, theme));
+        for (const [path, varName] of Object.entries(DESIGN_TOKEN_CSS_VARS)) {
+          expect(vars.get(varName), `${varName} (${path})`).toBe(
+            designTokenAt(theme, path, palette),
+          );
+        }
+      });
+    }
   }
 });

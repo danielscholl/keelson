@@ -1,9 +1,9 @@
 import { ribSurfaceBadgeSchema } from "@keelson/shared";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
-import type { RegionAction, ThemePreference } from "../hooks/useSettings.ts";
+import type { PalettePreference, RegionAction, ThemePreference } from "../hooks/useSettings.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
-import { ThemePicker } from "./ThemePicker.tsx";
+import { PalettePicker, ThemePicker } from "./ThemePicker.tsx";
 
 export type BuiltinTab = "chat" | "workflows" | "memory" | "usage";
 // Dynamic rib surfaces ride alongside the built-in tabs as opaque ids
@@ -24,6 +24,8 @@ export interface TopBarProps {
   surfaceTabs?: readonly SurfaceTab[];
   themePreference: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
+  palettePreference: PalettePreference;
+  onPaletteChange: (palette: PalettePreference) => void;
   isRegionActionHidden: (action: RegionAction) => boolean;
   onToggleRegionAction: (action: RegionAction) => void;
   // Count of workflow runs currently paused awaiting human input. Drives
@@ -46,6 +48,8 @@ export function TopBar(props: TopBarProps) {
     surfaceTabs,
     themePreference,
     onThemeChange,
+    palettePreference,
+    onPaletteChange,
     isRegionActionHidden,
     onToggleRegionAction,
     pausedRunCount,
@@ -117,6 +121,8 @@ export function TopBar(props: TopBarProps) {
           pendingMemoryCount={pendingMemoryCount ?? 0}
           themePreference={themePreference}
           onThemeChange={onThemeChange}
+          palettePreference={palettePreference}
+          onPaletteChange={onPaletteChange}
           isRegionActionHidden={isRegionActionHidden}
           onToggleRegionAction={onToggleRegionAction}
         />
@@ -162,6 +168,8 @@ function InstrumentsPopover({
   pendingMemoryCount,
   themePreference,
   onThemeChange,
+  palettePreference,
+  onPaletteChange,
   isRegionActionHidden,
   onToggleRegionAction,
 }: {
@@ -170,6 +178,8 @@ function InstrumentsPopover({
   pendingMemoryCount: number;
   themePreference: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
+  palettePreference: PalettePreference;
+  onPaletteChange: (palette: PalettePreference) => void;
   isRegionActionHidden: (action: RegionAction) => boolean;
   onToggleRegionAction: (action: RegionAction) => void;
 }) {
@@ -272,6 +282,10 @@ function InstrumentsPopover({
           <div className="instruments-theme">
             <span className="instruments-theme-label">Theme</span>
             <ThemePicker value={themePreference} onChange={onThemeChange} />
+          </div>
+          <div className="instruments-theme">
+            <span className="instruments-theme-label">Palette</span>
+            <PalettePicker value={palettePreference} onChange={onPaletteChange} />
           </div>
           <div className="instruments-heading">Panel controls</div>
           {REGION_ACTIONS.map((item) => {

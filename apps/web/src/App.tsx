@@ -37,7 +37,8 @@ export function App() {
 function AppInner() {
   useSchemaVersionGate();
   const toast = useToast();
-  const { settings, setTheme, isRegionActionHidden, toggleHiddenRegionAction } = useSettings();
+  const { settings, setTheme, setPalette, isRegionActionHidden, toggleHiddenRegionAction } =
+    useSettings();
   const [activeTab, setActiveTab] = useState<ActiveTab>("chat");
   // A run started from chat (`/workflow run`) — switches to the Workflows tab
   // and deep-links the run; Workflows consumes and clears it on mount.
@@ -159,6 +160,11 @@ function AppInner() {
     return () => mql.removeEventListener("change", apply);
   }, [themePreference]);
 
+  const palettePreference = settings.palette ?? "keelson";
+  useEffect(() => {
+    document.documentElement.setAttribute("data-palette", palettePreference);
+  }, [palettePreference]);
+
   // useConversation owns the active conversation id; expose setConversationId
   // here so the topbar's New Chat button and the panel explore handoff can reset
   // it. Clearing it is what lets Chat's seed consumer mint a fresh conversation.
@@ -187,6 +193,8 @@ function AppInner() {
         surfaceTabs={surfaceTabs}
         themePreference={themePreference}
         onThemeChange={setTheme}
+        palettePreference={palettePreference}
+        onPaletteChange={setPalette}
         isRegionActionHidden={isRegionActionHidden}
         onToggleRegionAction={toggleHiddenRegionAction}
         pausedRunCount={pausedRunCount}
