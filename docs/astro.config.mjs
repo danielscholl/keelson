@@ -34,7 +34,7 @@ export default defineConfig({
       title: "Keelson",
       description: "A local agent harness. Pluggable ribs, deterministic workflows.",
       favicon: "/assets/keelson-mark.svg",
-      customCss: ["./src/styles/keelson-theme.css"],
+      customCss: ["./src/styles/keelson-theme.css", "./src/styles/films.css"],
       components: {
         PageTitle: "./src/components/PageTitle.astro",
         SiteTitle: "./src/components/SiteTitle.astro",
