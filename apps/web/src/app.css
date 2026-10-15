@@ -644,7 +644,7 @@ body {
 }
 .cross-item .priority.P0 { color: var(--red); }
 .cross-item .priority.P1 { color: var(--orange); }
-.cross-item .priority.P2 { color: var(--yellow); }
+.cross-item .priority.P2 { color: var(--yellow-ink); }
 .cross-item .priority.P3 { color: var(--dim); }
 .cross-item .text { color: var(--fg); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cross-item .text a { color: inherit; text-decoration: none; }
@@ -765,7 +765,7 @@ body {
   color: var(--muted);
 }
 .pill.red { color: var(--red); border-color: rgba(240,135,147,0.3); background: rgba(240,135,147,0.08); }
-.pill.yellow { color: var(--yellow); border-color: rgba(245,195,82,0.3); background: rgba(245,195,82,0.08); }
+.pill.yellow { color: var(--yellow-ink); border-color: rgba(245,195,82,0.3); background: rgba(245,195,82,0.08); }
 
 .empty-state {
   font-size: 12px;
@@ -943,15 +943,15 @@ body {
 }
 .badge-running   { color: var(--accent);   border-color: rgb(var(--accent-rgb) / 0.3); }
 .badge-pending   { color: var(--cyan);     border-color: rgba(124,192,255,0.3); }
-.badge-stuck     { color: var(--yellow);   border-color: rgba(245,195,82,0.3); }
+.badge-stuck     { color: var(--yellow-ink);   border-color: rgba(245,195,82,0.3); }
 .badge-failed    { color: var(--red);      border-color: rgba(240,135,147,0.3); }
 .badge-manual    { color: var(--orange);   border-color: rgba(245,159,108,0.3); }
 .badge-success   { color: var(--green);    border-color: rgba(109,210,141,0.3); }
 .badge-open      { color: var(--muted); }
-.badge-merged    { color: var(--magenta);  border-color: rgba(199,168,240,0.3); }
+.badge-merged    { color: var(--magenta-ink);  border-color: rgba(199,168,240,0.3); }
 .badge-win-merged    { color: var(--green);   border-color: rgba(109,210,141,0.3); }
 .badge-win-recovered { color: var(--cyan);    border-color: rgba(124,192,255,0.3); }
-.badge-win-completed { color: var(--magenta); border-color: rgba(199,168,240,0.3); }
+.badge-win-completed { color: var(--magenta-ink); border-color: rgba(199,168,240,0.3); }
 
 /* "+N more" tail row -- shown when a column's bundle list exceeds the   */
 /* visible cap. The composer normally enforces the cap before the bundle */
@@ -7390,17 +7390,17 @@ a.cvb-card-title::after {
 .ansi-black-fg, .ansi-palette-0-fg { color: var(--dim); }
 .ansi-red-fg, .ansi-palette-1-fg { color: var(--red); }
 .ansi-green-fg, .ansi-palette-2-fg { color: var(--green); }
-.ansi-yellow-fg, .ansi-palette-3-fg { color: var(--yellow); }
+.ansi-yellow-fg, .ansi-palette-3-fg { color: var(--yellow-ink); }
 .ansi-blue-fg, .ansi-palette-4-fg { color: var(--cyan); }
-.ansi-magenta-fg, .ansi-palette-5-fg { color: var(--magenta); }
+.ansi-magenta-fg, .ansi-palette-5-fg { color: var(--magenta-ink); }
 .ansi-cyan-fg, .ansi-palette-6-fg { color: var(--cyan); }
 .ansi-white-fg, .ansi-palette-7-fg { color: var(--fg); }
 .ansi-bright-black-fg, .ansi-palette-8-fg { color: var(--muted); }
 .ansi-bright-red-fg, .ansi-palette-9-fg { color: var(--red); }
 .ansi-bright-green-fg, .ansi-palette-10-fg { color: var(--green); }
-.ansi-bright-yellow-fg, .ansi-palette-11-fg { color: var(--yellow); }
+.ansi-bright-yellow-fg, .ansi-palette-11-fg { color: var(--yellow-ink); }
 .ansi-bright-blue-fg, .ansi-palette-12-fg { color: var(--cyan); }
-.ansi-bright-magenta-fg, .ansi-palette-13-fg { color: var(--magenta); }
+.ansi-bright-magenta-fg, .ansi-palette-13-fg { color: var(--magenta-ink); }
 .ansi-bright-cyan-fg, .ansi-palette-14-fg { color: var(--cyan); }
 .ansi-bright-white-fg, .ansi-palette-15-fg { color: var(--fg); }
 
@@ -7998,7 +7998,7 @@ a.cvb-card-title::after {
 }
 .row-ok .icc-lifecycle-glyph { color: var(--green); }
 .row-warn .icc-lifecycle-glyph,
-.row-pending .icc-lifecycle-glyph { color: var(--yellow); }
+.row-pending .icc-lifecycle-glyph { color: var(--yellow-ink); }
 .row-error .icc-lifecycle-glyph { color: var(--red); }
 .row-na .icc-lifecycle-glyph { color: var(--dim); }
 
@@ -8886,7 +8886,7 @@ a.cvb-card-title::after {
   border: 1px solid var(--border-soft);
   background: var(--bg-soft);
 }
-.lane-title .lane-glyph.l1 { color: var(--magenta); }
+.lane-title .lane-glyph.l1 { color: var(--magenta-ink); }
 .lane-title .lane-glyph.l2 { color: var(--cyan); }
 .lane-title .lane-glyph.l3 { color: var(--orange); }
 .lane-title .lane-scope {
@@ -9000,7 +9000,7 @@ a.cvb-card-title::after {
   font-variant-numeric: tabular-nums;
 }
 .kpi-value.green  { color: var(--green); }
-.kpi-value.yellow { color: var(--yellow); }
+.kpi-value.yellow { color: var(--yellow-ink); }
 .kpi-value.red    { color: var(--red); }
 .kpi-value.dim    { color: var(--dim); }
 .kpi-sub {
@@ -9015,7 +9015,7 @@ a.cvb-card-title::after {
   text-overflow: ellipsis;
 }
 .kpi-sub.danger { color: var(--red); }
-.kpi-sub.warn   { color: var(--yellow); }
+.kpi-sub.warn   { color: var(--yellow-ink); }
 .lane-body {
   padding: 14px 16px;
   display: flex;
@@ -9170,7 +9170,7 @@ a.cvb-card-title::after {
 }
 .pct-cell { font-variant-numeric: tabular-nums; font-weight: 600; }
 .pct-cell.green  { color: var(--green); }
-.pct-cell.yellow { color: var(--yellow); }
+.pct-cell.yellow { color: var(--yellow-ink); }
 .pct-cell.red    { color: var(--red); }
 .pct-cell.dim    { color: var(--dim); }
 
@@ -9199,7 +9199,7 @@ a.cvb-card-title::after {
   text-align: right;
 }
 .quality-cell .cov-pct.green  { color: var(--green); }
-.quality-cell .cov-pct.yellow { color: var(--yellow); }
+.quality-cell .cov-pct.yellow { color: var(--yellow-ink); }
 .quality-cell .cov-pct.red    { color: var(--red); }
 .quality-cell .cov-pct.dim    { color: var(--dim); }
 
@@ -9216,7 +9216,7 @@ a.cvb-card-title::after {
 }
 .grade.A { color: var(--green);  background: color-mix(in srgb, var(--green)  18%, transparent); }
 .grade.B { color: var(--cyan);   background: color-mix(in srgb, var(--cyan)   18%, transparent); }
-.grade.C { color: var(--yellow); background: color-mix(in srgb, var(--yellow) 18%, transparent); }
+.grade.C { color: var(--yellow-ink); background: color-mix(in srgb, var(--yellow) 18%, transparent); }
 .grade.D { color: var(--orange); background: color-mix(in srgb, var(--orange) 22%, transparent); }
 .grade.E { color: var(--red);    background: color-mix(in srgb, var(--red)    22%, transparent); }
 .grade.dim { color: var(--dim); background: var(--bg-soft); }
@@ -9224,7 +9224,7 @@ a.cvb-card-title::after {
 
 /* Generic key/value row meta (used by Sonar notes) */
 .kv-meta { color: var(--muted); font-size: 11px; }
-.kv-meta.warn { color: var(--yellow); }
+.kv-meta.warn { color: var(--yellow-ink); }
 .kv-meta.bad  { color: var(--red); }
 
 /* Lane 2 — test performance panel */
@@ -9276,7 +9276,7 @@ a.cvb-card-title::after {
   font-size: 14px;
 }
 .stage-bar-pct.green  { color: var(--green); }
-.stage-bar-pct.yellow { color: var(--yellow); }
+.stage-bar-pct.yellow { color: var(--yellow-ink); }
 .stage-bar-pct.red    { color: var(--red); }
 .stage-bar-totals {
   color: var(--dim);
@@ -9328,7 +9328,7 @@ a.cvb-card-title::after {
   text-align: right;
 }
 .worst-pct.green  { color: var(--green); }
-.worst-pct.yellow { color: var(--yellow); }
+.worst-pct.yellow { color: var(--yellow-ink); }
 .worst-pct.red    { color: var(--red); }
 .test-counts {
   display: inline-flex;
@@ -9347,7 +9347,7 @@ a.cvb-card-title::after {
   justify-content: center;
 }
 .tc.good { color: var(--green);  background: color-mix(in srgb, var(--green)  16%, transparent); }
-.tc.poor { color: var(--yellow); background: color-mix(in srgb, var(--yellow) 16%, transparent); }
+.tc.poor { color: var(--yellow-ink); background: color-mix(in srgb, var(--yellow) 16%, transparent); }
 .tc.fail { color: var(--red);    background: color-mix(in srgb, var(--red)    16%, transparent); }
 .tc.zero { opacity: 0.40; }
 .worst-list-head {
@@ -9468,7 +9468,7 @@ a.cvb-card-title::after {
   margin-left: 6px;
 }
 .qw-risk.low { color: var(--green); }
-.qw-risk.med { color: var(--yellow); }
+.qw-risk.med { color: var(--yellow-ink); }
 .qw-risk.hi  { color: var(--red); }
 
 /* Lane 3 — Aged criticals (card variant; mirrors .epic-card from Stalled) */
@@ -9885,7 +9885,7 @@ a.cvb-card-title::after {
 .status-pill.pending::before   { background: var(--muted); }
 .status-pill.skipped   { color: var(--dim);    border-color: var(--border-soft); }
 .status-pill.skipped::before   { background: var(--dim); }
-.status-pill.awaiting  { color: var(--magenta);border-color: var(--magenta);background: color-mix(in srgb, var(--magenta) 14%, transparent); }
+.status-pill.awaiting  { color: var(--magenta-ink);border-color: var(--magenta);background: color-mix(in srgb, var(--magenta) 14%, transparent); }
 .status-pill.awaiting::before  { background: var(--magenta); box-shadow: 0 0 6px var(--magenta); animation: workflow-pulse 1.6s ease-in-out infinite; }
 
 .status-dot {
@@ -10047,9 +10047,9 @@ a.cvb-card-title::after {
   border-radius: 3px;
   letter-spacing: 0.04em;
 }
-.dag-node .dn-type.bash     { color: var(--yellow);  background: color-mix(in srgb, var(--yellow) 18%, transparent); }
+.dag-node .dn-type.bash     { color: var(--yellow-ink);  background: color-mix(in srgb, var(--yellow) 18%, transparent); }
 .dag-node .dn-type.prompt   { color: var(--cyan);    background: color-mix(in srgb, var(--cyan) 16%, transparent); }
-.dag-node .dn-type.approval { color: var(--magenta); background: color-mix(in srgb, var(--magenta) 16%, transparent); }
+.dag-node .dn-type.approval { color: var(--magenta-ink); background: color-mix(in srgb, var(--magenta) 16%, transparent); }
 .dag-node .dn-type.generic  { color: var(--muted);   background: var(--bg-soft); }
 .dag-node .dn-name { font-size: 12px; color: var(--fg-strong); font-weight: 600; }
 .dag-node .dn-meta { display: block; margin-top: 4px; font-size: 10px; color: var(--muted); font-family: ui-monospace, monospace; }
@@ -10203,9 +10203,9 @@ a.cvb-card-title::after {
   padding: 1px 5px; border-radius: 3px;
   letter-spacing: 0.04em;
 }
-.trace-head .node-type.bash     { color: var(--yellow);  background: color-mix(in srgb, var(--yellow) 18%, transparent); }
+.trace-head .node-type.bash     { color: var(--yellow-ink);  background: color-mix(in srgb, var(--yellow) 18%, transparent); }
 .trace-head .node-type.prompt   { color: var(--cyan);    background: color-mix(in srgb, var(--cyan) 16%, transparent); }
-.trace-head .node-type.approval { color: var(--magenta); background: color-mix(in srgb, var(--magenta) 16%, transparent); }
+.trace-head .node-type.approval { color: var(--magenta-ink); background: color-mix(in srgb, var(--magenta) 16%, transparent); }
 .trace-head .node-type.generic  { color: var(--muted);   background: var(--bg-soft); }
 /* Per-node configured model — a quiet metadata pill next to the type chip, so
    the louder colored node-type still reads first. */
@@ -10552,11 +10552,11 @@ a.cvb-card-title::after {
 .memory-pill-type { color: var(--fg); background: var(--bg-soft); }
 .memory-pill-prov { color: var(--cyan); border-color: var(--cyan);
   background: color-mix(in srgb, var(--cyan) 12%, transparent); }
-.memory-pill-prom { color: var(--magenta); border-color: var(--magenta);
+.memory-pill-prom { color: var(--magenta-ink); border-color: var(--magenta);
   background: color-mix(in srgb, var(--magenta) 14%, transparent); }
-.memory-pill-instr { color: var(--magenta); border-color: var(--magenta);
+.memory-pill-instr { color: var(--magenta-ink); border-color: var(--magenta);
   background: color-mix(in srgb, var(--magenta) 22%, transparent); }
-.memory-pill-ev { color: var(--yellow); border-color: var(--yellow);
+.memory-pill-ev { color: var(--yellow-ink); border-color: var(--yellow);
   background: color-mix(in srgb, var(--yellow) 12%, transparent); }
 .memory-pill-status {
   color: var(--fg); border-color: var(--border);
@@ -11033,7 +11033,7 @@ a.cvb-card-title::after {
   transition: width 200ms ease;
 }
 .chat-usage-chip.warn .chat-usage-chip-meter-fill { background: var(--yellow); }
-.chat-usage-chip.warn .chat-usage-chip-value { color: var(--yellow); }
+.chat-usage-chip.warn .chat-usage-chip-value { color: var(--yellow-ink); }
 .chat-usage-chip.hot .chat-usage-chip-meter-fill { background: var(--red); }
 .chat-usage-chip.hot .chat-usage-chip-value { color: var(--red); }
 
@@ -11656,7 +11656,7 @@ a.cvb-card-title::after {
   border-width: 1.25px;
 }
 .cvb-person[data-tone="brand"] {
-  --id-tone: var(--magenta);
+  --id-tone: var(--magenta-ink);
 }
 .cvb-row .cvb-person--face {
   flex: none;
