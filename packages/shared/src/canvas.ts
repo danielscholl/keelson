@@ -69,12 +69,19 @@ export type CanvasHtmlAction = z.infer<typeof canvasHtmlActionSchema>;
 // `html` canvas so token-level markup (styled through `:root[data-theme]`
 // overrides) re-themes live without an iframe reload — the opaque-origin frame
 // cannot observe the parent's data-theme itself. The shell stamps the initial
-// theme at compose time; this message carries subsequent toggles.
+// theme at compose time; this message carries subsequent toggles. `tokens` is the
+// SPA's resolved palette as custom properties, which the bridge applies as the
+// frame's lowest-precedence `:root` defaults, so markup that defines its own wins.
 export const CANVAS_HTML_THEME_CHANNEL = "keelson:canvas:html:theme";
+export const CANVAS_HTML_TOKEN_NAME = /^--[a-z0-9-]+$/;
+export const CANVAS_HTML_TOKEN_VALUE = /^#[0-9a-f]{6}$/i;
 export const canvasHtmlThemeSchema = z
   .object({
     channel: z.literal(CANVAS_HTML_THEME_CHANNEL),
     theme: z.enum(["light", "dark"]),
+    tokens: z
+      .record(z.string().regex(CANVAS_HTML_TOKEN_NAME), z.string().regex(CANVAS_HTML_TOKEN_VALUE))
+      .optional(),
   })
   .strict();
 export type CanvasHtmlThemeMessage = z.infer<typeof canvasHtmlThemeSchema>;

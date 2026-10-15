@@ -249,3 +249,33 @@ export function designTokenAt(
   }
   return undefined;
 }
+
+/** Every mapped token as `{ "--bg": "#0d1429", … }` for one palette and theme. */
+export function designTokenCssVars(
+  theme: DesignThemeName,
+  palette: DesignPaletteName = "keelson",
+): Record<string, string> {
+  const vars: Record<string, string> = {};
+  for (const [path, name] of Object.entries(DESIGN_TOKEN_CSS_VARS)) {
+    const value = designTokenAt(theme, path, palette);
+    if (value !== undefined) vars[name] = value;
+  }
+  return vars;
+}
+
+// Canvas frames get each token twice: under its app name as a plain default, and
+// as --keelson-<name>, which designTokenCssBlock reads ahead of its own values.
+export const DESIGN_TOKEN_HOOK_PREFIX = "--keelson-";
+
+/** The custom properties the host stamps into a canvas frame for one palette and theme. */
+export function designTokenFrameVars(
+  theme: DesignThemeName,
+  palette: DesignPaletteName = "keelson",
+): Record<string, string> {
+  const vars = designTokenCssVars(theme, palette);
+  const hooks = Object.entries(vars).map(([name, value]) => [
+    `${DESIGN_TOKEN_HOOK_PREFIX}${name.slice(2)}`,
+    value,
+  ]);
+  return { ...vars, ...Object.fromEntries(hooks) };
+}

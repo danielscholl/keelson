@@ -15,7 +15,11 @@
 // prompt nodes, rib turns, MCP). Palette values come from DESIGN_TOKENS so
 // guidance and the SPA can never disagree about a hex.
 
-import { DESIGN_TOKENS } from "./design-tokens.ts";
+import {
+  DESIGN_TOKEN_HOOK_PREFIX,
+  DESIGN_TOKENS,
+  type DesignThemeTokens,
+} from "./design-tokens.ts";
 
 const dark = DESIGN_TOKENS.dark;
 const light = DESIGN_TOKENS.light;
@@ -26,29 +30,28 @@ const MONO_STACK = `ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
 // Ready-to-paste token block: dark is keelson's default (`:root`), light is the
 // override — the same polarity the SPA uses, so a stamped data-theme just works.
 // It paints <body> too, because the frame's own ground is white.
+// The host stamps its live palette into a canvas frame as --keelson-<token>, so the
+// block follows the operator's palette and keeps Keelson's values as the fallback.
+function hook(token: string, fallback: string): string {
+  return `var(${DESIGN_TOKEN_HOOK_PREFIX}${token}, ${fallback})`;
+}
+
 export function designTokenCssBlock(): string {
-  return `:root {
-  --bg: ${dark.bg}; --card: ${dark.card}; --card-2: ${dark.card2};
-  --border: ${dark.border}; --fg: ${dark.fg}; --fg-strong: ${dark.fgStrong};
-  --muted: ${dark.muted}; --accent: ${dark.accent};
-  --good: ${dark.green}; --warn: ${dark.yellow}; --crit: ${dark.red}; --info: ${dark.cyan};
-  --s1: ${dark.series[0]}; --s2: ${dark.series[1]}; --s3: ${dark.series[2]};
-  --s4: ${dark.series[3]}; --s5: ${dark.series[4]}; --s6: ${dark.series[5]};
-  --id-1: ${dark.identity.blue}; --id-2: ${dark.identity.amber}; --id-3: ${dark.identity.teal};
-  --id-4: ${dark.identity.rose}; --id-5: ${dark.identity.olive};
+  const block = (t: DesignThemeTokens) => `
+  --bg: ${hook("bg", t.bg)}; --card: ${hook("card", t.card)}; --card-2: ${hook("card-2", t.card2)};
+  --border: ${hook("border", t.border)}; --fg: ${hook("fg", t.fg)}; --fg-strong: ${hook("fg-strong", t.fgStrong)};
+  --muted: ${hook("muted", t.muted)}; --accent: ${hook("accent", t.accent)};
+  --good: ${hook("green", t.green)}; --warn: ${hook("yellow", t.yellow)}; --crit: ${hook("red", t.red)}; --info: ${hook("cyan", t.cyan)};
+  --s1: ${hook("s1", t.series[0])}; --s2: ${hook("s2", t.series[1])}; --s3: ${hook("s3", t.series[2])};
+  --s4: ${hook("s4", t.series[3])}; --s5: ${hook("s5", t.series[4])}; --s6: ${hook("s6", t.series[5])};
+  --id-1: ${hook("id-blue", t.identity.blue)}; --id-2: ${hook("id-amber", t.identity.amber)}; --id-3: ${hook("id-teal", t.identity.teal)};
+  --id-4: ${hook("id-rose", t.identity.rose)}; --id-5: ${hook("id-olive", t.identity.olive)};`;
+  return `:root {${block(dark)}
   --sans: ${SANS_STACK};
   --mono: ${MONO_STACK};
   color-scheme: dark;
 }
-:root[data-theme="light"] {
-  --bg: ${light.bg}; --card: ${light.card}; --card-2: ${light.card2};
-  --border: ${light.border}; --fg: ${light.fg}; --fg-strong: ${light.fgStrong};
-  --muted: ${light.muted}; --accent: ${light.accent};
-  --good: ${light.green}; --warn: ${light.yellow}; --crit: ${light.red}; --info: ${light.cyan};
-  --s1: ${light.series[0]}; --s2: ${light.series[1]}; --s3: ${light.series[2]};
-  --s4: ${light.series[3]}; --s5: ${light.series[4]}; --s6: ${light.series[5]};
-  --id-1: ${light.identity.blue}; --id-2: ${light.identity.amber}; --id-3: ${light.identity.teal};
-  --id-4: ${light.identity.rose}; --id-5: ${light.identity.olive};
+:root[data-theme="light"] {${block(light)}
   color-scheme: light;
 }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 var(--sans); }`;
@@ -165,7 +168,7 @@ export function buildCanvasArtifactGuidance(): string {
     "The frame contract (sandboxed iframe, enforced):",
     "- No network: fetch/XHR are blocked; inline every style and script. Images/fonts may load from data:/https:, but a page should stand alone offline.",
     "- System font stack only, never webfonts or font data URIs.",
-    "- Theme through tokens: define CSS custom properties on :root with keelson's dark values (dark is the default theme), override them under :root[data-theme=\"light\"], and style everything through the tokens. The host stamps data-theme on <html> and re-stamps it live on toggle. The frame's own ground is white, so <body> must paint var(--bg). Use this exact block as the base; it does that, and it carries the identity tones and font stacks:",
+    "- Theme through tokens: define CSS custom properties on :root with keelson's dark values (dark is the default theme), override them under :root[data-theme=\"light\"], and style everything through the tokens. The host stamps data-theme on <html> and re-stamps it live on toggle. The frame's own ground is white, so <body> must paint var(--bg). Use this exact block as the base; it does that, and it carries the identity tones and font stacks. Keep its var(--keelson-…) wrappers: the host fills them with the operator's palette, and the hex after each is the fallback:",
     "",
     "```css",
     designTokenCssBlock(),
