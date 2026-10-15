@@ -59,6 +59,17 @@
      fill color and still clear 4.5:1 for normal-size text. */
   --yellow-ink: var(--yellow);
   --magenta-ink: var(--magenta);
+  /* Count pips and the menu's attention dot. */
+  --pip: var(--magenta);
+  --pip-ink: #fff;
+  --scrim-rgb: 8 12 28;
+  /* Dark reading surfaces; light mode paints these components from --paper. */
+  --reading-top: rgba(24, 32, 70, 0.97);
+  --reading-bottom: rgba(17, 25, 56, 0.99);
+  --reading-border: rgba(148, 163, 255, 0.15);
+  --table-bg: rgba(8, 14, 34, 0.34);
+  --table-border: rgba(151, 164, 255, 0.11);
+  --table-rule: rgba(151, 164, 255, 0.07);
   --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.4);
   --shadow-card:    0 2px 6px rgba(0, 0, 0, 0.4);
 
@@ -177,6 +188,15 @@
 
   --danger:  #e06a50;
   --accent-rgb: 92 196 178;
+  --pip: var(--accent);
+  --pip-ink: var(--bg);
+  --scrim-rgb: 4 12 12;
+  --reading-top: rgba(25, 40, 41, 0.97);
+  --reading-bottom: rgba(19, 32, 33, 0.99);
+  --reading-border: rgba(228, 223, 209, 0.12);
+  --table-bg: rgba(5, 12, 12, 0.34);
+  --table-border: rgba(228, 223, 209, 0.1);
+  --table-rule: rgba(228, 223, 209, 0.06);
   --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.4);
   --shadow-card:    0 2px 6px rgba(0, 0, 0, 0.35);
 
@@ -229,6 +249,10 @@
   --accent-rgb: 42 157 143;
   --yellow-ink: #8f6207;
   --magenta-ink: #8152b5;
+  --pip: var(--accent);
+  --pip-ink: var(--card);
+  --scrim-rgb: 38 32 22;
+  --brand-flat: var(--accent);
   --shadow-popover: 0 12px 32px rgba(92, 72, 40, 0.14);
   --shadow-card:    0 10px 28px rgba(92, 72, 40, 0.07);
   --shadow-topbar:  0 2px 10px rgba(92, 72, 40, 0.04);
@@ -383,8 +407,8 @@ body {
   height: 16px;
   padding: 0 5px;
   border-radius: 999px;
-  background: var(--magenta);
-  color: #fff;
+  background: var(--pip);
+  color: var(--pip-ink);
   font-size: 10px;
   font-weight: 600;
   line-height: 1;
@@ -432,7 +456,7 @@ body {
   width: 7px;
   height: 7px;
   border-radius: 999px;
-  background: var(--magenta);
+  background: var(--pip);
 }
 .instruments-menu {
   position: absolute;
@@ -577,9 +601,9 @@ body {
   border-radius: 50%;
   margin-right: 4px;
 }
-.dot.green { background: var(--green); box-shadow: 0 0 8px rgba(109,210,141,0.5); }
-.dot.yellow { background: var(--yellow); box-shadow: 0 0 8px rgba(245,195,82,0.5); }
-.dot.red { background: var(--red); box-shadow: 0 0 8px rgba(240,135,147,0.5); }
+.dot.green { background: var(--green); box-shadow: 0 0 8px color-mix(in srgb, var(--green) 50%, transparent); }
+.dot.yellow { background: var(--yellow); box-shadow: 0 0 8px color-mix(in srgb, var(--yellow) 50%, transparent); }
+.dot.red { background: var(--red); box-shadow: 0 0 8px color-mix(in srgb, var(--red) 50%, transparent); }
 .dot.dim { background: var(--dim); }
 /* One-shot pulse on each bundle_done. TopBar toggles `.pulsing` for ~600ms;
    the animation is finite (no `infinite`) so a stale class wouldn't loop. */
@@ -764,8 +788,8 @@ body {
   background: var(--card-2);
   color: var(--muted);
 }
-.pill.red { color: var(--red); border-color: rgba(240,135,147,0.3); background: rgba(240,135,147,0.08); }
-.pill.yellow { color: var(--yellow); border-color: rgba(245,195,82,0.3); background: rgba(245,195,82,0.08); }
+.pill.red { color: var(--red); border-color: color-mix(in srgb, var(--red) 30%, transparent); background: color-mix(in srgb, var(--red) 8%, transparent); }
+.pill.yellow { color: var(--yellow-ink); border-color: color-mix(in srgb, var(--yellow) 30%, transparent); background: color-mix(in srgb, var(--yellow) 8%, transparent); }
 
 .empty-state {
   font-size: 12px;
@@ -987,10 +1011,10 @@ body {
   box-shadow: var(--shadow-popover);
 }
 .keelson-toast-ok {
-  border-color: rgba(109, 210, 141, 0.4);
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
 }
 .keelson-toast-error {
-  border-color: rgba(240, 135, 147, 0.5);
+  border-color: color-mix(in srgb, var(--red) 50%, transparent);
 }
 
 
@@ -1081,8 +1105,8 @@ button.tab:focus-visible {
   gap: 8px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(245, 195, 82, 0.08);
-  border: 1px solid rgba(245, 195, 82, 0.3);
+  background: color-mix(in srgb, var(--yellow) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--yellow) 30%, transparent);
   color: var(--yellow-ink);
   font-size: 11px;
   line-height: 1.4;
@@ -1160,12 +1184,8 @@ button.tab:focus-visible {
 .chat-message.assistant .chat-bubble {
   padding: 24px 30px;
   border-radius: 14px;
-  background: linear-gradient(
-    180deg,
-    rgba(24, 32, 70, 0.97),
-    rgba(17, 25, 56, 0.99)
-  );
-  border: 1px solid rgba(148, 163, 255, 0.15);
+  background: linear-gradient(180deg, var(--reading-top), var(--reading-bottom));
+  border: 1px solid var(--reading-border);
   color: var(--fg);
   font-size: 15.5px;
   line-height: 1.62;
@@ -1801,7 +1821,7 @@ button.tab:focus-visible {
 
 .chat-sidebar-delete:hover {
   color: var(--red);
-  background: rgba(240, 135, 147, 0.08);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
 }
 
 /* --- Sidebar polish (F10.5): collapse toggle, search, date grouping --- */
@@ -1965,7 +1985,7 @@ button.tab:focus-visible {
 }
 
 .keelson-toast-info {
-  border-color: rgba(124, 192, 255, 0.4);
+  border-color: color-mix(in srgb, var(--cyan) 40%, transparent);
 }
 
 .toast-message {
@@ -2098,8 +2118,8 @@ button.tab:focus-visible {
   font-size: 14px;
   line-height: 1.45;
   color: var(--fg);
-  background: rgba(8, 14, 34, 0.34);
-  border: 1px solid rgba(151, 164, 255, 0.11);
+  background: var(--table-bg);
+  border: 1px solid var(--table-border);
   border-radius: 10px;
   overflow: hidden;
   font-variant-numeric: tabular-nums;
@@ -2116,7 +2136,7 @@ button.tab:focus-visible {
 .markdown-content td,
 .markdown-content th {
   padding: 8px 12px;
-  border-bottom: 1px solid rgba(151, 164, 255, 0.07);
+  border-bottom: 1px solid var(--table-rule);
   vertical-align: top;
 }
 .markdown-content tr:last-child td {
@@ -2716,7 +2736,7 @@ button.tab:focus-visible {
 
 .model-picker-popover-fav:hover {
   color: var(--yellow-ink);
-  background: rgba(245, 195, 82, 0.08);
+  background: color-mix(in srgb, var(--yellow) 8%, transparent);
 }
 
 .model-picker-popover-fav:focus-visible {
@@ -3154,7 +3174,7 @@ button.tab:focus-visible {
 .canvas-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 12, 28, 0.55);
+  background: rgb(var(--scrim-rgb) / 0.55);
   z-index: 1000;
   animation: credentials-fade-in 120ms ease-out;
 }
@@ -3208,7 +3228,7 @@ button.tab:focus-visible {
 .run-drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 12, 28, 0.45);
+  background: rgb(var(--scrim-rgb) / 0.45);
   z-index: 998;
   animation: credentials-fade-in 120ms ease-out;
 }
@@ -6920,7 +6940,7 @@ a.cvb-card-title::after {
 .credentials-drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 12, 28, 0.5);
+  background: rgb(var(--scrim-rgb) / 0.5);
   z-index: 1000;
   animation: credentials-fade-in 120ms ease-out;
 }
@@ -7009,7 +7029,7 @@ a.cvb-card-title::after {
   padding: 12px;
   border: 1px solid var(--border-soft);
   border-radius: 6px;
-  background: rgba(240, 135, 147, 0.06);
+  background: color-mix(in srgb, var(--red) 6%, transparent);
 }
 
 .credentials-drawer-list {
@@ -7074,7 +7094,7 @@ a.cvb-card-title::after {
 
 .credentials-drawer-value.revealed {
   color: var(--fg);
-  background: rgba(125, 192, 255, 0.08);
+  background: color-mix(in srgb, var(--cyan) 8%, transparent);
 }
 
 .credentials-drawer-item-actions {
@@ -7116,7 +7136,7 @@ a.cvb-card-title::after {
 .confirm-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 12, 28, 0.55);
+  background: rgb(var(--scrim-rgb) / 0.55);
   z-index: 2000;
   animation: credentials-fade-in 120ms ease-out;
 }
@@ -7246,13 +7266,13 @@ a.cvb-card-title::after {
 }
 
 .confirm-modal-confirm.danger {
-  background: rgba(255, 92, 92, 0.18);
-  border-color: rgba(255, 92, 92, 0.55);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
   color: var(--red);
 }
 
 .confirm-modal-confirm.danger:hover:not(:disabled) {
-  background: rgba(255, 92, 92, 0.3);
+  background: color-mix(in srgb, var(--danger) 30%, transparent);
 }
 
 .confirm-modal-confirm:disabled {
