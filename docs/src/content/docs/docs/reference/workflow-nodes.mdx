@@ -237,8 +237,9 @@ downstream node can branch on approval versus requested changes. `on_reject`
 and `$ARGUMENTS`, so a gate can name what it asks about or inline a plan.
 `$ARTIFACTS_DIR/<file>` stays as written: the Workflows tab turns it into a link
 to that file, and a rib reading the run gets the file with the pending gate. A
-resolved message past 32 KiB is cut with a note; the full text stays in the node
-outputs.
+resolved message, with any coverage checklist, past 32,768 characters is cut
+with a note. An inlined node output is still whole in that node's output; static
+text and inputs past the cut are not kept.
 
 #### `reviewer`
 

@@ -1649,8 +1649,10 @@ export const APPROVAL_MESSAGE_MAX_CHARS = 32_768;
 
 export function capApprovalMessage(message: string): string {
   if (message.length <= APPROVAL_MESSAGE_MAX_CHARS) return message;
-  const dropped = message.length - APPROVAL_MESSAGE_MAX_CHARS;
-  return `${message.slice(0, APPROVAL_MESSAGE_MAX_CHARS)}\n\n[truncated ${dropped} characters; the full text is in the node outputs]`;
+  let end = APPROVAL_MESSAGE_MAX_CHARS;
+  const last = message.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return `${message.slice(0, end)}\n\n[truncated ${message.length - end} characters; an inlined node output is in full in that node's output]`;
 }
 
 export type RunArtifactRead =
@@ -3663,8 +3665,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         );
       }
     }
-    const capped = capApprovalMessage(message);
-    const augmentedMessage = checklist ? `${capped}\n\n${checklist}` : capped;
+    const augmentedMessage = capApprovalMessage(checklist ? `${message}\n\n${checklist}` : message);
 
     return new Promise<string>((resolve, reject) => {
       const pauseId = crypto.randomUUID();

@@ -12,4 +12,11 @@ describe("capApprovalMessage", () => {
     expect(capped.startsWith("y".repeat(APPROVAL_MESSAGE_MAX_CHARS))).toBe(true);
     expect(capped).toContain("[truncated 10 characters");
   });
+
+  test("the cut never splits a surrogate pair", () => {
+    const head = "a".repeat(APPROVAL_MESSAGE_MAX_CHARS - 1);
+    const capped = capApprovalMessage(`${head}😀tail`);
+    expect(capped.startsWith(`${head}\n\n[truncated`)).toBe(true);
+    expect(capped).not.toContain("\ud83d\n");
+  });
 });
