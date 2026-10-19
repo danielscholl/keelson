@@ -233,6 +233,13 @@ Pauses the run for a human decision. The pause needs a running server
 downstream node can branch on approval versus requested changes. `on_reject`
 (`{ prompt, max_attempts }`) re-prompts on rejection instead of failing the run.
 
+`message` resolves `$nodeId.output`, `$nodeId.output.<field>`, `$inputs.<key>`
+and `$ARGUMENTS`, so a gate can name what it asks about or inline a plan.
+`$ARTIFACTS_DIR/<file>` stays as written: the Workflows tab turns it into a link
+to that file, and a rib reading the run gets the file with the pending gate. A
+resolved message past 32 KiB is cut with a note; the full text stays in the node
+outputs.
+
 #### `reviewer`
 
 An approval node may declare a `reviewer`: one agent turn that answers the gate

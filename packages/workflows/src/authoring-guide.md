@@ -167,8 +167,11 @@ Optional `timeout` in ms:
   runtime: bun
 ```
 
-`approval` — pauses the run for a human decision. `capture_response: true`
-exposes the reply as the node's output; `on_reject` re-prompts on rejection:
+`approval` — pauses the run for a human decision. `message` resolves node
+outputs (`$plan.output`, `$info.output.title`), inputs and `$ARGUMENTS`;
+`$ARTIFACTS_DIR/<file>` stays literal so the UI links the file.
+`capture_response: true` exposes the reply as the node's output; `on_reject`
+re-prompts on rejection:
 
 ```yaml
 - id: gate

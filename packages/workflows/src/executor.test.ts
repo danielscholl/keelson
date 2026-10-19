@@ -2084,6 +2084,44 @@ nodes:
     expect(reviewDone).toBeGreaterThan(reviewStarted);
   });
 
+  test("the gate message resolves node outputs and fields, keeping the $ARTIFACTS_DIR token", async () => {
+    const workflow = parseInline(`
+name: pa-sub
+description: approval message substitution
+nodes:
+  - id: info
+    bash: film info
+  - id: review
+    depends_on: [info]
+    approval:
+      message: "Cut ready: $info.output.title. Raw: $info.output Plan: $ARTIFACTS_DIR/plan.md Cost: \\\\$5"
+`);
+    const info: NodeHandler = {
+      type: "bash",
+      async handle() {
+        return { status: "succeeded", output: { kind: "text", text: '{"title":"Hello, film"}' } };
+      },
+    };
+    let seen = "";
+    const approval = makeApprovalHandler({
+      awaitApproval: async (_runId, _nodeId, message) => {
+        seen = message;
+        return "approve";
+      },
+    });
+    await runWorkflow({
+      ...baseOpts(workflow),
+      artifactsDir: "/tmp/keelson-run-abc",
+      handlers: new Map<string, NodeHandler>([
+        ["bash", info],
+        ["approval", approval],
+      ]),
+    });
+    expect(seen).toBe(
+      'Cut ready: Hello, film. Raw: {"title":"Hello, film"} Plan: $ARTIFACTS_DIR/plan.md Cost: $5',
+    );
+  });
+
   test("non-approve reply skips downstream nodes via when:", async () => {
     const workflow = parseInline(`
 name: pa
