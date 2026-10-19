@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@github/copilot": "1.0.92",
-    "@github/copilot-sdk": "1.0.16",
+    "@github/copilot-sdk": "1.0.19",
     "@keelson/shared": "workspace:*",
     "zod": "^4.4.3"
   },
