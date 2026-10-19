@@ -544,6 +544,8 @@ nodes:
         Approve this plan to continue, or send requested changes before code is written.
 
         $ARTIFACTS_DIR/plan.md
+
+        $plan-ready.output
       capture_response: true
       reviewer:
         when: "$gate-mode.output == 'true'"
