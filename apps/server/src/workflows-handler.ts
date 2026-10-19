@@ -1644,6 +1644,17 @@ function resumeRunCore(
 
 const ARTIFACT_MAX_BYTES = 1_000_000;
 
+// A resolved gate message can inline a whole node output; keep the frame and the awaiting row bounded.
+export const APPROVAL_MESSAGE_MAX_CHARS = 32_768;
+
+export function capApprovalMessage(message: string): string {
+  if (message.length <= APPROVAL_MESSAGE_MAX_CHARS) return message;
+  let end = APPROVAL_MESSAGE_MAX_CHARS;
+  const last = message.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return `${message.slice(0, end)}\n\n[truncated ${message.length - end} characters; an inlined node output is in full in that node's output]`;
+}
+
 export type RunArtifactRead =
   | { ok: true; content: string }
   | { ok: false; status: 400 | 404 | 410; error: string };
@@ -3654,7 +3665,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         );
       }
     }
-    const augmentedMessage = checklist ? `${message}\n\n${checklist}` : message;
+    const augmentedMessage = capApprovalMessage(checklist ? `${message}\n\n${checklist}` : message);
 
     return new Promise<string>((resolve, reject) => {
       const pauseId = crypto.randomUUID();

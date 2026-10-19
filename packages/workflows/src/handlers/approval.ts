@@ -285,11 +285,10 @@ export function makeApprovalHandler(opts: MakeApprovalHandlerOptions): NodeHandl
   return {
     type: "approval",
     async handle(node, ctx): Promise<NodeResult> {
-      // approvalNodeSchema validates `approval.message` as required + non-empty
-      // at load time. `isApprovalNode` narrows to the typed shape; the
-      // fallback to resolvedBody keeps tests that pass a stub DagNode working
-      // without forcing them to construct a full approval node.
-      const message = isApprovalNode(node) ? node.approval.message : (ctx.resolvedBody ?? "");
+      // The executor resolves `approval.message` into resolvedBody, and an empty
+      // resolution stays empty; callers that hand the handler no body get the raw message.
+      const template = isApprovalNode(node) ? node.approval.message : ctx.rawBody;
+      const message = ctx.rawBody ? ctx.resolvedBody : template;
 
       // Honour an already-aborted signal — the run was cancelled between
       // dispatch and entry to the handler; don't open a pause that nobody
@@ -325,10 +324,11 @@ export function makeApprovalHandler(opts: MakeApprovalHandlerOptions): NodeHandl
           wanted = parsed && result;
         }
         if (wanted) {
+          // The reviewer resolves the template itself, once, so an inlined output is never re-substituted.
           const outcome = await runReviewer(
             node,
             reviewer,
-            message,
+            template,
             ctx,
             opts.reviewer.promptHandler,
           );
