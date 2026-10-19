@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { render } from "@testing-library/react";
+import { ribFixture } from "./ribsFixture.ts";
 
 // Drive the manifest-revision beacon and observe whether RibsProvider refetches.
 // Mocking the two hooks (not api.ts/ws.ts) keeps this file's stubs off the
@@ -20,13 +21,14 @@ const refresh = () => {
   refreshCalls++;
 };
 mock.module("../src/hooks/useRibs.ts", () => ({
-  useRibs: () => ({ status: "ready", ribs: [], error: null, refresh }),
+  useRibs: () => ({ status: "ready", ribs: ribFixture.ribs, error: null, refresh }),
 }));
 
 const { RibsProvider } = await import("../src/components/RibsProvider.tsx");
 
 beforeEach(() => {
   refreshCalls = 0;
+  ribFixture.ribs = [];
   beaconVersion = null;
 });
 
