@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
-import type { Conversation, RibActionResponse, RibSummary } from "@keelson/shared";
+import type { Conversation, RibActionResponse } from "@keelson/shared";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CanvasProvider } from "../src/components/Canvas/CanvasHost.tsx";
 import { ToastHost } from "../src/components/Toast.tsx";
+import { ribFixture } from "./ribsFixture.ts";
 
 const conversations: Conversation[] = [
   {
@@ -68,7 +69,6 @@ function armConversationGate(): void {
   });
 }
 
-let ribSummaries: RibSummary[] = [];
 const postRibActionCalls: Array<{ id: string; action: unknown }> = [];
 let postRibActionResult: RibActionResponse = { ok: true };
 let ledgerPricedEvents = 0;
@@ -127,7 +127,7 @@ mock.module("../src/api.ts", () => ({
 }));
 
 mock.module("../src/hooks/useRibs.ts", () => ({
-  useRibs: () => ({ status: "ready", ribs: ribSummaries, error: null, refresh: () => {} }),
+  useRibs: () => ({ status: "ready", ribs: ribFixture.ribs, error: null, refresh: () => {} }),
 }));
 
 mock.module("../src/hooks/useSnapshot.ts", () => ({
@@ -157,7 +157,7 @@ function renderChat() {
 
 beforeEach(() => {
   sessionStorage.setItem("keelson.conversationId", "conv-1");
-  ribSummaries = [];
+  ribFixture.ribs = [];
   postRibActionCalls.length = 0;
   postRibActionResult = { ok: true };
   getConversationGate = null;
@@ -190,7 +190,7 @@ describe("Chat send to surface", () => {
   });
 
   test("sends a persisted assistant message to the single ingest target", async () => {
-    ribSummaries = [
+    ribFixture.ribs = [
       {
         id: "receiver",
         displayName: "Receiver",
