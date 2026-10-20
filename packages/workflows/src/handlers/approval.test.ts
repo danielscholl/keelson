@@ -49,6 +49,19 @@ describe("makeApprovalHandler", () => {
     expect(result.output).toEqual({ kind: "text", text: "approve" });
   });
 
+  test("an empty substitution stays empty instead of showing the raw template", async () => {
+    let seen: string | undefined;
+    const handler = makeApprovalHandler({
+      awaitApproval: async (_runId, _nodeId, message) => {
+        seen = message;
+        return "approve";
+      },
+    });
+    const node = { id: "review-plan", approval: { message: "$inputs.note" } } as unknown as DagNode;
+    await handler.handle(node, { ...buildCtx({}), rawBody: "$inputs.note", resolvedBody: "" });
+    expect(seen).toBe("");
+  });
+
   test("free-form reply lands verbatim as output text", async () => {
     const await_: AwaitApproval = async () => "narrow the regex first";
     const handler = makeApprovalHandler({ awaitApproval: await_ });
@@ -184,6 +197,30 @@ function verdictReply(value: unknown): NodeResult {
 }
 
 describe("makeApprovalHandler — reviewer", () => {
+  test("the reviewer resolves the gate template once, so markers inside an output stay literal", async () => {
+    const { handler: prompt, calls } = stubPromptHandler(
+      verdictReply({ decision: "approve", confidence: 90, reason: "ok" }),
+    );
+    const handler = makeApprovalHandler({
+      awaitApproval: async () => "human",
+      reviewer: { promptHandler: prompt },
+    });
+    const node = {
+      id: "review-plan",
+      approval: { message: "Plan: $plan.output", reviewer: { prompt: "Check it." } },
+    } as unknown as DagNode;
+    const planText = "set $inputs.name and pay \\$5";
+    await handler.handle(node, {
+      ...buildCtx({}),
+      inputs: { name: "SUBSTITUTED" },
+      rawBody: "Plan: $plan.output",
+      resolvedBody: `Plan: ${planText}`,
+      upstreamOutputs: new Map([["plan", { state: "completed", output: planText }]]),
+    });
+    expect(calls[0]?.body).toContain(`Plan: ${planText}`);
+    expect(calls[0]?.body).not.toContain("SUBSTITUTED");
+  });
+
   test("approve at or above min_confidence resolves the gate without pausing", async () => {
     let paused = false;
     const await_: AwaitApproval = async () => {

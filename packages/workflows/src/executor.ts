@@ -256,9 +256,12 @@ function nodeTypeOf(node: DagNode): NodeTypeField {
 function nodeBodyOf(node: DagNode): string {
   const t = nodeTypeOf(node);
   const body = (node as Record<string, unknown>)[t];
-  // loop/approval/cancel/script have non-string bodies and don't go through
-  // substitution — the missing-handler path fires before this. Return "" for
-  // them so substitution helpers receive a safe input.
+  // An approval's message is its body, so the gate shows resolved node outputs;
+  // other non-string bodies resolve to "".
+  if (t === "approval") {
+    const message = (body as { message?: unknown } | undefined)?.message;
+    return typeof message === "string" ? message : "";
+  }
   return typeof body === "string" ? body : "";
 }
 
@@ -337,7 +340,12 @@ export function resolveBody(
   rawBody: string,
   inputs: Readonly<Record<string, string>>,
   nodeOutputs: ReadonlyMap<string, NodeOutput>,
-  options?: { artifactsDir?: string; memoryRecall?: MemoryRecallContext; convergeRound?: number },
+  options?: {
+    artifactsDir?: string;
+    memoryRecall?: MemoryRecallContext;
+    convergeRound?: number;
+    keepArtifactsToken?: boolean;
+  },
 ): string {
   return rawBody.replace(
     SUB_PATTERN,
@@ -361,7 +369,9 @@ export function resolveBody(
       // Absent artifactsDir resolves to "" — same convention as missing
       // input. Authors who require an artifacts dir should check inside
       // the script body (`if [ -z "$KEELSON_ARTIFACTS_DIR" ] ...`).
-      if (artifactsMarker !== undefined) return options?.artifactsDir ?? "";
+      if (artifactsMarker !== undefined) {
+        return options?.keepArtifactsToken ? match : (options?.artifactsDir ?? "");
+      }
       if (convergeRoundMarker !== undefined) {
         return options?.convergeRound !== undefined ? String(options.convergeRound) : "";
       }
@@ -1292,6 +1302,8 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
   const rawBody = nodeBodyOf(node);
   const resolvedBody = resolveBody(rawBody, ctx.inputs, nodeOutputs, {
     ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+    // The SPA and the rib pendingApproval seam link files from the literal token.
+    ...("approval" in node ? { keepArtifactsToken: true } : {}),
     ...(memoryRecall !== undefined ? { memoryRecall } : {}),
     ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
   });

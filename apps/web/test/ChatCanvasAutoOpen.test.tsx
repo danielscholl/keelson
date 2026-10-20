@@ -3,6 +3,7 @@ import type { ChatFrame, Conversation } from "@keelson/shared";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CanvasProvider } from "../src/components/Canvas/CanvasHost.tsx";
 import { ToastHost } from "../src/components/Toast.tsx";
+import { ribFixture } from "./ribsFixture.ts";
 
 const conversations: Conversation[] = [
   {
@@ -48,7 +49,7 @@ mock.module("../src/api.ts", () => ({
 }));
 
 mock.module("../src/hooks/useRibs.ts", () => ({
-  useRibs: () => ({ status: "ready", ribs: [], error: null, refresh: () => {} }),
+  useRibs: () => ({ status: "ready", ribs: ribFixture.ribs, error: null, refresh: () => {} }),
 }));
 
 mock.module("../src/hooks/useSnapshot.ts", () => ({
@@ -111,6 +112,7 @@ async function sendPrompt(): Promise<void> {
 }
 
 beforeEach(() => {
+  ribFixture.ribs = [];
   sessionStorage.setItem("keelson.conversationId", "conv-1");
   conversations[0]!.messages = [];
   onFrame = null;
