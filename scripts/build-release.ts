@@ -23,6 +23,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { $ } from "bun";
+import { MXC_SDK_PACKAGE, MXC_SDK_VERSION } from "../packages/shared/src/launcher.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
 const OUT = join(ROOT, "dist", "release");
@@ -123,6 +124,8 @@ const cliPkg = {
     "@earendil-works/pi-coding-agent": PI_SDK_RANGE,
     "@keelson/shared": `^${VERSION}`,
     "@openai/codex-sdk": CODEX_SDK_RANGE,
+    // `keelson sandbox install` pins to this; never a dependency (108 MB).
+    [MXC_SDK_PACKAGE]: MXC_SDK_VERSION,
   },
   peerDependenciesMeta: {
     "@anthropic-ai/claude-agent-sdk": { optional: true },
@@ -130,6 +133,7 @@ const cliPkg = {
     "@earendil-works/pi-coding-agent": { optional: true },
     "@keelson/shared": { optional: true },
     "@openai/codex-sdk": { optional: true },
+    [MXC_SDK_PACKAGE]: { optional: true },
   },
   files: ["dist", "web", "assets", "LICENSE", "NOTICE"],
 };

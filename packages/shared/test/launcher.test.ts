@@ -9,7 +9,16 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { hostLauncher, type SpawnSpec, shellJoin } from "../src/launcher.ts";
+import {
+  buildMxcConfig,
+  hostLauncher,
+  mxcProfileWarnings,
+  resolveMxcExecutor,
+  rewriteMxcStderrLine,
+  type SpawnSpec,
+  shellJoin,
+} from "../src/launcher.ts";
+import type { SandboxProfile } from "../src/sandbox.ts";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -130,5 +139,147 @@ describe("hostLauncher", () => {
         env: { ...(process.env as Record<string, string>) },
       }),
     ).toThrow();
+  });
+});
+
+describe("resolveMxcExecutor", () => {
+  const darwin = {
+    env: {},
+    platform: "darwin" as const,
+    arch: "arm64",
+    release: "24.1.0",
+    exists: () => true,
+    resolvePackageJson: () => "/home/k/node_modules/@microsoft/mxc-sdk/package.json",
+    readVersion: () => "1.0.1",
+  };
+
+  test("finds the arm64 executor inside the installed SDK", () => {
+    expect(resolveMxcExecutor(darwin)).toEqual({
+      ok: true,
+      path: "/home/k/node_modules/@microsoft/mxc-sdk/bin/arm64/mxc-exec-mac",
+      source: "package",
+      version: "1.0.1",
+    });
+  });
+
+  test("KEELSON_MXC_EXEC wins when it exists, and is reported when it does not", () => {
+    expect(resolveMxcExecutor({ ...darwin, env: { KEELSON_MXC_EXEC: "/dev/mxc" } })).toEqual({
+      ok: true,
+      path: "/dev/mxc",
+      source: "env",
+    });
+    const missing = resolveMxcExecutor({
+      ...darwin,
+      env: { KEELSON_MXC_EXEC: "/nope" },
+      exists: () => false,
+    });
+    expect(missing.ok).toBe(false);
+    expect(!missing.ok && missing.reason).toContain("/nope");
+  });
+
+  test("refuses Linux, Windows, macOS before 15, and Intel Macs with a reason", () => {
+    for (const [overrides, reason] of [
+      [{ platform: "linux" as const }, "macOS only"],
+      [{ platform: "win32" as const }, "macOS only"],
+      [{ release: "23.6.0" }, "macOS 15 or later"],
+      [{ arch: "x64" }, "Apple silicon only"],
+    ] as const) {
+      const res = resolveMxcExecutor({ ...darwin, ...overrides });
+      expect(res.ok).toBe(false);
+      expect(!res.ok && res.reason).toContain(reason);
+    }
+  });
+
+  test("an absent SDK or a missing binary points at keelson sandbox install", () => {
+    const notInstalled = resolveMxcExecutor({
+      ...darwin,
+      resolvePackageJson: () => {
+        throw new Error("not found");
+      },
+    });
+    expect(notInstalled).toEqual({
+      ok: false,
+      reason: "@microsoft/mxc-sdk is not installed",
+      installHint: "run `keelson sandbox install`",
+    });
+    const noBinary = resolveMxcExecutor({ ...darwin, exists: () => false });
+    expect(!noBinary.ok && noBinary.installHint).toBe("run `keelson sandbox install`");
+  });
+});
+
+describe("buildMxcConfig", () => {
+  const profile: SandboxProfile = {
+    enabled: true,
+    filesystem: { readwrite: ["/nonexistent/repo"], readonly: ["/nonexistent/tools"], denied: [] },
+    network: { outbound: "deny" },
+    env: [],
+  };
+  const spec: SpawnSpec = {
+    cmd: "bash",
+    args: ["/nonexistent/body.sh", "it's"],
+    cwd: "/nonexistent/repo",
+    env: { KEELSON_RUN_ID: "r1", PATH: "/usr/bin" },
+  };
+
+  test("emits a 1.0.0 seatbelt request with no process timeout", () => {
+    const config = buildMxcConfig(profile, spec);
+    expect(config).toEqual({
+      version: "1.0.0",
+      containment: "seatbelt",
+      process: {
+        commandLine: "'bash' '/nonexistent/body.sh' 'it'\\''s'",
+        cwd: "/nonexistent/repo",
+        env: ["KEELSON_RUN_ID=r1", "PATH=/usr/bin"],
+        inheritDefaultEnv: true,
+      },
+      filesystem: {
+        readwritePaths: ["/nonexistent/repo"],
+        readonlyPaths: ["/nonexistent/tools"],
+        deniedPaths: [],
+      },
+      network: {
+        egress: { default: "deny" },
+        ingress: { default: "deny", hostLoopback: "deny" },
+      },
+    });
+    expect((config.process as Record<string, unknown>).timeout).toBeUndefined();
+  });
+
+  test("loopback opens inbound too, and says so", () => {
+    const loop = { ...profile, network: { outbound: "allow" as const, loopback: true } };
+    expect(buildMxcConfig(loop, spec).network).toEqual({
+      egress: { default: "allow" },
+      ingress: { default: "allow", hostLoopback: "allow" },
+    });
+    expect(mxcProfileWarnings(loop)[0]).toContain("inbound");
+    expect(mxcProfileWarnings(profile)).toEqual([]);
+  });
+
+  test.skipIf(IS_WINDOWS)("grants are canonical paths and `..` is refused", () => {
+    const real = realpathSync(tmpdir());
+    const config = buildMxcConfig(
+      { ...profile, filesystem: { readwrite: [tmpdir(), real], readonly: [], denied: [] } },
+      spec,
+    );
+    expect((config.filesystem as { readwritePaths: string[] }).readwritePaths).toEqual([real]);
+    expect(() =>
+      buildMxcConfig(
+        { ...profile, filesystem: { readwrite: ["/a/../b"], readonly: [], denied: [] } },
+        spec,
+      ),
+    ).toThrow("contains '..'");
+  });
+});
+
+describe("rewriteMxcStderrLine", () => {
+  test("labels the executor's own failures as launch failures and leaves script output alone", () => {
+    expect(rewriteMxcStderrLine("Request error")).toBe(
+      "sandbox launch failed: the executor rejected its config",
+    );
+    expect(rewriteMxcStderrLine('{"error":{"code":"backend_error","message":"cwd missing"}}')).toBe(
+      "sandbox launch failed: cwd missing",
+    );
+    expect(rewriteMxcStderrLine("ls: Operation not permitted")).toBe("ls: Operation not permitted");
+    expect(rewriteMxcStderrLine('{"error": not json')).toBe('{"error": not json');
   });
 });
