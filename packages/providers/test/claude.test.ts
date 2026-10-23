@@ -2634,3 +2634,46 @@ describe("projectToolsForClaude — per-call policy gate", () => {
     expect(result.isError).toBeUndefined();
   });
 });
+
+describe("ClaudeProvider — sandbox", () => {
+  const profile = {
+    enabled: true,
+    filesystem: { readwrite: ["/repo"], readonly: [], denied: ["/repo/.env"] },
+    network: { outbound: "deny" as const },
+    env: [],
+  };
+
+  it("declares native sandbox support", () => {
+    expect(CLAUDE_CAPABILITIES.sandbox).toBe("native");
+  });
+
+  it("forwards an enabled profile as Options.sandbox with fail-closed settings", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const provider = new ClaudeProvider({
+      getCredential: async () => undefined,
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+    await drain(provider.sendQuery("hi", "/repo", undefined, { sandbox: profile }));
+    expect(sdk.lastOptions()?.sandbox).toMatchObject({
+      enabled: true,
+      failIfUnavailable: true,
+      allowUnsandboxedCommands: false,
+      filesystem: { allowWrite: ["/repo"], denyRead: ["/repo/.env"] },
+      network: { allowedDomains: [] },
+    });
+  });
+
+  it("leaves Options.sandbox unset when the profile is absent or disabled", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const provider = new ClaudeProvider({
+      getCredential: async () => undefined,
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+    await drain(provider.sendQuery("hi", "/repo"));
+    expect(sdk.lastOptions()?.sandbox).toBeUndefined();
+    await drain(
+      provider.sendQuery("hi", "/repo", undefined, { sandbox: { ...profile, enabled: false } }),
+    );
+    expect(sdk.lastOptions()?.sandbox).toBeUndefined();
+  });
+});

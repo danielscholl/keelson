@@ -24,6 +24,7 @@ import type {
   ToolDefinition,
   ToolResultGate,
 } from "../types.ts";
+import type { CopilotSandboxClient, CopilotSandboxSession } from "./sandbox.ts";
 
 // Structural — captures only what the provider drives. Keeps this file off a
 // typeof-import on the SDK so tests can pass any compatible shape.
@@ -38,6 +39,7 @@ export interface CopilotClientLike {
   // Caller must start() the client first — SDK throws "Client not connected"
   // otherwise.
   listModels(): Promise<CopilotModelInfo[]>;
+  readonly rpc?: CopilotSandboxClient["rpc"];
 }
 
 // Structural projection of the SDK's ModelInfo — only the fields the
@@ -203,6 +205,7 @@ export interface CopilotSessionLike {
       reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
     },
   ): Promise<void>;
+  readonly rpc?: CopilotSandboxSession["rpc"];
 }
 
 // Inputs widened to unknown so this layer doesn't import SDK types; callers

@@ -30,6 +30,7 @@ import {
 } from "./factory.ts";
 import { buildCopilotSessionHooks } from "./hooks-shim.ts";
 import { buildPermissionGate, buildSessionToolFilter } from "./permission-gate.ts";
+import { applyCopilotSandbox } from "./sandbox.ts";
 
 export const COPILOT_CREDENTIAL_SERVICE_ID = "copilot" as const;
 
@@ -76,6 +77,7 @@ export const COPILOT_CAPABILITIES: ProviderCapabilities = {
   models: [COPILOT_DEFAULT_MODEL],
   defaultModel: COPILOT_DEFAULT_MODEL,
   modelClasses: { ...COPILOT_FALLBACK_MODEL_CLASSES },
+  sandbox: "native",
 };
 
 export type GetCredentialFn = (serviceId: string) => Promise<string | undefined>;
@@ -692,6 +694,11 @@ export class CopilotProvider implements IAgentProvider {
           const msg = err instanceof Error ? err.message : String(err);
           yield yieldChunk({ type: "system", content: `setModel failed: ${msg}` });
         }
+      }
+
+      if (options?.sandbox?.enabled) {
+        const refused = await applyCopilotSandbox(activeWarm.client, session, options.sandbox);
+        if (refused !== undefined) throw new Error(`sandbox unavailable: ${refused}`);
       }
 
       // Don't submit if cancel raced session creation — would spend tokens

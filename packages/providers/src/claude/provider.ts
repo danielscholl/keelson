@@ -82,6 +82,7 @@ export const CLAUDE_CAPABILITIES: ProviderCapabilities = {
   models: CLAUDE_MODEL_CATALOG.map((m) => m.id),
   defaultModel: CLAUDE_DEFAULT_MODEL,
   modelClasses: deriveModelClasses(CLAUDE_MODEL_CATALOG, CLAUDE_DEFAULT_MODEL),
+  sandbox: "native",
 };
 
 type ClaudeEffort = "low" | "medium" | "high" | "xhigh";
@@ -279,6 +280,7 @@ export class ClaudeProvider implements IAgentProvider {
           ? { registeredMcpToolNames: options.registeredMcpToolNames }
           : {}),
         ...(options?.hooks !== undefined ? { hooks: options.hooks } : {}),
+        ...(options?.sandbox !== undefined ? { sandbox: options.sandbox } : {}),
         // Forwarded independently of `tools`/`toolProjection` so the built-in
         // PreToolUse gate covers Bash/Edit/Write even on a turn with no keelson
         // tools (where `toolProjection` is omitted).

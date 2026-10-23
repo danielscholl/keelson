@@ -15,6 +15,7 @@ import type {
   ModelInfo,
   ModelPrices,
   ProviderCapabilities,
+  SandboxProfile,
   ToolDefinition,
 } from "@keelson/shared";
 
@@ -126,6 +127,10 @@ export interface SendQueryOptions {
   // the server only when a policy actually consumes the `tool_result` phase, so
   // the default path runs no per-result evaluation.
   evaluateToolResult?: ToolResultGate;
+  // The turn's resolved sandbox. A provider whose capabilities declare native
+  // support confines its own tools to it or fails the turn; absent or disabled
+  // leaves the SDK's default behavior.
+  sandbox?: SandboxProfile;
 }
 
 export interface IAgentProvider {

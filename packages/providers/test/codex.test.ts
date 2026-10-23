@@ -566,3 +566,49 @@ describe("checkCodexAuth", () => {
     });
   });
 });
+
+describe("CodexProvider — sandbox", () => {
+  const profile = {
+    enabled: true,
+    filesystem: { readwrite: ["/r"], readonly: [], denied: [] },
+    network: { outbound: "deny" as const },
+    env: [],
+  };
+
+  test("declares native sandbox support", () => {
+    expect(CODEX_CAPABILITIES.sandbox).toBe("native");
+  });
+
+  test("an enabled profile clamps danger-full-access and takes network from the profile", async () => {
+    let captured: CodexCreateThreadParams | undefined;
+    const capture = (p: CodexCreateThreadParams) => {
+      captured = p;
+    };
+    await collect(
+      new CodexProvider({
+        factory: fakeFactory([], { capture }),
+        sandboxMode: "danger-full-access",
+        networkAccessEnabled: true,
+      }).sendQuery("x", "/r", undefined, { sandbox: profile }),
+    );
+    expect(captured?.sandboxMode).toBe("workspace-write");
+    expect(captured?.networkAccessEnabled).toBe(false);
+  });
+
+  test("without a profile the configured mode and network stand", async () => {
+    let captured: CodexCreateThreadParams | undefined;
+    await collect(
+      new CodexProvider({
+        factory: fakeFactory([], {
+          capture: (p) => {
+            captured = p;
+          },
+        }),
+        sandboxMode: "danger-full-access",
+        networkAccessEnabled: true,
+      }).sendQuery("x", "/r"),
+    );
+    expect(captured?.sandboxMode).toBe("danger-full-access");
+    expect(captured?.networkAccessEnabled).toBe(true);
+  });
+});
