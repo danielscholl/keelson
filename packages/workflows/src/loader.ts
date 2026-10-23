@@ -7,7 +7,8 @@
  *   is the source of truth for which provider ids are registered, mirroring
  *   how `model:` is handled. An unknown provider surfaces at run time.
  * - `WorkflowLoadWarning` channel surfaces the "Adapted" / "Ignored"
- *   compatibility tiers (e.g. `hooks`, `agents`, `sandbox`, `script`).
+ *   compatibility tiers (e.g. `hooks`, `agents`, `script`), and the legacy
+ *   Claude-shaped `sandbox` block lifted to `sandbox.backend.claude`.
  * - Discovery walks bundled defaults plus `<repo>/.keelson/workflows/`.
  *
  * Validation invariants:
@@ -40,6 +41,7 @@ import {
   dagNodeSchema,
   isApprovalNode,
   isCancelNode,
+  isLegacySandboxShape,
   isLoopNode,
   isScriptNode,
   LOOP_NODE_AI_FIELDS,
@@ -73,7 +75,10 @@ export interface WorkflowLoadWarning {
     // Fields the schema accepts and the executor *can* honor,
     // but only when paired with the claude provider. Emitted at load
     // time so the warning surfaces even if the workflow never runs.
-    | "provider_specific_capability";
+    | "provider_specific_capability"
+    // A Claude SDK SandboxSettings block where the provider-neutral `sandbox`
+    // field now lives; it is kept as `sandbox.backend.claude`.
+    | "sandbox_legacy_shape";
   readonly message: string;
 }
 
@@ -82,7 +87,7 @@ export interface WorkflowLoadWarning {
  * (warned on every node where they appear). The schema accepts them for
  * cross-runtime portability.
  *
- * Worktree integration, hooks, sandbox, MCP, inline agents, betas, fallback
+ * Worktree integration, hooks, MCP, inline agents, betas, fallback
  * model, and max-budget are tracked for future releases. Until those land,
  * the loader surfaces the warning and `--strict` refuses workflows that
  * depend on them so users aren't silently misled by the README's
@@ -90,7 +95,6 @@ export interface WorkflowLoadWarning {
  */
 const IGNORED_FIELDS_PER_NODE: readonly string[] = [
   "agents",
-  "sandbox",
   "betas",
   "fallbackModel",
   "maxBudgetUsd",
@@ -119,11 +123,20 @@ const KNOWN_NODE_FIELDS = new Set([
 ]);
 
 const IGNORED_FIELDS_WORKFLOW: readonly string[] = [
-  "sandbox",
   "betas",
   "fallbackModel",
   "additionalDirectories",
 ];
+
+function legacySandboxWarning(filename: string, nodeId?: string): WorkflowLoadWarning {
+  return {
+    filename,
+    ...(nodeId !== undefined ? { nodeId } : {}),
+    kind: "sandbox_legacy_shape",
+    message:
+      "'sandbox' uses the Claude SandboxSettings shape; it is kept as sandbox.backend.claude. Move it there, or use enabled/filesystem/network/env",
+  };
+}
 
 // ---------------------------------------------------------------------------
 // YAML parse + raw shape utilities
@@ -174,6 +187,10 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
       kind: "ignored_capability",
       message: `Unknown node fields are ignored: ${unknownFields.join(", ")}`,
     });
+  }
+
+  if (isLegacySandboxShape(rawObj.sandbox)) {
+    ctx.warnings.push(legacySandboxWarning(ctx.filename, node.id));
   }
 
   // Warn about AI-specific fields on non-AI nodes .
@@ -972,6 +989,26 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     }
   }
 
+  let sandbox: WorkflowDefinition["sandbox"];
+  if (obj.sandbox !== undefined) {
+    const sandboxResult = workflowBaseSchema.shape.sandbox.safeParse(obj.sandbox);
+    if (!sandboxResult.success) {
+      const issue = sandboxResult.error.issues[0];
+      const where = issue?.path.length ? ` at sandbox.${issue.path.join(".")}` : "";
+      return {
+        workflow: null,
+        warnings,
+        error: {
+          filename,
+          error: `Invalid 'sandbox'${where}: ${issue?.message ?? "invalid shape"}`,
+          errorType: "validation_error",
+        },
+      };
+    }
+    sandbox = sandboxResult.data;
+    if (isLegacySandboxShape(obj.sandbox)) warnings.push(legacySandboxWarning(filename));
+  }
+
   let mutatesCheckout: boolean | undefined;
   if (typeof obj.mutates_checkout === "boolean") mutatesCheckout = obj.mutates_checkout;
 
@@ -1018,6 +1055,7 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     ...(requiresProject !== undefined ? { requiresProject } : {}),
     nodes,
     ...(worktreePolicy ? { worktree: worktreePolicy } : {}),
+    ...(sandbox !== undefined ? { sandbox } : {}),
     ...(converge ? { converge } : {}),
     ...(tags !== undefined ? { tags } : {}),
   };

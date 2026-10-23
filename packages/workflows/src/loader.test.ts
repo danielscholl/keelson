@@ -11,6 +11,7 @@ import * as os from "node:os";
 // @ts-ignore
 import * as path from "node:path";
 
+import { createSandboxPolicy } from "./handlers/sandbox.ts";
 import { discoverWorkflows, parseWorkflow, validateWorkflowInvariants } from "./loader.ts";
 import { isApprovalNode } from "./schema/index.ts";
 
@@ -2185,5 +2186,161 @@ nodes:
 `;
     const result = parseWorkflow(yaml, "notebook-ancestor.yaml");
     expect(result.error).toBeNull();
+  });
+});
+
+describe("parseWorkflow — sandbox", () => {
+  test("sandbox on bash, script, and loop nodes raises no warning and survives the transform", () => {
+    const result = parseWorkflow(
+      `
+name: boxed
+description: sandboxed nodes
+nodes:
+  - id: b
+    bash: echo hi
+    sandbox:
+      enabled: true
+      network: { outbound: allow }
+      env: [GH_TOKEN]
+  - id: s
+    script: console.log(1)
+    runtime: bun
+    sandbox: { filesystem: { readonly: ["~/data"] } }
+  - id: l
+    loop:
+      prompt: go
+      until: DONE
+      max_iterations: 2
+      until_bash: exit 0
+    sandbox: { enabled: false }
+`,
+      "boxed.yaml",
+    );
+    expect(result.error).toBeNull();
+    expect(result.warnings).toEqual([]);
+    const byId = Object.fromEntries((result.workflow?.nodes ?? []).map((n) => [n.id, n]));
+    expect(byId.b?.sandbox).toEqual({
+      enabled: true,
+      network: { outbound: "allow" },
+      env: ["GH_TOKEN"],
+    });
+    expect(byId.s?.sandbox).toEqual({ filesystem: { readonly: ["~/data"] } });
+    expect(byId.l?.sandbox).toEqual({ enabled: false });
+  });
+
+  test("workflow-level sandbox is copied onto the definition", () => {
+    const result = parseWorkflow(
+      `
+name: wf
+description: workflow default
+sandbox:
+  enabled: true
+  filesystem: { denied: ["~/.aws"] }
+nodes:
+  - id: a
+    bash: echo hi
+`,
+      "wf.yaml",
+    );
+    expect(result.error).toBeNull();
+    expect(result.warnings).toEqual([]);
+    expect(result.workflow?.sandbox).toEqual({
+      enabled: true,
+      filesystem: { denied: ["~/.aws"] },
+    });
+  });
+
+  test("a malformed workflow-level sandbox is a validation error, not silently dropped", () => {
+    const result = parseWorkflow(
+      `
+name: bad
+description: typo
+sandbox:
+  enabled: true
+  network: { outbound: sometimes }
+nodes:
+  - id: a
+    bash: echo hi
+`,
+      "bad.yaml",
+    );
+    expect(result.workflow).toBeNull();
+    expect(result.error?.error).toContain("sandbox.network.outbound");
+  });
+
+  test("an unknown neutral key on a node fails the node instead of passing through", () => {
+    const result = parseWorkflow(
+      `
+name: bad-node
+description: typo
+nodes:
+  - id: a
+    bash: echo hi
+    sandbox: { enabled: true, filesystem: { writable: ["x"] } }
+`,
+      "bad-node.yaml",
+    );
+    expect(result.workflow).toBeNull();
+  });
+
+  test("a legacy Claude-shaped block lifts to backend.claude with a warning", () => {
+    const result = parseWorkflow(
+      `
+name: legacy
+description: old shape
+sandbox:
+  autoAllowBashIfSandboxed: true
+  network: { allowedDomains: [github.com] }
+nodes:
+  - id: p
+    prompt: hi
+    sandbox:
+      enabled: true
+      filesystem: { allowWrite: [/tmp/out] }
+`,
+      "legacy.yaml",
+    );
+    expect(result.error).toBeNull();
+    expect(result.workflow?.sandbox).toEqual({
+      backend: {
+        claude: { autoAllowBashIfSandboxed: true, network: { allowedDomains: ["github.com"] } },
+      },
+    });
+    const node = result.workflow?.nodes[0];
+    expect(node?.sandbox).toEqual({
+      backend: { claude: { enabled: true, filesystem: { allowWrite: ["/tmp/out"] } } },
+    });
+    expect(result.warnings.map((w) => [w.kind, w.nodeId])).toEqual([
+      ["sandbox_legacy_shape", "p"],
+      ["sandbox_legacy_shape", undefined],
+    ]);
+  });
+
+  test("a lifted legacy block carries no enabled, so default off runs the node unsandboxed", () => {
+    const result = parseWorkflow(
+      `
+name: legacy-off
+description: old shape under default off
+nodes:
+  - id: b
+    bash: echo hi
+    sandbox: { excludedCommands: [docker] }
+`,
+      "legacy-off.yaml",
+    );
+    expect(result.warnings.map((w) => w.kind)).toEqual(["sandbox_legacy_shape"]);
+    const node = result.workflow?.nodes[0];
+    const policy = createSandboxPolicy({
+      floor: false,
+      defaultEnabled: false,
+      home: path.join(os.tmpdir(), "keelson-legacy-home"),
+      dbPath: path.join(os.tmpdir(), "keelson-legacy-home", "keelson.db"),
+      bundledBinDir: path.join(os.tmpdir(), "keelson-legacy-home", "bin"),
+      resolveGitCommonDir: () => undefined,
+    });
+    expect(policy.resolve(node?.sandbox, { cwd: os.tmpdir() })).toEqual({
+      profile: null,
+      outcome: "off",
+    });
   });
 });

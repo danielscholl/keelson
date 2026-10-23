@@ -283,6 +283,7 @@ export function buildSubprocessEnv(
       "ERROR",
       "PROVIDER",
       "MODEL",
+      "SANDBOX",
     ]) {
       delete env[`${provenanceName}_${suffix}`];
     }
@@ -316,6 +317,9 @@ export function buildSubprocessEnv(
     }
     if ("model" in out && out.model !== undefined) {
       env[`${provenanceName}_MODEL`] = out.model.slice(0, PROVENANCE_ENV_MAX_CHARS);
+    }
+    if ("sandbox" in out && out.sandbox !== undefined) {
+      env[`${provenanceName}_SANDBOX`] = out.sandbox;
     }
   }
   // Two env vars for the same path: `KEELSON_ARTIFACTS_DIR` is the prefixed

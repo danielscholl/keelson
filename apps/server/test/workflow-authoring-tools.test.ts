@@ -227,8 +227,7 @@ nodes:
       {
         yaml: `name: warned
 description: y
-sandbox:
-  enabled: true
+fallbackModel: some-model
 nodes:
   - id: a
     bash: echo hi

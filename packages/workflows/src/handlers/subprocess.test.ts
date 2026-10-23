@@ -534,3 +534,27 @@ describe("runSubprocess — launcher seam", () => {
     expect(outcome.stdoutText).toBe("from-host");
   });
 });
+
+describe("buildSubprocessEnv — sandbox provenance", () => {
+  test("projects an upstream node's sandbox outcome and clears an inherited one", () => {
+    const upstream = new Map<string, NodeOutput>([
+      [
+        "build",
+        {
+          state: "completed",
+          output: "ok",
+          sandbox: "mxc",
+          startedAt: "2026-05-22T00:00:00Z",
+          completedAt: "2026-05-22T00:00:01Z",
+          durationMs: 1000,
+        },
+      ],
+      ["plain", { state: "completed", output: "ok" }],
+    ]);
+    const env = buildSubprocessEnv({}, upstream, {
+      parentEnv: { KEELSON_NODE_plain_SANDBOX: "stale" },
+    });
+    expect(env.KEELSON_NODE_build_SANDBOX).toBe("mxc");
+    expect(env.KEELSON_NODE_plain_SANDBOX).toBeUndefined();
+  });
+});

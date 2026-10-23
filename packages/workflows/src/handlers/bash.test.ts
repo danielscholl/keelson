@@ -9,9 +9,14 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { NodeContext, NodeStreamEvent } from "../executor.ts";
 import type { DagNode, NodeOutput, WorkflowDefinition } from "../schema/index.ts";
 import { bashHandler, makeBashHandler } from "./bash.ts";
+import { hostLauncher, type ProcessLauncher, type SpawnSpec } from "./launcher.ts";
+import { createSandboxPolicy, type SandboxProfile } from "./sandbox.ts";
 
 interface BuildCtxOptions {
   resolvedBody: string;
@@ -423,5 +428,164 @@ describe("bashHandler", () => {
     } else {
       expect(actual).toBe(process.cwd());
     }
+  });
+});
+
+describe("makeBashHandler — sandbox", () => {
+  // A runtime that records what it was asked to launch and runs it on the host.
+  function recordingPolicy(runtime: boolean, defaultEnabled = true) {
+    const specs: SpawnSpec[] = [];
+    const profiles: SandboxProfile[] = [];
+    const home = join(tmpdir(), "keelson-bash-sandbox-home");
+    const policy = createSandboxPolicy({
+      floor: false,
+      defaultEnabled,
+      home,
+      dbPath: join(home, "keelson.db"),
+      bundledBinDir: join(home, "bin"),
+      resolveGitCommonDir: () => undefined,
+      ...(runtime
+        ? {
+            runtime: {
+              backend: "fake",
+              createLauncher: (profile: SandboxProfile): ProcessLauncher => {
+                profiles.push(profile);
+                return {
+                  id: "mxc",
+                  spawn: (spec) => {
+                    specs.push(spec);
+                    return hostLauncher.spawn(spec);
+                  },
+                };
+              },
+            },
+          }
+        : {}),
+    });
+    return { policy, specs, profiles };
+  }
+
+  function sandboxCtx(body: string, artifactsDir: string): NodeContext {
+    return { ...buildCtx({ resolvedBody: body }), artifactsDir };
+  }
+
+  test("runs the body from <artifacts>/sandbox/<node>/body.sh through the runtime's launcher", async () => {
+    const artifacts = mkdtempSync(join(tmpdir(), "keelson-bash-sandbox-"));
+    try {
+      const { policy, specs, profiles } = recordingPolicy(true);
+      const body = "echo sandboxed-$KEELSON_RUN_ID";
+      const result = await makeBashHandler({ sandbox: policy }).handle(
+        stubNode,
+        sandboxCtx(body, artifacts),
+      );
+
+      expect(result.status).toBe("succeeded");
+      expect(result.output).toEqual({ kind: "text", text: "sandboxed-test-run\n" });
+      expect(result.sandbox).toBe("mxc");
+      expect(result.sandboxBackend).toBe("fake");
+
+      const scratch = join(artifacts, "sandbox", "n1");
+      const bodyFile = join(scratch, "body.sh");
+      expect(specs[0]?.args).toEqual([bodyFile]);
+      expect(readFileSync(bodyFile, "utf8")).toBe(body);
+      if (process.platform !== "win32") {
+        expect(statSync(bodyFile).mode & 0o777).toBe(0o600);
+      }
+      expect(specs[0]?.env.HOME).toBe(join(scratch, "home"));
+      expect(specs[0]?.env.TMPDIR).toBe(join(scratch, "tmp"));
+      expect(
+        Object.keys(specs[0]?.env ?? {}).every(
+          (k) =>
+            k.startsWith("KEELSON_") ||
+            k.toUpperCase() === "PATH" ||
+            [
+              "ARTIFACTS_DIR",
+              "LANG",
+              "LC_ALL",
+              "TERM",
+              "HOME",
+              "TMPDIR",
+              "UV_CACHE_DIR",
+              "BUN_INSTALL_CACHE_DIR",
+              "GIT_CONFIG_GLOBAL",
+            ].includes(k),
+        ),
+      ).toBe(true);
+      expect(profiles[0]?.filesystem.readwrite).toContain(realpathSync(artifacts));
+    } finally {
+      rmSync(artifacts, { recursive: true, force: true });
+    }
+  });
+
+  test("with no runtime a sandboxed node fails closed with the install hint and runs nothing", async () => {
+    const artifacts = mkdtempSync(join(tmpdir(), "keelson-bash-sandbox-"));
+    try {
+      const { policy, specs } = recordingPolicy(false);
+      const result = await makeBashHandler({ sandbox: policy }).handle(
+        stubNode,
+        sandboxCtx("echo should-not-run", artifacts),
+      );
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("sandbox required but unavailable");
+      expect(result.error).toContain("keelson sandbox install");
+      expect(result.sandbox).toBe("off");
+      expect(specs).toEqual([]);
+    } finally {
+      rmSync(artifacts, { recursive: true, force: true });
+    }
+  });
+
+  test("an opted-out node runs the unchanged host path and reports off", async () => {
+    const { policy, specs } = recordingPolicy(true);
+    const node = { id: "n1", bash: "", sandbox: { enabled: false } } as unknown as DagNode;
+    const result = await makeBashHandler({ sandbox: policy }).handle(
+      node,
+      buildCtx({ resolvedBody: "echo host" }),
+    );
+    expect(result).toMatchObject({ status: "succeeded", sandbox: "off" });
+    expect(result.sandboxBackend).toBeUndefined();
+    expect(specs).toEqual([]);
+  });
+
+  test("a launcher that cannot spawn still reports the sandbox outcome", async () => {
+    const artifacts = mkdtempSync(join(tmpdir(), "keelson-bash-sandbox-"));
+    try {
+      const home = join(tmpdir(), "keelson-bash-sandbox-home");
+      const policy = createSandboxPolicy({
+        floor: true,
+        defaultEnabled: false,
+        home,
+        dbPath: join(home, "keelson.db"),
+        bundledBinDir: join(home, "bin"),
+        resolveGitCommonDir: () => undefined,
+        runtime: {
+          backend: "fake",
+          createLauncher: () => ({
+            id: "mxc",
+            spawn: () => {
+              throw new Error("mxc-exec-mac: ENOENT");
+            },
+          }),
+        },
+      });
+      const result = await makeBashHandler({ sandbox: policy }).handle(
+        stubNode,
+        sandboxCtx("echo hi", artifacts),
+      );
+      expect(result).toMatchObject({
+        status: "failed",
+        error: "bash spawn failed: mxc-exec-mac: ENOENT",
+        sandbox: "mxc",
+        sandboxBackend: "fake",
+      });
+    } finally {
+      rmSync(artifacts, { recursive: true, force: true });
+    }
+  });
+
+  test("without a policy the result carries no sandbox fields", async () => {
+    const result = await bashHandler.handle(stubNode, buildCtx({ resolvedBody: "echo plain" }));
+    expect(result.sandbox).toBeUndefined();
+    expect(result.sandboxBackend).toBeUndefined();
   });
 });

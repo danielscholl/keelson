@@ -1,0 +1,404 @@
+// Copyright 2026, Daniel Scholl
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+
+// biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
+// @ts-ignore
+import { describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
+
+import { hostLauncher } from "./launcher.ts";
+import {
+  type CreateSandboxPolicyOptions,
+  createOperatorSandboxPolicy,
+  createSandboxPolicy,
+  defaultSandboxProfile,
+  mergeSandboxProfiles,
+  pickSandboxEnv,
+  prepareSandboxScratch,
+  resolveSandboxPath,
+  type SandboxProfile,
+  type SandboxRuntime,
+  sandboxUnavailableMessage,
+} from "./sandbox.ts";
+
+// Every path is built from these roots with the platform path module, so the
+// expectations hold on Windows too.
+const ROOT = resolve(tmpdir(), "keelson-sandbox-policy");
+const HOST_HOME = join(ROOT, "user");
+const HOME = join(ROOT, "keelson-home");
+const DB = join(HOME, "keelson.db");
+const CWD = join(ROOT, "repo");
+const ARTIFACTS = join(ROOT, "artifacts", "run-1");
+const BIN = join(ROOT, "bin");
+const TOOL_DIR = join(ROOT, "tools", "bin");
+
+const fakeRuntime: SandboxRuntime = {
+  backend: "fake",
+  createLauncher: () => hostLauncher,
+};
+
+function policyOptions(
+  overrides: Partial<CreateSandboxPolicyOptions> = {},
+): CreateSandboxPolicyOptions {
+  return {
+    floor: false,
+    defaultEnabled: false,
+    home: HOME,
+    dbPath: DB,
+    bundledBinDir: BIN,
+    resolveGitCommonDir: () => undefined,
+    hostHome: HOST_HOME,
+    hostPath: [TOOL_DIR, "relative/dir"].join(delimiter),
+    exists: () => false,
+    canonical: (p) => p,
+    ...overrides,
+  };
+}
+
+const ctx = { cwd: CWD, artifactsDir: ARTIFACTS };
+
+describe("resolve: precedence and floor", () => {
+  test("default off: a node that does not choose runs unconfined", () => {
+    const policy = createSandboxPolicy(policyOptions());
+    expect(policy.resolve(undefined, ctx)).toEqual({ profile: null, outcome: "off" });
+  });
+
+  test("default off: an explicit enabled: true still resolves a profile and fails closed without a runtime", () => {
+    const policy = createSandboxPolicy(policyOptions());
+    const res = policy.resolve({ enabled: true }, ctx);
+    expect(res.profile?.enabled).toBe(true);
+    expect(res.outcome).toBe("off");
+    expect(res.fail).toBe(sandboxUnavailableMessage("no sandbox runtime is installed", false));
+    expect(res.fail).toContain("keelson sandbox install");
+    expect(res.fail).toContain("sandbox: { enabled: false }");
+  });
+
+  test("default on: a node opting out runs unconfined; others need the runtime", () => {
+    const policy = createSandboxPolicy(policyOptions({ defaultEnabled: true }));
+    expect(policy.resolve({ enabled: false }, ctx)).toEqual({ profile: null, outcome: "off" });
+    expect(policy.resolve(undefined, ctx).fail).toContain("sandbox required but unavailable");
+  });
+
+  test("node beats workflow beats the default", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    expect(policy.resolve(undefined, { ...ctx, workflowSandbox: { enabled: true } }).outcome).toBe(
+      "mxc",
+    );
+    expect(
+      policy.resolve({ enabled: false }, { ...ctx, workflowSandbox: { enabled: true } }).outcome,
+    ).toBe("off");
+    const onByDefault = createSandboxPolicy(
+      policyOptions({ defaultEnabled: true, runtime: fakeRuntime }),
+    );
+    expect(
+      onByDefault.resolve(undefined, { ...ctx, workflowSandbox: { enabled: false } }).profile,
+    ).toBeNull();
+  });
+
+  test("the floor ignores enabled: false and names its own opt-out in the failure", () => {
+    const policy = createSandboxPolicy(policyOptions({ floor: true }));
+    const res = policy.resolve({ enabled: false }, { ...ctx, workflowSandbox: { enabled: false } });
+    expect(res.profile?.enabled).toBe(true);
+    expect(res.fail).toContain("KEELSON_SANDBOX=required");
+    expect(res.fail).not.toContain("set `sandbox: { enabled: false }`");
+  });
+
+  test("with a runtime the node runs in it and reports its backend", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime, floor: true }));
+    const res = policy.resolve(undefined, ctx);
+    expect(res).toMatchObject({ outcome: "mxc", backend: "fake" });
+    expect(res.fail).toBeUndefined();
+  });
+
+  test("a prompt node is confined by its provider, or fails closed when it cannot be", () => {
+    const policy = createSandboxPolicy(policyOptions({ floor: true }));
+    expect(
+      policy.resolve(undefined, { ...ctx, provider: { id: "claude", support: "native" } }),
+    ).toMatchObject({ outcome: "provider", backend: "claude" });
+    const res = policy.resolve(undefined, { ...ctx, provider: { id: "stub", support: "none" } });
+    expect(res.outcome).toBe("off");
+    expect(res.fail).toContain("provider 'stub' cannot sandbox its tools");
+  });
+
+  test("a `..` path fails the node with a readable reason", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const res = policy.resolve({ enabled: true, filesystem: { readwrite: ["../escape"] } }, ctx);
+    expect(res.profile).toBeNull();
+    expect(res.fail).toBe("sandbox path '../escape' contains '..'; write the path it means");
+  });
+
+  test("the git common dir is added when a worktree's .git lives outside cwd", () => {
+    const gitDir = join(ROOT, "main-repo", ".git");
+    const policy = createSandboxPolicy(
+      policyOptions({ runtime: fakeRuntime, resolveGitCommonDir: () => gitDir }),
+    );
+    expect(policy.resolve({ enabled: true }, ctx).profile?.filesystem.readwrite).toContain(gitDir);
+    const inside = createSandboxPolicy(
+      policyOptions({ runtime: fakeRuntime, resolveGitCommonDir: () => join(CWD, ".git") }),
+    );
+    expect(inside.resolve({ enabled: true }, ctx).profile?.filesystem.readwrite).toEqual([
+      CWD,
+      ARTIFACTS,
+    ]);
+  });
+
+  test("git is never consulted for a node that resolves unsandboxed", () => {
+    let calls = 0;
+    const policy = createSandboxPolicy(
+      policyOptions({
+        resolveGitCommonDir: () => {
+          calls++;
+          return undefined;
+        },
+      }),
+    );
+    policy.resolve(undefined, ctx);
+    expect(calls).toBe(0);
+  });
+});
+
+describe("the built-in profile", () => {
+  const built = defaultSandboxProfile({
+    cwd: CWD,
+    artifactsDir: ARTIFACTS,
+    home: HOME,
+    dbPath: DB,
+    bundledBinDir: BIN,
+    hostHome: HOST_HOME,
+    hostPath: [TOOL_DIR, join(HOST_HOME, ".bun", "bin"), "relative"].join(delimiter),
+    exists: (p) => p === join(HOST_HOME, ".bun"),
+  });
+
+  test("writes only to cwd and the artifacts dir; network denied", () => {
+    expect(built.filesystem.readwrite).toEqual([CWD, ARTIFACTS]);
+    expect(built.network).toEqual({ outbound: "deny" });
+    expect(built.env).toEqual([]);
+  });
+
+  test("reads the bundled bin, keelson scripts, git config, existing toolchains, and PATH dirs", () => {
+    expect(built.filesystem.readonly).toEqual([
+      BIN,
+      join(HOME, "scripts"),
+      join(HOME, "node_modules"),
+      join(HOST_HOME, ".gitconfig"),
+      join(HOST_HOME, ".config", "git"),
+      join(HOST_HOME, ".bun"),
+      TOOL_DIR,
+    ]);
+  });
+
+  test("denies credentials and keelson's own database, server state, and config", () => {
+    const denied = built.filesystem.denied;
+    for (const p of [
+      join(HOST_HOME, ".ssh"),
+      join(HOST_HOME, ".aws"),
+      join(HOST_HOME, ".config", "gh"),
+      join(HOST_HOME, ".claude"),
+      DB,
+      `${DB}-wal`,
+      `${DB}-shm`,
+      join(HOME, "server.json"),
+      join(HOME, "config.json"),
+    ]) {
+      expect(denied).toContain(p);
+    }
+  });
+});
+
+describe("mergeSandboxProfiles", () => {
+  const base: SandboxProfile = {
+    enabled: false,
+    filesystem: { readwrite: [CWD], readonly: [BIN], denied: [join(HOST_HOME, ".ssh")] },
+    network: { outbound: "deny" },
+    env: ["KEEP"],
+  };
+  const opts = { cwd: CWD, hostHome: HOST_HOME };
+
+  test("paths and env add; enabled and network override", () => {
+    expect(
+      mergeSandboxProfiles(
+        base,
+        {
+          enabled: true,
+          filesystem: { readwrite: ["out"], readonly: ["~/data"], denied: [join(ROOT, "x")] },
+          network: { outbound: "allow", loopback: true },
+          env: ["GH_TOKEN", "KEEP"],
+        },
+        opts,
+      ),
+    ).toEqual({
+      enabled: true,
+      filesystem: {
+        readwrite: [CWD, join(CWD, "out")],
+        readonly: [BIN, join(HOST_HOME, "data")],
+        denied: [join(HOST_HOME, ".ssh"), join(ROOT, "x")],
+      },
+      network: { outbound: "allow", loopback: true },
+      env: ["KEEP", "GH_TOKEN"],
+    });
+  });
+
+  test("an author cannot remove a default deny", () => {
+    const merged = mergeSandboxProfiles(base, { filesystem: { readwrite: ["~/.ssh"] } }, opts);
+    expect(merged.filesystem.denied).toContain(join(HOST_HOME, ".ssh"));
+  });
+
+  test("backend keys merge per SDK", () => {
+    const merged = mergeSandboxProfiles(
+      { ...base, backend: { claude: { a: 1 } } },
+      { backend: { claude: { b: 2 }, codex: { mode: "read-only" } } },
+      opts,
+    );
+    expect(merged.backend).toEqual({ claude: { a: 1, b: 2 }, codex: { mode: "read-only" } });
+  });
+});
+
+describe("resolveSandboxPath", () => {
+  const opts = { cwd: CWD, hostHome: HOST_HOME };
+  test("~ is the host home, relative is against cwd, absolute is normalized", () => {
+    expect(resolveSandboxPath("~", opts)).toBe(HOST_HOME);
+    expect(resolveSandboxPath("~/.cache", opts)).toBe(join(HOST_HOME, ".cache"));
+    expect(resolveSandboxPath("build/out", opts)).toBe(join(CWD, "build", "out"));
+    expect(resolveSandboxPath(join(ROOT, "abs"), opts)).toBe(join(ROOT, "abs"));
+  });
+
+  test("`..` is refused in any position", () => {
+    for (const raw of ["..", "../x", "a/../b", `${ROOT}/../etc`, "a\\..\\b"]) {
+      expect(() => resolveSandboxPath(raw, opts)).toThrow("contains '..'");
+    }
+  });
+});
+
+describe("pickSandboxEnv", () => {
+  const scratch = join(ROOT, "scratch");
+  const host = {
+    KEELSON_RUN_ID: "r1",
+    KEELSON_NODE_a_OUTPUT: "x",
+    ARTIFACTS_DIR: ARTIFACTS,
+    PATH: TOOL_DIR,
+    LANG: "en_US.UTF-8",
+    TERM: "xterm",
+    GH_TOKEN: "secret",
+    ANTHROPIC_API_KEY: "secret",
+    HOME: HOST_HOME,
+    NPM_TOKEN: "secret",
+  };
+
+  test("keeps the KEELSON_* channel and locale/PATH, drops tokens, and moves HOME/TMPDIR/caches", () => {
+    expect(pickSandboxEnv(host, { scratch, hostHome: HOST_HOME })).toEqual({
+      KEELSON_RUN_ID: "r1",
+      KEELSON_NODE_a_OUTPUT: "x",
+      ARTIFACTS_DIR: ARTIFACTS,
+      PATH: TOOL_DIR,
+      LANG: "en_US.UTF-8",
+      TERM: "xterm",
+      HOME: join(scratch, "home"),
+      TMPDIR: join(scratch, "tmp"),
+      UV_CACHE_DIR: join(scratch, "cache", "uv"),
+      BUN_INSTALL_CACHE_DIR: join(scratch, "cache", "bun"),
+      GIT_CONFIG_GLOBAL: join(HOST_HOME, ".gitconfig"),
+    });
+  });
+
+  test("a name the profile allows passes through", () => {
+    const env = pickSandboxEnv(host, { scratch, hostHome: HOST_HOME, allow: ["GH_TOKEN"] });
+    expect(env.GH_TOKEN).toBe("secret");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+});
+
+describe("launcherFor and envFor", () => {
+  test("hands the runtime the profile with scratch made writable", () => {
+    const seen: SandboxProfile[] = [];
+    const policy = createSandboxPolicy(
+      policyOptions({
+        runtime: {
+          backend: "fake",
+          createLauncher: (profile) => {
+            seen.push(profile);
+            return hostLauncher;
+          },
+        },
+      }),
+    );
+    const profile = policy.resolve({ enabled: true }, { cwd: CWD }).profile;
+    if (!profile) throw new Error("expected a profile");
+    const outside = join(ROOT, "scratch-outside");
+    policy.launcherFor(profile, outside);
+    expect(seen[0]?.filesystem.readwrite).toContain(outside);
+    expect(policy.envFor({ GH_TOKEN: "x" }, profile, outside).GH_TOKEN).toBeUndefined();
+  });
+
+  test("refuses to build a launcher without a runtime", () => {
+    const policy = createSandboxPolicy(policyOptions());
+    const profile = policy.resolve({ enabled: true }, ctx).profile;
+    if (!profile) throw new Error("expected a profile");
+    expect(() => policy.launcherFor(profile, ROOT)).toThrow("without a sandbox runtime");
+  });
+});
+
+describe("createOperatorSandboxPolicy", () => {
+  test("operator paths overlay the default and operator denies land last", () => {
+    const policy = createOperatorSandboxPolicy(
+      {
+        floor: false,
+        default: true,
+        settings: {
+          filesystem: {
+            readwrite: [join(ROOT, "cache")],
+            readonly: [],
+            denied: [join(CWD, "secrets")],
+          },
+          network: { outbound: "allow" },
+          env: ["CI"],
+        },
+      },
+      {
+        home: HOME,
+        dbPath: DB,
+        bundledBinDir: BIN,
+        runtime: fakeRuntime,
+        resolveGitCommonDir: () => undefined,
+      },
+    );
+    const res = policy.resolve(
+      { filesystem: { readwrite: ["secrets"] }, network: { outbound: "deny" } },
+      ctx,
+    );
+    expect(res.profile?.filesystem.readwrite).toContain(join(ROOT, "cache"));
+    expect(res.profile?.filesystem.denied).toContain(join(CWD, "secrets"));
+    expect(res.profile?.network.outbound).toBe("deny");
+    expect(res.profile?.env).toEqual(["CI"]);
+  });
+});
+
+describe("prepareSandboxScratch", () => {
+  test("creates <artifacts>/sandbox/<node>/ with home, tmp, and caches", () => {
+    const artifacts = mkdtempSync(join(tmpdir(), "keelson-scratch-"));
+    try {
+      const scratch = prepareSandboxScratch(artifacts, "build:step");
+      expect(scratch).toBe(join(artifacts, "sandbox", "build_step"));
+      for (const dir of ["home", "tmp", join("cache", "uv")]) {
+        expect(statSync(join(scratch, dir)).isDirectory()).toBe(true);
+      }
+    } finally {
+      rmSync(artifacts, { recursive: true, force: true });
+    }
+  });
+
+  test("falls back to a temp dir without an artifacts dir", () => {
+    const scratch = prepareSandboxScratch(undefined, "n1");
+    try {
+      expect(existsSync(join(scratch, "home"))).toBe(true);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+});

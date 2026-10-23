@@ -50,6 +50,7 @@ export {
   type RunSummary,
   resolveBody,
   runWorkflow,
+  type SandboxOutcome,
 } from "./executor.ts";
 export {
   buildTopologicalLayers,
@@ -98,8 +99,10 @@ export {
   defaultRunUntilBashProbe,
   type MakeLoopHandlerOptions,
   makeLoopHandler,
+  makeRunUntilBashProbe,
   type RunUntilBashProbe,
   type RunUntilBashProbeOptions,
+  SandboxUnavailableError,
   UNTIL_BASH_TIMEOUT_MS,
   type UntilBashResult,
 } from "./handlers/loop.ts";
@@ -118,6 +121,24 @@ export {
   parseToolDenylist,
   type WorkflowNodeMeta,
 } from "./handlers/prompt.ts";
+export {
+  type CreateSandboxPolicyOptions,
+  createOperatorSandboxPolicy,
+  createSandboxPolicy,
+  defaultSandboxProfile,
+  mergeSandboxProfiles,
+  type OperatorSandboxConfig,
+  pickSandboxEnv,
+  resolveGitCommonDir,
+  resolveSandboxPath,
+  SandboxPathError,
+  type SandboxPolicy,
+  type SandboxProfile,
+  type SandboxResolution,
+  type SandboxResolveContext,
+  type SandboxRuntime,
+  sandboxUnavailableMessage,
+} from "./handlers/sandbox.ts";
 export {
   type MakeScriptHandlerOptions,
   makeScriptHandler,

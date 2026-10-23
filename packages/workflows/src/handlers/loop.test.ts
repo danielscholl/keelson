@@ -3,9 +3,14 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { NodeContext, NodeHandler, NodeResult } from "../executor.ts";
 import type { DagNode, WorkflowDefinition } from "../schema/index.ts";
-import { makeLoopHandler } from "./loop.ts";
+import { hostLauncher, type ProcessLauncher, type SpawnSpec } from "./launcher.ts";
+import { makeLoopHandler, makeRunUntilBashProbe, SandboxUnavailableError } from "./loop.ts";
+import { createSandboxPolicy } from "./sandbox.ts";
 
 interface SeenPrompt {
   prompt: string;
@@ -895,5 +900,85 @@ describe("makeLoopHandler — substitution in loop.prompt", () => {
     await handler.handle(node, ctx);
     expect(seen).toHaveLength(1);
     expect(seen[0].prompt).toBe("args=u-msg lane=stable prior=upstream-text round=2 prev=");
+  });
+});
+
+describe("makeRunUntilBashProbe — sandbox", () => {
+  function policyWith(runtime: boolean, specs: SpawnSpec[]) {
+    const home = join(tmpdir(), "keelson-loop-sandbox-home");
+    return createSandboxPolicy({
+      floor: false,
+      defaultEnabled: true,
+      home,
+      dbPath: join(home, "keelson.db"),
+      bundledBinDir: join(home, "bin"),
+      resolveGitCommonDir: () => undefined,
+      ...(runtime
+        ? {
+            runtime: {
+              backend: "fake",
+              createLauncher: (): ProcessLauncher => ({
+                id: "mxc",
+                spawn: (spec) => {
+                  specs.push(spec);
+                  return hostLauncher.spawn(spec);
+                },
+              }),
+            },
+          }
+        : {}),
+    });
+  }
+
+  test("a sandboxed probe runs its script from <artifacts>/sandbox/<node>-until/until.sh", async () => {
+    const artifacts = mkdtempSync(join(tmpdir(), "keelson-loop-sandbox-"));
+    try {
+      const specs: SpawnSpec[] = [];
+      const probe = makeRunUntilBashProbe({ sandbox: policyWith(true, specs) });
+      const result = await probe("exit 0", {
+        cwd: process.cwd(),
+        signal: new AbortController().signal,
+        inputs: {},
+        upstreamOutputs: new Map(),
+        artifactsDir: artifacts,
+        nodeId: "retry",
+      });
+      expect(result.exitCode).toBe(0);
+      const script = join(artifacts, "sandbox", "retry-until", "until.sh");
+      expect(specs[0]?.args).toEqual([script]);
+      expect(readFileSync(script, "utf8")).toBe("exit 0");
+    } finally {
+      rmSync(artifacts, { recursive: true, force: true });
+    }
+  });
+
+  test("with no runtime the probe refuses, and the loop node fails closed", async () => {
+    const probe = makeRunUntilBashProbe({ sandbox: policyWith(false, []) });
+    const { handler: promptHandler } = makeRecorderHandler(() => ({
+      status: "succeeded",
+      output: { kind: "text", text: "step" },
+    }));
+    const handler = makeLoopHandler({ promptHandler, runUntilBashProbe: probe });
+    const node = {
+      id: "retry",
+      loop: {
+        prompt: "do work",
+        until: "DONE",
+        max_iterations: 3,
+        fresh_context: false,
+        until_bash: "exit 0",
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    const result = await handler.handle(node, buildCtx());
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("sandbox required but unavailable");
+    await expect(
+      probe("exit 0", {
+        cwd: process.cwd(),
+        signal: new AbortController().signal,
+        inputs: {},
+        upstreamOutputs: new Map(),
+      }),
+    ).rejects.toBeInstanceOf(SandboxUnavailableError);
   });
 });

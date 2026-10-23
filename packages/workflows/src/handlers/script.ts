@@ -21,9 +21,23 @@
  * `buildSubprocessEnv` populates — same contract the bash handler uses.
  */
 
-import { type NodeHandler, type NodeResult, resolveConvergeRound } from "../executor.ts";
+import {
+  type NodeContext,
+  type NodeHandler,
+  type NodeResult,
+  resolveConvergeRound,
+} from "../executor.ts";
+import type { DagNode } from "../schema/index.ts";
 import { resolveScript, type ScriptRuntime } from "./discovery.ts";
 import { failed, formatSubprocessFailure, isInlineScript } from "./helpers.ts";
+import {
+  prepareSandboxScratch,
+  type SandboxPolicy,
+  type SandboxResolution,
+  sandboxContextFor,
+  tagSandboxResult,
+  writeSandboxBody,
+} from "./sandbox.ts";
 import {
   buildSubprocessEnv,
   runSubprocess,
@@ -34,6 +48,7 @@ import {
 
 export interface MakeScriptHandlerOptions {
   timeoutMs?: number;
+  sandbox?: SandboxPolicy;
 }
 
 interface ScriptNodeLike {
@@ -47,11 +62,14 @@ interface SpawnSpec {
   args: string[];
 }
 
+// `inlineFile` marks a sandboxed inline body written to a file: python runs it
+// through `uv run python <file>`, like the inline form, rather than as a script.
 function buildSpawnSpec(
   runtime: ScriptRuntime,
   body: string,
   resolvedPath: string | null,
   deps: readonly string[],
+  inlineFile = false,
 ): SpawnSpec {
   const withFlags = deps.flatMap((d) => ["--with", d]);
   if (resolvedPath === null) {
@@ -62,6 +80,7 @@ function buildSpawnSpec(
     return { cmd: "uv", args: ["run", ...withFlags, "python", "-c", body] };
   }
   if (runtime === "bun") return { cmd: "bun", args: ["--no-env-file", resolvedPath] };
+  if (inlineFile) return { cmd: "uv", args: ["run", ...withFlags, "python", resolvedPath] };
   return { cmd: "uv", args: ["run", ...withFlags, resolvedPath] };
 }
 
@@ -70,101 +89,134 @@ export function makeScriptHandler(opts: MakeScriptHandlerOptions = {}): NodeHand
   return {
     type: "script",
     async handle(node, ctx): Promise<NodeResult> {
-      const sn = node as unknown as ScriptNodeLike & { id: string };
-      const runtime = sn.runtime;
-      if (runtime !== "bun" && runtime !== "uv") {
-        return failed(`Script node '${node.id}': invalid runtime '${String(runtime)}'`);
-      }
-
-      const timeoutMs =
-        typeof sn.timeout === "number" && Number.isFinite(sn.timeout) && sn.timeout > 0
-          ? sn.timeout
-          : factoryTimeoutMs;
-
-      // rawBody — see file header for the injection trade-off.
-      const scriptBody = resolveConvergeRound(ctx.rawBody, {
-        ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
-      }).trim();
-      if (!scriptBody) {
-        return failed(`Script node '${node.id}': empty script body`);
-      }
-
-      let spec: SpawnSpec;
-      if (isInlineScript(scriptBody)) {
-        spec = buildSpawnSpec(runtime, scriptBody, null, sn.deps ?? []);
-      } else {
-        const resolved = await resolveScript(scriptBody, runtime, ctx.cwd);
-        if (!resolved) {
-          return failed(
-            `Script node '${node.id}': named script '${scriptBody}' not found in .keelson/scripts/ for runtime '${runtime}'`,
-          );
-        }
-        spec = buildSpawnSpec(runtime, scriptBody, resolved.path, sn.deps ?? []);
-      }
-
-      let outcome: SubprocessOutcome;
-      try {
-        outcome = await runSubprocess({
-          cmd: spec.cmd,
-          args: spec.args,
-          cwd: ctx.cwd,
-          env: buildSubprocessEnv(ctx.inputs, ctx.upstreamOutputs, {
-            runId: ctx.runId,
-            ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
-          }),
-          timeoutMs,
-          abortSignal: ctx.abortSignal,
-          emit: ctx.emit,
-          trimTrailingNewline: true,
-        });
-      } catch (err) {
-        if (err instanceof SubprocessSpawnError) {
-          const detail = err.message;
-          if (/ENOENT/.test(detail)) {
-            const hint =
-              runtime === "uv"
-                ? " (install: https://docs.astral.sh/uv/)"
-                : " (install: https://bun.sh/)";
-            return failed(
-              `Script node '${node.id}': '${spec.cmd}' executable not found in PATH${hint}`,
-            );
-          }
-          return failed(`Script node '${node.id}': spawn failed: ${detail}`);
-        }
-        throw err;
-      }
-
-      const { stdoutText, stderrTail, exitCode, killReason } = outcome;
-      const label = `Script node '${node.id}' (${runtime})`;
-
-      if (killReason === "abort") {
-        return {
-          status: "failed",
-          output: { kind: "text", text: stdoutText },
-          error: "aborted",
-        };
-      }
-      if (killReason === "timeout") {
-        return {
-          status: "failed",
-          output: { kind: "text", text: stdoutText },
-          error: `${label} timed out after ${Math.round(timeoutMs / 1000)}s`,
-        };
-      }
-      if (exitCode !== 0) {
-        return {
-          status: "failed",
-          output: { kind: "text", text: stdoutText },
-          error: formatSubprocessFailure(label, {
-            cmd: spec.cmd,
-            exitCode,
-            stderrTail,
-          }),
-        };
-      }
-      return { status: "succeeded", output: { kind: "text", text: stdoutText } };
+      const resolution = opts.sandbox?.resolve(node.sandbox, sandboxContextFor(ctx));
+      return tagSandboxResult(
+        await runScript(node, ctx, factoryTimeoutMs, opts.sandbox, resolution),
+        resolution,
+      );
     },
   };
+}
+
+async function runScript(
+  node: DagNode,
+  ctx: NodeContext,
+  factoryTimeoutMs: number,
+  policy: SandboxPolicy | undefined,
+  resolution: SandboxResolution | undefined,
+): Promise<NodeResult> {
+  if (resolution?.fail !== undefined) return failed(resolution.fail);
+  const sn = node as unknown as ScriptNodeLike & { id: string };
+  const runtime = sn.runtime;
+  if (runtime !== "bun" && runtime !== "uv") {
+    return failed(`Script node '${node.id}': invalid runtime '${String(runtime)}'`);
+  }
+
+  const timeoutMs =
+    typeof sn.timeout === "number" && Number.isFinite(sn.timeout) && sn.timeout > 0
+      ? sn.timeout
+      : factoryTimeoutMs;
+
+  // rawBody — see file header for the injection trade-off.
+  const scriptBody = resolveConvergeRound(ctx.rawBody, {
+    ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
+  }).trim();
+  if (!scriptBody) {
+    return failed(`Script node '${node.id}': empty script body`);
+  }
+
+  const profile = policy !== undefined ? resolution?.profile : null;
+  const scratch = profile ? prepareSandboxScratch(ctx.artifactsDir, ctx.nodeId) : undefined;
+  let spec: SpawnSpec;
+  if (isInlineScript(scriptBody)) {
+    spec =
+      scratch !== undefined
+        ? buildSpawnSpec(
+            runtime,
+            scriptBody,
+            writeSandboxBody(scratch, runtime === "bun" ? "body.ts" : "body.py", scriptBody),
+            sn.deps ?? [],
+            true,
+          )
+        : buildSpawnSpec(runtime, scriptBody, null, sn.deps ?? []);
+  } else {
+    const resolved = await resolveScript(scriptBody, runtime, ctx.cwd);
+    if (!resolved) {
+      return failed(
+        `Script node '${node.id}': named script '${scriptBody}' not found in .keelson/scripts/ for runtime '${runtime}'`,
+      );
+    }
+    spec = buildSpawnSpec(runtime, scriptBody, resolved.path, sn.deps ?? []);
+  }
+
+  let outcome: SubprocessOutcome;
+  try {
+    const env = buildSubprocessEnv(ctx.inputs, ctx.upstreamOutputs, {
+      runId: ctx.runId,
+      ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+    });
+    outcome = await runSubprocess({
+      cmd: spec.cmd,
+      args: spec.args,
+      cwd: ctx.cwd,
+      env:
+        policy !== undefined && profile && scratch !== undefined
+          ? policy.envFor(env, profile, scratch)
+          : env,
+      timeoutMs,
+      abortSignal: ctx.abortSignal,
+      emit: ctx.emit,
+      trimTrailingNewline: true,
+      ...(policy !== undefined && profile && scratch !== undefined
+        ? { launcher: policy.launcherFor(profile, scratch) }
+        : {}),
+    });
+  } catch (err) {
+    if (err instanceof SubprocessSpawnError) {
+      const detail = err.message;
+      if (/ENOENT/.test(detail)) {
+        const hint =
+          runtime === "uv"
+            ? " (install: https://docs.astral.sh/uv/)"
+            : " (install: https://bun.sh/)";
+        return failed(
+          `Script node '${node.id}': '${spec.cmd}' executable not found in PATH${hint}`,
+        );
+      }
+      return failed(`Script node '${node.id}': spawn failed: ${detail}`);
+    }
+    throw err;
+  }
+
+  const { stdoutText, stderrTail, exitCode, killReason } = outcome;
+  const label = `Script node '${node.id}' (${runtime})`;
+
+  if (killReason === "abort") {
+    return {
+      status: "failed",
+      output: { kind: "text", text: stdoutText },
+      error: "aborted",
+    };
+  }
+  if (killReason === "timeout") {
+    return {
+      status: "failed",
+      output: { kind: "text", text: stdoutText },
+      error: `${label} timed out after ${Math.round(timeoutMs / 1000)}s`,
+    };
+  }
+  if (exitCode !== 0) {
+    return {
+      status: "failed",
+      output: { kind: "text", text: stdoutText },
+      error: formatSubprocessFailure(label, {
+        cmd: spec.cmd,
+        exitCode,
+        stderrTail,
+      }),
+    };
+  }
+  return { status: "succeeded", output: { kind: "text", text: stdoutText } };
 }
 
 export const scriptHandler: NodeHandler = makeScriptHandler();
