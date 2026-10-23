@@ -402,3 +402,34 @@ describe("prepareSandboxScratch", () => {
     }
   });
 });
+
+describe("prompt-node default", () => {
+  test("defers to the provider: working dirs writable, nothing else granted or denied", () => {
+    const policy = createSandboxPolicy(
+      policyOptions({ floor: true, resolveGitCommonDir: () => join(ROOT, "main", ".git") }),
+    );
+    const res = policy.resolve(undefined, { ...ctx, provider: { id: "codex", support: "native" } });
+    expect(res.outcome).toBe("provider");
+    expect(res.profile?.filesystem).toEqual({
+      readwrite: [CWD, ARTIFACTS],
+      readonly: [],
+      denied: [],
+    });
+    expect(res.profile?.network).toEqual({ outbound: "deny" });
+  });
+
+  test("operator denies still reach prompt nodes; bash keeps the hardened default", () => {
+    const denied = join(CWD, "secrets");
+    const policy = createSandboxPolicy(
+      policyOptions({ floor: true, runtime: fakeRuntime, operatorDenied: [denied] }),
+    );
+    const prompt = policy.resolve(undefined, {
+      ...ctx,
+      provider: { id: "codex", support: "native" },
+    });
+    expect(prompt.profile?.filesystem.denied).toEqual([denied]);
+    const bash = policy.resolve(undefined, ctx);
+    expect(bash.profile?.filesystem.denied).toContain(join(HOST_HOME, ".ssh"));
+    expect(bash.profile?.filesystem.denied).toContain(denied);
+  });
+});

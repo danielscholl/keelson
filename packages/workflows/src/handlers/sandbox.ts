@@ -6,6 +6,10 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+// The bash/script default hardens credential and keelson-state paths because
+// keelson owns that process's policy; a prompt node's default defers to its
+// provider's sandbox, so it denies nothing an operator did not configure.
+
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, isAbsolute, join, normalize, relative, resolve } from "node:path";
@@ -256,6 +260,21 @@ export function defaultSandboxProfile(opts: DefaultSandboxProfileOptions): Sandb
   };
 }
 
+// A prompt node's starting profile: its working dirs writable, nothing else
+// granted or denied, network off.
+export function providerSandboxProfile(cwd: string, artifactsDir?: string): SandboxProfile {
+  return {
+    enabled: false,
+    filesystem: {
+      readwrite: union([cwd], artifactsDir !== undefined ? [artifactsDir] : []),
+      readonly: [],
+      denied: [],
+    },
+    network: { outbound: "deny" },
+    env: [],
+  };
+}
+
 function builtInDenied(opts: { home: string; dbPath: string; hostHome: string }): string[] {
   return union(
     HOST_DENIED.map((p) => join(opts.hostHome, p.slice(2))),
@@ -276,6 +295,10 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
   const hostPath = opts.hostPath ?? process.env.PATH ?? "";
   const exists = opts.exists ?? existsSync;
   const canonical = opts.canonical ?? realpathOrSelf;
+  const gitCommonDirFor = (cwd: string): { gitCommonDir?: string } => {
+    const gitCommonDir = (opts.resolveGitCommonDir ?? resolveGitCommonDir)(cwd);
+    return gitCommonDir !== undefined ? { gitCommonDir } : {};
+  };
 
   const canonicalize = (profile: SandboxProfile): SandboxProfile => ({
     ...profile,
@@ -294,18 +317,20 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
       const pathOpts = { cwd: ctx.cwd, hostHome };
       let profile: SandboxProfile;
       try {
-        const gitCommonDir = (opts.resolveGitCommonDir ?? resolveGitCommonDir)(ctx.cwd);
-        profile = defaultSandboxProfile({
-          cwd: ctx.cwd,
-          ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
-          home: opts.home,
-          dbPath: opts.dbPath,
-          bundledBinDir: opts.bundledBinDir,
-          hostHome,
-          hostPath,
-          ...(gitCommonDir !== undefined ? { gitCommonDir } : {}),
-          exists,
-        });
+        profile =
+          ctx.provider !== undefined
+            ? providerSandboxProfile(ctx.cwd, ctx.artifactsDir)
+            : defaultSandboxProfile({
+                cwd: ctx.cwd,
+                ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+                home: opts.home,
+                dbPath: opts.dbPath,
+                bundledBinDir: opts.bundledBinDir,
+                hostHome,
+                hostPath,
+                ...gitCommonDirFor(ctx.cwd),
+                exists,
+              });
         profile = mergeSandboxProfiles(profile, opts.configProfile, pathOpts);
         profile = mergeSandboxProfiles(profile, ctx.workflowSandbox, pathOpts);
         profile = mergeSandboxProfiles(profile, nodeSandbox, pathOpts);

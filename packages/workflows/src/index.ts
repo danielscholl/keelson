@@ -129,6 +129,7 @@ export {
   mergeSandboxProfiles,
   type OperatorSandboxConfig,
   pickSandboxEnv,
+  providerSandboxProfile,
   resolveGitCommonDir,
   resolveSandboxPath,
   SandboxPathError,
