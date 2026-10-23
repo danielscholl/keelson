@@ -48,6 +48,7 @@ import {
   bootstrapProviders,
   bootstrapRibs,
   bootstrapSandbox,
+  bootstrapSandboxPolicy,
   bootstrapWorkflows,
   describeSandboxPolicy,
   prepareRibWorkflows,
@@ -536,8 +537,11 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // Undefined when no providers are registered — workflowsRoutes falls back to
   // the placeholder handler in that case. Rib tools are passed as default-off so
   // a workflow prompt node only sees a rib tool it explicitly `allowed_tools`.
+  const sandbox = bootstrapSandbox();
+  const sandboxPolicy = bootstrapSandboxPolicy(sandbox, { home: KEELSON_HOME, dbPath: DB_PATH });
   const promptHandler = bootstrapPromptHandler({
     defaultOffTools: ribs.tools.map((t) => t.name),
+    sandbox: sandboxPolicy,
     // Final global gate for workflow prompt nodes — the engine owns the operator
     // denylist + rib policies here, so the handler's own floor stands down.
     projectTools: (candidates, provider, meta) =>
@@ -627,6 +631,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     conversationStore: store,
     projectsStore,
     ...(promptHandler ? { promptHandler } : {}),
+    sandboxPolicy,
     memoryStore,
     projectNotebookStore,
     snapshotManager,
@@ -723,7 +728,6 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // and WORKSPACE_ROOT is known); constructed + mounted alongside the other
   // routes below, and torn down in drain before ribs dispose.
   const mcpSettings = resolveMcpSettings(loadKeelsonConfig());
-  const sandbox = bootstrapSandbox();
   let mcpRoutes: McpRoutesHandle | null = null;
 
   const drain = async (): Promise<void> => {

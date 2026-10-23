@@ -73,6 +73,11 @@ export type SandboxMode = z.infer<typeof sandboxModeSchema>;
 export const sandboxSupportSchema = z.enum(["native", "tool", "none"]);
 export type SandboxSupport = z.infer<typeof sandboxSupportSchema>;
 
+// How a workflow node actually ran: in the Keelson sandbox runtime, inside the
+// provider's own sandbox, or unconfined.
+export const sandboxOutcomeSchema = z.enum(["mxc", "provider", "off"]);
+export type SandboxOutcome = z.infer<typeof sandboxOutcomeSchema>;
+
 // KEELSON_SANDBOX: `required` is a floor no conversation or frame can lower;
 // `on`/`off` only replace the configured default.
 export type SandboxEnvSetting =

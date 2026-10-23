@@ -27,7 +27,7 @@ import {
   type NodeTokenUsage,
   resolveBody,
 } from "../executor.ts";
-import { isLoopNode, type NodeOutput } from "../schema/index.ts";
+import { isLoopNode, type NodeOutput, type NodeSandbox } from "../schema/index.ts";
 import { bundledBinDir, forgeShimPath } from "../seed.ts";
 import { addNodeUsage } from "../usage.ts";
 import type { AwaitInteraction } from "./approval.ts";
@@ -37,6 +37,7 @@ import {
   stripCompletionTags,
   synthesizePromptNode,
 } from "./helpers.ts";
+import { prepareSandboxScratch, type SandboxPolicy, writeSandboxBody } from "./sandbox.ts";
 import { prependPath, resolveBash } from "./shell.ts";
 import { buildSubprocessEnv, runSubprocess, SubprocessSpawnError } from "./subprocess.ts";
 
@@ -75,6 +76,19 @@ export interface RunUntilBashProbeOptions {
   runId?: string;
   /** Per-run scratch dir — projected as `KEELSON_ARTIFACTS_DIR` + `ARTIFACTS_DIR`. */
   artifactsDir?: string;
+  /** The loop node's id and sandbox blocks, for a sandboxed probe. */
+  nodeId?: string;
+  sandbox?: NodeSandbox;
+  workflowSandbox?: NodeSandbox;
+}
+
+// Thrown by a sandboxed probe that cannot be confined; the loop fails rather
+// than run the probe unconfined or iterate past it.
+export class SandboxUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SandboxUnavailableError";
+  }
 }
 
 export type RunUntilBashProbe = (
@@ -92,47 +106,79 @@ export type RunUntilBashProbe = (
  *
  * Exposed so composition roots can wire it directly without reimplementing
  * the safety properties; a test harness or in-process CLI fallback can pass
- * a stub instead.
+ * a stub instead. With a sandbox policy, a confined probe runs its body from a
+ * file through the policy's launcher.
  */
-export const defaultRunUntilBashProbe: RunUntilBashProbe = async (script, opts) => {
-  const env = buildSubprocessEnv(opts.inputs, opts.upstreamOutputs, {
-    ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
-    ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
-  });
-  if (opts.env) {
-    for (const [k, v] of Object.entries(opts.env)) env[k] = v;
-  }
-  env.KEELSON_FORGE_BIN = forgeShimPath();
-  if (process.env.KEELSON_FORGE?.trim()) env.KEELSON_FORGE = process.env.KEELSON_FORGE;
-  try {
-    const bash = resolveBash();
-    prependPath(env, [bundledBinDir(), ...bash.pathDirs]);
-    const outcome = await runSubprocess({
-      cmd: bash.cmd,
-      args: ["-c", script],
+export function makeRunUntilBashProbe(
+  factoryOpts: { sandbox?: SandboxPolicy } = {},
+): RunUntilBashProbe {
+  const policy = factoryOpts.sandbox;
+  return async (script, opts) => {
+    const resolution = policy?.resolve(opts.sandbox, {
       cwd: opts.cwd,
-      env,
-      timeoutMs: UNTIL_BASH_TIMEOUT_MS,
-      abortSignal: opts.signal,
-      // The probe emits no node_log lines — we only care about the exit
-      // code. A noop emit drops everything on the floor without paying
-      // the chunk-coalescing cost.
-      emit: () => undefined,
+      ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
+      ...(opts.workflowSandbox !== undefined ? { workflowSandbox: opts.workflowSandbox } : {}),
     });
-    return {
-      exitCode: outcome.exitCode ?? 1,
-      stdout: outcome.stdoutText,
-      stderr: outcome.stderrTail,
-      timedOut: outcome.killReason === "timeout",
-      aborted: outcome.killReason === "abort",
-    };
-  } catch (err) {
-    if (err instanceof SubprocessSpawnError) {
-      return { exitCode: 127, stdout: "", stderr: err.message };
+    if (resolution?.fail !== undefined) throw new SandboxUnavailableError(resolution.fail);
+    const env = buildSubprocessEnv(opts.inputs, opts.upstreamOutputs, {
+      ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
+      ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
+    });
+    if (opts.env) {
+      for (const [k, v] of Object.entries(opts.env)) env[k] = v;
     }
-    throw err;
-  }
-};
+    env.KEELSON_FORGE_BIN = forgeShimPath();
+    if (process.env.KEELSON_FORGE?.trim()) env.KEELSON_FORGE = process.env.KEELSON_FORGE;
+    try {
+      const bash = resolveBash();
+      prependPath(env, [bundledBinDir(), ...bash.pathDirs]);
+      const profile = resolution?.profile;
+      const scratch =
+        policy !== undefined && profile
+          ? prepareSandboxScratch(opts.artifactsDir, `${opts.nodeId ?? "loop"}-until`)
+          : undefined;
+      const outcome = await runSubprocess({
+        cmd: bash.cmd,
+        args:
+          scratch !== undefined ? [writeSandboxBody(scratch, "until.sh", script)] : ["-c", script],
+        cwd: opts.cwd,
+        // The loop's own overlay (LOOP_PREV_OUTPUT, LOOP_USER_INPUT) is
+        // harness-provided, so it passes the sandbox env filter like KEELSON_*.
+        env:
+          policy !== undefined && profile && scratch !== undefined
+            ? policy.envFor(
+                env,
+                { ...profile, env: [...profile.env, ...Object.keys(opts.env ?? {})] },
+                scratch,
+              )
+            : env,
+        timeoutMs: UNTIL_BASH_TIMEOUT_MS,
+        abortSignal: opts.signal,
+        // The probe emits no node_log lines — we only care about the exit
+        // code. A noop emit drops everything on the floor without paying
+        // the chunk-coalescing cost.
+        emit: () => undefined,
+        ...(policy !== undefined && profile && scratch !== undefined
+          ? { launcher: policy.launcherFor(profile, scratch) }
+          : {}),
+      });
+      return {
+        exitCode: outcome.exitCode ?? 1,
+        stdout: outcome.stdoutText,
+        stderr: outcome.stderrTail,
+        timedOut: outcome.killReason === "timeout",
+        aborted: outcome.killReason === "abort",
+      };
+    } catch (err) {
+      if (err instanceof SubprocessSpawnError) {
+        return { exitCode: 127, stdout: "", stderr: err.message };
+      }
+      throw err;
+    }
+  };
+}
+
+export const defaultRunUntilBashProbe: RunUntilBashProbe = makeRunUntilBashProbe();
 
 export interface MakeLoopHandlerOptions {
   promptHandler: NodeHandler;
@@ -299,6 +345,11 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
               inputs: ctx.inputs,
               upstreamOutputs: ctx.upstreamOutputs,
               ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+              nodeId: node.id,
+              ...(node.sandbox !== undefined ? { sandbox: node.sandbox } : {}),
+              ...(ctx.workflow.sandbox !== undefined
+                ? { workflowSandbox: ctx.workflow.sandbox }
+                : {}),
             });
             // Order matters: abort > timeout > exit 0. A probe that traps
             // SIGTERM and exits 0 after the kill must NOT be misread as a
@@ -320,6 +371,9 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
             // Non-zero (and timeouts) keep iterating — matches Archon's
             // behavior: the probe is a hint, not a fatal check.
           } catch (err) {
+            if (err instanceof SandboxUnavailableError) {
+              return finalize(failed(err.message, stripped));
+            }
             // Probe runner threw (subprocess spawn failure, etc.). Surface
             // as a warning and keep iterating — the model's `until` signal
             // is still a valid termination path.

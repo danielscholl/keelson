@@ -45,7 +45,9 @@ import {
   recallRequestSchema,
   refreshWorkflowBodySchema,
   resumeWorkflowRunBodySchema,
+  type SandboxOutcome,
   type SnapshotManager,
+  sandboxOutcomeSchema,
   startWorkflowRunBodySchema,
   TERMINAL_RUN_STATUSES,
   type WorkflowFrame,
@@ -71,12 +73,10 @@ import {
 import {
   type AwaitApproval,
   type AwaitInteraction,
-  bashHandler,
   checkWorkflowCatalog,
   collectTransitiveDependents,
   createWorktree,
   type DagNode,
-  defaultRunUntilBashProbe,
   deleteBranch,
   ensureWorktreeDeps,
   fetchOrigin,
@@ -87,9 +87,11 @@ import {
   listWorktreesWithStatus,
   type MemoryTools,
   makeApprovalHandler,
+  makeBashHandler,
   makeCancelHandler,
   makeCommandHandler,
   makeLoopHandler,
+  makeRunUntilBashProbe,
   makeScriptHandler,
   type NodeHandler,
   type NodeOutput,
@@ -105,6 +107,7 @@ import {
   resolveDefaultBranch,
   resolveWorkflowResolutionReady,
   runWorkflow,
+  type SandboxPolicy,
   validateWorkflowInvariants,
   type WorkflowDefinition,
   withoutApprovalReviewers,
@@ -175,6 +178,9 @@ export interface WorkflowsHandlerOptions {
   // prompt nodes fail with a "not registered" sentinel. Keeps the route
   // construction testable without standing up a provider rig.
   promptHandler?: NodeHandler;
+  // Sandbox policy for bash, script, until_bash, and prompt nodes. Absent runs
+  // every node as before and reports no sandbox outcome.
+  sandboxPolicy?: SandboxPolicy;
   // Optional MemoryStore. Undefined → executor memory hooks no-op.
   memoryStore?: MemoryStore;
   // Optional project notebook store. When set with a resolved project, prompt
@@ -710,6 +716,7 @@ function buildExecutionDeps(opts: WorkflowsHandlerOptions): {
   defaultProvider: string | undefined;
   memoryTools: MemoryTools | undefined;
   projectNotebookStore: ProjectNotebookStore | undefined;
+  sandboxPolicy: SandboxPolicy | undefined;
 } {
   const promptHandler = opts.promptHandler ?? placeholderPromptHandler;
   const memoryStore = opts.memoryStore;
@@ -731,6 +738,7 @@ function buildExecutionDeps(opts: WorkflowsHandlerOptions): {
     defaultProvider: resolveWorkflowDefaultProviderId(),
     memoryTools,
     projectNotebookStore: opts.projectNotebookStore,
+    sandboxPolicy: opts.sandboxPolicy,
   };
 }
 
@@ -744,6 +752,7 @@ interface StartRunCoreDeps {
   defaultProvider: string | undefined;
   memoryTools: MemoryTools | undefined;
   projectNotebookStore?: ProjectNotebookStore;
+  sandboxPolicy?: SandboxPolicy | undefined;
   snapshotManager?: SnapshotManager;
   ribWorkflowBindings?: Map<WorkflowDefinition, RibWorkflowBinding>;
   usageStore?: UsageStore;
@@ -977,6 +986,7 @@ function buildResumeSeed(
         output: node.outputText ?? "",
         ...(node.provider !== null ? { provider: node.provider } : {}),
         ...(node.model !== null ? { model: node.model } : {}),
+        ...(node.sandbox !== null ? { sandbox: node.sandbox } : {}),
         ...(node.startedAt !== null ? { startedAt: node.startedAt } : {}),
         ...(node.completedAt !== null ? { completedAt: node.completedAt } : {}),
       });
@@ -1154,6 +1164,7 @@ function startRunCore(
     promptHandler,
     defaultProvider,
     memoryTools,
+    sandboxPolicy,
   } = deps;
   const { snapshotManager, ribWorkflowBindings, projectNotebookStore, usageStore } = deps;
   const { workspaceManager, mutationLockManager, projectsStore } = deps;
@@ -1277,6 +1288,7 @@ function startRunCore(
     subscribers,
     promptHandler,
     defaultProvider,
+    sandboxPolicy,
     preflight: params.preflight === true,
     pendingApprovals,
     ...(providerOverride !== undefined ? { providerOverride } : {}),
@@ -1387,7 +1399,7 @@ function resumeRunCore(
   runId: string,
 ): ResumeRunResult {
   const { store, activeRuns, subscribers, promptHandler, defaultProvider, memoryTools } = deps;
-  const { snapshotManager, ribWorkflowBindings, catalog, usageStore } = deps;
+  const { snapshotManager, ribWorkflowBindings, catalog, usageStore, sandboxPolicy } = deps;
   const { workspaceManager, mutationLockManager } = deps;
   const { projectsStore, projectNotebookStore } = deps;
 
@@ -1582,6 +1594,7 @@ function resumeRunCore(
       subscribers,
       promptHandler,
       defaultProvider,
+      sandboxPolicy,
       preflight: rerunPreflight && resolveWorkflowPreflight(loadKeelsonConfig()),
       pendingApprovals,
       ...(providerOverride !== null ? { providerOverride } : {}),
@@ -1955,7 +1968,7 @@ export function createWorkflowController(
     workspaceManager,
     mutationLockManager,
   } = opts;
-  const { promptHandler, defaultProvider, memoryTools, projectNotebookStore } =
+  const { promptHandler, defaultProvider, memoryTools, projectNotebookStore, sandboxPolicy } =
     buildExecutionDeps(opts);
 
   return {
@@ -2036,7 +2049,7 @@ export function createWorkflowController(
           }
         }
         const handlers = new Map<string, NodeHandler>([
-          ["bash", bashHandler],
+          ["bash", makeBashHandler(sandboxPolicy ? { sandbox: sandboxPolicy } : {})],
           ["prompt", promptHandler],
           // No UI to pause on for a rib-driven run — approval fails fast, cancel aborts.
           [
@@ -2059,8 +2072,16 @@ export function createWorkflowController(
             }),
           ],
           ["command", makeCommandHandler({ promptHandler })],
-          ["loop", makeLoopHandler({ promptHandler, runUntilBashProbe: defaultRunUntilBashProbe })],
-          ["script", makeScriptHandler()],
+          [
+            "loop",
+            makeLoopHandler({
+              promptHandler,
+              runUntilBashProbe: makeRunUntilBashProbe(
+                sandboxPolicy ? { sandbox: sandboxPolicy } : {},
+              ),
+            }),
+          ],
+          ["script", makeScriptHandler(sandboxPolicy ? { sandbox: sandboxPolicy } : {})],
         ]);
         artifacts = await RunArtifactsDir.create(runId);
         try {
@@ -2171,6 +2192,7 @@ export function createWorkflowController(
             subscribers,
             promptHandler,
             defaultProvider,
+            sandboxPolicy,
             memoryTools,
             ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
             ...(snapshotManager !== undefined ? { snapshotManager } : {}),
@@ -2237,6 +2259,7 @@ export function createWorkflowController(
           subscribers,
           promptHandler,
           defaultProvider,
+          sandboxPolicy,
           memoryTools,
           catalog,
           ...(projectsStore !== undefined ? { projectsStore } : {}),
@@ -2376,6 +2399,7 @@ export function workflowsRoutes(
     defaultProvider,
     memoryTools,
     projectNotebookStore,
+    sandboxPolicy,
   } = buildExecutionDeps(opts);
 
   // Purge a run and cascade its linked chat conversation. Delete the
@@ -2803,6 +2827,7 @@ export function workflowsRoutes(
           subscribers,
           promptHandler: effectivePromptHandler,
           defaultProvider,
+          sandboxPolicy,
           memoryTools,
           ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
           ...(snapshotManager !== undefined ? { snapshotManager } : {}),
@@ -2903,6 +2928,7 @@ export function workflowsRoutes(
           subscribers,
           promptHandler: effectivePromptHandler,
           defaultProvider,
+          sandboxPolicy,
           memoryTools,
           ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
           ...(snapshotManager !== undefined ? { snapshotManager } : {}),
@@ -3042,6 +3068,7 @@ export function workflowsRoutes(
         subscribers,
         promptHandler: effectivePromptHandler,
         defaultProvider,
+        sandboxPolicy,
         memoryTools,
         ...(snapshotManager !== undefined ? { snapshotManager } : {}),
         ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
@@ -3230,6 +3257,7 @@ interface ExecuteRunArgs {
   subscribers: WorkflowSubscribers;
   promptHandler: NodeHandler;
   defaultProvider: string | undefined;
+  sandboxPolicy?: SandboxPolicy | undefined;
   preflight: boolean;
   providerOverride?: string;
   // Per-run pending approval map shared with the route's POST /resume and
@@ -3330,6 +3358,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     subscribers,
     promptHandler,
     defaultProvider,
+    sandboxPolicy,
     preflight,
     providerOverride,
     pendingApprovals,
@@ -3915,7 +3944,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
   };
 
   const handlers = new Map<string, NodeHandler>([
-    ["bash", bashHandler],
+    ["bash", makeBashHandler(sandboxPolicy ? { sandbox: sandboxPolicy } : {})],
     ["prompt", promptHandler],
     [
       "approval",
@@ -3936,10 +3965,10 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       makeLoopHandler({
         promptHandler,
         awaitInteraction,
-        runUntilBashProbe: defaultRunUntilBashProbe,
+        runUntilBashProbe: makeRunUntilBashProbe(sandboxPolicy ? { sandbox: sandboxPolicy } : {}),
       }),
     ],
-    ["script", makeScriptHandler()],
+    ["script", makeScriptHandler(sandboxPolicy ? { sandbox: sandboxPolicy } : {})],
   ]);
 
   const artifacts = await RunArtifactsDir.create(runId);
@@ -4139,6 +4168,12 @@ function sanitizeEffort(v: unknown): ReasoningEffortLevel | null {
   return result.success ? result.data : null;
 }
 
+// A handler may set any string; only the closed enum reaches the strict frame.
+function sanitizeSandbox(v: unknown): SandboxOutcome | null {
+  const result = sandboxOutcomeSchema.safeParse(v);
+  return result.success ? result.data : null;
+}
+
 interface NodeUsageAttribution {
   runId: string;
   nodeId: string;
@@ -4301,6 +4336,9 @@ function dispatchRunEvent(args: DispatchArgs): void {
       const provider = sanitizeProvenanceField(event.result.provider);
       const model = sanitizeProvenanceField(event.result.model);
       const effort = sanitizeEffort(event.result.effort);
+      const sandbox = sanitizeSandbox(event.result.sandbox);
+      const sandboxBackend =
+        sandbox !== null ? sanitizeProvenanceField(event.result.sandboxBackend) : null;
       const approval = approvalRecords?.get(event.nodeId) ?? null;
       approvalRecords?.delete(event.nodeId);
       store.upsertNodeOutput({
@@ -4317,6 +4355,8 @@ function dispatchRunEvent(args: DispatchArgs): void {
         model,
         effort,
         approval,
+        sandbox,
+        sandboxBackend,
       });
       subscribers.broadcast(runId, {
         type: "node_done",
@@ -4329,6 +4369,8 @@ function dispatchRunEvent(args: DispatchArgs): void {
         ...(model !== null ? { model } : {}),
         ...(effort !== null ? { effort } : {}),
         ...(approval !== null ? { approval } : {}),
+        ...(sandbox !== null ? { sandbox } : {}),
+        ...(sandboxBackend !== null ? { sandboxBackend } : {}),
       });
       // Snapshot bridge: a structured node output becomes the latest frame
       // on the run-scoped snapshot key.

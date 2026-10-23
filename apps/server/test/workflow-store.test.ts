@@ -351,6 +351,41 @@ describe("SQLite WorkflowStore", () => {
     expect(run!.nodes[0]!.startedAt).toBe("2025-01-01T00:00:01.000Z");
   });
 
+  test("persists the sandbox outcome and backend, and clears them on a later write (migration 23)", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    store.createRun({
+      runId: "r1",
+      workflowName: "x",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:00.000Z",
+      conversationId: mintConv(db),
+    });
+    const base = {
+      runId: "r1",
+      nodeId: "build",
+      status: "succeeded" as const,
+      outputText: "ok",
+      contentParts: null,
+      startedAt: null,
+      completedAt: null,
+      error: null,
+      usage: null,
+      provider: null,
+      model: null,
+      effort: null,
+    };
+    store.upsertNodeOutput({ ...base, sandbox: "mxc", sandboxBackend: "seatbelt" });
+    expect(store.getRun("r1")!.nodes[0]).toMatchObject({
+      sandbox: "mxc",
+      sandboxBackend: "seatbelt",
+    });
+    store.upsertNodeOutput(base);
+    expect(store.getRun("r1")!.nodes[0]).toMatchObject({ sandbox: null, sandboxBackend: null });
+    db.prepare("UPDATE workflow_node_outputs SET sandbox = 'weird' WHERE node_id = 'build'").run();
+    expect(store.getRun("r1")!.nodes[0]!.sandbox).toBeNull();
+  });
+
   test("persists and reads back the approval record (migration 18)", () => {
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);

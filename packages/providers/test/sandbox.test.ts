@@ -45,18 +45,43 @@ describe("toCopilotSandboxConfig", () => {
     });
   });
 
-  test("outbound allow, loopback, and hosts carry through; backend.copilot spreads last", () => {
+  test("outbound allow, loopback, and hosts carry through; backend.copilot adds options", () => {
     const config = toCopilotSandboxConfig(
       profile({
         network: { outbound: "allow", loopback: true, allowedHosts: ["github.com"] },
-        backend: { copilot: { allowDevToolAccess: false, sandboxMcpServers: false } },
+        backend: { copilot: { allowDevToolAccess: false } },
       }),
     );
     expect(config.userPolicy).toMatchObject({
       network: { allowOutbound: true, allowLocalNetwork: true, allowedHosts: ["github.com"] },
     });
     expect(config.allowDevToolAccess).toBe(false);
-    expect(config.sandboxMcpServers).toBe(false);
+  });
+
+  test("backend.copilot cannot disable the sandbox, allow a bypass, or drop a deny", () => {
+    const config = toCopilotSandboxConfig(
+      profile({
+        backend: {
+          copilot: {
+            enabled: false,
+            allowBypass: true,
+            sandboxMcpServers: false,
+            userPolicy: {
+              filesystem: { deniedPaths: [], readwritePaths: ["/extra"] },
+              network: { allowOutbound: true },
+            },
+          },
+        },
+      }),
+    );
+    expect(config).toMatchObject({ enabled: true, allowBypass: false, sandboxMcpServers: true });
+    expect(config.userPolicy).toMatchObject({
+      filesystem: {
+        readwritePaths: ["/extra", "/repo"],
+        deniedPaths: ["/home/op/.ssh"],
+      },
+      network: { allowOutbound: false },
+    });
   });
 });
 
@@ -150,12 +175,39 @@ describe("toClaudeSandboxSettings", () => {
     ).toEqual({ allowedDomains: ["registry.npmjs.org"], allowLocalBinding: false });
   });
 
-  test("backend.claude spreads over the mapped settings", () => {
+  test("backend.claude adds SDK options under the mapped settings", () => {
     const settings = toClaudeSandboxSettings(
       profile({ backend: { claude: { excludedCommands: ["docker"] } } }),
     );
     expect(settings.excludedCommands).toEqual(["docker"]);
     expect(settings.failIfUnavailable).toBe(true);
+  });
+
+  test("backend.claude cannot disable confinement or drop a profile deny", () => {
+    const settings = toClaudeSandboxSettings(
+      profile({
+        backend: {
+          claude: {
+            enabled: false,
+            failIfUnavailable: false,
+            allowUnsandboxedCommands: true,
+            network: { allowedDomains: ["*"], allowLocalBinding: true },
+            filesystem: { denyRead: [], denyWrite: [], allowWrite: ["/extra"] },
+          },
+        },
+      }),
+    );
+    expect(settings).toMatchObject({
+      enabled: true,
+      failIfUnavailable: true,
+      allowUnsandboxedCommands: false,
+      network: { allowedDomains: [], allowLocalBinding: false },
+      filesystem: {
+        allowWrite: ["/extra", "/repo"],
+        denyRead: ["/home/op/.ssh"],
+        denyWrite: ["/opt/tools", "/home/op/.ssh"],
+      },
+    });
   });
 });
 

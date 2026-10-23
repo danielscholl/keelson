@@ -7,7 +7,12 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { describe, expect, it } from "bun:test";
-import { startWorkflowRunBodySchema, workflowRunDetailSchema } from "../src/workflows.ts";
+import {
+  nodeOutputRowSchema,
+  startWorkflowRunBodySchema,
+  workflowFrameSchema,
+  workflowRunDetailSchema,
+} from "../src/workflows.ts";
 
 function makeRunDetail(overrides: Record<string, unknown> = {}) {
   return {
@@ -91,5 +96,32 @@ describe("workflowRunDetailSchema", () => {
       criteria: ["Flag uncovered acceptance criteria"],
     };
     expect(workflowRunDetailSchema.parse(makeRunDetail({ brief })).brief).toEqual(brief);
+  });
+});
+
+describe("sandbox outcome on node rows and node_done", () => {
+  it("rows default the outcome to null and reject values outside the enum", () => {
+    const row = {
+      nodeId: "b",
+      status: "succeeded",
+      outputText: null,
+      contentParts: null,
+      startedAt: null,
+      completedAt: null,
+      error: null,
+    };
+    expect(nodeOutputRowSchema.parse(row)).toMatchObject({ sandbox: null, sandboxBackend: null });
+    expect(
+      nodeOutputRowSchema.parse({ ...row, sandbox: "mxc", sandboxBackend: "seatbelt" }),
+    ).toMatchObject({ sandbox: "mxc", sandboxBackend: "seatbelt" });
+    expect(nodeOutputRowSchema.safeParse({ ...row, sandbox: "docker" }).success).toBe(false);
+  });
+
+  it("node_done carries an optional outcome and backend", () => {
+    const frame = { type: "node_done", nodeId: "b", status: "succeeded", error: null };
+    expect(
+      workflowFrameSchema.parse({ ...frame, sandbox: "provider", sandboxBackend: "claude" }),
+    ).toMatchObject({ sandbox: "provider", sandboxBackend: "claude" });
+    expect(workflowFrameSchema.safeParse({ ...frame, sandbox: "on" }).success).toBe(false);
   });
 });

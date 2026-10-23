@@ -18,16 +18,18 @@ import {
 import {
   loadKeelsonConfig,
   readModelClassOverride,
+  resolveSandboxConfig,
   resolveWorkflowPreflight,
 } from "@keelson/shared/config";
+import { keelsonPaths, resolveKeelsonHome } from "@keelson/shared/paths";
 import { getRegisteredTools } from "@keelson/skills";
 import {
-  bashHandler,
+  bundledBinDir,
   checkWorkflowCatalog,
+  createOperatorSandboxPolicy,
   createWorktree,
   DEFAULT_TOOL_DENYLIST,
   type DiscoveryRoot,
-  defaultRunUntilBashProbe,
   discoverWorkflows,
   ensureWorktreeDeps,
   fetchOrigin,
@@ -36,10 +38,12 @@ import {
   headDivergesFrom,
   isGitRepo,
   makeApprovalHandler,
+  makeBashHandler,
   makeCancelHandler,
   makeCommandHandler,
   makeLoopHandler,
   makePromptHandler,
+  makeRunUntilBashProbe,
   makeScriptHandler,
   type NodeHandler,
   type PromptHandlerProvider,
@@ -269,7 +273,19 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   // a pause callout and no second client to resume the run, so an approval
   // node fails immediately with a clear message. Operators who need
   // approval should route through `keelson start` + the SPA.
+  // Same policy the server builds; headless runs ship no sandbox runtime either,
+  // so a node that resolves sandboxed fails closed here too.
+  const sandboxConfig = resolveSandboxConfig(config);
+  for (const warning of sandboxConfig.warnings) console.warn(`[sandbox] ${warning}`);
+  const home = resolveKeelsonHome();
+  const sandbox = createOperatorSandboxPolicy(sandboxConfig, {
+    home,
+    dbPath: keelsonPaths(home).dbPath,
+    bundledBinDir: bundledBinDir(),
+    unavailableReason: "this build has no sandbox runtime",
+  });
   const promptHandler = makePromptHandler({
+    sandbox,
     getProvider: (id) => {
       const target = id ?? providerId;
       if (!isRegisteredProvider(target)) {
@@ -322,7 +338,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   });
 
   const handlers = new Map<string, NodeHandler>([
-    ["bash", bashHandler],
+    ["bash", makeBashHandler({ sandbox })],
     ["prompt", promptHandler],
     ["approval", approvalHandler],
     ["cancel", cancelHandler],
@@ -330,8 +346,11 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
     // Headless fallback has no UI to pause on, so `loop.interactive: true`
     // fails fast (no awaitInteraction wired). `loop.until_bash` is supported
     // because it's an autonomous completion probe, not human-in-the-loop.
-    ["loop", makeLoopHandler({ promptHandler, runUntilBashProbe: defaultRunUntilBashProbe })],
-    ["script", makeScriptHandler()],
+    [
+      "loop",
+      makeLoopHandler({ promptHandler, runUntilBashProbe: makeRunUntilBashProbe({ sandbox }) }),
+    ],
+    ["script", makeScriptHandler({ sandbox })],
   ]);
 
   const runId = crypto.randomUUID();

@@ -9,6 +9,8 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { NodeContext, NodeStreamEvent, NotebookAdapter } from "../executor.ts";
 import type { DagNode, NodeOutput, WorkflowDefinition } from "../schema/index.ts";
 import {
@@ -17,6 +19,7 @@ import {
   type PromptHandlerProvider,
   type PromptHandlerSendOptions,
 } from "./prompt.ts";
+import { createSandboxPolicy } from "./sandbox.ts";
 
 interface SpyCall {
   prompt: string;
@@ -48,6 +51,7 @@ interface SpyProviderOptions {
       balanced?: string;
       deep?: string;
     };
+    sandbox?: "native" | "tool" | "none";
   };
 }
 
@@ -3139,5 +3143,64 @@ describe("prompt handler — usage sanitation at the provider boundary", () => {
     });
     const result = await handler.handle(stubNode, buildCtx());
     expect(result.usage).toBeUndefined();
+  });
+});
+
+describe("makePromptHandler — sandbox", () => {
+  const home = join(tmpdir(), "keelson-prompt-sandbox-home");
+  const policy = (defaultEnabled: boolean) =>
+    createSandboxPolicy({
+      floor: false,
+      defaultEnabled,
+      home,
+      dbPath: join(home, "keelson.db"),
+      bundledBinDir: join(home, "bin"),
+      resolveGitCommonDir: () => undefined,
+    });
+
+  test("a provider with native support gets the profile and the node reports provider", async () => {
+    const { provider, calls } = makeSpyProvider({
+      type: "claude",
+      capabilities: { sandbox: "native" },
+      chunks: [{ type: "text", content: "ok" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      sandbox: policy(true),
+    });
+    const result = await handler.handle(stubNode, buildCtx({ workflowProvider: "claude" }));
+    expect(result.status).toBe("succeeded");
+    expect(result.sandbox).toBe("provider");
+    expect(result.sandboxBackend).toBe("claude");
+    expect(calls[0]?.options?.sandbox?.enabled).toBe(true);
+    expect(calls[0]?.options?.sandbox?.filesystem.readwrite[0]).toBeDefined();
+  });
+
+  test("a provider that cannot sandbox fails the node closed before any turn", async () => {
+    const { provider, calls } = makeSpyProvider({ type: "stub" });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      sandbox: policy(false),
+    });
+    const node = { id: "n1", prompt: "", sandbox: { enabled: true } } as unknown as DagNode;
+    const result = await handler.handle(node, buildCtx());
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("cannot sandbox its tools");
+    expect(result.sandbox).toBe("off");
+    expect(calls).toEqual([]);
+  });
+
+  test("default off sends no profile and reports off", async () => {
+    const { provider, calls } = makeSpyProvider({ chunks: [{ type: "text", content: "ok" }] });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      sandbox: policy(false),
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.sandbox).toBe("off");
+    expect(calls[0]?.options?.sandbox).toBeUndefined();
   });
 });

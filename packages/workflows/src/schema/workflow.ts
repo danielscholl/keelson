@@ -9,7 +9,7 @@ import { convergeConfigSchema } from "./converge.ts";
 import {
   dagNodeSchema,
   effortLevelSchema,
-  sandboxSettingsSchema,
+  sandboxProfileSchema,
   thinkingConfigSchema,
 } from "./dag-node.ts";
 
@@ -79,7 +79,7 @@ export const workflowBaseSchema = z.object({
   thinking: thinkingConfigSchema.optional(),
   fallbackModel: z.string().min(1).optional(),
   betas: z.array(z.string().min(1)).nonempty("'betas' must be a non-empty array").optional(),
-  sandbox: sandboxSettingsSchema.optional(),
+  sandbox: sandboxProfileSchema.optional(),
   worktree: workflowWorktreePolicySchema.optional(),
   converge: convergeConfigSchema.optional(),
   /**

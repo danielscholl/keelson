@@ -3,11 +3,14 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
+import { readFileSync, rmSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NodeContext } from "../executor.ts";
 import type { DagNode, WorkflowDefinition } from "../schema/index.ts";
+import { hostLauncher, type ProcessLauncher, type SpawnSpec } from "./launcher.ts";
+import { createSandboxPolicy } from "./sandbox.ts";
 import { makeScriptHandler } from "./script.ts";
 
 function buildCtx(opts: {
@@ -246,5 +249,73 @@ describe("makeScriptHandler — uv (python)", () => {
     const result = await handler.handle(node, ctx);
     expect(result.status).toBe("succeeded");
     expect(result.output).toEqual({ kind: "text", text: "from-py" });
+  });
+});
+
+describe("makeScriptHandler — sandbox", () => {
+  function recordingPolicy(runtime: boolean) {
+    const specs: SpawnSpec[] = [];
+    const home = join(tmpdir(), "keelson-script-sandbox-home");
+    const policy = createSandboxPolicy({
+      floor: false,
+      defaultEnabled: true,
+      home,
+      dbPath: join(home, "keelson.db"),
+      bundledBinDir: join(home, "bin"),
+      resolveGitCommonDir: () => undefined,
+      ...(runtime
+        ? {
+            runtime: {
+              backend: "fake",
+              createLauncher: (): ProcessLauncher => ({
+                id: "mxc",
+                spawn: (spec) => {
+                  specs.push(spec);
+                  return hostLauncher.spawn(spec);
+                },
+              }),
+            },
+          }
+        : {}),
+    });
+    return { policy, specs };
+  }
+
+  const bunNode = { id: "s", script: "x", runtime: "bun" } as unknown as DagNode;
+
+  test("an inline bun body runs as `bun --no-env-file <scratch>/body.ts`", async () => {
+    const artifacts = await mkdtemp(join(tmpdir(), "keelson-script-sandbox-"));
+    try {
+      const { policy, specs } = recordingPolicy(true);
+      const body = "console.log('from ' + process.env.KEELSON_RUN_ID)";
+      const result = await makeScriptHandler({ sandbox: policy }).handle(bunNode, {
+        ...buildCtx({ cwd: process.cwd(), body }),
+        artifactsDir: artifacts,
+      });
+      expect(result).toMatchObject({
+        status: "succeeded",
+        output: { kind: "text", text: "from run-script" },
+        sandbox: "mxc",
+        sandboxBackend: "fake",
+      });
+      const bodyFile = join(artifacts, "sandbox", "s", "body.ts");
+      expect(specs[0]?.cmd).toBe("bun");
+      expect(specs[0]?.args).toEqual(["--no-env-file", bodyFile]);
+      expect(readFileSync(bodyFile, "utf8")).toBe(body);
+    } finally {
+      rmSync(artifacts, { recursive: true, force: true });
+    }
+  });
+
+  test("with no runtime it fails closed and reports off", async () => {
+    const { policy, specs } = recordingPolicy(false);
+    const result = await makeScriptHandler({ sandbox: policy }).handle(
+      bunNode,
+      buildCtx({ cwd: process.cwd(), body: "console.log('no')" }),
+    );
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("sandbox required but unavailable");
+    expect(result.sandbox).toBe("off");
+    expect(specs).toEqual([]);
   });
 });

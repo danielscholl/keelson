@@ -413,6 +413,16 @@ const migrations: Migration[] = [
       db.exec("ALTER TABLE conversations ADD COLUMN sandbox TEXT;");
     },
   },
+  {
+    version: 23,
+    description: "record where each workflow node ran ('mxc', 'provider', 'off') and its backend",
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE workflow_node_outputs ADD COLUMN sandbox TEXT;
+        ALTER TABLE workflow_node_outputs ADD COLUMN sandbox_backend TEXT;
+      `);
+    },
+  },
 ];
 
 // The lowest version this build can apply. A database stamped below it was

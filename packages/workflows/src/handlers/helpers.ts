@@ -27,11 +27,14 @@ export function failed(error: string, text = ""): NodeResult {
  * `BASH_NODE_AI_FIELDS`: that list also drives the loader's "meaningless on
  * bash" warning, where `idle_timeout` legitimately belongs. The prompt handler
  * does read them, so a synthesized prompt node must still inherit them.
+ * `sandbox` is appended for the same reason: it is valid on every node kind,
+ * so it is not an AI-only field, but the prompt turn still needs it.
  */
 export const AI_PASSTHROUGH_KEYS: readonly string[] = [
   ...BASH_NODE_AI_FIELDS,
   "idle_timeout",
   "timeout",
+  "sandbox",
 ];
 
 /**

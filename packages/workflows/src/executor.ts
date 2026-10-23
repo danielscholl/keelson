@@ -150,7 +150,13 @@ export interface NodeResult {
   effort?: string;
   /** Provider-reported finish reason for LLM-backed nodes; absent when the provider reports none. */
   finishReason?: "end" | "max_tokens" | "tool_calls" | "content_filter";
+  /** Where a bash, script, or prompt node's work ran; absent for node types that run nothing. */
+  sandbox?: SandboxOutcome;
+  /** The backend that confined it (e.g. "seatbelt", or the provider id), when sandboxed. */
+  sandboxBackend?: string;
 }
+
+export type SandboxOutcome = "mxc" | "provider" | "off";
 
 export interface NodeHandler {
   /** Node-type string the handler claims (e.g. "prompt", "bash"). Widened from a strict union so future node types don't break the contract. */
@@ -461,6 +467,7 @@ function bodyToSchemaOutput(
   const provenance = {
     ...(result.provider !== undefined ? { provider: result.provider } : {}),
     ...(result.model !== undefined ? { model: result.model } : {}),
+    ...(result.sandbox !== undefined ? { sandbox: result.sandbox } : {}),
   };
   switch (result.status) {
     case "succeeded":

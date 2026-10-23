@@ -17,6 +17,8 @@ import {
   parsePersistedTokenUsage,
   type ReasoningEffortLevel,
   reasoningEffortLevelSchema,
+  type SandboxOutcome,
+  sandboxOutcomeSchema,
   TERMINAL_RUN_STATUSES,
   type TokenUsage,
   type WorkflowNodeStatus,
@@ -92,6 +94,10 @@ export interface UpsertNodeOutputInput {
   // Approval-gate record: who answered and the reviewer's verdict when one
   // ran. Omitted or null for every other node type.
   approval?: ApprovalRecord | null;
+  // Where the node's work ran and what confined it; omitted or null for node
+  // types that run nothing.
+  sandbox?: SandboxOutcome | null;
+  sandboxBackend?: string | null;
 }
 
 export interface UpdateRunStatusInput {
@@ -215,6 +221,8 @@ interface NodeRow {
   model: string | null;
   effort: string | null;
   approval_json: string | null;
+  sandbox: string | null;
+  sandbox_backend: string | null;
 }
 
 function rowToRunSummary(row: RunRow): WorkflowRunSummary {
@@ -279,7 +287,15 @@ function rowToNodeOutput(row: NodeRow): NodeOutputRow {
     model: row.model,
     effort: parsePersistedEffort(row.effort),
     approval: parseApprovalRecord(row.approval_json),
+    sandbox: parsePersistedSandbox(row.sandbox),
+    sandboxBackend: row.sandbox_backend,
   };
+}
+
+// Closed enum on the wire, like effort: an unknown stored value reads as null.
+function parsePersistedSandbox(raw: string | null): SandboxOutcome | null {
+  const result = sandboxOutcomeSchema.safeParse(raw);
+  return result.success ? result.data : null;
 }
 
 // Degrades to null on a malformed value so the run-detail endpoint keeps
@@ -392,8 +408,8 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     "SELECT * FROM workflow_runs WHERE status = ? ORDER BY started_at DESC, rowid DESC",
   );
   const upsertNode = db.prepare(
-    `INSERT INTO workflow_node_outputs(run_id, node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json, provider, model, effort, approval_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO workflow_node_outputs(run_id, node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json, provider, model, effort, approval_json, sandbox, sandbox_backend)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(run_id, node_id) DO UPDATE SET
        status = excluded.status,
        output_text = excluded.output_text,
@@ -405,13 +421,15 @@ export function createWorkflowStore(db: Database): WorkflowStore {
        provider = excluded.provider,
        model = excluded.model,
        effort = excluded.effort,
-       approval_json = excluded.approval_json`,
+       approval_json = excluded.approval_json,
+       sandbox = excluded.sandbox,
+       sandbox_backend = excluded.sandbox_backend`,
   );
   // rowid tiebreak preserves DAG insertion order when two nodes share a
   // completed_at millisecond — the executor runs independent nodes in
   // parallel, so timestamp ties are common.
   const selectNodes = db.prepare(
-    "SELECT node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json, provider, model, effort, approval_json FROM workflow_node_outputs WHERE run_id = ? ORDER BY rowid ASC",
+    "SELECT node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json, provider, model, effort, approval_json, sandbox, sandbox_backend FROM workflow_node_outputs WHERE run_id = ? ORDER BY rowid ASC",
   );
   // Usage rides as JSON in usage_json, so the sum is done in JS over the run's
   // node rows rather than in SQL. Selects only the JSON column.
@@ -511,6 +529,8 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         input.approval !== undefined && input.approval !== null
           ? JSON.stringify(input.approval)
           : null,
+        input.sandbox ?? null,
+        input.sandboxBackend ?? null,
       );
     },
     getRunUsageTotals(runId) {

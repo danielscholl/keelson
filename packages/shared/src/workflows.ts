@@ -14,6 +14,7 @@ import {
   reasoningEffortLevelSchema,
   tokenUsageSchema,
 } from "./chat.ts";
+import { sandboxOutcomeSchema } from "./sandbox.ts";
 
 // Run-level status. `running` is the value the store writes on POST; the
 // executor's RunStatus union ("succeeded" | "failed" | "cancelled") flows in
@@ -190,6 +191,10 @@ export const nodeOutputRowSchema = z
     // verdict when one ran. Null for every other node type and for rows that
     // predate the column.
     approval: approvalRecordSchema.nullable().default(null),
+    // Where the node's work ran (migration 23) and the backend that confined it.
+    // Null for node types that run nothing and for rows that predate the column.
+    sandbox: sandboxOutcomeSchema.nullable().default(null),
+    sandboxBackend: z.string().nullable().default(null),
   })
   .strict();
 export type NodeOutputRow = z.infer<typeof nodeOutputRowSchema>;
@@ -398,6 +403,9 @@ export const workflowFrameSchema = z.discriminatedUnion("type", [
       // Present for approval nodes: who answered the gate and the reviewer's
       // verdict when one ran.
       approval: approvalRecordSchema.optional(),
+      // Present for bash, script, and prompt nodes once the sandbox decision is made.
+      sandbox: sandboxOutcomeSchema.optional(),
+      sandboxBackend: z.string().optional(),
     })
     .strict(),
   z

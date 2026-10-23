@@ -10,28 +10,52 @@ import type { SandboxProfile } from "@keelson/shared";
 
 // The SDK's SandboxConfig. `profile.env` has no counterpart here: Copilot's
 // credentials.envVars masks each value behind per-variable HTTPS inject hosts,
-// so an operator who needs one sets it through `backend.copilot`.
+// so an operator who needs one sets it through `backend.copilot`. That block is
+// the base the profile is applied over: it may add options and grants, but
+// cannot disable the sandbox, allow a bypass, or drop a deny.
 export function toCopilotSandboxConfig(profile: SandboxProfile): Record<string, unknown> {
   const { filesystem, network } = profile;
+  const pass = profile.backend?.copilot ?? {};
+  const passPolicy = asRecord(pass.userPolicy);
+  const passFs = asRecord(passPolicy.filesystem);
+  const passNet = asRecord(passPolicy.network);
   return {
-    enabled: true,
     addCurrentWorkingDirectory: true,
+    ...pass,
+    enabled: true,
     allowBypass: false,
     sandboxMcpServers: true,
     userPolicy: {
+      ...passPolicy,
       filesystem: {
-        readwritePaths: [...filesystem.readwrite],
-        readonlyPaths: [...filesystem.readonly],
-        deniedPaths: [...filesystem.denied],
+        ...passFs,
+        readwritePaths: union(passFs.readwritePaths, filesystem.readwrite),
+        readonlyPaths: union(passFs.readonlyPaths, filesystem.readonly),
+        deniedPaths: union(passFs.deniedPaths, filesystem.denied),
       },
       network: {
+        ...passNet,
         allowOutbound: network.outbound === "allow",
         allowLocalNetwork: network.loopback === true,
         ...(network.allowedHosts !== undefined ? { allowedHosts: [...network.allowedHosts] } : {}),
       },
     },
-    ...profile.backend?.copilot,
   };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function union(...lists: unknown[]): string[] {
+  const out = new Set<string>();
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) if (typeof item === "string") out.add(item);
+  }
+  return [...out];
 }
 
 // Structural slices of the SDK's server and session RPC surfaces.

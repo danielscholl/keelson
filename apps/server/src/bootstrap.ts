@@ -94,6 +94,8 @@ import { runJSON, runText } from "@keelson/shared/exec";
 import { projectWorkflowsDir } from "@keelson/shared/paths";
 import { getRegisteredTools, isRegisteredTool, registerTool } from "@keelson/skills";
 import {
+  bundledBinDir,
+  createOperatorSandboxPolicy,
   currentBranch,
   DEFAULT_TOOL_DENYLIST,
   discoverWorkflows,
@@ -108,6 +110,7 @@ import {
   type PromptToolResultGate,
   parseToolDenylist,
   parseWorkflow,
+  type SandboxPolicy,
   validateWorkflowInvariants,
   type WorkflowDefinition,
   type WorkflowLoadWarning,
@@ -1591,6 +1594,19 @@ export function bootstrapSandbox(
   return resolved;
 }
 
+// The workflow-node policy over the same resolved config chat uses. No runtime
+// ships yet, so a node that resolves sandboxed fails closed.
+export function bootstrapSandboxPolicy(
+  resolved: ResolvedSandboxConfig,
+  deps: { home: string; dbPath: string },
+): SandboxPolicy {
+  return createOperatorSandboxPolicy(resolved, {
+    ...deps,
+    bundledBinDir: bundledBinDir(),
+    unavailableReason: "this build has no sandbox runtime",
+  });
+}
+
 // The one-line policy text GET /api/config serves to both clients.
 export function describeSandboxPolicy(policy: ResolvedSandboxConfig): string {
   const enabled = policy.floor || policy.default;
@@ -1690,6 +1706,7 @@ export function bootstrapPromptHandler(
     evaluateToolResult?: PromptToolResultGate;
     evaluateResponse?: PromptResponseGate;
     requestGate?: PromptRequestGate;
+    sandbox?: SandboxPolicy;
   } = {},
 ): NodeHandler | undefined {
   const providers = getProviderInfoList();
@@ -1751,6 +1768,7 @@ export function bootstrapPromptHandler(
   const timeoutMs = parsePromptTimeoutMs(process.env.KEELSON_WORKFLOW_PROMPT_TIMEOUT_S);
   return makePromptHandler({
     getProvider,
+    ...(opts.sandbox ? { sandbox: opts.sandbox } : {}),
     // Resolve absent or unavailable preferences to the registered boot default.
     resolveProviderId: (id) => (id !== undefined && isRegisteredProvider(id) ? id : providerId),
     resolveModelClass: (id, modelClass) => readModelClassOverride(config, id)?.[modelClass],

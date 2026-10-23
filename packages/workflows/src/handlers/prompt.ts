@@ -26,8 +26,16 @@
  * the workflowFrameSchema validator) cast back to `MessageChunk` at the edge.
  */
 
-import type { NodeHandler, NodeResult, NodeTokenUsage } from "../executor.ts";
+import type { NodeContext, NodeHandler, NodeResult, NodeTokenUsage } from "../executor.ts";
+import type { DagNode } from "../schema/index.ts";
 import { buildOutputFormatSuffix, extractJsonValue } from "./output-format.ts";
+import {
+  type SandboxPolicy,
+  type SandboxProfile,
+  type SandboxResolution,
+  sandboxContextFor,
+  tagSandboxResult,
+} from "./sandbox.ts";
 
 type ModelClassName = "fast" | "balanced" | "deep";
 type PromptFinishReason = NonNullable<NodeResult["finishReason"]>;
@@ -72,6 +80,8 @@ export interface PromptHandlerProvider {
     tools?: boolean;
     models?: readonly string[];
     modelClasses?: Partial<Record<ModelClassName, string>>;
+    // Absent reads as "none": a sandboxed node on this provider fails closed.
+    sandbox?: "native" | "tool" | "none";
   };
 }
 
@@ -94,6 +104,8 @@ export interface PromptHandlerSendOptions {
   // can correctly identify MCP names even when one was filtered out by
   // the global denylist.
   registeredMcpToolNames?: readonly string[];
+  // The node's resolved sandbox; the provider confines its own tools to it.
+  sandbox?: SandboxProfile;
   onFinishReason?: (reason: PromptFinishReason) => void;
   // Per-node hook matchers from the vendored schema. Forwarded verbatim
   // to the provider, which projects them into the SDK's hook protocol.
@@ -262,6 +274,9 @@ export interface MakePromptHandlerOptions {
   lifecycle?: PromptHandlerLifecycle;
   /** Optional system prompt to seed every prompt-node session. */
   systemPrompt?: string;
+  // When set, a sandboxed node hands its profile to the provider, and one on a
+  // provider that cannot sandbox fails closed.
+  sandbox?: SandboxPolicy;
 }
 
 // Default denylist is empty — Keelson core has no built-in tools, and ribs
@@ -294,697 +309,736 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
   const lifecycle = opts.lifecycle ?? {};
   const systemPrompt = opts.systemPrompt;
 
-  return {
-    type: "prompt",
-    async handle(node, ctx): Promise<NodeResult> {
-      // Lifecycle: beforeNode (memory recall plugs in here). Errors here
-      // MUST NOT take the node down — the seam is a hook, not an oracle.
-      try {
-        await lifecycle.beforeNode?.({ runId: ctx.runId, nodeId: ctx.nodeId });
-      } catch {
-        // swallow — hooks are best-effort
-      }
+  const effectiveProviderFor = (node: DagNode, ctx: NodeContext): string | undefined => {
+    const pin =
+      trimmedString((node as { provider?: unknown }).provider) ??
+      trimmedString(ctx.workflow.provider);
+    return ctx.providerOverride ?? opts.resolveProviderId?.(pin) ?? pin;
+  };
 
-      // Race the provider stream against ctx.abortSignal (run cancel) and a
-      // node-level timeout. handlerExit is the single source of truth for
-      // "the handler is done" — both cancel and timeout flip it. Whatever
-      // happens to the provider (even a hung sendQuery that never honors
-      // abort), the race below guarantees handle() returns within bounded
-      // time.
-      const handlerExit = new AbortController();
-      let timedOut = false;
-      let cancelled = false;
-      const onUserCancel = (): void => {
-        cancelled = true;
-        handlerExit.abort();
-      };
-      if (ctx.abortSignal.aborted) {
-        cancelled = true;
-        handlerExit.abort();
+  const resolveSandbox = (node: DagNode, ctx: NodeContext): SandboxResolution | undefined => {
+    if (opts.sandbox === undefined) return undefined;
+    const providerId = effectiveProviderFor(node, ctx);
+    let support: "native" | "tool" | "none" = "none";
+    let label = providerId;
+    try {
+      const provider = opts.getProvider(providerId);
+      support = provider.getCapabilities?.().sandbox ?? "none";
+      label ??= provider.getType?.();
+    } catch {
+      // An unresolvable provider fails in the turn itself; here it just cannot sandbox.
+    }
+    return opts.sandbox.resolve(node.sandbox, {
+      ...sandboxContextFor(ctx),
+      provider: { id: label ?? "default", support },
+    });
+  };
+
+  const handleTurn = async (
+    node: DagNode,
+    ctx: NodeContext,
+    sandboxProfile: SandboxProfile | undefined,
+  ): Promise<NodeResult> => {
+    // Lifecycle: beforeNode (memory recall plugs in here). Errors here
+    // MUST NOT take the node down — the seam is a hook, not an oracle.
+    try {
+      await lifecycle.beforeNode?.({ runId: ctx.runId, nodeId: ctx.nodeId });
+    } catch {
+      // swallow — hooks are best-effort
+    }
+
+    // Race the provider stream against ctx.abortSignal (run cancel) and a
+    // node-level timeout. handlerExit is the single source of truth for
+    // "the handler is done" — both cancel and timeout flip it. Whatever
+    // happens to the provider (even a hung sendQuery that never honors
+    // abort), the race below guarantees handle() returns within bounded
+    // time.
+    const handlerExit = new AbortController();
+    let timedOut = false;
+    let cancelled = false;
+    const onUserCancel = (): void => {
+      cancelled = true;
+      handlerExit.abort();
+    };
+    if (ctx.abortSignal.aborted) {
+      cancelled = true;
+      handlerExit.abort();
+    } else {
+      ctx.abortSignal.addEventListener("abort", onUserCancel, { once: true });
+    }
+
+    // Per-node budget overrides the factory default, mirroring bash.ts.
+    // It's an IDLE timer per the authoring guide ("ms of AI-stream silence
+    // before the node fails") — resetIdleTimer re-arms it on every chunk, so
+    // a long turn that keeps producing output is bounded by silence, not
+    // wall-clock.
+    const nodeIdleTimeout = (node as { idle_timeout?: unknown }).idle_timeout;
+    const nodeTimeout = (node as { timeout?: unknown }).timeout;
+    const nodeBudget = nodeIdleTimeout ?? nodeTimeout;
+    const idleTimeoutMs =
+      typeof nodeBudget === "number" && Number.isFinite(nodeBudget) && nodeBudget > 0
+        ? nodeBudget
+        : timeoutMs;
+
+    const fireIdleTimeout = (): void => {
+      timedOut = true;
+      handlerExit.abort();
+    };
+    let timer = setTimeout(fireIdleTimeout, idleTimeoutMs);
+    const resetIdleTimer = (): void => {
+      clearTimeout(timer);
+      timer = setTimeout(fireIdleTimeout, idleTimeoutMs);
+    };
+
+    const allTools = opts.getRegisteredTools();
+
+    const nodeMeta: WorkflowNodeMeta = {
+      workflowName: ctx.workflow.name,
+      nodeId: ctx.nodeId,
+    };
+
+    // Per-node fields from the vendored schema if present. Cast through
+    // `unknown`-shaped accessors because the executor's DagNode is a
+    // discriminated union and these fields live on the prompt-shaped
+    // member.
+    const nodeModelRaw = (node as { model?: unknown }).model;
+    const workflowModelRaw = ctx.workflow.model;
+    // Resolution chain: node.model → workflow.model → provider.defaultModel.
+    // The third step is deferred to consume(): it needs a successfully
+    // resolved provider, and resolving it there keeps the fallback on the
+    // same code path that surfaces unknown-provider errors as a failed
+    // NodeResult.
+    let model: string | undefined;
+    if (typeof nodeModelRaw === "string" && nodeModelRaw.length > 0) {
+      model = nodeModelRaw;
+    } else if (typeof workflowModelRaw === "string" && workflowModelRaw.length > 0) {
+      model = workflowModelRaw;
+    }
+    // Same chain as model, minus a provider-level default: providers apply
+    // their own per-model default when this is absent.
+    const effort =
+      readEffort((node as { effort?: unknown }).effort) ?? readEffort(ctx.workflow.effort);
+    const nodeAllowed = readStringArray(node, "allowed_tools");
+    const nodeDenied = readStringArray(node, "denied_tools");
+    const requiredToolCalls = readStringArray(node, "require_tool_call");
+    const nodeHooks = readHooksField(node);
+    const nodeOutputFormat = readOutputFormat(node);
+    const failOnToolError = (node as { fail_on_tool_error?: unknown }).fail_on_tool_error === true;
+
+    const nodeProviderRaw = (node as { provider?: unknown }).provider;
+    const nodeProvider =
+      typeof nodeProviderRaw === "string" && nodeProviderRaw.trim().length > 0
+        ? nodeProviderRaw.trim()
+        : undefined;
+    const workflowProviderRaw = ctx.workflow.provider;
+    const workflowProvider =
+      typeof workflowProviderRaw === "string" && workflowProviderRaw.trim().length > 0
+        ? workflowProviderRaw.trim()
+        : undefined;
+    const pinnedProviderId = nodeProvider ?? workflowProvider;
+    const preferredProviderId = opts.resolveProviderId?.(pinnedProviderId) ?? pinnedProviderId;
+    const effectiveProviderId = ctx.providerOverride ?? preferredProviderId;
+    const modelProviderId = pinnedProviderId ?? preferredProviderId;
+    const recordedProviderId = effectiveProviderId;
+
+    if (
+      ctx.providerOverride !== undefined &&
+      pinnedProviderId !== undefined &&
+      effectiveProviderId !== pinnedProviderId
+    ) {
+      const source = nodeProvider !== undefined ? "node" : "workflow";
+      const message = `provider override '${effectiveProviderId}' displaces ${source} pin '${pinnedProviderId}'`;
+      if (nodeProvider !== undefined || ctx.warnOnce === undefined) {
+        ctx.emit({ type: "node_warning", message });
       } else {
-        ctx.abortSignal.addEventListener("abort", onUserCancel, { once: true });
-      }
-
-      // Per-node budget overrides the factory default, mirroring bash.ts.
-      // It's an IDLE timer per the authoring guide ("ms of AI-stream silence
-      // before the node fails") — resetIdleTimer re-arms it on every chunk, so
-      // a long turn that keeps producing output is bounded by silence, not
-      // wall-clock.
-      const nodeIdleTimeout = (node as { idle_timeout?: unknown }).idle_timeout;
-      const nodeTimeout = (node as { timeout?: unknown }).timeout;
-      const nodeBudget = nodeIdleTimeout ?? nodeTimeout;
-      const idleTimeoutMs =
-        typeof nodeBudget === "number" && Number.isFinite(nodeBudget) && nodeBudget > 0
-          ? nodeBudget
-          : timeoutMs;
-
-      const fireIdleTimeout = (): void => {
-        timedOut = true;
-        handlerExit.abort();
-      };
-      let timer = setTimeout(fireIdleTimeout, idleTimeoutMs);
-      const resetIdleTimer = (): void => {
-        clearTimeout(timer);
-        timer = setTimeout(fireIdleTimeout, idleTimeoutMs);
-      };
-
-      const allTools = opts.getRegisteredTools();
-
-      const nodeMeta: WorkflowNodeMeta = {
-        workflowName: ctx.workflow.name,
-        nodeId: ctx.nodeId,
-      };
-
-      // Per-node fields from the vendored schema if present. Cast through
-      // `unknown`-shaped accessors because the executor's DagNode is a
-      // discriminated union and these fields live on the prompt-shaped
-      // member.
-      const nodeModelRaw = (node as { model?: unknown }).model;
-      const workflowModelRaw = ctx.workflow.model;
-      // Resolution chain: node.model → workflow.model → provider.defaultModel.
-      // The third step is deferred to consume(): it needs a successfully
-      // resolved provider, and resolving it there keeps the fallback on the
-      // same code path that surfaces unknown-provider errors as a failed
-      // NodeResult.
-      let model: string | undefined;
-      if (typeof nodeModelRaw === "string" && nodeModelRaw.length > 0) {
-        model = nodeModelRaw;
-      } else if (typeof workflowModelRaw === "string" && workflowModelRaw.length > 0) {
-        model = workflowModelRaw;
-      }
-      // Same chain as model, minus a provider-level default: providers apply
-      // their own per-model default when this is absent.
-      const effort =
-        readEffort((node as { effort?: unknown }).effort) ?? readEffort(ctx.workflow.effort);
-      const nodeAllowed = readStringArray(node, "allowed_tools");
-      const nodeDenied = readStringArray(node, "denied_tools");
-      const requiredToolCalls = readStringArray(node, "require_tool_call");
-      const nodeHooks = readHooksField(node);
-      const nodeOutputFormat = readOutputFormat(node);
-      const failOnToolError =
-        (node as { fail_on_tool_error?: unknown }).fail_on_tool_error === true;
-
-      const nodeProviderRaw = (node as { provider?: unknown }).provider;
-      const nodeProvider =
-        typeof nodeProviderRaw === "string" && nodeProviderRaw.trim().length > 0
-          ? nodeProviderRaw.trim()
-          : undefined;
-      const workflowProviderRaw = ctx.workflow.provider;
-      const workflowProvider =
-        typeof workflowProviderRaw === "string" && workflowProviderRaw.trim().length > 0
-          ? workflowProviderRaw.trim()
-          : undefined;
-      const pinnedProviderId = nodeProvider ?? workflowProvider;
-      const preferredProviderId = opts.resolveProviderId?.(pinnedProviderId) ?? pinnedProviderId;
-      const effectiveProviderId = ctx.providerOverride ?? preferredProviderId;
-      const modelProviderId = pinnedProviderId ?? preferredProviderId;
-      const recordedProviderId = effectiveProviderId;
-
-      if (
-        ctx.providerOverride !== undefined &&
-        pinnedProviderId !== undefined &&
-        effectiveProviderId !== pinnedProviderId
-      ) {
-        const source = nodeProvider !== undefined ? "node" : "workflow";
-        const message = `provider override '${effectiveProviderId}' displaces ${source} pin '${pinnedProviderId}'`;
-        if (nodeProvider !== undefined || ctx.warnOnce === undefined) {
-          ctx.emit({ type: "node_warning", message });
-        } else {
-          ctx.warnOnce(
-            `workflow-provider-override:${pinnedProviderId}:${effectiveProviderId}`,
-            message,
-          );
-        }
-      } else if (
-        ctx.providerOverride === undefined &&
-        pinnedProviderId !== undefined &&
-        effectiveProviderId !== pinnedProviderId
-      ) {
-        const source = nodeProvider !== undefined ? "node" : "workflow";
-        const message = `${source} prefers '${pinnedProviderId}' (not registered); running on '${effectiveProviderId}'`;
-        if (nodeProvider !== undefined || ctx.warnOnce === undefined) {
-          ctx.emit({ type: "node_warning", message });
-        } else {
-          ctx.warnOnce(
-            `workflow-provider-fallback:${pinnedProviderId}:${effectiveProviderId}`,
-            message,
-          );
-        }
-      }
-
-      // Surface a one-off `run_warning` when the active provider
-      // can't honor the per-node config we just resolved. Only claude
-      // implements the tool-gate / hook forwarding today; other providers
-      // would silently no-op.
-      //
-      // Guarded against `getProvider()` throwing: a provider deregistered
-      // mid-run (or a thunk that fails to resolve) MUST surface as a
-      // structured node failure through `consume()` below, not bleed out
-      // here before the timer / abort-listener cleanup. We treat any
-      // preflight throw as "skip the warning" and let the real failure
-      // path own the diagnostic.
-      try {
-        const providerType = opts.getProvider(effectiveProviderId).getType?.();
-        if (providerType !== undefined && providerType !== "claude") {
-          const usedFields: string[] = [];
-          if (providerType === "copilot") {
-            // copilot enforces allowed_tools / denied_tools (by capability) and
-            // PreToolUse / PostToolUse hooks; only the other hook events no-op.
-            const unsupportedHookEvents =
-              nodeHooks === undefined
-                ? []
-                : Object.keys(nodeHooks).filter((e) => e !== "PreToolUse" && e !== "PostToolUse");
-            if (unsupportedHookEvents.length > 0) {
-              ctx.emit({
-                type: "node_warning",
-                message: `Provider 'copilot' enforces only PreToolUse / PostToolUse hooks — these events will silently no-op: ${unsupportedHookEvents.join(", ")}.`,
-              });
-            }
-          } else {
-            // pi narrows its session tools to allowed_tools / denied_tools.
-            if (providerType !== "pi") {
-              if (nodeAllowed !== undefined) usedFields.push("allowed_tools");
-              if (nodeDenied !== undefined) usedFields.push("denied_tools");
-            }
-            if (nodeHooks !== undefined) usedFields.push("hooks");
-            if (usedFields.length > 0) {
-              ctx.emit({
-                type: "node_warning",
-                message: `Provider '${providerType}' ${TOOL_RAILS_UNENFORCED_MARKER} ${usedFields.join(", ")} — these will silently no-op.`,
-              });
-            }
-          }
-        }
-      } catch {
-        // swallow — consume() will hit the same getProvider() and
-        // translate any real failure into a failed NodeResult.
-      }
-
-      // The global denylist (KEELSON_WORKFLOW_TOOL_DENYLIST) is the operator
-      // safety floor — always applied, never overridable by workflow
-      // authors. Per-node fields layer on top:
-      //   - `node.allowed_tools` set → MCP catalog is intersected with
-      //     allow-set, then the global denylist still subtracts ("ONLY
-      //     these, minus anything the operator forbids").
-      //   - `node.denied_tools` set → union with the global denylist
-      //     (additive — author can deny MORE, never less).
-      //   - neither set → global denylist only, PLUS the default-off set (rib
-      //     tools), so a node inherits no rib tool it didn't explicitly allow.
-      // SDK-level `allowedTools` / `disallowedTools` are forwarded so the
-      // gate applies to SDK built-ins (Read/Write/Edit/Bash/Glob/Grep/…),
-      // not just our MCP-projected tool catalog.
-      //
-      // `allow_tools` / `denied_tools` may list either the bare registry
-      // name (`osdu_list_partitions`) or the SDK-qualified MCP form
-      // (`mcp__keelson__osdu_list_partitions`). Normalize to bare names
-      // before the set membership check so workflow authors can use
-      // either form and our MCP catalog filter still matches.
-      const nodeAllowedBare =
-        nodeAllowed === undefined ? undefined : nodeAllowed.map(stripMcpPrefix);
-      const nodeDeniedBare = nodeDenied === undefined ? undefined : nodeDenied.map(stripMcpPrefix);
-      let filteredTools: readonly { name: string; [k: string]: unknown }[];
-      if (nodeAllowedBare !== undefined) {
-        const allowSet = new Set(nodeAllowedBare);
-        filteredTools = allTools.filter((t) => allowSet.has(t.name) && !denySet.has(t.name));
-      } else {
-        const effectiveDeny =
-          nodeDeniedBare === undefined ? denySet : new Set([...denySet, ...nodeDeniedBare]);
-        // Default-off (rib) tools require an explicit allowed_tools opt-in, which
-        // this branch (no allow-list) is not — so exclude them here too.
-        filteredTools = allTools.filter(
-          (t) => !effectiveDeny.has(t.name) && !defaultOffSet.has(t.name),
+        ctx.warnOnce(
+          `workflow-provider-override:${pinnedProviderId}:${effectiveProviderId}`,
+          message,
         );
       }
-
-      // Final global gate: the unified policy engine (operator denylist + rib
-      // policies). Runs after node-level resolution so a policy DENY can't be
-      // widened by a node's allowed_tools. The engine contains a faulty policy to
-      // itself (skips it) internally, so a throw here is an unexpected fault —
-      // keep the node-resolved tools (fail open) and warn rather than failing the node.
-      if (opts.projectTools) {
-        try {
-          filteredTools = await opts.projectTools(filteredTools, effectiveProviderId, nodeMeta);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn(`[workflows] tool gate threw for node '${ctx.nodeId}': ${msg}`);
-        }
+    } else if (
+      ctx.providerOverride === undefined &&
+      pinnedProviderId !== undefined &&
+      effectiveProviderId !== pinnedProviderId
+    ) {
+      const source = nodeProvider !== undefined ? "node" : "workflow";
+      const message = `${source} prefers '${pinnedProviderId}' (not registered); running on '${effectiveProviderId}'`;
+      if (nodeProvider !== undefined || ctx.warnOnce === undefined) {
+        ctx.emit({ type: "node_warning", message });
+      } else {
+        ctx.warnOnce(
+          `workflow-provider-fallback:${pinnedProviderId}:${effectiveProviderId}`,
+          message,
+        );
       }
-      const registeredToolNames = new Set(filteredTools.map((tool) => bareToolName(tool.name)));
+    }
 
-      // Bind the node's effective provider id + teardown signal so the provider
-      // gets a thunk that takes only the call. `handlerExit` fires on run cancel or
-      // node timeout — the same signal the provider stream rides.
-      const perCallGate = opts.evaluateToolCall;
-      const boundToolCallGate = perCallGate
-        ? (call: { tool: string; args?: unknown }) =>
-            perCallGate(call, effectiveProviderId, handlerExit.signal, nodeMeta)
-        : undefined;
-      const perResultGate = opts.evaluateToolResult;
-      const boundToolResultGate = perResultGate
-        ? (call: { tool: string; result: unknown }) =>
-            perResultGate(call, effectiveProviderId, nodeMeta)
-        : undefined;
-
-      let assistantText = "";
-      let lastChunkWasText = false;
-      let providerError: string | null = null;
-      // Set once consume() successfully resolves the provider. Gates the
-      // provenance attach below: a node that failed BECAUSE its provider
-      // couldn't be resolved (unknown `provider:` id) must not claim it "ran on"
-      // that provider/model — it never opened a session.
-      let providerResolved = false;
-      // Whether the resolved provider forwards reasoningEffort to its SDK.
-      // Providers that ignore the option (claude, pi, gateways) must not have a
-      // tier reported against their turns — the turn ran at the SDK's default.
-      let effortConsumed = false;
-      // Providers that don't take keelson's tool catalog (codex, gateways, stub)
-      // can never satisfy `require_tool_call`, so the assertion is skipped for
-      // them rather than failing a turn that was never given the tool.
-      let providerProjectsTools = true;
-      // Set when any tool the turn invoked returned an error result; consulted
-      // after the stream when the node opts into `fail_on_tool_error`.
-      let toolErrored = false;
-      const toolNamesById = new Map<string, string>();
-      const succeededToolNames = new Set<string>();
-      // The provider's end-of-turn usage chunk; rides NodeResult → node_done
-      // rather than the node_chunk channel.
-      let nodeUsage: NodeTokenUsage | undefined;
-      let finishReason: PromptFinishReason | undefined;
-
-      let iterator: AsyncIterator<unknown> | undefined;
-      let iteratorReturned = false;
-      // Fire iterator.return() when handlerExit aborts. This is the only
-      // thing that unsticks a `next()` parked inside a provider that
-      // ignores its abortSignal — without it, consume's await never
-      // resolves and the finally below would never run. Listener attached
-      // here (not inside consume) so it fires even if handlerExit was
-      // already aborted before consume started.
-      //
-      // `iteratorReturned` dedupes between the abort-listener call and
-      // consume's finally — calling return() twice on the same generator
-      // is benign per spec but cleaner to skip the second.
-      const returnIterator = (): void => {
-        if (iteratorReturned) return;
-        if (!iterator?.return) return;
-        iteratorReturned = true;
-        // iterator.return() can throw synchronously or reject async; catch
-        // BOTH branches so the cleanup doesn't escape as an unhandled
-        // rejection after handle() has returned.
-        Promise.resolve()
-          .then(() => iterator!.return!(undefined))
-          .catch(() => undefined);
-      };
-      const onHandlerExit = (): void => returnIterator();
-
-      const promptBody =
-        nodeOutputFormat !== undefined
-          ? ctx.resolvedBody + buildOutputFormatSuffix(nodeOutputFormat)
-          : ctx.resolvedBody;
-
-      // Project notebook (read) prepended to the factory seed — the prompt node
-      // inherits the same project context chat sees. Best-effort: a throwing
-      // adapter must not take the node down.
-      let notebook: string | undefined;
-      try {
-        notebook = ctx.notebook?.read();
-      } catch {
-        notebook = undefined;
-      }
-      const effectiveSystemPrompt =
-        [notebook, systemPrompt].filter((s) => s !== undefined && s.length > 0).join("\n\n") ||
-        undefined;
-
-      const consume = async (): Promise<void> => {
-        try {
-          if (ctx.workflow.provider_required === true) {
-            if (workflowProvider === undefined) {
-              providerError = "workflow requires a provider, but no provider is configured";
-              return;
-            }
-            if (effectiveProviderId !== workflowProvider) {
-              providerError =
-                `workflow requires provider '${workflowProvider}', but resolved provider is ` +
-                `'${effectiveProviderId ?? "none"}'`;
-              return;
-            }
-          }
-          const provider = opts.getProvider(effectiveProviderId);
-          providerResolved = true;
-          const perProviderModel =
-            effectiveProviderId === undefined
-              ? undefined
-              : (readModelByProvider(node)?.[effectiveProviderId] ??
-                (nodeModelRaw === undefined
-                  ? readModelByProvider(ctx.workflow)?.[effectiveProviderId]
-                  : undefined));
-          if (
-            effectiveProviderId === "copilot" &&
-            provider.getType?.() === "copilot" &&
-            !(typeof perProviderModel === "string" && perProviderModel.length > 0) &&
-            model !== undefined &&
-            isModelClassName(model) &&
-            !opts.resolveModelClass?.(effectiveProviderId, model)
-          ) {
-            await provider.waitForModelClasses?.();
-          }
-          const capabilities = provider.getCapabilities?.();
-          effortConsumed = capabilities?.reasoningEffort === true;
-          providerProjectsTools = capabilities?.tools !== false;
-          if (typeof perProviderModel === "string" && perProviderModel.length > 0) {
-            model = perProviderModel;
-          } else if (model !== undefined && isModelClassName(model)) {
-            const configuredModel =
-              effectiveProviderId === undefined
-                ? undefined
-                : opts.resolveModelClass?.(effectiveProviderId, model);
-            const resolvedModel = configuredModel ?? capabilities?.modelClasses?.[model];
-            model =
-              typeof resolvedModel === "string" && resolvedModel.length > 0
-                ? resolvedModel
-                : capabilities?.defaultModel;
-          }
-          if (model === "auto") {
-            model = capabilities?.defaultModel ?? model;
-          }
-          if (
-            effectiveProviderId !== modelProviderId &&
-            typeof model === "string" &&
-            model.length > 0 &&
-            capabilities?.models !== undefined &&
-            capabilities.models.length > 0 &&
-            !capabilities.models.includes(model)
-          ) {
-            const defaultModel = capabilities.defaultModel ?? "";
+    // Surface a one-off `run_warning` when the active provider
+    // can't honor the per-node config we just resolved. Only claude
+    // implements the tool-gate / hook forwarding today; other providers
+    // would silently no-op.
+    //
+    // Guarded against `getProvider()` throwing: a provider deregistered
+    // mid-run (or a thunk that fails to resolve) MUST surface as a
+    // structured node failure through `consume()` below, not bleed out
+    // here before the timer / abort-listener cleanup. We treat any
+    // preflight throw as "skip the warning" and let the real failure
+    // path own the diagnostic.
+    try {
+      const providerType = opts.getProvider(effectiveProviderId).getType?.();
+      if (providerType !== undefined && providerType !== "claude") {
+        const usedFields: string[] = [];
+        if (providerType === "copilot") {
+          // copilot enforces allowed_tools / denied_tools (by capability) and
+          // PreToolUse / PostToolUse hooks; only the other hook events no-op.
+          const unsupportedHookEvents =
+            nodeHooks === undefined
+              ? []
+              : Object.keys(nodeHooks).filter((e) => e !== "PreToolUse" && e !== "PostToolUse");
+          if (unsupportedHookEvents.length > 0) {
             ctx.emit({
               type: "node_warning",
-              message: `model '${model}' is not in provider '${effectiveProviderId}' catalog; using '${defaultModel}'`,
+              message: `Provider 'copilot' enforces only PreToolUse / PostToolUse hooks — these events will silently no-op: ${unsupportedHookEvents.join(", ")}.`,
             });
-            model = capabilities.defaultModel;
           }
-          if (model === undefined) {
-            const defaultModel = capabilities?.defaultModel;
-            if (typeof defaultModel === "string" && defaultModel.length > 0) {
-              model = defaultModel;
-            }
+        } else {
+          // pi narrows its session tools to allowed_tools / denied_tools.
+          if (providerType !== "pi") {
+            if (nodeAllowed !== undefined) usedFields.push("allowed_tools");
+            if (nodeDenied !== undefined) usedFields.push("denied_tools");
           }
-          // Request-phase budget gate (after model resolution so the gate can
-          // read the effective model's cost tier). A deny fails the node with
-          // the policy's reason — no provider session is opened. Routed through
-          // providerError so the existing terminal-state logic builds the failed
-          // NodeResult; returning here skips the stream entirely.
-          if (opts.requestGate) {
-            const decision = await opts.requestGate(
-              { runId: ctx.runId, nodeId: ctx.nodeId, workflowName: ctx.workflow.name },
-              model,
-              effectiveProviderId,
-            );
-            if (decision.outcome === "deny") {
-              providerError = decision.reason;
-              return;
-            }
+          if (nodeHooks !== undefined) usedFields.push("hooks");
+          if (usedFields.length > 0) {
+            ctx.emit({
+              type: "node_warning",
+              message: `Provider '${providerType}' ${TOOL_RAILS_UNENFORCED_MARKER} ${usedFields.join(", ")} — these will silently no-op.`,
+            });
           }
-          const stream = provider.sendQuery(promptBody, ctx.cwd, undefined, {
-            abortSignal: handlerExit.signal,
-            turnContext: {
-              workflowRunId: ctx.runId,
-              workflowWorkingDir: ctx.cwd,
-            },
-            ...(filteredTools.length > 0 ? { tools: filteredTools } : {}),
-            ...(model !== undefined ? { model } : {}),
-            ...(effort !== undefined ? { reasoningEffort: effort } : {}),
-            ...(effectiveSystemPrompt !== undefined ? { systemPrompt: effectiveSystemPrompt } : {}),
-            ...(nodeAllowed !== undefined ? { allowedTools: nodeAllowed } : {}),
-            ...(nodeDenied !== undefined ? { disallowedTools: nodeDenied } : {}),
-            ...(nodeHooks !== undefined ? { hooks: nodeHooks } : {}),
-            ...(boundToolCallGate !== undefined ? { evaluateToolCall: boundToolCallGate } : {}),
-            ...(boundToolResultGate !== undefined
-              ? { evaluateToolResult: boundToolResultGate }
-              : {}),
-            onFinishReason: (reason) => {
-              finishReason = reason;
-            },
-            // Forward the UNFILTERED catalog so the claude provider
-            // can detect MCP names even when one was filtered out
-            // by the global denylist.
-            registeredMcpToolNames: allTools.map((t) => t.name),
+        }
+      }
+    } catch {
+      // swallow — consume() will hit the same getProvider() and
+      // translate any real failure into a failed NodeResult.
+    }
+
+    // The global denylist (KEELSON_WORKFLOW_TOOL_DENYLIST) is the operator
+    // safety floor — always applied, never overridable by workflow
+    // authors. Per-node fields layer on top:
+    //   - `node.allowed_tools` set → MCP catalog is intersected with
+    //     allow-set, then the global denylist still subtracts ("ONLY
+    //     these, minus anything the operator forbids").
+    //   - `node.denied_tools` set → union with the global denylist
+    //     (additive — author can deny MORE, never less).
+    //   - neither set → global denylist only, PLUS the default-off set (rib
+    //     tools), so a node inherits no rib tool it didn't explicitly allow.
+    // SDK-level `allowedTools` / `disallowedTools` are forwarded so the
+    // gate applies to SDK built-ins (Read/Write/Edit/Bash/Glob/Grep/…),
+    // not just our MCP-projected tool catalog.
+    //
+    // `allow_tools` / `denied_tools` may list either the bare registry
+    // name (`osdu_list_partitions`) or the SDK-qualified MCP form
+    // (`mcp__keelson__osdu_list_partitions`). Normalize to bare names
+    // before the set membership check so workflow authors can use
+    // either form and our MCP catalog filter still matches.
+    const nodeAllowedBare = nodeAllowed === undefined ? undefined : nodeAllowed.map(stripMcpPrefix);
+    const nodeDeniedBare = nodeDenied === undefined ? undefined : nodeDenied.map(stripMcpPrefix);
+    let filteredTools: readonly { name: string; [k: string]: unknown }[];
+    if (nodeAllowedBare !== undefined) {
+      const allowSet = new Set(nodeAllowedBare);
+      filteredTools = allTools.filter((t) => allowSet.has(t.name) && !denySet.has(t.name));
+    } else {
+      const effectiveDeny =
+        nodeDeniedBare === undefined ? denySet : new Set([...denySet, ...nodeDeniedBare]);
+      // Default-off (rib) tools require an explicit allowed_tools opt-in, which
+      // this branch (no allow-list) is not — so exclude them here too.
+      filteredTools = allTools.filter(
+        (t) => !effectiveDeny.has(t.name) && !defaultOffSet.has(t.name),
+      );
+    }
+
+    // Final global gate: the unified policy engine (operator denylist + rib
+    // policies). Runs after node-level resolution so a policy DENY can't be
+    // widened by a node's allowed_tools. The engine contains a faulty policy to
+    // itself (skips it) internally, so a throw here is an unexpected fault —
+    // keep the node-resolved tools (fail open) and warn rather than failing the node.
+    if (opts.projectTools) {
+      try {
+        filteredTools = await opts.projectTools(filteredTools, effectiveProviderId, nodeMeta);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[workflows] tool gate threw for node '${ctx.nodeId}': ${msg}`);
+      }
+    }
+    const registeredToolNames = new Set(filteredTools.map((tool) => bareToolName(tool.name)));
+
+    // Bind the node's effective provider id + teardown signal so the provider
+    // gets a thunk that takes only the call. `handlerExit` fires on run cancel or
+    // node timeout — the same signal the provider stream rides.
+    const perCallGate = opts.evaluateToolCall;
+    const boundToolCallGate = perCallGate
+      ? (call: { tool: string; args?: unknown }) =>
+          perCallGate(call, effectiveProviderId, handlerExit.signal, nodeMeta)
+      : undefined;
+    const perResultGate = opts.evaluateToolResult;
+    const boundToolResultGate = perResultGate
+      ? (call: { tool: string; result: unknown }) =>
+          perResultGate(call, effectiveProviderId, nodeMeta)
+      : undefined;
+
+    let assistantText = "";
+    let lastChunkWasText = false;
+    let providerError: string | null = null;
+    // Set once consume() successfully resolves the provider. Gates the
+    // provenance attach below: a node that failed BECAUSE its provider
+    // couldn't be resolved (unknown `provider:` id) must not claim it "ran on"
+    // that provider/model — it never opened a session.
+    let providerResolved = false;
+    // Whether the resolved provider forwards reasoningEffort to its SDK.
+    // Providers that ignore the option (claude, pi, gateways) must not have a
+    // tier reported against their turns — the turn ran at the SDK's default.
+    let effortConsumed = false;
+    // Providers that don't take keelson's tool catalog (codex, gateways, stub)
+    // can never satisfy `require_tool_call`, so the assertion is skipped for
+    // them rather than failing a turn that was never given the tool.
+    let providerProjectsTools = true;
+    // Set when any tool the turn invoked returned an error result; consulted
+    // after the stream when the node opts into `fail_on_tool_error`.
+    let toolErrored = false;
+    const toolNamesById = new Map<string, string>();
+    const succeededToolNames = new Set<string>();
+    // The provider's end-of-turn usage chunk; rides NodeResult → node_done
+    // rather than the node_chunk channel.
+    let nodeUsage: NodeTokenUsage | undefined;
+    let finishReason: PromptFinishReason | undefined;
+
+    let iterator: AsyncIterator<unknown> | undefined;
+    let iteratorReturned = false;
+    // Fire iterator.return() when handlerExit aborts. This is the only
+    // thing that unsticks a `next()` parked inside a provider that
+    // ignores its abortSignal — without it, consume's await never
+    // resolves and the finally below would never run. Listener attached
+    // here (not inside consume) so it fires even if handlerExit was
+    // already aborted before consume started.
+    //
+    // `iteratorReturned` dedupes between the abort-listener call and
+    // consume's finally — calling return() twice on the same generator
+    // is benign per spec but cleaner to skip the second.
+    const returnIterator = (): void => {
+      if (iteratorReturned) return;
+      if (!iterator?.return) return;
+      iteratorReturned = true;
+      // iterator.return() can throw synchronously or reject async; catch
+      // BOTH branches so the cleanup doesn't escape as an unhandled
+      // rejection after handle() has returned.
+      Promise.resolve()
+        .then(() => iterator!.return!(undefined))
+        .catch(() => undefined);
+    };
+    const onHandlerExit = (): void => returnIterator();
+
+    const promptBody =
+      nodeOutputFormat !== undefined
+        ? ctx.resolvedBody + buildOutputFormatSuffix(nodeOutputFormat)
+        : ctx.resolvedBody;
+
+    // Project notebook (read) prepended to the factory seed — the prompt node
+    // inherits the same project context chat sees. Best-effort: a throwing
+    // adapter must not take the node down.
+    let notebook: string | undefined;
+    try {
+      notebook = ctx.notebook?.read();
+    } catch {
+      notebook = undefined;
+    }
+    const effectiveSystemPrompt =
+      [notebook, systemPrompt].filter((s) => s !== undefined && s.length > 0).join("\n\n") ||
+      undefined;
+
+    const consume = async (): Promise<void> => {
+      try {
+        if (ctx.workflow.provider_required === true) {
+          if (workflowProvider === undefined) {
+            providerError = "workflow requires a provider, but no provider is configured";
+            return;
+          }
+          if (effectiveProviderId !== workflowProvider) {
+            providerError =
+              `workflow requires provider '${workflowProvider}', but resolved provider is ` +
+              `'${effectiveProviderId ?? "none"}'`;
+            return;
+          }
+        }
+        const provider = opts.getProvider(effectiveProviderId);
+        providerResolved = true;
+        const perProviderModel =
+          effectiveProviderId === undefined
+            ? undefined
+            : (readModelByProvider(node)?.[effectiveProviderId] ??
+              (nodeModelRaw === undefined
+                ? readModelByProvider(ctx.workflow)?.[effectiveProviderId]
+                : undefined));
+        if (
+          effectiveProviderId === "copilot" &&
+          provider.getType?.() === "copilot" &&
+          !(typeof perProviderModel === "string" && perProviderModel.length > 0) &&
+          model !== undefined &&
+          isModelClassName(model) &&
+          !opts.resolveModelClass?.(effectiveProviderId, model)
+        ) {
+          await provider.waitForModelClasses?.();
+        }
+        const capabilities = provider.getCapabilities?.();
+        effortConsumed = capabilities?.reasoningEffort === true;
+        providerProjectsTools = capabilities?.tools !== false;
+        if (typeof perProviderModel === "string" && perProviderModel.length > 0) {
+          model = perProviderModel;
+        } else if (model !== undefined && isModelClassName(model)) {
+          const configuredModel =
+            effectiveProviderId === undefined
+              ? undefined
+              : opts.resolveModelClass?.(effectiveProviderId, model);
+          const resolvedModel = configuredModel ?? capabilities?.modelClasses?.[model];
+          model =
+            typeof resolvedModel === "string" && resolvedModel.length > 0
+              ? resolvedModel
+              : capabilities?.defaultModel;
+        }
+        if (model === "auto") {
+          model = capabilities?.defaultModel ?? model;
+        }
+        if (
+          effectiveProviderId !== modelProviderId &&
+          typeof model === "string" &&
+          model.length > 0 &&
+          capabilities?.models !== undefined &&
+          capabilities.models.length > 0 &&
+          !capabilities.models.includes(model)
+        ) {
+          const defaultModel = capabilities.defaultModel ?? "";
+          ctx.emit({
+            type: "node_warning",
+            message: `model '${model}' is not in provider '${effectiveProviderId}' catalog; using '${defaultModel}'`,
           });
-          iterator = stream[Symbol.asyncIterator]();
-          // Wire abort → iterator.return. If handlerExit already aborted
-          // (e.g. ctx.abortSignal was pre-fired), kick the cleanup now so
-          // the about-to-park next() resolves immediately.
-          if (handlerExit.signal.aborted) {
-            returnIterator();
-          } else {
-            handlerExit.signal.addEventListener("abort", onHandlerExit, {
-              once: true,
-            });
-          }
-          while (true) {
-            const next = await iterator.next();
-            if (next.done) break;
-            if (handlerExit.signal.aborted) break;
-            resetIdleTimer();
-            // Provider chunks are typed unknown at this boundary (see
-            // file header). Inspect minimally so we can compute the text
-            // return value; downstream consumers do their own typed
-            // handling.
-            const chunk = next.value;
-            const t = chunkType(chunk);
-            if (t === "done") continue;
-            if (t === "usage") {
-              const sanitized = sanitizeNodeUsage((chunk as { usage?: unknown }).usage);
-              if (sanitized !== undefined) nodeUsage = sanitized;
-              continue;
-            }
-            if (t === "model") {
-              // A provider that resolves a concrete model server-side reports it
-              // through this chunk (mirrors the chat handler). Override the
-              // requested model so the recorded value is what actually ran, not
-              // the "auto"-style hint. Rides NodeResult, not the node_chunk channel.
-              // Ignore a blank report so it can't null out a real requested model.
-              const reported = (chunk as { model?: unknown }).model;
-              if (typeof reported === "string" && reported.trim().length > 0) {
-                // The run trace labels a live node with its configured model, so
-                // a concrete pin the provider swapped out would read as running.
-                if (
-                  typeof model === "string" &&
-                  model.length > 0 &&
-                  model !== "auto" &&
-                  !isModelClassName(model) &&
-                  reported !== model
-                ) {
-                  ctx.emit({
-                    type: "node_warning",
-                    message: `provider '${effectiveProviderId}' is running '${reported}' (requested '${model}')`,
-                  });
-                }
-                model = reported;
-              }
-              continue;
-            }
-            if (t === "text") {
-              const content = (chunk as { content: string }).content;
-              if (content.length > 0) {
-                if (assistantText.length > 0 && !lastChunkWasText) assistantText += "\n\n";
-                assistantText += content;
-                lastChunkWasText = true;
-              }
-            } else if (t === "error") {
-              providerError = (chunk as { message: string }).message;
-            } else if (t === "tool_use") {
-              lastChunkWasText = false;
-              const toolUse = chunk as { id?: unknown; toolName?: unknown };
-              if (typeof toolUse.id === "string" && typeof toolUse.toolName === "string") {
-                toolNamesById.set(toolUse.id, bareToolName(toolUse.toolName));
-              }
-            } else if (t === "tool_result") {
-              lastChunkWasText = false;
-              const toolResult = chunk as { toolUseId?: unknown; isError?: boolean };
-              if (toolResult.isError === true) {
-                toolErrored = true;
-              } else if (typeof toolResult.toolUseId === "string") {
-                const toolName = toolNamesById.get(toolResult.toolUseId);
-                if (toolName !== undefined) succeededToolNames.add(toolName);
-              }
-            }
-            // Defensive: a timeout or cancel can fire after the chunk
-            // resolves but before this branch runs. Skip the emit so
-            // subscribers don't see a stray node_chunk after node_done
-            // has been broadcast on the race-winner path.
-            if (handlerExit.signal.aborted) break;
-            ctx.emit({ type: "node_chunk", chunk });
-          }
-        } catch (err) {
-          // AbortError from handlerExit.abort() is expected on cancel/
-          // timeout — the surrounding flags decide the final NodeResult
-          // shape. Any other throw is a real provider failure, but only
-          // overwrite providerError if the stream didn't already emit a
-          // normalized "error" chunk — the normalized message is the
-          // user-friendly one we want to preserve.
-          if (!cancelled && !timedOut && providerError === null) {
-            providerError = err instanceof Error ? err.message : String(err);
-          }
-        } finally {
-          handlerExit.signal.removeEventListener("abort", onHandlerExit);
-          // Non-abort exit paths (e.g. ctx.emit throws synchronously,
-          // stream exhausted normally) never fire the abort listener.
-          // Still close the generator so the provider's session/network
-          // resources don't leak — dedup guards against the abort-path
-          // double-call.
-          returnIterator();
+          model = capabilities.defaultModel;
         }
-      };
-
-      const consumePromise = consume();
-
-      // The handler returns as soon as either consume finishes OR
-      // handlerExit fires. If the provider parks deep in sendQuery without
-      // honoring the abort signal, consumePromise stays pending but the
-      // handler still returns — the workflow run terminates as documented.
-      const exitPromise = new Promise<void>((resolve) => {
-        if (handlerExit.signal.aborted) {
-          resolve();
-          return;
+        if (model === undefined) {
+          const defaultModel = capabilities?.defaultModel;
+          if (typeof defaultModel === "string" && defaultModel.length > 0) {
+            model = defaultModel;
+          }
         }
-        handlerExit.signal.addEventListener("abort", () => resolve(), {
-          once: true,
-        });
-      });
-      await Promise.race([consumePromise, exitPromise]);
-
-      clearTimeout(timer);
-      ctx.abortSignal.removeEventListener("abort", onUserCancel);
-      // Detach: attach a noop catch so the pending promise (if any) can
-      // settle quietly without an unhandled-rejection warning.
-      consumePromise.then(undefined, () => undefined);
-
-      // Response-phase policy gate on the COMPLETE assembled text. Runs whenever
-      // the turn produced a full response (skipped only on cancel / timeout /
-      // provider error, where there's no complete text) — INCLUDING a
-      // tool-errored turn, whose model reply is still recorded as the failed
-      // node's output. Governs that output (the value `$nodeId.output` resolves
-      // to downstream, and the recorded output), not the already-streamed
-      // transcript. A deny fails the node; an allow+data substitutes. Fail open
-      // on a gate fault — a response-gate bug must not take the node down.
-      if (opts.evaluateResponse && !cancelled && !timedOut && providerError === null) {
-        try {
-          const decision = await opts.evaluateResponse(
-            assistantText,
+        // Request-phase budget gate (after model resolution so the gate can
+        // read the effective model's cost tier). A deny fails the node with
+        // the policy's reason — no provider session is opened. Routed through
+        // providerError so the existing terminal-state logic builds the failed
+        // NodeResult; returning here skips the stream entirely.
+        if (opts.requestGate) {
+          const decision = await opts.requestGate(
+            { runId: ctx.runId, nodeId: ctx.nodeId, workflowName: ctx.workflow.name },
+            model,
             effectiveProviderId,
-            nodeMeta,
           );
           if (decision.outcome === "deny") {
             providerError = decision.reason;
-            // Drop the forbidden text — the failed NodeResult below records it as
-            // `output.text`, so keeping it would leak what the deny meant to
-            // block. The reason rides `error`, not the output.
-            assistantText = "";
-          } else if (typeof decision.data === "string") {
-            assistantText = decision.data;
+            return;
           }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn(`[workflows] response gate threw for node '${ctx.nodeId}': ${msg}`);
         }
+        const stream = provider.sendQuery(promptBody, ctx.cwd, undefined, {
+          abortSignal: handlerExit.signal,
+          turnContext: {
+            workflowRunId: ctx.runId,
+            workflowWorkingDir: ctx.cwd,
+          },
+          ...(filteredTools.length > 0 ? { tools: filteredTools } : {}),
+          ...(model !== undefined ? { model } : {}),
+          ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+          ...(effectiveSystemPrompt !== undefined ? { systemPrompt: effectiveSystemPrompt } : {}),
+          ...(nodeAllowed !== undefined ? { allowedTools: nodeAllowed } : {}),
+          ...(nodeDenied !== undefined ? { disallowedTools: nodeDenied } : {}),
+          ...(nodeHooks !== undefined ? { hooks: nodeHooks } : {}),
+          ...(sandboxProfile !== undefined ? { sandbox: sandboxProfile } : {}),
+          ...(boundToolCallGate !== undefined ? { evaluateToolCall: boundToolCallGate } : {}),
+          ...(boundToolResultGate !== undefined ? { evaluateToolResult: boundToolResultGate } : {}),
+          onFinishReason: (reason) => {
+            finishReason = reason;
+          },
+          // Forward the UNFILTERED catalog so the claude provider
+          // can detect MCP names even when one was filtered out
+          // by the global denylist.
+          registeredMcpToolNames: allTools.map((t) => t.name),
+        });
+        iterator = stream[Symbol.asyncIterator]();
+        // Wire abort → iterator.return. If handlerExit already aborted
+        // (e.g. ctx.abortSignal was pre-fired), kick the cleanup now so
+        // the about-to-park next() resolves immediately.
+        if (handlerExit.signal.aborted) {
+          returnIterator();
+        } else {
+          handlerExit.signal.addEventListener("abort", onHandlerExit, {
+            once: true,
+          });
+        }
+        while (true) {
+          const next = await iterator.next();
+          if (next.done) break;
+          if (handlerExit.signal.aborted) break;
+          resetIdleTimer();
+          // Provider chunks are typed unknown at this boundary (see
+          // file header). Inspect minimally so we can compute the text
+          // return value; downstream consumers do their own typed
+          // handling.
+          const chunk = next.value;
+          const t = chunkType(chunk);
+          if (t === "done") continue;
+          if (t === "usage") {
+            const sanitized = sanitizeNodeUsage((chunk as { usage?: unknown }).usage);
+            if (sanitized !== undefined) nodeUsage = sanitized;
+            continue;
+          }
+          if (t === "model") {
+            // A provider that resolves a concrete model server-side reports it
+            // through this chunk (mirrors the chat handler). Override the
+            // requested model so the recorded value is what actually ran, not
+            // the "auto"-style hint. Rides NodeResult, not the node_chunk channel.
+            // Ignore a blank report so it can't null out a real requested model.
+            const reported = (chunk as { model?: unknown }).model;
+            if (typeof reported === "string" && reported.trim().length > 0) {
+              // The run trace labels a live node with its configured model, so
+              // a concrete pin the provider swapped out would read as running.
+              if (
+                typeof model === "string" &&
+                model.length > 0 &&
+                model !== "auto" &&
+                !isModelClassName(model) &&
+                reported !== model
+              ) {
+                ctx.emit({
+                  type: "node_warning",
+                  message: `provider '${effectiveProviderId}' is running '${reported}' (requested '${model}')`,
+                });
+              }
+              model = reported;
+            }
+            continue;
+          }
+          if (t === "text") {
+            const content = (chunk as { content: string }).content;
+            if (content.length > 0) {
+              if (assistantText.length > 0 && !lastChunkWasText) assistantText += "\n\n";
+              assistantText += content;
+              lastChunkWasText = true;
+            }
+          } else if (t === "error") {
+            providerError = (chunk as { message: string }).message;
+          } else if (t === "tool_use") {
+            lastChunkWasText = false;
+            const toolUse = chunk as { id?: unknown; toolName?: unknown };
+            if (typeof toolUse.id === "string" && typeof toolUse.toolName === "string") {
+              toolNamesById.set(toolUse.id, bareToolName(toolUse.toolName));
+            }
+          } else if (t === "tool_result") {
+            lastChunkWasText = false;
+            const toolResult = chunk as { toolUseId?: unknown; isError?: boolean };
+            if (toolResult.isError === true) {
+              toolErrored = true;
+            } else if (typeof toolResult.toolUseId === "string") {
+              const toolName = toolNamesById.get(toolResult.toolUseId);
+              if (toolName !== undefined) succeededToolNames.add(toolName);
+            }
+          }
+          // Defensive: a timeout or cancel can fire after the chunk
+          // resolves but before this branch runs. Skip the emit so
+          // subscribers don't see a stray node_chunk after node_done
+          // has been broadcast on the race-winner path.
+          if (handlerExit.signal.aborted) break;
+          ctx.emit({ type: "node_chunk", chunk });
+        }
+      } catch (err) {
+        // AbortError from handlerExit.abort() is expected on cancel/
+        // timeout — the surrounding flags decide the final NodeResult
+        // shape. Any other throw is a real provider failure, but only
+        // overwrite providerError if the stream didn't already emit a
+        // normalized "error" chunk — the normalized message is the
+        // user-friendly one we want to preserve.
+        if (!cancelled && !timedOut && providerError === null) {
+          providerError = err instanceof Error ? err.message : String(err);
+        }
+      } finally {
+        handlerExit.signal.removeEventListener("abort", onHandlerExit);
+        // Non-abort exit paths (e.g. ctx.emit throws synchronously,
+        // stream exhausted normally) never fire the abort listener.
+        // Still close the generator so the provider's session/network
+        // resources don't leak — dedup guards against the abort-path
+        // double-call.
+        returnIterator();
       }
+    };
 
-      const missingRequiredTool = providerProjectsTools
-        ? requiredToolCalls?.find((toolName) => {
-            const bareName = bareToolName(toolName);
-            return registeredToolNames.has(bareName) && !succeededToolNames.has(bareName);
-          })
-        : undefined;
+    const consumePromise = consume();
 
-      let result: NodeResult;
-      if (cancelled) {
-        result = {
-          status: "failed",
-          output: { kind: "text", text: assistantText },
-          error: "aborted",
-        };
-      } else if (timedOut) {
-        result = {
-          status: "failed",
-          output: { kind: "text", text: assistantText },
-          error: `prompt idle timeout after ${Math.round(idleTimeoutMs / 1000)}s without stream activity`,
-        };
-      } else if (providerError !== null) {
-        result = {
-          status: "failed",
-          output: { kind: "text", text: assistantText },
-          error: providerError,
-        };
-      } else if (failOnToolError && toolErrored) {
-        // The node's real work happens inside a tool that failed closed; the
-        // turn may still have completed with a normal text reply, but the node
-        // must report failure rather than a successful no-op.
-        result = {
-          status: "failed",
-          output: { kind: "text", text: assistantText },
-          error: "a tool invoked by this node returned an error",
-        };
-      } else if (missingRequiredTool !== undefined) {
-        result = {
-          status: "failed",
-          output: { kind: "text", text: assistantText },
-          error: `node required a successful call to '${missingRequiredTool}' but the turn produced none`,
-        };
-      } else if (finishReason !== undefined && finishReason !== "end") {
-        result = {
-          status: "failed",
-          output: { kind: "text", text: assistantText },
-          error: `prompt node did not finish cleanly (provider finish reason: '${finishReason}')`,
-        };
-      } else if (nodeOutputFormat !== undefined) {
-        // output_format → structured output only when the reply yields a JSON
-        // object or array. A bare scalar (null/true/42/"x") or a non-JSON reply
-        // fails the node: it promised a shape downstream substitution and bash
-        // consumers parse, so passing the prose on turns a legible miss here
-        // into an inscrutable parse error in some later node.
-        const value = extractJsonValue(assistantText);
-        result =
-          value !== null && typeof value === "object"
-            ? { status: "succeeded", output: { kind: "structured", value } }
-            : {
-                status: "failed",
-                output: { kind: "text", text: assistantText },
-                error:
-                  "node declares output_format but the reply contained no JSON object or array",
-              };
-      } else if (assistantText.trim() === "") {
-        result = {
-          status: "failed",
-          output: { kind: "text", text: assistantText },
-          error: "prompt node produced no output (empty or whitespace-only reply)",
-        };
-      } else {
-        result = {
-          status: "succeeded",
-          output: { kind: "text", text: assistantText },
-        };
+    // The handler returns as soon as either consume finishes OR
+    // handlerExit fires. If the provider parks deep in sendQuery without
+    // honoring the abort signal, consumePromise stays pending but the
+    // handler still returns — the workflow run terminates as documented.
+    const exitPromise = new Promise<void>((resolve) => {
+      if (handlerExit.signal.aborted) {
+        resolve();
+        return;
       }
-      // Attach regardless of outcome — a failed or timed-out turn still
-      // spent whatever the provider reported before the cut, and still ran on a
-      // resolved provider/model worth surfacing in the trace.
-      if (nodeUsage !== undefined) result.usage = nodeUsage;
-      if (finishReason !== undefined) result.finishReason = finishReason;
-      // Only stamp provenance when a provider was actually resolved — a node that
-      // failed on an unknown `provider:` never ran on the requested provider/model.
-      if (providerResolved) {
-        if (recordedProviderId !== undefined) result.provider = recordedProviderId;
-        if (model !== undefined) result.model = model;
-        if (effort !== undefined && effortConsumed) result.effort = effort;
-      }
+      handlerExit.signal.addEventListener("abort", () => resolve(), {
+        once: true,
+      });
+    });
+    await Promise.race([consumePromise, exitPromise]);
 
+    clearTimeout(timer);
+    ctx.abortSignal.removeEventListener("abort", onUserCancel);
+    // Detach: attach a noop catch so the pending promise (if any) can
+    // settle quietly without an unhandled-rejection warning.
+    consumePromise.then(undefined, () => undefined);
+
+    // Response-phase policy gate on the COMPLETE assembled text. Runs whenever
+    // the turn produced a full response (skipped only on cancel / timeout /
+    // provider error, where there's no complete text) — INCLUDING a
+    // tool-errored turn, whose model reply is still recorded as the failed
+    // node's output. Governs that output (the value `$nodeId.output` resolves
+    // to downstream, and the recorded output), not the already-streamed
+    // transcript. A deny fails the node; an allow+data substitutes. Fail open
+    // on a gate fault — a response-gate bug must not take the node down.
+    if (opts.evaluateResponse && !cancelled && !timedOut && providerError === null) {
       try {
-        await lifecycle.afterNode?.({ runId: ctx.runId, nodeId: ctx.nodeId }, result);
-      } catch {
-        // swallow — hooks are best-effort
+        const decision = await opts.evaluateResponse(assistantText, effectiveProviderId, nodeMeta);
+        if (decision.outcome === "deny") {
+          providerError = decision.reason;
+          // Drop the forbidden text — the failed NodeResult below records it as
+          // `output.text`, so keeping it would leak what the deny meant to
+          // block. The reason rides `error`, not the output.
+          assistantText = "";
+        } else if (typeof decision.data === "string") {
+          assistantText = decision.data;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[workflows] response gate threw for node '${ctx.nodeId}': ${msg}`);
       }
+    }
 
-      return result;
+    const missingRequiredTool = providerProjectsTools
+      ? requiredToolCalls?.find((toolName) => {
+          const bareName = bareToolName(toolName);
+          return registeredToolNames.has(bareName) && !succeededToolNames.has(bareName);
+        })
+      : undefined;
+
+    let result: NodeResult;
+    if (cancelled) {
+      result = {
+        status: "failed",
+        output: { kind: "text", text: assistantText },
+        error: "aborted",
+      };
+    } else if (timedOut) {
+      result = {
+        status: "failed",
+        output: { kind: "text", text: assistantText },
+        error: `prompt idle timeout after ${Math.round(idleTimeoutMs / 1000)}s without stream activity`,
+      };
+    } else if (providerError !== null) {
+      result = {
+        status: "failed",
+        output: { kind: "text", text: assistantText },
+        error: providerError,
+      };
+    } else if (failOnToolError && toolErrored) {
+      // The node's real work happens inside a tool that failed closed; the
+      // turn may still have completed with a normal text reply, but the node
+      // must report failure rather than a successful no-op.
+      result = {
+        status: "failed",
+        output: { kind: "text", text: assistantText },
+        error: "a tool invoked by this node returned an error",
+      };
+    } else if (missingRequiredTool !== undefined) {
+      result = {
+        status: "failed",
+        output: { kind: "text", text: assistantText },
+        error: `node required a successful call to '${missingRequiredTool}' but the turn produced none`,
+      };
+    } else if (finishReason !== undefined && finishReason !== "end") {
+      result = {
+        status: "failed",
+        output: { kind: "text", text: assistantText },
+        error: `prompt node did not finish cleanly (provider finish reason: '${finishReason}')`,
+      };
+    } else if (nodeOutputFormat !== undefined) {
+      // output_format → structured output only when the reply yields a JSON
+      // object or array. A bare scalar (null/true/42/"x") or a non-JSON reply
+      // fails the node: it promised a shape downstream substitution and bash
+      // consumers parse, so passing the prose on turns a legible miss here
+      // into an inscrutable parse error in some later node.
+      const value = extractJsonValue(assistantText);
+      result =
+        value !== null && typeof value === "object"
+          ? { status: "succeeded", output: { kind: "structured", value } }
+          : {
+              status: "failed",
+              output: { kind: "text", text: assistantText },
+              error: "node declares output_format but the reply contained no JSON object or array",
+            };
+    } else if (assistantText.trim() === "") {
+      result = {
+        status: "failed",
+        output: { kind: "text", text: assistantText },
+        error: "prompt node produced no output (empty or whitespace-only reply)",
+      };
+    } else {
+      result = {
+        status: "succeeded",
+        output: { kind: "text", text: assistantText },
+      };
+    }
+    // Attach regardless of outcome — a failed or timed-out turn still
+    // spent whatever the provider reported before the cut, and still ran on a
+    // resolved provider/model worth surfacing in the trace.
+    if (nodeUsage !== undefined) result.usage = nodeUsage;
+    if (finishReason !== undefined) result.finishReason = finishReason;
+    // Only stamp provenance when a provider was actually resolved — a node that
+    // failed on an unknown `provider:` never ran on the requested provider/model.
+    if (providerResolved) {
+      if (recordedProviderId !== undefined) result.provider = recordedProviderId;
+      if (model !== undefined) result.model = model;
+      if (effort !== undefined && effortConsumed) result.effort = effort;
+    }
+
+    try {
+      await lifecycle.afterNode?.({ runId: ctx.runId, nodeId: ctx.nodeId }, result);
+    } catch {
+      // swallow — hooks are best-effort
+    }
+
+    return result;
+  };
+
+  return {
+    type: "prompt",
+    async handle(node, ctx): Promise<NodeResult> {
+      const resolution = resolveSandbox(node, ctx);
+      if (resolution?.fail !== undefined) {
+        return tagSandboxResult(
+          { status: "failed", output: { kind: "text", text: "" }, error: resolution.fail },
+          resolution,
+        );
+      }
+      return tagSandboxResult(
+        await handleTurn(node, ctx, resolution?.profile ?? undefined),
+        resolution,
+      );
     },
   };
+}
+
+function trimmedString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function chunkType(chunk: unknown): string | undefined {

@@ -116,6 +116,108 @@ export const sandboxSettingsSchema = z
 export type SandboxSettings = z.infer<typeof sandboxSettingsSchema>;
 
 /**
+ * Keelson's provider-neutral sandbox block, on a node or a workflow. Every field
+ * is optional; the sandbox policy merges it over the workflow's block and the
+ * built-in default. Field names mirror `@keelson/shared`'s SandboxProfile.
+ */
+const sandboxPathListSchema = z.array(z.string().min(1));
+const neutralSandboxProfileSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    filesystem: z
+      .object({
+        readwrite: sandboxPathListSchema.optional(),
+        readonly: sandboxPathListSchema.optional(),
+        denied: sandboxPathListSchema.optional(),
+      })
+      .strict()
+      .optional(),
+    network: z
+      .object({
+        outbound: z.enum(["allow", "deny"]).optional(),
+        loopback: z.boolean().optional(),
+        allowedHosts: z.array(z.string().min(1)).optional(),
+      })
+      .strict()
+      .optional(),
+    env: z
+      .array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "sandbox.env entries are variable names"))
+      .optional(),
+    backend: z
+      .object({
+        claude: sandboxSettingsSchema.optional(),
+        copilot: z.record(z.string(), z.unknown()).optional(),
+        codex: z
+          .object({
+            mode: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
+          })
+          .strict()
+          .optional(),
+        pi: z.record(z.string(), z.unknown()).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+// Keys only the Claude SDK SandboxSettings shape defines. `enabled` is shared
+// with the neutral block, so it alone never marks a block as legacy.
+const CLAUDE_SANDBOX_KEYS = Object.keys(sandboxSettingsSchema.shape).filter(
+  (key) => key !== "enabled" && key !== "network" && key !== "filesystem",
+);
+const CLAUDE_SANDBOX_FILESYSTEM_KEYS = ["allowWrite", "denyWrite", "denyRead", "allowRead"];
+const CLAUDE_SANDBOX_NETWORK_KEYS = [
+  "allowedDomains",
+  "deniedDomains",
+  "allowManagedDomainsOnly",
+  "allowUnixSockets",
+  "allowAllUnixSockets",
+  "allowLocalBinding",
+  "httpProxyPort",
+  "socksProxyPort",
+];
+
+function hasAnyKey(value: unknown, keys: readonly string[]): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    keys.some((key) => Object.hasOwn(value, key))
+  );
+}
+
+/**
+ * True for the Claude SDK SandboxSettings shape this field carried before it was
+ * provider-neutral: a key, top-level or under `filesystem` / `network`, that only
+ * that shape defines. Any other unknown key fails the strict neutral schema.
+ */
+export function isLegacySandboxShape(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const rec = value as Record<string, unknown>;
+  return (
+    hasAnyKey(rec, CLAUDE_SANDBOX_KEYS) ||
+    hasAnyKey(rec.filesystem, CLAUDE_SANDBOX_FILESYSTEM_KEYS) ||
+    hasAnyKey(rec.network, CLAUDE_SANDBOX_NETWORK_KEYS)
+  );
+}
+
+// A legacy block becomes Claude passthrough with no `enabled`, so the workflow
+// keeps the default it ran under before the field was honored.
+export function liftLegacySandbox(value: Record<string, unknown>): {
+  backend: { claude: unknown };
+} {
+  return { backend: { claude: value } };
+}
+
+export const sandboxProfileSchema = z.preprocess(
+  (value) =>
+    isLegacySandboxShape(value) ? liftLegacySandbox(value as Record<string, unknown>) : value,
+  neutralSandboxProfileSchema,
+);
+
+export type NodeSandbox = z.infer<typeof neutralSandboxProfileSchema>;
+
+/**
  * Claude Agent SDK AgentDefinition — inline sub-agent available via the Task tool.
  * Mirrors the SDK's AgentDefinition type (sdk.d.ts), minus mcpServers and the
  * experimental critical-reminder field.
@@ -226,7 +328,7 @@ export const dagNodeBaseSchema = z.object({
   systemPrompt: z.string().min(1).optional(),
   fallbackModel: z.string().min(1).optional(),
   betas: z.array(z.string().min(1)).nonempty("'betas' must be a non-empty array").optional(),
-  sandbox: sandboxSettingsSchema.optional(),
+  sandbox: sandboxProfileSchema.optional(),
   memory: nodeMemoryBlockSchema.optional(),
   notebook: nodeNotebookBlockSchema.optional(),
 });
@@ -434,7 +536,6 @@ export const BASH_NODE_AI_FIELDS: readonly string[] = [
   "systemPrompt",
   "fallbackModel",
   "betas",
-  "sandbox",
 ];
 
 /** AI-specific fields that are meaningless on script nodes — same as bash nodes */
@@ -645,6 +746,7 @@ export const dagNodeSchema = dagNodeBaseSchema
     // Shared optional fields (valid on AI and bash nodes)
     const shared = {
       ...(data.retry !== undefined ? { retry: data.retry } : {}),
+      ...(data.sandbox !== undefined ? { sandbox: data.sandbox } : {}),
     };
 
     const providerAndModel = {
@@ -682,7 +784,6 @@ export const dagNodeSchema = dagNodeBaseSchema
       ...(data.systemPrompt !== undefined ? { systemPrompt: data.systemPrompt } : {}),
       ...(data.fallbackModel !== undefined ? { fallbackModel: data.fallbackModel } : {}),
       ...(data.betas !== undefined ? { betas: data.betas } : {}),
-      ...(data.sandbox !== undefined ? { sandbox: data.sandbox } : {}),
     };
 
     if (data.command !== undefined && data.command.trim().length > 0) {
@@ -719,7 +820,12 @@ export const dagNodeSchema = dagNodeBaseSchema
     }
     // loop — guaranteed by superRefine to be defined at this point
     if (!data.loop) throw new Error("unreachable: loop must be defined after superRefine");
-    return { ...base, ...providerAndModel, loop: data.loop } as LoopNode;
+    return {
+      ...base,
+      ...providerAndModel,
+      ...(data.sandbox !== undefined ? { sandbox: data.sandbox } : {}),
+      loop: data.loop,
+    } as LoopNode;
   });
 
 // ---------------------------------------------------------------------------
