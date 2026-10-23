@@ -42,6 +42,7 @@ import {
   makeScriptHandler,
   type NodeHandler,
   type PromptHandlerProvider,
+  parseToolDenylist,
   parseWorkflow,
   type RunStreamEvent,
   type RunSummary,
@@ -293,6 +294,9 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
     // shape. Same boundary cast as the provider above.
     getRegisteredTools: () =>
       getRegisteredTools() as unknown as readonly { name: string; [k: string]: unknown }[],
+    // No policy engine runs headless, so the handler carries the operator floor
+    // the server folds into its engine.
+    denylist: parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST),
   });
   const approvalHandler = makeApprovalHandler({
     awaitApproval: async (_runId, nodeId, message) => {

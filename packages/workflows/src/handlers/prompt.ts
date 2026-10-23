@@ -270,6 +270,17 @@ export interface MakePromptHandlerOptions {
 // `denylist` explicitly when constructing the prompt handler.
 export const DEFAULT_TOOL_DENYLIST: readonly string[] = [];
 
+// Parses KEELSON_WORKFLOW_TOOL_DENYLIST. Unset means the default; an explicit
+// empty string means allow everything.
+export function parseToolDenylist(raw: string | undefined): readonly string[] {
+  if (raw === undefined) return DEFAULT_TOOL_DENYLIST;
+  if (raw.trim() === "") return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 // Marker inside the warning a provider gets when it cannot enforce a node's
 // tool rails; the approval handler reads it to refuse a reviewer's approval.
 export const TOOL_RAILS_UNENFORCED_MARKER = "does not enforce per-node";

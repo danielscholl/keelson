@@ -7,7 +7,16 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { clearRegistry, isRegisteredProvider, registerStubProvider } from "@keelson/providers";
+import {
+  clearRegistry,
+  isRegisteredProvider,
+  registerProvider,
+  registerStubProvider,
+  type SendQueryOptions,
+  StubProvider,
+} from "@keelson/providers";
+import type { ToolDefinition } from "@keelson/shared";
+import { clearRegistry as clearToolRegistry, registerTool } from "@keelson/skills";
 import { createWorktree, type RunStreamEvent, worktreePathForRepoLocal } from "@keelson/workflows";
 
 import { getCliCredential } from "../src/in-process/providers.ts";
@@ -29,6 +38,7 @@ const ENV_KEYS = [
   "KEELSON_PROVIDERS",
   "KEELSON_WORKFLOW_PROVIDER",
   "KEELSON_WORKFLOW_PREFLIGHT",
+  "KEELSON_WORKFLOW_TOOL_DENYLIST",
   "KEELSON_HOME",
 ] as const;
 const savedEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
@@ -492,6 +502,71 @@ nodes:
       expect(JSON.parse(stdout.trim()).data.warnings).toEqual(["preflight not checked: offline"]);
     } finally {
       rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("runHeadless tool denylist floor", () => {
+  afterEach(() => clearToolRegistry());
+
+  test("KEELSON_WORKFLOW_TOOL_DENYLIST drops a registered tool from prompt nodes", async () => {
+    const seen: string[][] = [];
+    class RecordingProvider extends StubProvider {
+      override getType(): string {
+        return "recorder";
+      }
+      override sendQuery(
+        prompt: string,
+        cwd: string,
+        resumeSessionId?: string,
+        options?: SendQueryOptions,
+      ) {
+        seen.push((options?.tools ?? []).map((t) => t.name));
+        return super.sendQuery(prompt, cwd, resumeSessionId, options);
+      }
+    }
+    registerProvider({
+      id: "recorder",
+      displayName: "Recorder",
+      factory: () => new RecordingProvider(),
+      capabilities: { ...new StubProvider().getCapabilities(), tools: true },
+      builtIn: false,
+    });
+    for (const name of ["kept_tool", "denied_tool"]) {
+      registerTool({
+        name,
+        description: name,
+        // The recording provider never converts schemas, so none is needed.
+        inputSchema: undefined as unknown as ToolDefinition["inputSchema"],
+        execute: async () => {},
+      });
+    }
+    process.env.KEELSON_WORKFLOW_TOOL_DENYLIST = "denied_tool";
+
+    const root = mkdtempSync(join(tmpdir(), "keelson-cli-denylist-"));
+    try {
+      const workflowsDir = writeWorkflow(
+        root,
+        "denylist-floor",
+        `name: denylist-floor
+description: one prompt node
+nodes:
+  - id: ask
+    prompt: say hi
+`,
+      );
+      const result = await runHeadless({
+        name: "denylist-floor",
+        inputs: {},
+        cwd: root,
+        workflowsDir,
+        provider: "recorder",
+        preflight: false,
+      });
+      expect(result.summary.status).toBe("succeeded");
+      expect(seen).toEqual([["kept_tool"]]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });
