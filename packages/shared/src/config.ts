@@ -204,7 +204,28 @@ const keelsonConfigSchema = z.object({
   defaultProvider: z.string().optional(),
   workflowPreflight: z.boolean().optional(),
   copilot: providerSettingsSchema.optional(),
-  pi: providerSettingsSchema.optional(),
+  pi: providerSettingsSchema
+    .extend({
+      // pi's built-in coding tools (read/bash/edit/write/grep/find/ls) behind
+      // keelson's policy gates. Default on.
+      builtinTools: z.boolean().optional(),
+      // Max concurrent turns per pi vendor, e.g. { "rec": 1 } for a local
+      // engine that serves one generation at a time.
+      concurrency: z.record(z.string(), z.number().int().min(1)).optional(),
+      // Allowlist of pi vendors keelson may use, e.g. ["rec"] for local-only.
+      vendors: z.array(z.string().min(1)).optional(),
+      // pi extension packages to load: absolute paths, or package names in the
+      // keelson home's node_modules. The operator's ~/.pi extensions never load.
+      extensions: z.array(z.string().min(1)).optional(),
+      // Tools those extensions register that turns may call; all others stay off.
+      extensionTools: z.array(z.string().min(1)).optional(),
+      // Seconds a bash call may run when it sets no timeout. Default 300.
+      bashTimeoutSec: z.number().int().min(1).max(86400).optional(),
+      // Times an identical tool call may return an identical result before it
+      // is blocked. Default 3; 0 disables.
+      repeatCallLimit: z.number().int().min(0).optional(),
+    })
+    .optional(),
   claude: claudeSettingsSchema.optional(),
   codex: codexSettingsSchema.optional(),
   mcp: mcpSettingsSchema.optional(),

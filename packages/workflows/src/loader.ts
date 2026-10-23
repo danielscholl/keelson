@@ -52,6 +52,7 @@ import {
   type WorkflowWithSource,
   webSearchModeSchema,
   workflowBaseSchema,
+  workflowModelByProviderSchema,
 } from "./schema/index.ts";
 import { findUnknownDirectiveRefs } from "./substitute.ts";
 
@@ -879,6 +880,16 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
 
   // Warn-and-ignore scalars
   const model = typeof obj.model === "string" ? obj.model : undefined;
+  const mbpResult = workflowModelByProviderSchema.safeParse(obj.model_by_provider);
+  const modelByProvider = mbpResult.success ? mbpResult.data : undefined;
+  if (obj.model_by_provider !== undefined && !mbpResult.success) {
+    warnings.push({
+      filename,
+      kind: "invalid_field_value",
+      message:
+        "invalid 'model_by_provider' value (ignored); expected a map of provider id to model",
+    });
+  }
 
   const mreResult = modelReasoningEffortSchema.safeParse(obj.modelReasoningEffort);
   const modelReasoningEffort = mreResult.success ? mreResult.data : undefined;
@@ -995,6 +1006,7 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     ...(provider !== undefined ? { provider } : {}),
     ...(providerRequired ? { provider_required: true } : {}),
     ...(model !== undefined ? { model } : {}),
+    ...(modelByProvider !== undefined ? { model_by_provider: modelByProvider } : {}),
     ...(modelReasoningEffort !== undefined ? { modelReasoningEffort } : {}),
     ...(webSearchMode !== undefined ? { webSearchMode } : {}),
     ...(additionalDirectories !== undefined ? { additionalDirectories } : {}),

@@ -67,7 +67,9 @@ function pinnedLiteralFor(
   provider: string,
   modelClassOverride: PreflightOptions["modelClassOverride"],
 ): PinnedLiteral | undefined {
-  const perProvider = node.model_by_provider?.[provider];
+  const perProvider =
+    node.model_by_provider?.[provider] ??
+    (node.model === undefined ? workflow.model_by_provider?.[provider] : undefined);
   if (perProvider !== undefined) return { literal: perProvider };
   const model = node.model ?? workflow.model;
   if (model === undefined) return undefined;

@@ -1270,6 +1270,34 @@ describe("makePromptHandler", () => {
     expect(emitted.some((e) => e.type === "node_warning")).toBe(false);
   });
 
+  test("pi warns only for hooks, not allowed_tools / denied_tools", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+      type: "pi",
+    });
+    const emitted: NodeStreamEvent[] = [];
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const node = {
+      id: "n1",
+      prompt: "",
+      allowed_tools: ["Read", "WebFetch"],
+      denied_tools: ["Bash"],
+      hooks: { PreToolUse: [{ matcher: "Bash", response: { decision: "block" } }] },
+    } as unknown as DagNode;
+    await handler.handle(node, buildCtx({ onEvent: (e) => emitted.push(e) }));
+    const warnings = emitted.filter(
+      (e): e is { type: "node_warning"; message: string } => e.type === "node_warning",
+    );
+    expect(warnings).toHaveLength(1);
+    const noOpList = warnings[0]!.message.split("per-node")[1] ?? "";
+    expect(noOpList).toContain("hooks");
+    expect(noOpList).not.toContain("allowed_tools");
+    expect(noOpList).not.toContain("denied_tools");
+  });
+
   test("copilot warns only for hook events beyond Pre/PostToolUse", async () => {
     const { provider } = makeSpyProvider({
       chunks: [{ type: "text", content: "" }, { type: "done" }],
@@ -2325,6 +2353,51 @@ describe("makePromptHandler", () => {
         )
         .map((e) => (e.chunk as { type?: string }).type);
       expect(chunkTypes).not.toContain("model");
+    });
+
+    test("workflow-level model_by_provider applies when the node names no model", async () => {
+      const { provider, calls } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "copilot",
+        getRegisteredTools: () => [],
+      });
+      const ctx = buildCtx({ workflowModel: "balanced" });
+      (ctx.workflow as { model_by_provider?: Record<string, string> }).model_by_provider = {
+        copilot: "gpt-5.6-terra",
+      };
+      const result = await handler.handle({ id: "n1", prompt: "" } as unknown as DagNode, ctx);
+      expect(result.model).toBe("gpt-5.6-terra");
+      expect((calls[0]?.options as { model?: string } | undefined)?.model).toBe("gpt-5.6-terra");
+    });
+
+    test("warns live when the provider swaps a concrete requested model", async () => {
+      const events: NodeStreamEvent[] = [];
+      const { provider } = makeSpyProvider({
+        chunks: [
+          { type: "model", model: "rec/flint" },
+          { type: "text", content: "ok" },
+          { type: "done" },
+        ],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "pi",
+        getRegisteredTools: () => [],
+      });
+      const node = { id: "n1", prompt: "", model: "gpt-5.6-terra" } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx({ onEvent: (e) => events.push(e) }));
+      expect(result.model).toBe("rec/flint");
+      const warnings = events
+        .filter(
+          (e): e is Extract<NodeStreamEvent, { type: "node_warning" }> => e.type === "node_warning",
+        )
+        .map((e) => e.message);
+      expect(warnings).toContain(
+        "provider 'pi' is running 'rec/flint' (requested 'gpt-5.6-terra')",
+      );
     });
 
     test("a blank {type:'model'} chunk does not clobber the requested model", async () => {

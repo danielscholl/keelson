@@ -61,12 +61,16 @@ export type WorkflowWorktreePolicy = z.infer<typeof workflowWorktreePolicySchema
 // WorkflowBase — common fields shared by all workflow types
 // ---------------------------------------------------------------------------
 
+export const workflowModelByProviderSchema = z.record(z.string(), z.string().min(1));
+
 export const workflowBaseSchema = z.object({
   name: z.string().min(1),
   description: z.string().min(1),
   provider: z.string().trim().min(1).optional(),
   provider_required: z.boolean().optional(),
   model: z.string().optional(),
+  // Per-provider default model; a node's own model / model_by_provider wins.
+  model_by_provider: workflowModelByProviderSchema.optional(),
   modelReasoningEffort: modelReasoningEffortSchema.optional(),
   webSearchMode: webSearchModeSchema.optional(),
   additionalDirectories: z.array(z.string()).optional(),

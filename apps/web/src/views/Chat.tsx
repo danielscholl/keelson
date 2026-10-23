@@ -276,32 +276,37 @@ function snapshotTurnForReconcile<T extends { id: string; role: string }>(
 // Order of preference: lastUsed → first registered favorite → server default
 // (config.defaultProvider) → Copilot → stub → first provider's default. Returns
 // null when no providers are registered.
+// "pending" means the chosen provider has no fixed default and its live
+// catalog has not settled yet; picking from the curated baseline then would
+// seed a model the operator may have no credential for.
 function pickInitialRef(
   providers: ProviderInfo[],
   modelsByProvider: Record<string, ModelInfo[]>,
   lastUsed: ModelRef | null,
   favorites: ModelRef[],
   defaultProvider: string | null,
-): ModelRef | null {
+  catalogSettled?: ReadonlySet<string>,
+): ModelRef | null | "pending" {
   const providerIds = new Set(providers.map((p) => p.id));
   if (lastUsed && providerIds.has(lastUsed.providerId)) return lastUsed;
   for (const fav of favorites) {
     if (providerIds.has(fav.providerId)) return fav;
   }
-  const refFor = (providerId: string): ModelRef | null => {
+  const refFor = (providerId: string): ModelRef | null | "pending" => {
     const provider = providers.find((p) => p.id === providerId);
     if (!provider) return null;
     const def = provider.capabilities.defaultModel;
     if (def) return { providerId, modelId: def };
+    if (catalogSettled && !catalogSettled.has(providerId)) return "pending";
     const [first] = modelsByProvider[providerId] ?? [];
     return first ? { providerId, modelId: first.id } : null;
   };
-  return (
-    (defaultProvider ? refFor(defaultProvider) : null) ??
-    refFor("copilot") ??
-    refFor("stub") ??
-    refFor(providers[0]?.id ?? "")
-  );
+  for (const id of [defaultProvider, "copilot", "stub", providers[0]?.id]) {
+    if (!id) continue;
+    const ref = refFor(id);
+    if (ref !== null) return ref;
+  }
+  return null;
 }
 
 const ROLE_LABEL: Record<Role, string> = {
@@ -369,6 +374,8 @@ export function Chat({
   // Falls back to a bare-id projection of provider.capabilities.models when
   // the live fetch hasn't resolved yet (or failed).
   const [dynamicModels, setDynamicModels] = useState<Record<string, ModelInfo[]>>({});
+  // Providers whose live model fetch has finished, successfully or not.
+  const [catalogSettled, setCatalogSettled] = useState<ReadonlySet<string>>(new Set());
 
   const selectedProvider = useMemo(
     () => providers.find((p) => p.id === selectedProviderId) ?? null,
@@ -632,6 +639,7 @@ export function Chat({
         } catch {
           // non-fatal — modelsByProvider falls back to capabilities.models
         }
+        if (!cancelled.current) setCatalogSettled((prev) => new Set(prev).add(p.id));
       }),
     );
     return () => {
@@ -653,8 +661,9 @@ export function Chat({
         settings.lastUsed,
         settings.favorites,
         defaultProvider,
+        catalogSettled,
       );
-      if (!ref) return current;
+      if (!ref || ref === "pending") return current;
       // Don't clobber a model an agent seed already pinned (the seed consumer
       // above); only fall back to the picked default when none is set.
       setSelectedModel((m) => (m ? m : ref.modelId));
@@ -662,7 +671,14 @@ export function Chat({
     });
     // settings reads intentionally only at provider-load time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [providers, settings.lastUsed, settings.favorites, modelsByProvider, defaultProvider]);
+  }, [
+    providers,
+    settings.lastUsed,
+    settings.favorites,
+    modelsByProvider,
+    defaultProvider,
+    catalogSettled,
+  ]);
 
   // Replay a stored conversation's messages on mount. Stale-resolution guard:
   // a sidebar click during this load bumps conversationIdRef, so compare on
@@ -1945,8 +1961,9 @@ export function Chat({
       settings.lastUsed,
       settings.favorites,
       defaultProvider,
+      catalogSettled,
     );
-    if (ref) {
+    if (ref && ref !== "pending") {
       setSelectedProviderId(ref.providerId);
       setSelectedModel(ref.modelId);
       resetEffortForModel(ref.providerId, ref.modelId);
@@ -1957,6 +1974,7 @@ export function Chat({
     }
   }, [
     abortActiveStream,
+    catalogSettled,
     defaultProvider,
     modelsByProvider,
     providers,

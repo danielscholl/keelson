@@ -120,7 +120,17 @@ export function bootstrapCliProviders(): ProviderBootstrapResult {
     }
     if (id === "pi") {
       // Self-managed auth — no keyring credential to pass.
-      registerPiProvider();
+      // No policy engine runs in-process, so pi's built-in and extension tools
+      // stay off here rather than run outside the operator's denylist and gates.
+      registerPiProvider({
+        builtinTools: false,
+        ...(config.pi?.concurrency !== undefined ? { concurrency: config.pi.concurrency } : {}),
+        ...(config.pi?.vendors !== undefined ? { vendors: config.pi.vendors } : {}),
+        ...(config.pi?.model ? { defaultModel: config.pi.model } : {}),
+        ...(config.pi?.repeatCallLimit !== undefined
+          ? { repeatCallLimit: config.pi.repeatCallLimit }
+          : {}),
+      });
       registered.push("pi");
       continue;
     }

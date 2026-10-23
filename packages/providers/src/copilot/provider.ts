@@ -10,6 +10,7 @@ import type { ModelPrices, TokenUsage, ToolContext } from "@keelson/shared";
 import { ChunkQueue } from "../chunk-queue.ts";
 import { deriveModelClasses } from "../model-classes.ts";
 import { toTokenCount } from "../token-count.ts";
+import { filterToolsByRail } from "../tool-rail.ts";
 import type {
   IAgentProvider,
   MessageChunk,
@@ -1071,36 +1072,6 @@ function buildSessionConfig(
     if (sessionHooks !== undefined) config.hooks = sessionHooks;
   }
   return config;
-}
-
-// MCP-projected tools register as `mcp__<server>__<tool>`; allow/deny lists may
-// use either the bare or qualified form. Strip the wrapper so both match — the
-// server segment is consumed up to the next `__` (mirrors the workflow handler).
-function stripMcpPrefix(name: string): string {
-  if (!name.startsWith("mcp__")) return name;
-  const serverEnd = name.indexOf("__", 5);
-  if (serverEnd < 0) return name;
-  return name.slice(serverEnd + 2);
-}
-
-// Intersect the projected tool list with `allowedTools` and subtract
-// `disallowedTools`, comparing on bare names. An empty `allowedTools` yields no
-// tools, satisfying the documented "no tools" contract.
-function filterToolsByRail<T extends { name: string }>(
-  tools: T[],
-  allowedTools: readonly string[] | undefined,
-  disallowedTools: readonly string[] | undefined,
-): T[] {
-  let result = tools;
-  if (allowedTools !== undefined) {
-    const allow = new Set(allowedTools.map(stripMcpPrefix));
-    result = result.filter((t) => allow.has(stripMcpPrefix(t.name)));
-  }
-  if (disallowedTools !== undefined) {
-    const deny = new Set(disallowedTools.map(stripMcpPrefix));
-    result = result.filter((t) => !deny.has(stripMcpPrefix(t.name)));
-  }
-  return result;
 }
 
 function mapCopilotFinishReason(reason: string | undefined): ProviderFinishReason | undefined {

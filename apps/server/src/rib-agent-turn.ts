@@ -54,6 +54,9 @@ export interface MakeRibAgentTurnDeps {
   getProvider?: (id: string) => IAgentProvider;
   isRegisteredProvider?: (id: string) => boolean;
   listProviderIds?: () => string[];
+  // config.defaultProvider — honored after KEELSON_WORKFLOW_PROVIDER, matching
+  // the workflow prompt-node default.
+  defaultProviderId?: string;
   // Neutral cwd for turns that don't pin one. Defaults to the OS temp dir so a
   // rib turn never runs in the server's (host repo) cwd.
   defaultCwd?: string;
@@ -91,6 +94,7 @@ interface ResolvedDeps {
   getProvider: (id: string) => IAgentProvider;
   hasProvider: (id: string) => boolean;
   listProviderIds: () => string[];
+  defaultProviderId?: string;
   neutralCwd: string;
   getRegisteredTools: () => readonly ToolDefinition[];
   denied: ReadonlySet<string>;
@@ -110,6 +114,7 @@ function resolveDeps(deps: MakeRibAgentTurnDeps): ResolvedDeps {
     getProvider: deps.getProvider ?? getAgentProvider,
     hasProvider: deps.isRegisteredProvider ?? registryHasProvider,
     listProviderIds: deps.listProviderIds ?? (() => getProviderInfoList().map((p) => p.id)),
+    ...(deps.defaultProviderId ? { defaultProviderId: deps.defaultProviderId } : {}),
     neutralCwd: deps.defaultCwd ?? tmpdir(),
     getRegisteredTools: deps.getRegisteredTools ?? (() => liveRegisteredTools()),
     // The shared operator floor (DEFAULT_TOOL_DENYLIST) always applies, plus the
@@ -176,7 +181,8 @@ function relayClose(relay: ChunkRelay): void {
   relay.notify?.();
 }
 
-// req.provider hint → KEELSON_WORKFLOW_PROVIDER → first registered non-stub
+// req.provider hint → KEELSON_WORKFLOW_PROVIDER → config.defaultProvider (when
+// registered) → first registered non-stub
 // (skipping the synthetic 'workflow' provider) → any non-'workflow' provider.
 // A named-but-unregistered id is an error rather than a silent fallback so a
 // misconfigured pin fails loudly.
@@ -195,6 +201,10 @@ function resolveProviderId(
     return deps.hasProvider(pinned)
       ? { id: pinned }
       : { error: `Provider '${pinned}' (KEELSON_WORKFLOW_PROVIDER) is not registered.` };
+  }
+  const configured = deps.defaultProviderId?.trim().toLowerCase();
+  if (configured && configured !== "workflow" && deps.hasProvider(configured)) {
+    return { id: configured };
   }
   const ids = deps.listProviderIds();
   const real = ids.find((id) => id !== "stub" && id !== "workflow");

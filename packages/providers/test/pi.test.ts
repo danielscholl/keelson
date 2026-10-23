@@ -3,22 +3,21 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MessageChunk, ModelInfo, ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
-import {
-  buildPiCatalog,
-  costTierFromOutput,
-  type PiAiLike,
-  type PiAuthStorageLike,
-} from "../src/pi/catalog.ts";
+import { buildPiCatalog, costTierFromOutput, type PiModelLike } from "../src/pi/catalog.ts";
+import { PiVendorSlots } from "../src/pi/concurrency.ts";
 import type { PiRawEvent } from "../src/pi/event-bridge.ts";
 import { mapPiEvent, mapPiFinishReason } from "../src/pi/event-bridge.ts";
 import type { PiCreateSessionParams, PiSession, PiSessionFactory } from "../src/pi/factory.ts";
 import { checkPiAuth } from "../src/pi/factory.ts";
-import { PI_CAPABILITIES, PiProvider } from "../src/pi/provider.ts";
+import { createPiGateExtension, type PiGateExtensionApi } from "../src/pi/gate-extension.ts";
+import { PI_CAPABILITIES, PiProvider, piCapabilities } from "../src/pi/provider.ts";
+import { resolvePiExtensionPaths } from "../src/pi/registration.ts";
+import { filterPiTools } from "../src/pi/tool-filter.ts";
 import { projectToolsForPi } from "../src/pi/tool-projection.ts";
 
 const textDelta = (delta: string): PiRawEvent => ({
@@ -358,9 +357,9 @@ describe("PiProvider", () => {
     expect(PI_CAPABILITIES.tools).toBe(true);
     expect(PI_CAPABILITIES.sessionResume).toBe(false);
     expect(PI_CAPABILITIES.modelClasses).toEqual({
-      fast: "anthropic/claude-haiku-4.5",
-      balanced: "anthropic/claude-sonnet-4.6",
-      deep: "anthropic/claude-opus-4.5",
+      fast: "anthropic/claude-haiku-5-5",
+      balanced: "anthropic/claude-sonnet-5-5",
+      deep: "anthropic/claude-opus-5-5",
     });
   });
 
@@ -461,11 +460,11 @@ describe("PiProvider", () => {
     const provider = new PiProvider({ factory });
     await collect(
       provider.sendQuery("question", "/tmp", undefined, {
-        model: "google/gemini-2.5-pro",
+        model: "google/gemini-3.1-pro-preview",
         systemPrompt: "you are helpful",
       }),
     );
-    expect(promptedModel).toBe("google/gemini-2.5-pro");
+    expect(promptedModel).toBe("google/gemini-3.1-pro-preview");
     expect(promptedText).toBe("you are helpful\n\nquestion");
   });
 
@@ -478,6 +477,28 @@ describe("PiProvider", () => {
       { type: "model", model: "openai/gpt-5.2" },
       { type: "text", content: "hi" },
     ]);
+  });
+
+  test("warns when the requested model fell back to a different one", async () => {
+    const provider = new PiProvider({
+      factory: fakeFactory([textDelta("hi")], { modelRef: "github-copilot/gpt-5.5" }),
+    });
+    const chunks = await collect(
+      provider.sendQuery("hi", "/tmp", undefined, { model: "rec/flint" }),
+    );
+    expect(chunks[0]).toEqual({ type: "model", model: "github-copilot/gpt-5.5" });
+    expect(chunks[1]?.type).toBe("system");
+    expect((chunks[1] as { content: string }).content).toContain('"rec/flint"');
+  });
+
+  test("no fallback warning when the requested model resolved", async () => {
+    const provider = new PiProvider({
+      factory: fakeFactory([textDelta("hi")], { modelRef: "rec/flint" }),
+    });
+    const chunks = await collect(
+      provider.sendQuery("hi", "/tmp", undefined, { model: "rec/flint" }),
+    );
+    expect(chunks.map((c) => c.type)).toEqual(["model", "text"]);
   });
 
   test("projects options.tools into the session's customTools", async () => {
@@ -709,90 +730,86 @@ describe("checkPiAuth", () => {
   });
 });
 
-type FakeModel = {
-  id: string;
-  name: string;
-  reasoning: boolean;
-  input: string[];
-  cost: { output: number };
+const GPT4: PiModelLike = {
+  provider: "openai",
+  id: "gpt-4",
+  name: "GPT-4",
+  reasoning: false,
+  input: ["text"],
+  cost: { output: 60 },
+};
+const OPUS: PiModelLike = {
+  provider: "anthropic",
+  id: "claude-opus-4.5",
+  name: "Claude Opus 4.5",
+  reasoning: true,
+  input: ["text", "image"],
+  cost: { output: 25 },
+};
+const COPILOT: PiModelLike = {
+  provider: "github-copilot",
+  id: "gpt-5.5",
+  name: "GPT-5.5",
+  reasoning: true,
+  input: ["text"],
+  cost: { output: 0 },
+};
+// A models.json custom provider pointing at a local OpenAI-compatible server.
+const LOCAL: PiModelLike = {
+  provider: "rec",
+  id: "flint",
+  name: "Flint (local)",
+  reasoning: true,
+  input: ["text"],
+  cost: { output: 0 },
 };
 
-const FAKE_MODELS: Record<string, FakeModel[]> = {
-  anthropic: [
-    {
-      id: "claude-opus-4.5",
-      name: "Claude Opus 4.5",
-      reasoning: true,
-      input: ["text", "image"],
-      cost: { output: 25 },
-    },
-  ],
-  "github-copilot": [
-    { id: "gpt-5.5", name: "GPT-5.5", reasoning: true, input: ["text"], cost: { output: 0 } },
-  ],
-  openai: [{ id: "gpt-4", name: "GPT-4", reasoning: false, input: ["text"], cost: { output: 60 } }],
-  unauthed: [
-    { id: "ghost", name: "Ghost", reasoning: false, input: ["text"], cost: { output: 1 } },
-  ],
-};
-
-// anthropic + openai resolve an env key; github-copilot is OAuth-only (no env
-// key); unauthed has neither, so it should be filtered out.
-const fakePiAi: PiAiLike = {
-  getProviders: () => ["anthropic", "github-copilot", "openai", "unauthed"],
-  getEnvApiKey: (p) => (p === "anthropic" || p === "openai" ? "sk-test" : undefined),
-  getModels: (p) => FAKE_MODELS[p] ?? [],
-};
-// Only github-copilot has a stored credential, and it's an OAuth subscription.
-const fakeAuth: PiAuthStorageLike = {
-  get: (p) => (p === "github-copilot" ? { type: "oauth" } : undefined),
-};
+const catalogOf = (models: PiModelLike[], oauth: string[] = []) =>
+  buildPiCatalog(models, (provider) => oauth.includes(provider));
 
 describe("buildPiCatalog", () => {
-  test("includes only authenticated vendors (stored credential or env key)", () => {
-    const ids = buildPiCatalog(fakePiAi, fakeAuth).map((m) => m.id);
-    expect(ids).toEqual(["anthropic/claude-opus-4.5", "github-copilot/gpt-5.5", "openai/gpt-4"]);
+  test("lists every registry-available model, including models.json custom providers", () => {
+    const ids = catalogOf([OPUS, COPILOT, GPT4, LOCAL]).map((m) => m.id);
+    expect(ids).toEqual([
+      "anthropic/claude-opus-4.5",
+      "github-copilot/gpt-5.5",
+      "openai/gpt-4",
+      "rec/flint",
+    ]);
   });
 
-  test("tags stored OAuth as subscription and env/api-key as metered", () => {
-    const byId = new Map(buildPiCatalog(fakePiAi, fakeAuth).map((m) => [m.id, m]));
+  test("tags OAuth as subscription, priced keys as metered, unpriced keys as unknown", () => {
+    const byId = new Map(
+      catalogOf([OPUS, COPILOT, GPT4, LOCAL], ["github-copilot"]).map((m) => [m.id, m]),
+    );
     expect(byId.get("github-copilot/gpt-5.5")?.billing).toBe("subscription");
     expect(byId.get("anthropic/claude-opus-4.5")?.billing).toBe("metered");
     expect(byId.get("openai/gpt-4")?.billing).toBe("metered");
+    expect(byId.get("rec/flint")?.billing).toBeUndefined();
+    expect(byId.get("rec/flint")?.costTier).toBe("free");
   });
 
   test("derives cost tier from output price and maps reasoning + vision", () => {
-    const byId = new Map(buildPiCatalog(fakePiAi, fakeAuth).map((m) => [m.id, m]));
+    const byId = new Map(catalogOf([OPUS, GPT4]).map((m) => [m.id, m]));
     const opus = byId.get("anthropic/claude-opus-4.5");
     expect(opus?.costTier).toBe("high");
     expect(opus?.displayName).toBe("Claude Opus 4.5");
     expect(opus?.supports).toEqual({ thinking: true, vision: true });
     // text-only, no reasoning → vision omitted, thinking false
     expect(byId.get("openai/gpt-4")?.supports).toEqual({ thinking: false });
-    expect(byId.get("github-copilot/gpt-5.5")?.costTier).toBe("free");
   });
 
-  test("skips a vendor whose getModels throws, keeping the rest of the catalog", () => {
-    const piai: PiAiLike = {
-      getProviders: () => ["anthropic", "boom", "openai"],
-      getEnvApiKey: () => "sk-test",
-      getModels: (vendor) => {
-        if (vendor === "boom") throw new Error("vendor exploded");
-        return [{ id: "m", name: "M", reasoning: false, input: ["text"], cost: { output: 4 } }];
-      },
-    };
-    const auth: PiAuthStorageLike = { get: () => undefined };
-    expect(buildPiCatalog(piai, auth).map((m) => m.id)).toEqual(["anthropic/m", "openai/m"]);
+  test("skips a model whose auth check throws, keeping the rest of the catalog", () => {
+    const catalog = buildPiCatalog([OPUS, GPT4], (provider) => {
+      if (provider === "anthropic") throw new Error("auth exploded");
+      return false;
+    });
+    expect(catalog.map((m) => m.id)).toEqual(["openai/gpt-4"]);
   });
 
   test("treats a model with no cost block as free", () => {
-    const piai = {
-      getProviders: () => ["x"],
-      getEnvApiKey: () => "sk-test",
-      getModels: () => [{ id: "m", name: "M", reasoning: false, input: ["text"] }],
-    } as unknown as PiAiLike;
-    const auth: PiAuthStorageLike = { get: () => undefined };
-    expect(buildPiCatalog(piai, auth)[0]?.costTier).toBe("free");
+    const { cost: _cost, ...noCost } = GPT4;
+    expect(catalogOf([noCost])[0]?.costTier).toBe("free");
   });
 });
 
@@ -1064,5 +1081,645 @@ describe("mapPiFinishReason", () => {
       }),
     ).toBeUndefined();
     expect(mapPiFinishReason({ type: "message_update" })).toBeUndefined();
+  });
+});
+
+// Captures the handlers the gate extension registers on a fake pi API.
+function loadGate(
+  gates: Parameters<typeof createPiGateExtension>[0],
+  selfGated: string[] = [],
+  options: Parameters<typeof createPiGateExtension>[2] = {},
+) {
+  const handlers: Record<string, (event: never) => Promise<unknown>> = {};
+  const api = {
+    on: (name: string, handler: (event: never) => Promise<unknown>) => {
+      handlers[name] = handler;
+    },
+  } as unknown as PiGateExtensionApi;
+  createPiGateExtension(gates, new Set(selfGated), options)(api);
+  return {
+    call: (toolName: string, input: unknown) => handlers.tool_call?.({ toolName, input } as never),
+    result: (
+      toolName: string,
+      content: { type: string; text?: string }[],
+      isError = false,
+      input: unknown = {},
+      toolCallId?: string,
+    ) => handlers.tool_result?.({ toolName, content, isError, input, toolCallId } as never),
+    callWithId: (toolName: string, input: unknown, toolCallId: string) =>
+      handlers.tool_call?.({ toolName, input, toolCallId } as never),
+    request: () => handlers.before_provider_request?.({} as never),
+  };
+}
+
+describe("createPiGateExtension", () => {
+  test("blocks a denied call with the policy message", async () => {
+    const gate = loadGate({
+      evaluateToolCall: async () => ({ outcome: "deny", reason: "no shell" }),
+    });
+    expect(await gate.call("bash", { command: "rm -rf /" })).toEqual({
+      block: true,
+      reason: "Tool 'Bash' denied by policy: no shell",
+    });
+  });
+
+  test("brackets generations: provider requests start one, tool calls end it", async () => {
+    const log: string[] = [];
+    const gate = loadGate({}, [], {
+      generation: {
+        start: async () => {
+          log.push("start");
+        },
+        end: () => {
+          log.push("end");
+        },
+      },
+    });
+    expect(await gate.request()).toBeUndefined();
+    await gate.call("workflow_run", {});
+    await gate.request();
+    expect(log).toEqual(["start", "end", "start"]);
+  });
+
+  test("gates built-ins under their canonical policy name, then pi's own", async () => {
+    const seen: string[] = [];
+    const denyOnly = (name: string) =>
+      loadGate({
+        evaluateToolCall: async (req) => {
+          seen.push(req.tool);
+          return req.tool === name ? { outcome: "deny", reason: "floor" } : { outcome: "allow" };
+        },
+      });
+    expect(await denyOnly("Bash").call("bash", { command: "ls" })).toMatchObject({ block: true });
+    expect(await denyOnly("Write").call("edit", {})).toMatchObject({ block: true });
+    expect(await denyOnly("bash").call("bash", { command: "ls" })).toMatchObject({ block: true });
+    seen.length = 0;
+    expect(await denyOnly("Bash").call("custom_ext", {})).toBeUndefined();
+    expect(seen).toEqual(["custom_ext"]);
+  });
+
+  test("the call gate sees the tool name and raw args; allow passes through", async () => {
+    const seen: unknown[] = [];
+    const gate = loadGate({
+      evaluateToolCall: async (req) => {
+        seen.push(req);
+        return { outcome: "allow" };
+      },
+    });
+    expect(await gate.call("fetch_content", { url: "https://example.com" })).toBeUndefined();
+    expect(seen).toEqual([
+      { tool: "WebFetch", args: { url: "https://example.com" } },
+      { tool: "fetch_content", args: { url: "https://example.com" } },
+    ]);
+  });
+
+  test("skips self-gated keelson tools so they are not gated twice", async () => {
+    let calls = 0;
+    const gate = loadGate(
+      {
+        evaluateToolCall: async () => {
+          calls++;
+          return { outcome: "deny", reason: "x" };
+        },
+        evaluateToolResult: async () => {
+          calls++;
+          return { outcome: "deny", reason: "x" };
+        },
+      },
+      ["workflow_run"],
+    );
+    expect(await gate.call("workflow_run", {})).toBeUndefined();
+    expect(await gate.result("workflow_run", [{ type: "text", text: "x" }])).toBeUndefined();
+    expect(calls).toBe(0);
+  });
+
+  test("the result gate can substitute or withhold output", async () => {
+    const redacting = loadGate({
+      evaluateToolResult: async () => ({ outcome: "allow", data: "token=[REDACTED]" }),
+    });
+    const image = { type: "image" };
+    expect(await redacting.result("read", [{ type: "text", text: "token=abc" }, image])).toEqual({
+      content: [{ type: "text", text: "token=[REDACTED]" }, image],
+      isError: false,
+    });
+    const withholding = loadGate({
+      evaluateToolResult: async () => ({ outcome: "deny", reason: "pii" }),
+    });
+    const withheld = (await withholding.result("bash", [{ type: "text", text: "secret" }])) as {
+      content: { text: string }[];
+      isError: boolean;
+    };
+    expect(withheld.isError).toBe(true);
+    expect(withheld.content).toHaveLength(1);
+    expect(withheld.content[0]?.text).toContain("withheld by policy");
+  });
+
+  test("gives a bash call without a timeout the default, leaving explicit ones", async () => {
+    const gate = loadGate({}, [], { bashTimeoutSec: 300 });
+    const bare: { command: string; timeout?: number } = { command: "find / -name x" };
+    await gate.call("bash", bare);
+    expect(bare.timeout).toBe(300);
+    const explicit = { command: "bun test", timeout: 900 };
+    await gate.call("bash", explicit);
+    expect(explicit.timeout).toBe(900);
+  });
+
+  test("an unchanged result is left alone", async () => {
+    const gate = loadGate({ evaluateToolResult: async () => ({ outcome: "allow" }) });
+    expect(await gate.result("ls", [{ type: "text", text: "a b" }])).toBeUndefined();
+  });
+});
+
+describe("PiProvider built-in tools", () => {
+  test("enables built-ins by default and carries both gates", async () => {
+    let captured: PiCreateSessionParams | undefined;
+    const evaluateToolCall = async () => ({ outcome: "allow" as const });
+    const evaluateToolResult = async () => ({ outcome: "allow" as const });
+    const provider = new PiProvider({
+      factory: fakeFactory([{ type: "agent_end" }], { capture: (p) => (captured = p) }),
+    });
+    await collect(
+      provider.sendQuery("hi", "/tmp", undefined, { evaluateToolCall, evaluateToolResult }),
+    );
+    expect(captured?.builtinTools).toBe(true);
+    expect(captured?.gates?.evaluateToolCall).toBe(evaluateToolCall);
+    expect(captured?.gates?.evaluateToolResult).toBe(evaluateToolResult);
+  });
+
+  test("builtinTools: false leaves the session without built-ins", async () => {
+    let captured: PiCreateSessionParams | undefined;
+    const provider = new PiProvider({
+      builtinTools: false,
+      factory: fakeFactory([{ type: "agent_end" }], { capture: (p) => (captured = p) }),
+    });
+    await collect(provider.sendQuery("hi", "/tmp"));
+    expect(captured?.builtinTools).toBe(false);
+  });
+});
+
+describe("PiProvider session lifecycle", () => {
+  test("disposes the session once the turn settles", async () => {
+    let disposed = 0;
+    const factory: PiSessionFactory = {
+      async createSession() {
+        return {
+          subscribe: () => () => {},
+          prompt: async () => {},
+          dispose: () => {
+            disposed++;
+          },
+        };
+      },
+    };
+    await collect(new PiProvider({ factory }).sendQuery("hi", "/tmp"));
+    expect(disposed).toBe(1);
+  });
+
+  test("an abort mid-turn interrupts pi and frees the vendor slot when it stops", async () => {
+    const abort = new AbortController();
+    const slots = new PiVendorSlots({ rec: 1 });
+    let finish: () => void = () => {};
+    let aborted = false;
+    const factory: PiSessionFactory = {
+      async createSession() {
+        return {
+          modelRef: "rec/flint",
+          subscribe: () => () => {},
+          prompt: () =>
+            new Promise<void>((resolve) => {
+              finish = resolve;
+            }),
+          abort: async () => {
+            aborted = true;
+            finish();
+          },
+        };
+      },
+    };
+    const gen = new PiProvider({ factory, slots }).sendQuery("hi", "/tmp", undefined, {
+      abortSignal: abort.signal,
+    });
+    expect((await gen.next()).value).toEqual({ type: "model", model: "rec/flint" });
+    const pending = gen.next();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(slots.isSaturated("rec")).toBe(true);
+    abort.abort();
+    await pending;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(aborted).toBe(true);
+    expect(slots.isSaturated("rec")).toBe(false);
+  });
+});
+
+describe("PiProvider abort and teardown", () => {
+  function disposableFactory(counter: { disposed: number; prompted: number }, modelRef?: string) {
+    return {
+      async createSession(): Promise<PiSession> {
+        return {
+          ...(modelRef !== undefined ? { modelRef } : {}),
+          subscribe: () => () => {},
+          prompt: async () => {
+            counter.prompted++;
+          },
+          dispose: () => {
+            counter.disposed++;
+          },
+        };
+      },
+    } satisfies PiSessionFactory;
+  }
+
+  test("an abort while queued for a slot disposes the session without prompting", async () => {
+    const counter = { disposed: 0, prompted: 0 };
+    const slots = new PiVendorSlots({ rec: 1 });
+    const held = await slots.acquire("rec");
+    const abort = new AbortController();
+    const done = collect(
+      new PiProvider({ factory: disposableFactory(counter, "rec/flint"), slots }).sendQuery(
+        "hi",
+        "/tmp",
+        undefined,
+        { abortSignal: abort.signal },
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    abort.abort();
+    await done;
+    held?.();
+    expect(counter).toEqual({ disposed: 1, prompted: 0 });
+  });
+
+  test("an abort before the slot continuation runs never prompts", async () => {
+    const counter = { disposed: 0, prompted: 0 };
+    const abort = new AbortController();
+    const gen = new PiProvider({ factory: disposableFactory(counter, "openai/gpt") }).sendQuery(
+      "hi",
+      "/tmp",
+      undefined,
+      { abortSignal: abort.signal },
+    );
+    expect((await gen.next()).value).toEqual({ type: "model", model: "openai/gpt" });
+    abort.abort();
+    expect((await gen.next()).done).toBe(true);
+    expect(counter).toEqual({ disposed: 1, prompted: 0 });
+  });
+
+  test("an abort during session creation disposes the session", async () => {
+    const counter = { disposed: 0, prompted: 0 };
+    const abort = new AbortController();
+    const inner = disposableFactory(counter);
+    const factory: PiSessionFactory = {
+      async createSession() {
+        abort.abort();
+        return inner.createSession();
+      },
+    };
+    await collect(
+      new PiProvider({ factory }).sendQuery("hi", "/tmp", undefined, {
+        abortSignal: abort.signal,
+      }),
+    );
+    expect(counter).toEqual({ disposed: 1, prompted: 0 });
+  });
+
+  test("a throwing dispose still ends the turn", async () => {
+    const factory: PiSessionFactory = {
+      async createSession() {
+        return {
+          subscribe: () => () => {},
+          prompt: async () => {},
+          dispose: () => {
+            throw new Error("dispose failed");
+          },
+        };
+      },
+    };
+    expect(await collect(new PiProvider({ factory }).sendQuery("hi", "/tmp"))).toEqual([]);
+  });
+});
+
+describe("PiProvider generation-scoped slots", () => {
+  test("a tool run frees the slot for another turn and the next generation waits", async () => {
+    const slots = new PiVendorSlots({ rec: 1 });
+    const seen: string[] = [];
+    const factory: PiSessionFactory = {
+      async createSession(params) {
+        const generation = params.generation;
+        if (generation === undefined) throw new Error("no generation hooks");
+        return {
+          modelRef: "rec/flint",
+          subscribe: () => () => {},
+          prompt: async () => {
+            // The model asked for a tool: pi's tool_call hook ends the generation.
+            generation.end();
+            const child = await slots.acquire("rec");
+            seen.push("child ran");
+            let resumed = false;
+            const next = generation.start().then(() => {
+              resumed = true;
+            });
+            await new Promise((r) => setTimeout(r, 0));
+            seen.push(resumed ? "parent jumped the queue" : "parent waiting");
+            child?.();
+            await next;
+            seen.push("parent resumed");
+          },
+        };
+      },
+    };
+    await collect(new PiProvider({ factory, slots }).sendQuery("hi", "/tmp"));
+    expect(seen).toEqual(["child ran", "parent waiting", "parent resumed"]);
+    expect(slots.isSaturated("rec")).toBe(false);
+  });
+});
+
+describe("PiProvider vendor allowlist", () => {
+  const catalogSource = async (): Promise<ModelInfo[]> => [
+    { id: "github-copilot/gpt-5.5" },
+    { id: "rec/flint" },
+  ];
+
+  test("filters the catalog to allowed vendors", async () => {
+    const provider = new PiProvider({ vendors: ["rec"], catalogSource, factory: fakeFactory([]) });
+    expect((await provider.listModels()).map((m) => m.id)).toEqual(["rec/flint"]);
+  });
+
+  test("refuses a turn that resolved outside the allowlist before prompting", async () => {
+    let prompted = false;
+    const provider = new PiProvider({
+      vendors: ["rec"],
+      factory: fakeFactory([textDelta("cloud")], {
+        modelRef: "github-copilot/gpt-5.5",
+        capturePrompt: () => {
+          prompted = true;
+        },
+      }),
+    });
+    const chunks = await collect(
+      provider.sendQuery("hi", "/tmp", undefined, { model: "rec/flint" }),
+    );
+    expect(prompted).toBe(false);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.type).toBe("error");
+    expect((chunks[0] as { message: string }).message).toContain("outside pi.vendors");
+  });
+
+  test("an empty allowlist allows no vendor", async () => {
+    let prompted = false;
+    const provider = new PiProvider({
+      vendors: [],
+      catalogSource,
+      factory: fakeFactory([textDelta("local")], {
+        modelRef: "rec/flint",
+        capturePrompt: () => {
+          prompted = true;
+        },
+      }),
+    });
+    expect(await provider.listModels()).toEqual([]);
+    const chunks = await collect(provider.sendQuery("hi", "/tmp"));
+    expect(prompted).toBe(false);
+    expect(chunks[0]?.type).toBe("error");
+  });
+
+  test("runs an allowed vendor normally", async () => {
+    const provider = new PiProvider({
+      vendors: ["rec"],
+      factory: fakeFactory([textDelta("local")], { modelRef: "rec/flint" }),
+    });
+    const chunks = await collect(
+      provider.sendQuery("hi", "/tmp", undefined, { model: "rec/flint" }),
+    );
+    expect(chunks).toEqual([
+      { type: "model", model: "rec/flint" },
+      { type: "text", content: "local" },
+    ]);
+  });
+});
+
+describe("PiProvider default model (config pi.model)", () => {
+  test("piCapabilities maps every tier to the default and leads the model list", () => {
+    const caps = piCapabilities("rec/flint");
+    expect(caps.defaultModel).toBe("rec/flint");
+    expect(caps.models[0]).toBe("rec/flint");
+    expect(caps.modelClasses).toEqual({
+      fast: "rec/flint",
+      balanced: "rec/flint",
+      deep: "rec/flint",
+    });
+    expect(piCapabilities()).toBe(PI_CAPABILITIES);
+  });
+
+  test("a turn that names no model requests the default", async () => {
+    let captured: PiCreateSessionParams | undefined;
+    const provider = new PiProvider({
+      defaultModel: "rec/flint",
+      factory: fakeFactory([textDelta("ok")], {
+        modelRef: "rec/flint",
+        capture: (p) => (captured = p),
+      }),
+    });
+    const chunks = await collect(provider.sendQuery("hi", "/tmp"));
+    expect(captured?.model).toBe("rec/flint");
+    expect(chunks.map((c) => c.type)).toEqual(["model", "text"]);
+  });
+});
+
+describe("PiProvider fallback to config pi.model", () => {
+  test("hands the default to the factory as the fallback for another requested model", async () => {
+    let captured: PiCreateSessionParams | undefined;
+    const provider = new PiProvider({
+      defaultModel: "rec/flint",
+      factory: fakeFactory([textDelta("ok")], {
+        modelRef: "rec/flint",
+        capture: (p) => (captured = p),
+      }),
+    });
+    const chunks = await collect(
+      provider.sendQuery("hi", "/tmp", undefined, { model: "gpt-5.6-terra" }),
+    );
+    expect(captured?.model).toBe("gpt-5.6-terra");
+    expect(captured?.fallbackModel).toBe("rec/flint");
+    expect(chunks[1]?.type).toBe("system");
+    expect((chunks[1] as { content: string }).content).toContain('running "rec/flint"');
+  });
+});
+
+describe("PiProvider extensions", () => {
+  test("passes configured extension paths and allowed extension tools to the factory", async () => {
+    let captured: PiCreateSessionParams | undefined;
+    const provider = new PiProvider({
+      extensionPaths: ["/home/k/node_modules/pi-web-access"],
+      extensionTools: ["web_search", "fetch_content"],
+      factory: fakeFactory([{ type: "agent_end" }], { capture: (p) => (captured = p) }),
+    });
+    await collect(provider.sendQuery("hi", "/tmp"));
+    expect(captured?.extensionPaths).toEqual(["/home/k/node_modules/pi-web-access"]);
+    expect(captured?.extensionTools).toEqual(["web_search", "fetch_content"]);
+  });
+});
+
+describe("resolvePiExtensionPaths", () => {
+  test("resolves package names under the home's node_modules and skips missing ones", () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-ext-"));
+    try {
+      const pkg = join(home, "node_modules", "pi-web-access");
+      mkdirSync(pkg, { recursive: true });
+      const abs = mkdtempSync(join(tmpdir(), "pi-ext-abs-"));
+      expect(resolvePiExtensionPaths(["pi-web-access", "missing-ext", abs], home)).toEqual([
+        pkg,
+        abs,
+      ]);
+      rmSync(abs, { recursive: true, force: true });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("filterPiTools", () => {
+  const surface = [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "grep",
+    "find",
+    "ls",
+    "web_search",
+    "fetch_content",
+  ];
+
+  test("keeps everything when the node sets no rails", () => {
+    expect(filterPiTools(surface, undefined, undefined)).toEqual(surface);
+  });
+
+  test("maps Claude-style allowed_tools onto pi tools by capability", () => {
+    expect(filterPiTools(surface, ["Read", "Write", "WebFetch"], undefined)).toEqual([
+      "read",
+      "edit",
+      "write",
+      "grep",
+      "find",
+      "ls",
+      "web_search",
+      "fetch_content",
+    ]);
+  });
+
+  test("denied_tools removes a capability and exact names", () => {
+    expect(filterPiTools(surface, undefined, ["Bash", "web_search"])).toEqual([
+      "read",
+      "edit",
+      "write",
+      "grep",
+      "find",
+      "ls",
+      "fetch_content",
+    ]);
+  });
+
+  test("an allowlist of only non-capability names leaves no built-ins", () => {
+    expect(filterPiTools(surface, ["touchline_status"], undefined)).toEqual([]);
+  });
+});
+
+describe("PiProvider tool rails", () => {
+  test("forwards a node's allowed_tools / denied_tools to the factory", async () => {
+    let captured: PiCreateSessionParams | undefined;
+    const provider = new PiProvider({
+      factory: fakeFactory([{ type: "agent_end" }], { capture: (p) => (captured = p) }),
+    });
+    await collect(
+      provider.sendQuery("hi", "/tmp", undefined, {
+        allowedTools: ["Read", "WebFetch"],
+        disallowedTools: ["Bash"],
+      }),
+    );
+    expect(captured?.allowedTools).toEqual(["Read", "WebFetch"]);
+    expect(captured?.disallowedTools).toEqual(["Bash"]);
+  });
+
+  test("applies the rails to projected keelson tools, deny winning", async () => {
+    let captured: PiCreateSessionParams | undefined;
+    const tool = (name: string): ToolDefinition => ({
+      name,
+      description: name,
+      inputSchema: z.object({}),
+      execute: async () => {},
+    });
+    const provider = new PiProvider({
+      factory: fakeFactory([{ type: "agent_end" }], { capture: (p) => (captured = p) }),
+    });
+    await collect(
+      provider.sendQuery("hi", "/tmp", undefined, {
+        tools: [tool("workflow_run"), tool("workflow_list"), tool("memory_recall")],
+        allowedTools: ["workflow_run", "mcp__keelson__workflow_list"],
+        disallowedTools: ["mcp__keelson__workflow_run"],
+      }),
+    );
+    expect(captured?.customTools?.map((t) => t.name)).toEqual(["workflow_list"]);
+  });
+});
+
+describe("pi gate repeat-call guard", () => {
+  const text = (t: string) => [{ type: "text", text: t }];
+
+  test("blocks an identical call once it has returned the same result `limit` times", async () => {
+    const gate = loadGate({}, [], { repeatCallLimit: 2 });
+    const input = { pattern: "player-findings" };
+    for (let i = 0; i < 2; i++) {
+      expect(await gate.call("grep", input)).toBeUndefined();
+      await gate.result("grep", text("no matches"), false, input);
+    }
+    const blocked = (await gate.call("grep", input)) as { block: boolean; reason: string };
+    expect(blocked.block).toBe(true);
+    expect(blocked.reason).toContain("same result 2 times");
+    expect(await gate.call("grep", { pattern: "other" })).toBeUndefined();
+  });
+
+  test("a changed result resets the count", async () => {
+    const gate = loadGate({}, [], { repeatCallLimit: 2 });
+    const input = { command: "bun test" };
+    await gate.call("bash", input);
+    await gate.result("bash", text("1 fail"), false, input);
+    await gate.call("bash", input);
+    await gate.result("bash", text("0 fail"), false, input);
+    expect(await gate.call("bash", input)).toBeUndefined();
+  });
+
+  test("the blocked call's own result does not reset the count", async () => {
+    const gate = loadGate({}, [], { repeatCallLimit: 1 });
+    const input = { path: "/a" };
+    await gate.callWithId("read", input, "1");
+    await gate.result("read", text("same"), false, input, "1");
+    expect(await gate.callWithId("read", input, "2")).toMatchObject({ block: true });
+    await gate.result("read", text("blocked"), true, input, "2");
+    expect(await gate.callWithId("read", input, "3")).toMatchObject({ block: true });
+  });
+
+  test("is off without a limit", async () => {
+    const gate = loadGate({});
+    const input = { path: "/a" };
+    for (let i = 0; i < 5; i++) {
+      expect(await gate.call("read", input)).toBeUndefined();
+      await gate.result("read", text("same"), false, input);
+    }
+  });
+});
+
+describe("PiProvider repeatCallLimit", () => {
+  test("defaults to 3 and honors config", async () => {
+    const seen: (number | undefined)[] = [];
+    for (const repeatCallLimit of [undefined, 0]) {
+      const provider = new PiProvider({
+        ...(repeatCallLimit !== undefined ? { repeatCallLimit } : {}),
+        factory: fakeFactory([{ type: "agent_end" }], {
+          capture: (p) => seen.push(p.repeatCallLimit),
+        }),
+      });
+      await collect(provider.sendQuery("hi", "/tmp"));
+    }
+    expect(seen).toEqual([3, 0]);
   });
 });

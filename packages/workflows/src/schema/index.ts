@@ -123,6 +123,7 @@ export {
   webSearchModeSchema,
   workflowBaseSchema,
   workflowDefinitionSchema,
+  workflowModelByProviderSchema,
 } from "./workflow.ts";
 export type {
   ApprovalContext,

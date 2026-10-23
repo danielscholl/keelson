@@ -12,6 +12,7 @@ import {
   type SendQueryOptions,
 } from "@keelson/providers";
 import { type ClientFrame, WIRE_PROTOCOL_VERSION } from "@keelson/shared";
+import { clearRegistry as clearToolRegistry } from "@keelson/skills";
 import { handleChatRequest } from "../src/chat-handler.ts";
 import { buildWorkingRules } from "../src/chat-prompt.ts";
 import { createConversationStore } from "../src/conversation-store.ts";
@@ -57,6 +58,9 @@ function registerSpy(id: string, capture: (opts: SendQueryOptions | undefined) =
 
 beforeAll(() => {
   if (!isRegisteredProvider("stub")) registerStubProvider();
+  // Server-booting test files leave canvas_publish/keelson_docs registered, which
+  // would add their prompt sections to the exact-match assertions below.
+  clearToolRegistry();
 });
 
 function setup(spyId: string, capture: (opts: SendQueryOptions | undefined) => void) {
