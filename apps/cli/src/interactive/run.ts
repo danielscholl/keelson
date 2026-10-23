@@ -69,8 +69,10 @@ import {
   resolveProjectBinding,
 } from "./project.ts";
 import {
+  adoptCreatedConversationSandbox,
   footerSandbox,
   initialSandboxState,
+  leaveConversationSandbox,
   runSandboxCommand,
   type SandboxSessionState,
 } from "./sandbox.ts";
@@ -275,7 +277,8 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
 
   const resetConversation = (reason: string): void => {
     session.conversationId = undefined;
-    session.sandboxConversation = undefined;
+    leaveConversationSandbox(session, setup.sandboxConfig);
+    refreshSandboxFooter();
     resetTranscript(surface, reason);
   };
 
@@ -685,6 +688,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
             sandbox: session.sandbox ? "on" : "off",
           });
           session.conversationId = conv.id;
+          adoptCreatedConversationSandbox(session, conv.sandbox);
           // One-shot: the seed belongs to this conversation only.
           session.seedSystemPrompt = undefined;
           session.conversationName = undefined;

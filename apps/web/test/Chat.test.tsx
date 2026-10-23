@@ -304,6 +304,7 @@ describe("Chat sandbox", () => {
         });
       }
       const m = /^\/api\/conversations\/([^/]+)$/.exec(path);
+      if (m && init?.method === "DELETE") return new Response(null, { status: 204 });
       if (m && init?.method === "PATCH") {
         const patch = JSON.parse(String(init.body)) as { sandbox?: "on" | "off" };
         conversationPatches.push({ id: m[1]!, patch });
@@ -364,6 +365,25 @@ describe("Chat sandbox", () => {
     fireEvent.keyDown(box, { key: "Enter" });
     expect(await screen.findByText(/KEELSON_SANDBOX=required holds the sandbox on/)).toBeDefined();
     expect(conversationPatches).toEqual([]);
+  });
+
+  test("deleting the open chat drops its saved choice back to the default", async () => {
+    conversations[0]!.sandbox = "on";
+    renderChat();
+    await screen.findByText("Send this summary");
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("true"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete conversation Surface handoff" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("false"));
+  });
+
+  test("starting a new chat drops the old row's choice too", async () => {
+    conversations[0]!.sandbox = "on";
+    renderChat();
+    await screen.findByText("Send this summary");
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("true"));
+    fireEvent.click(screen.getAllByRole("button", { name: "Start a new conversation" })[0]!);
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("false"));
   });
 
   test("/sandbox status prints the same lines as the CLI", async () => {

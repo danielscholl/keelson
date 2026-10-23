@@ -6,8 +6,10 @@ import { describe, expect, test } from "bun:test";
 import type { SandboxMode, SandboxSupport } from "@keelson/shared";
 import type { ServerSandboxConfig } from "../src/http/chat-client.ts";
 import {
+  adoptCreatedConversationSandbox,
   footerSandbox,
   initialSandboxState,
+  leaveConversationSandbox,
   runSandboxCommand,
   type SandboxSessionState,
 } from "../src/interactive/sandbox.ts";
@@ -133,5 +135,49 @@ describe("initialSandboxState", () => {
       sandboxChosen: true,
     });
     expect(initialSandboxState(REQUIRED, "off", false).sandbox).toBe(true);
+  });
+});
+
+describe("moving between conversations", () => {
+  test("leaving a hydrated 'on' conversation drops back to the default, as the SPA does", async () => {
+    const h = harness({
+      session: { conversationId: "c1", ...initialSandboxState(OFF, "on", undefined) },
+    });
+    expect(h.session.sandbox).toBe(true);
+    leaveConversationSandbox(h.session, OFF);
+    expect(h.session.sandbox).toBe(false);
+    expect(footerSandbox(h.session, OFF)).toBeUndefined();
+    h.session.conversationId = undefined;
+    await h.run("status");
+    expect(h.info[0]).toBe("sandbox: off (config default)");
+  });
+
+  test("--sandbox applies again to each new conversation; a /sandbox choice does not", async () => {
+    const h = harness({
+      session: { conversationId: "c1", ...initialSandboxState(OFF, undefined, true) },
+    });
+    await h.run("off");
+    expect(h.session.sandbox).toBe(false);
+    leaveConversationSandbox(h.session, OFF);
+    expect(h.session.sandbox).toBe(true);
+    expect(h.session.sandboxChosen).toBe(true);
+  });
+
+  test("/sandbox on an open conversation reads as saved there, not as a session override", async () => {
+    const h = harness({ session: { conversationId: "c1" } });
+    await h.run("on");
+    h.info.length = 0;
+    await h.run("status");
+    expect(h.info[0]).toBe("sandbox: on (saved on this conversation)");
+  });
+
+  test("the row the pump creates counts as saved, so status names the conversation", async () => {
+    const h = harness();
+    await h.run("on");
+    h.session.conversationId = "c2";
+    adoptCreatedConversationSandbox(h.session, "on");
+    h.info.length = 0;
+    await h.run("status");
+    expect(h.info[0]).toBe("sandbox: on (saved on this conversation)");
   });
 });

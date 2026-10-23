@@ -467,6 +467,12 @@ export function Chat({
   const [sandboxConversation, setSandboxConversation] = useState<SandboxMode | undefined>(
     undefined,
   );
+  // Every path that leaves a conversation without opening another drops its
+  // choice, so the next chat starts from the default, not the row just left.
+  const forgetConversationSandbox = useCallback(() => {
+    setSandboxChoice(undefined);
+    setSandboxConversation(undefined);
+  }, []);
   const sandboxResolution = resolveSandboxEnabled({
     ...(sandboxChoice !== undefined ? { frame: sandboxChoice } : {}),
     ...(sandboxConversation !== undefined ? { conversation: sandboxConversation } : {}),
@@ -1308,10 +1314,11 @@ export function Chat({
         setMessages([]);
         conversationIdRef.current = null;
         setConversationId(null);
+        forgetConversationSandbox();
       }
       setActiveProject(id);
     },
-    [activeProjectId, setActiveProject, setConversationId],
+    [activeProjectId, forgetConversationSandbox, setActiveProject, setConversationId],
   );
 
   const dispatchProjectCommand = useCallback(
@@ -2012,6 +2019,7 @@ export function Chat({
             conversationIdRef.current = null;
             setConversationId(null);
             setMessages([]);
+            forgetConversationSandbox();
             return;
           }
           setSelectedProviderId(conv.providerId);
@@ -2057,7 +2065,14 @@ export function Chat({
           setHydrating(false);
         });
     },
-    [abortActiveStream, resetEffortForModel, setActiveProject, setConversationId, toast],
+    [
+      abortActiveStream,
+      forgetConversationSandbox,
+      resetEffortForModel,
+      setActiveProject,
+      setConversationId,
+      toast,
+    ],
   );
 
   const onNewConversation = useCallback(() => {
@@ -2074,8 +2089,7 @@ export function Chat({
     autoSendPromptRef.current = null;
     pendingSeedRef.current = null;
     pendingNameRef.current = null;
-    setSandboxChoice(undefined);
-    setSandboxConversation(undefined);
+    forgetConversationSandbox();
     // Re-seed from latest settings so a fresh chat picks up changes since
     // this view mounted (starring, sending on a different provider).
     const ref = pickInitialRef(
@@ -2099,6 +2113,7 @@ export function Chat({
     abortActiveStream,
     catalogSettled,
     defaultProvider,
+    forgetConversationSandbox,
     modelsByProvider,
     providers,
     resetEffortForModel,
@@ -2134,6 +2149,7 @@ export function Chat({
           setConversationId(null);
           conversationIdRef.current = null;
           setMessages([]);
+          forgetConversationSandbox();
         }
         toast.push({ kind: "ok", message: "Conversation deleted" });
       } catch (e: unknown) {
@@ -2142,7 +2158,7 @@ export function Chat({
         throw e;
       }
     },
-    [abortActiveStream, conversationsList, setConversationId, toast],
+    [abortActiveStream, conversationsList, forgetConversationSandbox, setConversationId, toast],
   );
 
   const activeRef: ModelRef | null = selectedProviderId
