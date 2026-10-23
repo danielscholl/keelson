@@ -986,6 +986,7 @@ function buildResumeSeed(
         output: node.outputText ?? "",
         ...(node.provider !== null ? { provider: node.provider } : {}),
         ...(node.model !== null ? { model: node.model } : {}),
+        ...(node.sandbox !== null ? { sandbox: node.sandbox } : {}),
         ...(node.startedAt !== null ? { startedAt: node.startedAt } : {}),
         ...(node.completedAt !== null ? { completedAt: node.completedAt } : {}),
       });

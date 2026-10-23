@@ -142,9 +142,15 @@ export function makeRunUntilBashProbe(
         args:
           scratch !== undefined ? [writeSandboxBody(scratch, "until.sh", script)] : ["-c", script],
         cwd: opts.cwd,
+        // The loop's own overlay (LOOP_PREV_OUTPUT, LOOP_USER_INPUT) is
+        // harness-provided, so it passes the sandbox env filter like KEELSON_*.
         env:
           policy !== undefined && profile && scratch !== undefined
-            ? policy.envFor(env, profile, scratch)
+            ? policy.envFor(
+                env,
+                { ...profile, env: [...profile.env, ...Object.keys(opts.env ?? {})] },
+                scratch,
+              )
             : env,
         timeoutMs: UNTIL_BASH_TIMEOUT_MS,
         abortSignal: opts.signal,

@@ -2625,11 +2625,20 @@ nodes:
       n=$((n+1))
       echo "$n" > "${attemptPath}"
       if [ "$n" -eq 1 ]; then exit 7; fi
-      printf '%s/%s\\n' "$KEELSON_NODE_ask_PROVIDER" "$KEELSON_NODE_ask_MODEL" > "${provenancePath}"
+      printf '%s/%s/%s\\n' "$KEELSON_NODE_ask_PROVIDER" "$KEELSON_NODE_ask_MODEL" "$KEELSON_NODE_ask_SANDBOX" > "${provenancePath}"
 `,
     );
     let promptCalls = 0;
+    const sandboxPolicy = createSandboxPolicy({
+      floor: false,
+      defaultEnabled: false,
+      home: tmpDir,
+      dbPath: join(tmpDir, "keelson.db"),
+      bundledBinDir: join(tmpDir, "bin"),
+      resolveGitCommonDir: () => undefined,
+    });
     const promptHandler = makePromptHandler({
+      sandbox: sandboxPolicy,
       getProvider: () => ({
         getCapabilities: () => ({ defaultModel: "stub-echo", models: ["stub-echo"] }),
         async *sendQuery() {
@@ -2641,7 +2650,7 @@ nodes:
       resolveProviderId: (id) => id ?? "stub",
       getRegisteredTools: () => [],
     });
-    const { app, store } = makeRig(promptHandler);
+    const { app, store } = makeRig(promptHandler, { sandboxPolicy });
     const start = await app.fetch(
       postRun("http://test/api/workflows/resume-provenance/runs", { inputs: {} }),
     );
@@ -2651,6 +2660,7 @@ nodes:
       status: "succeeded",
       provider: "stub",
       model: "stub-echo",
+      sandbox: "off",
     });
 
     const resumed = await app.fetch(
@@ -2659,7 +2669,7 @@ nodes:
     expect(resumed.status).toBe(200);
     expect((await pollUntilTerminal(app, runId)).status).toBe("succeeded");
     expect(promptCalls).toBe(1);
-    expect(readFileSync(provenancePath, "utf8").trim()).toBe("stub/stub-echo");
+    expect(readFileSync(provenancePath, "utf8").trim()).toBe("stub/stub-echo/off");
   });
 
   test("POST /resume-run preserves the provider override and requires it to remain registered", async () => {

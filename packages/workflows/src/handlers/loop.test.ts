@@ -952,6 +952,27 @@ describe("makeRunUntilBashProbe — sandbox", () => {
     }
   });
 
+  test("a sandboxed probe still sees the loop's own LOOP_PREV_OUTPUT and LOOP_USER_INPUT", async () => {
+    const artifacts = mkdtempSync(join(tmpdir(), "keelson-loop-sandbox-"));
+    try {
+      const specs: SpawnSpec[] = [];
+      const probe = makeRunUntilBashProbe({ sandbox: policyWith(true, specs) });
+      const result = await probe('test "$LOOP_PREV_OUTPUT/$LOOP_USER_INPUT" = "prev/user"', {
+        cwd: process.cwd(),
+        signal: new AbortController().signal,
+        inputs: {},
+        upstreamOutputs: new Map(),
+        artifactsDir: artifacts,
+        nodeId: "retry",
+        env: { LOOP_PREV_OUTPUT: "prev", LOOP_USER_INPUT: "user" },
+      });
+      expect(result.exitCode).toBe(0);
+      expect(specs[0]?.env).toMatchObject({ LOOP_PREV_OUTPUT: "prev", LOOP_USER_INPUT: "user" });
+    } finally {
+      rmSync(artifacts, { recursive: true, force: true });
+    }
+  });
+
   test("with no runtime the probe refuses, and the loop node fails closed", async () => {
     const probe = makeRunUntilBashProbe({ sandbox: policyWith(false, []) });
     const { handler: promptHandler } = makeRecorderHandler(() => ({

@@ -3,11 +3,13 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
+import type { DagNode } from "../schema/index.ts";
 import {
   detectCompletionSignal,
   formatSubprocessFailure,
   isInlineScript,
   stripCompletionTags,
+  synthesizePromptNode,
 } from "./helpers.ts";
 
 describe("isInlineScript", () => {
@@ -108,5 +110,17 @@ describe("formatSubprocessFailure", () => {
     expect(msg).toContain("…[truncated]");
     expect(msg).toContain("TAIL");
     expect(msg).not.toContain("a".repeat(2_001));
+  });
+});
+
+describe("synthesizePromptNode — sandbox", () => {
+  test("a command node's sandbox reaches the synthesized prompt node", () => {
+    const source = {
+      id: "cmd",
+      command: "review",
+      sandbox: { enabled: true, network: { outbound: "allow" } },
+    } as unknown as DagNode;
+    const synthesized = synthesizePromptNode(source, { id: "cmd", prompt: "review this" });
+    expect(synthesized.sandbox).toEqual({ enabled: true, network: { outbound: "allow" } });
   });
 });
