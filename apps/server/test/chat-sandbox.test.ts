@@ -98,8 +98,10 @@ async function run(
 describe("chat sandbox resolution", () => {
   test("a frame turning the sandbox on builds a profile with the real cwd and mirrors it", async () => {
     const root = mkdtempSync(join(tmpdir(), "keelson-chat-sandbox-"));
-    const link = `${root}-link`;
-    symlinkSync(root, link);
+    // A directory symlink proves the cwd is canonicalized; Windows cannot
+    // remove one reliably, so it uses the directory itself.
+    const link = process.platform === "win32" ? root : `${root}-link`;
+    if (link !== root) symlinkSync(root, link);
     try {
       const db = openDatabase({ path: ":memory:" });
       const store = createConversationStore(db);
@@ -118,7 +120,7 @@ describe("chat sandbox resolution", () => {
       expect(profile?.filesystem.readwrite).toEqual([realpathSync(root), "/scratch"]);
       expect(store.get(conv.id)?.sandbox).toBe("on");
     } finally {
-      rmSync(link, { force: true });
+      if (link !== root) rmSync(link, { force: true });
       rmSync(root, { recursive: true, force: true });
     }
   });

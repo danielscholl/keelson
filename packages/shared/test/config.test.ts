@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, normalize } from "node:path";
 import {
   BUILT_IN_PROVIDER_IDS,
   isRibWorkflowGrantAllowed,
@@ -479,13 +479,16 @@ describe("resolveSandboxConfig", () => {
   });
 
   test("expands ~, normalizes, drops relative paths with a warning", () => {
+    // A real absolute path on the host platform, so a Windows drive path is
+    // exercised on the Windows runner.
+    const hostAbsolute = join(tmpdir(), "keelson-grant");
     const resolved = resolveSandboxConfig(
       {
         sandbox: {
           default: true,
           filesystem: {
             readwrite: ["~/scratch", "/tmp/a/../b", "/tmp/b"],
-            readonly: ["~", "relative/dir"],
+            readonly: ["~", "relative/dir", hostAbsolute],
             denied: ["~/.ssh"],
           },
           network: { outbound: "allow", loopback: true },
@@ -498,9 +501,9 @@ describe("resolveSandboxConfig", () => {
     expect(resolved.default).toBe(true);
     expect(resolved.settings).toEqual({
       filesystem: {
-        readwrite: ["/home/op/scratch", "/tmp/b"],
-        readonly: ["/home/op"],
-        denied: ["/home/op/.ssh"],
+        readwrite: [join("/home/op", "scratch"), normalize("/tmp/b")],
+        readonly: [normalize("/home/op"), normalize(hostAbsolute)],
+        denied: [join("/home/op", ".ssh")],
       },
       network: { outbound: "allow", loopback: true },
       env: ["GH_TOKEN"],

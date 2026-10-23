@@ -487,7 +487,8 @@ export function resolveSandboxConfig(
   const paths = (field: string, list: readonly string[] | undefined): string[] => {
     const out: string[] = [];
     for (const raw of list ?? []) {
-      const expanded = raw === "~" ? home : raw.startsWith("~/") ? join(home, raw.slice(2)) : raw;
+      const expanded =
+        raw === "~" ? home : /^~[\\/]/.test(raw) ? join(home, raw.slice(2)) : raw;
       if (!isAbsolute(expanded)) {
         warnings.push(`sandbox.filesystem.${field}: '${raw}' is not absolute; ignored`);
         continue;
