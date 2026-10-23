@@ -81,6 +81,7 @@ import {
   resolveCrossRibGrants,
   resolveDefaultProvider,
   resolveEnabledProviders,
+  resolveModelAllowlists,
   resolveRibApprovalGrants,
   resolveRibWorkflowGrants,
 } from "@keelson/shared/config";
@@ -157,6 +158,8 @@ export interface BootstrapProvidersResult {
   // The provider new chats and the workflow fallback default to. Undefined only
   // when nothing chat-capable is registered.
   defaultProvider?: string;
+  // config `<provider>.models`, applied to what the pickers list.
+  modelAllowlists: Record<string, readonly string[]>;
   // Providers the operator enabled whose vendor SDK isn't installed. They are
   // left unregistered rather than registered-and-broken, so a picker never
   // offers a provider whose first turn would fail on a missing module.
@@ -173,7 +176,7 @@ export function bootstrapProviders(options: BootstrapProvidersOptions): Bootstra
     envProviders: process.env.KEELSON_PROVIDERS,
     known: BUILT_IN_PROVIDER_IDS,
   });
-  const result: BootstrapProvidersResult = { notInstalled: [] };
+  const result: BootstrapProvidersResult = { notInstalled: [], modelAllowlists: {} };
   const sdkInstalled = options.isSdkInstalled ?? isProviderSdkInstalled;
   for (const id of requested) {
     if (isOnDemandProvider(id) && !sdkInstalled(id)) {
@@ -245,6 +248,7 @@ export function bootstrapProviders(options: BootstrapProvidersOptions): Bootstra
   // Registered AFTER the selectable providers so it sits at the end of
   // getProviderInfoList() and isn't picked as a chat default.
   registerWorkflowProvider();
+  result.modelAllowlists = resolveModelAllowlists(config);
   result.defaultProvider = resolveDefaultProvider(
     config,
     getProviderInfoList().map((p) => p.id),

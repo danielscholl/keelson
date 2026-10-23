@@ -44,6 +44,9 @@ const modelClassesConfigSchema = z
 const providerSettingsSchema = z.object({
   model: z.string().optional(),
   modelClasses: modelClassesConfigSchema.optional(),
+  // Model ids the pickers offer for this provider. Display only: a workflow or
+  // turn that names another model still runs it.
+  models: z.array(z.string().min(1)).optional(),
 });
 
 // How the claude provider chooses a credential. "auto" (default) prefers a
@@ -372,6 +375,20 @@ export function resolveDefaultProvider(
   // Never default to the synthetic non-chat 'workflow' provider — undefined when
   // nothing chat-capable is registered.
   return registeredIds.find((id) => id !== "workflow");
+}
+
+// Per-provider picker allowlists from each provider's `models` setting.
+export function resolveModelAllowlists(config: KeelsonConfig): Record<string, readonly string[]> {
+  const out: Record<string, readonly string[]> = {};
+  for (const [id, settings] of [
+    ["copilot", config.copilot],
+    ["claude", config.claude],
+    ["pi", config.pi],
+    ["codex", config.codex],
+  ] as const) {
+    if (settings?.models !== undefined) out[id] = settings.models;
+  }
+  return out;
 }
 
 // Resolved MCP gateway settings — config.mcp with KEELSON_MCP_* env overrides

@@ -61,6 +61,9 @@ export interface ChatRoutesOptions {
   // The provider the picker should preselect (config.defaultProvider → copilot
   // → first real). Surfaced on GET /api/providers; absent when unresolved.
   defaultProvider?: string;
+  // Per-provider picker allowlists (config `<provider>.models`); providers
+  // without one list everything.
+  modelAllowlists?: Readonly<Record<string, readonly string[]>>;
   // Harness-owned tools merged into every chat turn's tool set (see
   // ChatDeps) but never registered into the shared registry, so GET
   // /api/tools must fold them in itself or under-report what a turn can
@@ -93,7 +96,18 @@ export function chatRoutes(
 ): void {
   app.get("/api/providers", (c) =>
     c.json({
-      providers: getProviderInfoList(),
+      providers: getProviderInfoList().map((p) => {
+        const allow = opts.modelAllowlists?.[p.id];
+        return allow === undefined
+          ? p
+          : {
+              ...p,
+              capabilities: {
+                ...p.capabilities,
+                models: p.capabilities.models.filter((m) => allow.includes(m)),
+              },
+            };
+      }),
       ...(opts.defaultProvider ? { defaultProvider: opts.defaultProvider } : {}),
     }),
   );
@@ -107,7 +121,11 @@ export function chatRoutes(
     }
     try {
       const provider = getAgentProvider(id);
-      const models = modelsResponseSchema.parse(await provider.listModels());
+      const allow = opts.modelAllowlists?.[id];
+      const listed = await provider.listModels();
+      const models = modelsResponseSchema.parse(
+        allow === undefined ? listed : listed.filter((m) => allow.includes(m.id)),
+      );
       return c.json({ models });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
