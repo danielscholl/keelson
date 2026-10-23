@@ -3,9 +3,11 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import type { ToolContext } from "@keelson/shared";
+import { capabilityToolName } from "../copilot/tool-names.ts";
 import { applyToolResultGate, checkToolCallGate } from "../tool-gate.ts";
 import { deriveToolParametersJsonSchema } from "../tool-params.ts";
 import type { MessageChunk, ToolCallGate, ToolDefinition, ToolResultGate } from "../types.ts";
+import { PI_TOOL_KIND } from "./tool-filter.ts";
 
 // Structural slice of pi's extension ToolDefinition that the projection
 // produces; the factory casts it at the SDK boundary. `parameters` is a plain
@@ -92,14 +94,18 @@ export function projectToolsForPi(
         throw new Error(`Invalid input for tool '${tool.name}': ${parsed.error.message}`);
       }
       // Per-call policy gate, after validation so a policy sees normalized args.
-      // A deny throws — pi turns the throw into an error tool result.
-      const gateResult = await checkToolCallGate(
-        projection.evaluateToolCall,
-        tool.name,
-        parsed.data,
-      );
-      if (gateResult.denied) {
-        throw new Error(gateResult.message);
+      // A deny throws — pi turns the throw into an error tool result. A tool
+      // standing in for a pi built-in (the host's sandboxed bash) also answers to
+      // the canonical name operator policy uses (Bash), as the built-in does.
+      const kind = PI_TOOL_KIND[tool.name];
+      const canonical = kind !== undefined ? capabilityToolName(kind) : undefined;
+      for (const name of canonical !== undefined && canonical !== tool.name
+        ? [canonical, tool.name]
+        : [tool.name]) {
+        const gateResult = await checkToolCallGate(projection.evaluateToolCall, name, parsed.data);
+        if (gateResult.denied) {
+          throw new Error(gateResult.message);
+        }
       }
       await tool.execute(parsed.data, ctx);
       // Per-result policy gate on the captured output before it returns to pi. A

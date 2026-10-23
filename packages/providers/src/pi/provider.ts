@@ -16,6 +16,7 @@ import { type PiCatalogSource, realPiCatalogSource } from "./catalog.ts";
 import { PiVendorSlots } from "./concurrency.ts";
 import { mapPiEvent, mapPiFinishReason } from "./event-bridge.ts";
 import { PiAgentSessionFactory, type PiSession, type PiSessionFactory } from "./factory.ts";
+import { withSandboxPathGate } from "./sandbox-paths.ts";
 import { filterPiTools } from "./tool-filter.ts";
 import { projectToolsForPi } from "./tool-projection.ts";
 
@@ -229,6 +230,10 @@ export class PiProvider implements IAgentProvider {
       }
     }
 
+    const toolCallGate =
+      sandboxed && options?.sandbox !== undefined
+        ? withSandboxPathGate(options.evaluateToolCall, options.sandbox, cwd)
+        : options?.evaluateToolCall;
     const queue = new ChunkQueue();
     // The workflow handler's allow-list branch doesn't subtract the node's own
     // denials, so the rails apply here too, as the copilot adapter does.
@@ -250,9 +255,7 @@ export class PiProvider implements IAgentProvider {
             pushChunk: (chunk) => queue.push(chunk),
             ...(options.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
             ...(options.turnContext !== undefined ? { turnContext: options.turnContext } : {}),
-            ...(options.evaluateToolCall !== undefined
-              ? { evaluateToolCall: options.evaluateToolCall }
-              : {}),
+            ...(toolCallGate !== undefined ? { evaluateToolCall: toolCallGate } : {}),
             ...(options.evaluateToolResult !== undefined
               ? { evaluateToolResult: options.evaluateToolResult }
               : {}),
@@ -283,9 +286,7 @@ export class PiProvider implements IAgentProvider {
           : {}),
         ...(customTools !== undefined ? { customTools } : {}),
         gates: {
-          ...(options?.evaluateToolCall !== undefined
-            ? { evaluateToolCall: options.evaluateToolCall }
-            : {}),
+          ...(toolCallGate !== undefined ? { evaluateToolCall: toolCallGate } : {}),
           ...(options?.evaluateToolResult !== undefined
             ? { evaluateToolResult: options.evaluateToolResult }
             : {}),

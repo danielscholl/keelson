@@ -880,6 +880,35 @@ describe("projectToolsForPi", () => {
     expect(streamed).toEqual([{ type: "system", content: "working…" }]);
   });
 
+  test("a tool standing in for a pi built-in is also gated under the canonical name", async () => {
+    const asked: string[] = [];
+    let ran = false;
+    const bash = makeTool({
+      name: "bash",
+      inputSchema: z.object({ command: z.string() }),
+      execute: async (_input, ctx) => {
+        ran = true;
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "ok" });
+      },
+    });
+    const [projected] = projectToolsForPi([bash], {
+      cwd: "/tmp",
+      pushChunk: () => {},
+      evaluateToolCall: async ({ tool }) => {
+        asked.push(tool);
+        return tool === "Bash"
+          ? { outcome: "deny", reason: "ask_on_shell: no approval channel" }
+          : { outcome: "allow" };
+      },
+    });
+    if (!projected) throw new Error("narrow");
+    await expect(projected.execute("t1", { command: "ls" }, noSignal)).rejects.toThrow(
+      "ask_on_shell",
+    );
+    expect(asked).toEqual(["Bash"]);
+    expect(ran).toBe(false);
+  });
+
   test("invalid input throws (pi converts a throw into an error tool result)", async () => {
     const [projected] = projectToolsForPi([makeTool()], { cwd: "/tmp", pushChunk: () => {} });
     if (!projected) throw new Error("narrow");
@@ -1797,6 +1826,30 @@ describe("PiProvider — sandbox", () => {
     expect(chunks.some((c) => c.type === "error")).toBe(false);
     expect(captured?.excludeBuiltinTools).toEqual(["bash"]);
     expect(captured?.customTools?.map((t) => t.name)).toEqual(["workflow_run"]);
+  });
+
+  test("a sandboxed turn holds pi's file tools to the profile through the session gate", async () => {
+    let captured: PiCreateSessionParams | undefined;
+    const provider = new PiProvider({
+      factory: fakeFactory([{ type: "agent_end" }], { capture: (p) => (captured = p) }),
+      sandboxSupport: "tool",
+    });
+    await collect(
+      provider.sendQuery("hi", "/repo", undefined, {
+        tools: [tool("bash")],
+        sandbox: { ...profile, filesystem: { ...profile.filesystem, denied: ["/repo/.env"] } },
+      }),
+    );
+    const gate = captured?.gates?.evaluateToolCall;
+    expect(await gate?.({ tool: "read", args: { path: ".env" } })).toMatchObject({
+      outcome: "deny",
+    });
+    expect(await gate?.({ tool: "write", args: { path: "/etc/hosts" } })).toMatchObject({
+      outcome: "deny",
+    });
+    expect(await gate?.({ tool: "read", args: { path: "src/a.ts" } })).toEqual({
+      outcome: "allow",
+    });
   });
 
   test("an unsandboxed turn keeps pi's own bash", async () => {
