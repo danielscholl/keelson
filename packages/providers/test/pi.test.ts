@@ -1118,8 +1118,25 @@ describe("createPiGateExtension", () => {
     });
     expect(await gate.call("bash", { command: "rm -rf /" })).toEqual({
       block: true,
-      reason: "Tool 'bash' denied by policy: no shell",
+      reason: "Tool 'Bash' denied by policy: no shell",
     });
+  });
+
+  test("gates built-ins under their canonical policy name, then pi's own", async () => {
+    const seen: string[] = [];
+    const denyOnly = (name: string) =>
+      loadGate({
+        evaluateToolCall: async (req) => {
+          seen.push(req.tool);
+          return req.tool === name ? { outcome: "deny", reason: "floor" } : { outcome: "allow" };
+        },
+      });
+    expect(await denyOnly("Bash").call("bash", { command: "ls" })).toMatchObject({ block: true });
+    expect(await denyOnly("Write").call("edit", {})).toMatchObject({ block: true });
+    expect(await denyOnly("bash").call("bash", { command: "ls" })).toMatchObject({ block: true });
+    seen.length = 0;
+    expect(await denyOnly("Bash").call("custom_ext", {})).toBeUndefined();
+    expect(seen).toEqual(["custom_ext"]);
   });
 
   test("the call gate sees the tool name and raw args; allow passes through", async () => {
@@ -1131,7 +1148,10 @@ describe("createPiGateExtension", () => {
       },
     });
     expect(await gate.call("fetch_content", { url: "https://example.com" })).toBeUndefined();
-    expect(seen).toEqual([{ tool: "fetch_content", args: { url: "https://example.com" } }]);
+    expect(seen).toEqual([
+      { tool: "WebFetch", args: { url: "https://example.com" } },
+      { tool: "fetch_content", args: { url: "https://example.com" } },
+    ]);
   });
 
   test("skips self-gated keelson tools so they are not gated twice", async () => {
@@ -1272,6 +1292,93 @@ describe("PiProvider session lifecycle", () => {
   });
 });
 
+describe("PiProvider abort and teardown", () => {
+  function disposableFactory(counter: { disposed: number; prompted: number }, modelRef?: string) {
+    return {
+      async createSession(): Promise<PiSession> {
+        return {
+          ...(modelRef !== undefined ? { modelRef } : {}),
+          subscribe: () => () => {},
+          prompt: async () => {
+            counter.prompted++;
+          },
+          dispose: () => {
+            counter.disposed++;
+          },
+        };
+      },
+    } satisfies PiSessionFactory;
+  }
+
+  test("an abort while queued for a slot disposes the session without prompting", async () => {
+    const counter = { disposed: 0, prompted: 0 };
+    const slots = new PiVendorSlots({ rec: 1 });
+    const held = await slots.acquire("rec");
+    const abort = new AbortController();
+    const done = collect(
+      new PiProvider({ factory: disposableFactory(counter, "rec/flint"), slots }).sendQuery(
+        "hi",
+        "/tmp",
+        undefined,
+        { abortSignal: abort.signal },
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    abort.abort();
+    await done;
+    held?.();
+    expect(counter).toEqual({ disposed: 1, prompted: 0 });
+  });
+
+  test("an abort before the slot continuation runs never prompts", async () => {
+    const counter = { disposed: 0, prompted: 0 };
+    const abort = new AbortController();
+    const gen = new PiProvider({ factory: disposableFactory(counter, "openai/gpt") }).sendQuery(
+      "hi",
+      "/tmp",
+      undefined,
+      { abortSignal: abort.signal },
+    );
+    expect((await gen.next()).value).toEqual({ type: "model", model: "openai/gpt" });
+    abort.abort();
+    expect((await gen.next()).done).toBe(true);
+    expect(counter).toEqual({ disposed: 1, prompted: 0 });
+  });
+
+  test("an abort during session creation disposes the session", async () => {
+    const counter = { disposed: 0, prompted: 0 };
+    const abort = new AbortController();
+    const inner = disposableFactory(counter);
+    const factory: PiSessionFactory = {
+      async createSession() {
+        abort.abort();
+        return inner.createSession();
+      },
+    };
+    await collect(
+      new PiProvider({ factory }).sendQuery("hi", "/tmp", undefined, {
+        abortSignal: abort.signal,
+      }),
+    );
+    expect(counter).toEqual({ disposed: 1, prompted: 0 });
+  });
+
+  test("a throwing dispose still ends the turn", async () => {
+    const factory: PiSessionFactory = {
+      async createSession() {
+        return {
+          subscribe: () => () => {},
+          prompt: async () => {},
+          dispose: () => {
+            throw new Error("dispose failed");
+          },
+        };
+      },
+    };
+    expect(await collect(new PiProvider({ factory }).sendQuery("hi", "/tmp"))).toEqual([]);
+  });
+});
+
 describe("PiProvider vendor allowlist", () => {
   const catalogSource = async (): Promise<ModelInfo[]> => [
     { id: "github-copilot/gpt-5.5" },
@@ -1301,6 +1408,24 @@ describe("PiProvider vendor allowlist", () => {
     expect(chunks).toHaveLength(1);
     expect(chunks[0]?.type).toBe("error");
     expect((chunks[0] as { message: string }).message).toContain("outside pi.vendors");
+  });
+
+  test("an empty allowlist allows no vendor", async () => {
+    let prompted = false;
+    const provider = new PiProvider({
+      vendors: [],
+      catalogSource,
+      factory: fakeFactory([textDelta("local")], {
+        modelRef: "rec/flint",
+        capturePrompt: () => {
+          prompted = true;
+        },
+      }),
+    });
+    expect(await provider.listModels()).toEqual([]);
+    const chunks = await collect(provider.sendQuery("hi", "/tmp"));
+    expect(prompted).toBe(false);
+    expect(chunks[0]?.type).toBe("error");
   });
 
   test("runs an allowed vendor normally", async () => {
@@ -1459,6 +1584,27 @@ describe("PiProvider tool rails", () => {
     );
     expect(captured?.allowedTools).toEqual(["Read", "WebFetch"]);
     expect(captured?.disallowedTools).toEqual(["Bash"]);
+  });
+
+  test("applies the rails to projected keelson tools, deny winning", async () => {
+    let captured: PiCreateSessionParams | undefined;
+    const tool = (name: string): ToolDefinition => ({
+      name,
+      description: name,
+      inputSchema: z.object({}),
+      execute: async () => {},
+    });
+    const provider = new PiProvider({
+      factory: fakeFactory([{ type: "agent_end" }], { capture: (p) => (captured = p) }),
+    });
+    await collect(
+      provider.sendQuery("hi", "/tmp", undefined, {
+        tools: [tool("workflow_run"), tool("workflow_list"), tool("memory_recall")],
+        allowedTools: ["workflow_run", "mcp__keelson__workflow_list"],
+        disallowedTools: ["mcp__keelson__workflow_run"],
+      }),
+    );
+    expect(captured?.customTools?.map((t) => t.name)).toEqual(["workflow_list"]);
   });
 });
 

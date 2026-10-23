@@ -2,8 +2,10 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { capabilityToolName } from "../copilot/tool-names.ts";
 import { applyToolResultGate, checkToolCallGate } from "../tool-gate.ts";
 import type { ToolCallGate, ToolResultGate } from "../types.ts";
+import { PI_TOOL_KIND } from "./tool-filter.ts";
 
 export interface PiToolGates {
   evaluateToolCall?: ToolCallGate;
@@ -88,6 +90,14 @@ export function createPiGateExtension(
         };
       }
       if (selfGated.has(event.toolName)) return undefined;
+      // Operator policy names built-ins canonically (Bash, Write, …), as copilot
+      // reports them; policies written for pi's own name still get their turn.
+      const kind = PI_TOOL_KIND[event.toolName];
+      const canonical = kind !== undefined ? capabilityToolName(kind) : undefined;
+      if (canonical !== undefined && canonical !== event.toolName) {
+        const result = await checkToolCallGate(gates.evaluateToolCall, canonical, event.input);
+        if (result.denied) return { block: true, reason: result.message };
+      }
       const result = await checkToolCallGate(gates.evaluateToolCall, event.toolName, event.input);
       return result.denied ? { block: true, reason: result.message } : undefined;
     });

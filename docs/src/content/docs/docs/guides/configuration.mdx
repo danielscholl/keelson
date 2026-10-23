@@ -261,7 +261,8 @@ Make it the default and keep turns on it:
   requested model does not resolve (a workflow that pins a Copilot-only id, for
   example).
 - `pi.vendors` restricts the picker to the listed pi vendors and refuses a turn,
-  before any request is sent, that would resolve anywhere else.
+  before any request is sent, that would resolve anywhere else. An empty list
+  allows no vendor; leave the key out to allow every vendor.
 - `pi.concurrency` queues turns per pi vendor. A local engine that serves one
   generation at a time answers an overlapping request with HTTP 429, and
   parallel workflow nodes overlap constantly.

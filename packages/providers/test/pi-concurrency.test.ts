@@ -51,6 +51,21 @@ describe("PiVendorSlots", () => {
     expect(await next).not.toBeNull();
   });
 
+  test("a waiter cancelled right after being woken passes the wake-up on", async () => {
+    const slots = new PiVendorSlots({ rec: 1 });
+    const held = await slots.acquire("rec");
+    const abort = new AbortController();
+    const first = slots.acquire("rec", abort.signal);
+    const second = slots.acquire("rec");
+    await tick();
+    held?.();
+    abort.abort();
+    expect(await first).toBeNull();
+    const release = await Promise.race([second, tick().then(() => "stuck" as const)]);
+    expect(release).not.toBe("stuck");
+    expect(release).not.toBeNull();
+  });
+
   test("release is idempotent", async () => {
     const slots = new PiVendorSlots({ rec: 2 });
     const a = await slots.acquire("rec");

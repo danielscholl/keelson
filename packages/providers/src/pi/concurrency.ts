@@ -46,7 +46,12 @@ export class PiVendorSlots {
         signal?.addEventListener("abort", onAbort, { once: true });
       });
     }
-    if (signal?.aborted) return null;
+    if (signal?.aborted) {
+      // A release may have woken this waiter just before the abort; pass that
+      // wake-up on, or the next waiter sleeps with a slot free.
+      this.waiters.get(vendor)?.shift()?.();
+      return null;
+    }
     this.active.set(vendor, (this.active.get(vendor) ?? 0) + 1);
     let released = false;
     return () => {

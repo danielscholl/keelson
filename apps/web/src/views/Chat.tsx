@@ -1961,6 +1961,7 @@ export function Chat({
       settings.lastUsed,
       settings.favorites,
       defaultProvider,
+      catalogSettled,
     );
     if (ref && ref !== "pending") {
       setSelectedProviderId(ref.providerId);
@@ -1973,6 +1974,7 @@ export function Chat({
     }
   }, [
     abortActiveStream,
+    catalogSettled,
     defaultProvider,
     modelsByProvider,
     providers,

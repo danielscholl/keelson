@@ -4,6 +4,7 @@
 
 import { ChunkQueue } from "../chunk-queue.ts";
 import { deriveModelClasses } from "../model-classes.ts";
+import { filterToolsByRail } from "../tool-rail.ts";
 import type {
   IAgentProvider,
   MessageChunk,
@@ -146,10 +147,8 @@ export class PiProvider implements IAgentProvider {
     this.extensionTools = options.extensionTools ?? [];
     this.bashTimeoutSec = options.bashTimeoutSec ?? 300;
     this.repeatCallLimit = options.repeatCallLimit ?? 3;
-    this.vendors =
-      options.vendors !== undefined && options.vendors.length > 0
-        ? new Set(options.vendors)
-        : undefined;
+    // An empty list allows no vendor; only an absent one leaves pi unrestricted.
+    this.vendors = options.vendors !== undefined ? new Set(options.vendors) : undefined;
   }
 
   getType(): string {
@@ -191,9 +190,15 @@ export class PiProvider implements IAgentProvider {
     if (options?.abortSignal?.aborted) return;
 
     const queue = new ChunkQueue();
+    // The workflow handler's allow-list branch doesn't subtract the node's own
+    // denials, so the rails apply here too, as the copilot adapter does.
+    const railTools =
+      options?.tools !== undefined
+        ? filterToolsByRail([...options.tools], options?.allowedTools, options?.disallowedTools)
+        : undefined;
     const customTools =
-      options?.tools !== undefined && options.tools.length > 0
-        ? projectToolsForPi(options.tools, {
+      options !== undefined && railTools !== undefined && railTools.length > 0
+        ? projectToolsForPi(railTools, {
             cwd,
             pushChunk: (chunk) => queue.push(chunk),
             ...(options.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
@@ -243,11 +248,14 @@ export class PiProvider implements IAgentProvider {
 
     // createSession is slow (SDK import + auth/registry load) — an abort that
     // landed during it must not start a full, uninterruptible pi turn.
-    if (options?.abortSignal?.aborted) return;
+    if (options?.abortSignal?.aborted) {
+      disposeQuietly(session);
+      return;
+    }
 
     // Checked before prompt(), so a disallowed vendor never receives a request.
     if (this.vendors !== undefined && !this.allows(session.modelRef ?? "")) {
-      session.dispose?.();
+      disposeQuietly(session);
       yield {
         type: "error",
         message: `pi resolved "${session.modelRef ?? "no model"}"${requestedModel ? ` for "${requestedModel}"` : ""}, which is outside pi.vendors (${[...this.vendors].join(", ")}); refusing to run the turn.`,
@@ -274,7 +282,13 @@ export class PiProvider implements IAgentProvider {
       yield { type: "system", content: `Waiting for a free '${vendor}' slot…` };
     }
     const release = await this.slots.acquire(vendor, options?.abortSignal);
-    if (release === null) return;
+    // Unlimited vendors hand back a slot even for an aborted signal, and an abort
+    // can land between the reservation and this continuation.
+    if (release === null || options?.abortSignal?.aborted) {
+      release?.();
+      disposeQuietly(session);
+      return;
+    }
 
     // No system-prompt hook on a fresh pi session, so the identity + recall
     // prompt rides in front of the user text. Acceptable while sessionResume is
@@ -318,7 +332,7 @@ export class PiProvider implements IAgentProvider {
         // reading: an abort asks pi to stop, but the slot frees only once it has.
         options?.abortSignal?.removeEventListener("abort", onAbort);
         release();
-        session.dispose?.();
+        disposeQuietly(session);
         queue.close();
       }
     })();
@@ -345,4 +359,12 @@ export class PiProvider implements IAgentProvider {
       unsubscribe();
     }
   }
+}
+
+// Teardown is best-effort: a throwing dispose must not skip queue.close() and
+// strand the consumer.
+function disposeQuietly(session: PiSession): void {
+  try {
+    session.dispose?.();
+  } catch {}
 }

@@ -6,7 +6,7 @@ import { type CopilotPermissionKind, GATED_KINDS, toolKind } from "../copilot/to
 
 // pi built-ins and the pi-web-access tools by the capability a workflow's
 // Claude-style names (Read, Bash, WebFetch, …) map to.
-const PI_TOOL_KIND: Readonly<Record<string, CopilotPermissionKind>> = {
+export const PI_TOOL_KIND: Readonly<Record<string, CopilotPermissionKind>> = {
   read: "read",
   grep: "read",
   find: "read",
