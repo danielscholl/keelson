@@ -129,6 +129,7 @@ export {
   mergeSandboxProfiles,
   type OperatorSandboxConfig,
   pickSandboxEnv,
+  prepareSandboxScratch,
   providerSandboxProfile,
   resolveGitCommonDir,
   resolveSandboxPath,
@@ -139,13 +140,20 @@ export {
   type SandboxResolveContext,
   type SandboxRuntime,
   sandboxUnavailableMessage,
+  writeSandboxBody,
 } from "./handlers/sandbox.ts";
 export {
   type MakeScriptHandlerOptions,
   makeScriptHandler,
   scriptHandler,
 } from "./handlers/script.ts";
-export { type ResolvedBash, resolveBash } from "./handlers/shell.ts";
+export { prependPath, type ResolvedBash, resolveBash } from "./handlers/shell.ts";
+export {
+  runSubprocess,
+  type SubprocessOptions,
+  type SubprocessOutcome,
+  SubprocessSpawnError,
+} from "./handlers/subprocess.ts";
 export {
   type DiscoveryResult,
   type DiscoveryRoot,

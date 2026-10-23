@@ -31,11 +31,13 @@ import type { DagNode } from "../schema/index.ts";
 import { resolveScript, type ScriptRuntime } from "./discovery.ts";
 import { failed, formatSubprocessFailure, isInlineScript } from "./helpers.ts";
 import {
+  emitSandboxWarnings,
   prepareSandboxScratch,
   type SandboxPolicy,
   type SandboxResolution,
   sandboxContextFor,
   tagSandboxResult,
+  writeBunEnvShim,
   writeSandboxBody,
 } from "./sandbox.ts";
 import {
@@ -155,21 +157,23 @@ async function runScript(
       runId: ctx.runId,
       ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
     });
+    const sandboxed = policy !== undefined && profile && scratch !== undefined;
+    const childEnv = sandboxed ? policy.envFor(env, profile, scratch) : env;
+    if (sandboxed) emitSandboxWarnings(ctx, resolution);
+    const args =
+      sandboxed && runtime === "bun"
+        ? ["--no-env-file", "--preload", writeBunEnvShim(scratch, childEnv), ...spec.args.slice(1)]
+        : spec.args;
     outcome = await runSubprocess({
       cmd: spec.cmd,
-      args: spec.args,
+      args,
       cwd: ctx.cwd,
-      env:
-        policy !== undefined && profile && scratch !== undefined
-          ? policy.envFor(env, profile, scratch)
-          : env,
+      env: childEnv,
       timeoutMs,
       abortSignal: ctx.abortSignal,
       emit: ctx.emit,
       trimTrailingNewline: true,
-      ...(policy !== undefined && profile && scratch !== undefined
-        ? { launcher: policy.launcherFor(profile, scratch) }
-        : {}),
+      ...(sandboxed ? { launcher: policy.launcherFor(profile, scratch) } : {}),
     });
   } catch (err) {
     if (err instanceof SubprocessSpawnError) {
