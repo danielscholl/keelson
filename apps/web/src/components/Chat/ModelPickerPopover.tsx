@@ -60,17 +60,20 @@ export function ModelPickerPopover({
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
 
-  // A loaded, non-empty catalog that lacks a ★ model no longer offers it (a
-  // picker allowlist, a retired model); the saved favorite itself is kept.
+  // A ★ model neither the loaded catalog nor the provider's static list offers
+  // is no longer offered (a picker allowlist, a retired model); the saved
+  // favorite itself is kept. The static list keeps synthetic defaults such as
+  // Copilot's `auto` that a live catalog can omit.
   const offeredFavorites = useMemo(
     () =>
       favorites.filter((f) => {
         const models = modelsByProvider[f.providerId];
-        return (
-          models === undefined || models.length === 0 || models.some((m) => m.id === f.modelId)
-        );
+        if (models === undefined || models.length === 0) return true;
+        if (models.some((m) => m.id === f.modelId)) return true;
+        const provider = providers.find((p) => p.id === f.providerId);
+        return provider?.capabilities.models.includes(f.modelId) ?? false;
       }),
-    [favorites, modelsByProvider],
+    [favorites, modelsByProvider, providers],
   );
   const favoritesKey = useMemo(() => new Set(favorites.map(refKey)), [favorites]);
   const providerLabels = useMemo(() => {

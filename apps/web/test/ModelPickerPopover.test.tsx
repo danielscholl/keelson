@@ -47,6 +47,15 @@ function renderPicker(
 }
 
 describe("ModelPickerPopover", () => {
+  test("keeps a ★ default the static list offers when the live catalog omits it", () => {
+    renderPicker(
+      [{ ...copilotProvider, capabilities: { ...copilotProvider.capabilities, models: ["auto"] } }],
+      { copilot: [{ id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol" }] },
+      [{ providerId: "copilot", modelId: "auto" }],
+    );
+    expect(screen.getByText("auto")).toBeDefined();
+  });
+
   test("hides a ★ model its loaded catalog no longer offers, keeping unloaded ones", () => {
     renderPicker(
       [copilotProvider, piProvider],
