@@ -200,7 +200,11 @@ function definedOnly<T extends object>(value: T): Partial<T> {
 }
 
 export function describeSandboxProfile(p: SandboxProfile): string {
-  if (!p.enabled) return "sandbox off";
+  return p.enabled ? `sandbox on · ${describeSandboxGrants(p)}` : "sandbox off";
+}
+
+// What a profile lets a sandboxed tool do, whether or not it is enabled.
+export function describeSandboxGrants(p: SandboxProfile): string {
   const [first, ...rest] = p.filesystem.readwrite;
   const writes =
     first === undefined ? "none" : rest.length > 0 ? `${first} +${rest.length}` : first;
@@ -217,7 +221,7 @@ export function describeSandboxProfile(p: SandboxProfile): string {
     `network ${network}${p.network.loopback ? " + loopback" : ""}`,
     p.env.length > 0 ? `env ${p.env.join(", ")}` : "no extra env",
   ];
-  return `sandbox on · ${parts.join(" · ")}`;
+  return parts.join(" · ");
 }
 
 const NATIVE_BACKENDS: Record<string, Partial<Record<string, string>>> = {
@@ -258,9 +262,9 @@ export interface SandboxStatusInput {
   providerId: string;
   support: SandboxSupport;
   platform: string;
-  // The operator policy line /api/config serves.
-  policy: string;
-  // The host runtime line, when the caller can see it.
+  // What a sandboxed turn may touch, from /api/config.
+  profile: string;
+  // The server host's runtime line, from /api/config.
   runtime?: string;
 }
 
@@ -278,7 +282,7 @@ export function describeSandboxStatus(input: SandboxStatusInput): string[] {
     `provider: ${backend}${resolution.enabled && support === "none" ? "; turns fail closed while the sandbox is on" : ""}`,
   );
   if (input.runtime !== undefined) lines.push(`runtime: ${input.runtime}`);
-  lines.push(`policy: ${input.policy}`);
+  lines.push(`profile: ${input.profile}`);
   return lines;
 }
 

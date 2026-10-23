@@ -64,6 +64,7 @@ describe("GET /api/config", () => {
         default: boolean;
         floor: boolean;
         summary: string;
+        profile: string;
         runtime: string;
         platform: string;
       };
@@ -72,6 +73,7 @@ describe("GET /api/config", () => {
       default: false,
       floor: false,
       summary: "sandbox off",
+      profile: "writes <project> · network outbound denied · no extra env",
       platform: process.platform,
     });
     expect(body.sandbox.runtime).toMatch(/^(seatbelt via |unavailable: )/);

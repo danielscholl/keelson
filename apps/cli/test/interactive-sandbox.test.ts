@@ -16,13 +16,14 @@ const OFF: ServerSandboxConfig = {
   default: false,
   floor: false,
   summary: "sandbox off",
+  profile: "writes <project> · network outbound denied · no extra env",
+  runtime: "seatbelt via /x/mxc-exec-mac",
   platform: "darwin",
 };
 const REQUIRED: ServerSandboxConfig = {
-  default: false,
+  ...OFF,
   floor: true,
   summary: "sandbox on · writes <project> · network outbound denied (required by KEELSON_SANDBOX)",
-  platform: "darwin",
 };
 
 function harness(
@@ -52,7 +53,6 @@ function harness(
       patchConversation: async (id, mode) => {
         patches.push({ id, mode });
       },
-      runtimeLine: async () => "seatbelt via /x/mxc-exec-mac; dry run passed",
       onChange: () => changes++,
       info: (l) => info.push(l),
       warn: (l) => warn.push(l),
@@ -103,14 +103,14 @@ describe("/sandbox", () => {
     expect(h.warn).toEqual(["finish the current turn before changing the sandbox"]);
   });
 
-  test("status prints the source, the provider backend, the runtime, and the policy", async () => {
+  test("status prints the source, the provider backend, and the server's runtime and profile", async () => {
     const h = harness({ config: REQUIRED });
     await h.run("status");
     expect(h.info).toEqual([
       "sandbox: on (required by KEELSON_SANDBOX=required)",
       "provider: Copilot CLI sandbox (Seatbelt)",
-      "runtime: seatbelt via /x/mxc-exec-mac; dry run passed",
-      `policy: ${REQUIRED.summary}`,
+      "runtime: seatbelt via /x/mxc-exec-mac",
+      "profile: writes <project> · network outbound denied · no extra env",
     ]);
   });
 

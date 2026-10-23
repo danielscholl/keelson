@@ -67,6 +67,7 @@ import type {
 } from "@keelson/shared";
 import {
   buildSandboxProfile,
+  describeSandboxGrants,
   describeSandboxProfile,
   recallRequestSchema,
   resumeWorkflowRunBodySchema,
@@ -1651,6 +1652,11 @@ export function describeSandboxRuntime(runtime: ReturnType<typeof resolveSandbox
   return "runtime" in runtime
     ? `seatbelt via ${runtime.executor}`
     : `unavailable: ${runtime.unavailableReason}`;
+}
+
+// What a sandboxed turn may touch under the operator policy, on or off.
+export function describeSandboxPolicyGrants(policy: ResolvedSandboxConfig): string {
+  return describeSandboxGrants(buildSandboxProfile(policy.settings, "<project>", true));
 }
 
 // The one-line policy text GET /api/config serves to both clients.

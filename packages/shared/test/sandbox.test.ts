@@ -251,10 +251,10 @@ describe("describeSandboxStatus", () => {
     providerId: "claude",
     support: "native" as const,
     platform: "darwin",
-    policy: "sandbox on · writes <project>",
+    profile: "writes <project> · network outbound denied",
   };
 
-  test("names the source, the provider backend, the runtime, and the policy", () => {
+  test("names the source, the provider backend, the runtime, and the profile", () => {
     expect(
       describeSandboxStatus({
         ...base,
@@ -265,7 +265,7 @@ describe("describeSandboxStatus", () => {
       "sandbox: on (saved on this conversation)",
       "provider: Claude Code sandbox (Seatbelt)",
       "runtime: seatbelt via /x",
-      "policy: sandbox on · writes <project>",
+      "profile: writes <project> · network outbound denied",
     ]);
   });
 
@@ -298,7 +298,7 @@ describe("describeSandboxStatus", () => {
     ).toEqual([
       "sandbox: off (config default)",
       "provider: stub runs no tools (n/a)",
-      "policy: sandbox on · writes <project>",
+      "profile: writes <project> · network outbound denied",
     ]);
   });
 

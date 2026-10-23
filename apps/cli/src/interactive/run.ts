@@ -27,7 +27,6 @@ import {
   type WorkflowFrame,
 } from "@keelson/shared";
 import pkg from "../../package.json" with { type: "json" };
-import { collectSandboxStatus, sandboxRuntimeLine } from "../commands/sandbox.ts";
 import { EXIT_FAIL, EXIT_NO_SERVER, EXIT_OK } from "../exit.ts";
 import {
   chatViaServer,
@@ -511,7 +510,6 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
           busy: () => busy,
           supportFor: sandboxSupportFor,
           patchConversation: (id, mode) => updateConversation(opts.baseUrl, id, { sandbox: mode }),
-          runtimeLine: async () => sandboxRuntimeLine(await collectSandboxStatus()),
           onChange: refreshSandboxFooter,
           info,
           warn,

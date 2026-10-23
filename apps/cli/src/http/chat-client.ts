@@ -139,6 +139,8 @@ export interface ServerSandboxConfig {
   default: boolean;
   floor: boolean;
   summary: string;
+  // What a sandboxed turn may touch, whether or not the sandbox is on.
+  profile?: string;
   runtime?: string;
   platform?: string;
 }
@@ -156,6 +158,7 @@ export async function fetchSandboxConfig(baseUrl: string): Promise<ServerSandbox
     default: s.default === true,
     floor: s.floor === true,
     summary: typeof s.summary === "string" ? s.summary : "sandbox off",
+    ...(typeof s.profile === "string" ? { profile: s.profile } : {}),
     ...(typeof s.runtime === "string" ? { runtime: s.runtime } : {}),
     ...(typeof s.platform === "string" ? { platform: s.platform } : {}),
   };

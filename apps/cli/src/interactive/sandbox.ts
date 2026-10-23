@@ -31,8 +31,6 @@ export interface SandboxCommandDeps {
   busy: () => boolean;
   supportFor: (providerId: string) => SandboxSupport;
   patchConversation: (id: string, mode: SandboxMode) => Promise<unknown>;
-  // The host runtime line; undefined when it cannot be read.
-  runtimeLine: () => Promise<string | undefined>;
   onChange: () => void;
   info: (line: string) => void;
   warn: (line: string) => void;
@@ -89,14 +87,14 @@ export async function runSandboxCommand(arg: string, deps: SandboxCommandDeps): 
   }
   const support = deps.supportFor(session.providerId);
   if (parsed === "status") {
-    const runtime = await deps.runtimeLine();
+    // The server's runtime and profile, not this process's: the server runs the turn.
     for (const line of describeSandboxStatus({
       resolution: sessionSandboxResolution(session, config),
       providerId: session.providerId,
       support,
       platform: config.platform ?? process.platform,
-      policy: config.summary,
-      ...(runtime !== undefined ? { runtime } : {}),
+      profile: config.profile ?? config.summary,
+      ...(config.runtime !== undefined ? { runtime: config.runtime } : {}),
     })) {
       deps.info(line);
     }
