@@ -94,10 +94,16 @@ export function chatRoutes(
   workflowDeps: ChatRoutesWorkflowDeps,
   opts: ChatRoutesOptions = {},
 ): void {
+  // Own keys only: a gateway may be named like an Object.prototype member.
+  const allowlistFor = (id: string): readonly string[] | undefined =>
+    opts.modelAllowlists !== undefined && Object.hasOwn(opts.modelAllowlists, id)
+      ? opts.modelAllowlists[id]
+      : undefined;
+
   app.get("/api/providers", (c) =>
     c.json({
       providers: getProviderInfoList().map((p) => {
-        const allow = opts.modelAllowlists?.[p.id];
+        const allow = allowlistFor(p.id);
         return allow === undefined
           ? p
           : {
@@ -121,7 +127,7 @@ export function chatRoutes(
     }
     try {
       const provider = getAgentProvider(id);
-      const allow = opts.modelAllowlists?.[id];
+      const allow = allowlistFor(id);
       const listed = await provider.listModels();
       const models = modelsResponseSchema.parse(
         allow === undefined ? listed : listed.filter((m) => allow.includes(m.id)),

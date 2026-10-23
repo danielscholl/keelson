@@ -4,7 +4,12 @@
 
 import { describe, expect, test } from "bun:test";
 import type { ModelInfo } from "@keelson/shared";
-import { createModelLoader, modelHint, toModelCompletions } from "../src/interactive/models.ts";
+import {
+  createModelLoader,
+  modelHint,
+  offeredDefault,
+  toModelCompletions,
+} from "../src/interactive/models.ts";
 
 describe("modelHint", () => {
   test("joins display name and cost tier", () => {
@@ -89,5 +94,22 @@ describe("createModelLoader", () => {
       fallback: () => ["auto"],
     });
     expect(await load("copilot")).toEqual([{ id: "auto" }]);
+  });
+});
+
+describe("offeredDefault", () => {
+  test("keeps a default the static list carries, or when the list is empty", () => {
+    expect(offeredDefault("auto", ["auto", "gpt-6.1-sol"])).toBe("auto");
+    expect(offeredDefault("auto", [])).toBe("auto");
+  });
+
+  test("drops a default an allowlist excluded, so completions don't re-add it", () => {
+    expect(offeredDefault("auto", ["gpt-6.1-sol"])).toBeUndefined();
+    const ids = toModelCompletions(
+      [{ id: "gpt-6.1-sol" }],
+      "",
+      offeredDefault("auto", ["gpt-6.1-sol"]),
+    ).map((c) => c.value);
+    expect(ids).toEqual(["gpt-6.1-sol"]);
   });
 });

@@ -60,6 +60,18 @@ export function ModelPickerPopover({
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
 
+  // A loaded, non-empty catalog that lacks a ★ model no longer offers it (a
+  // picker allowlist, a retired model); the saved favorite itself is kept.
+  const offeredFavorites = useMemo(
+    () =>
+      favorites.filter((f) => {
+        const models = modelsByProvider[f.providerId];
+        return (
+          models === undefined || models.length === 0 || models.some((m) => m.id === f.modelId)
+        );
+      }),
+    [favorites, modelsByProvider],
+  );
   const favoritesKey = useMemo(() => new Set(favorites.map(refKey)), [favorites]);
   const providerLabels = useMemo(() => {
     const m = new Map<string, string>();
@@ -203,7 +215,7 @@ export function ModelPickerPopover({
     const out: ModelRef[] = [];
     const seen = new Set<string>();
     // Favorites first
-    for (const fav of favorites) {
+    for (const fav of offeredFavorites) {
       if (!filterMatches(fav.providerId, fav.modelId)) continue;
       out.push(fav);
       seen.add(refKey(fav));
@@ -218,7 +230,7 @@ export function ModelPickerPopover({
       }
     }
     return out;
-  }, [favorites, filterMatches, modelsByProvider, providers]);
+  }, [offeredFavorites, filterMatches, modelsByProvider, providers]);
 
   const onSearchKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -273,9 +285,9 @@ export function ModelPickerPopover({
       </div>
 
       <div className="model-picker-popover-body">
-        {favorites.length > 0 && (
+        {offeredFavorites.length > 0 && (
           <Section title="Favorites">
-            {favorites
+            {offeredFavorites
               .filter((f) => filterMatches(f.providerId, f.modelId))
               .map((ref) => (
                 <Row
