@@ -10,7 +10,7 @@
 // point. Structural types keep this file free of a typeof-import on the SDK,
 // so tests can pass any compatible shape via sdkLoader.
 
-import type { ToolContext } from "@keelson/shared";
+import type { SandboxProfile, ToolContext } from "@keelson/shared";
 import { ensureSpawnPath } from "@keelson/shared/exec";
 import { applyToolResultGate, checkToolCallGate } from "../tool-gate.ts";
 import type { MessageChunk, ToolCallGate, ToolDefinition, ToolResultGate } from "../types.ts";
@@ -20,6 +20,7 @@ import {
   mergeSDKHooks,
   type YAMLHookMatcher,
 } from "./hooks-projection.ts";
+import { toClaudeSandboxSettings } from "./sandbox.ts";
 
 // A copy of the ambient env with ANTHROPIC_API_KEY removed. The Claude CLI/SDK
 // prefers an explicit ANTHROPIC_API_KEY over its stored OAuth login, so stripping
@@ -162,6 +163,8 @@ export interface ClaudeQueryOptions {
   // post-projection shape from `buildSDKHooksFromYAML` verbatim and the SDK
   // interprets each matcher's hook return value per its hook protocol.
   hooks?: Record<string, unknown>;
+  // SDK SandboxSettings, built by toClaudeSandboxSettings.
+  sandbox?: Record<string, unknown>;
 }
 
 // Structural projection of SdkMcpToolDefinition; `inputSchema` stays unknown
@@ -244,6 +247,8 @@ export interface CreateQueryParams {
   // Unfiltered registered-MCP tool name set (see SendQueryOptions for why
   // this is separate from the post-filter `tools` field above).
   registeredMcpToolNames?: readonly string[];
+  // Applied only when enabled; a disabled profile leaves the SDK default.
+  sandbox?: SandboxProfile;
   // Per-node YAML hook matchers. Projected into SDK matcher shape by
   // `buildSDKHooksFromYAML` inside createQuery() and merged with any
   // built-in capture hooks before reaching the SDK.
@@ -478,6 +483,7 @@ export class ClaudeQueryFactory {
       options.permissionMode = "default";
     }
     if (params.model !== undefined) options.model = params.model;
+    if (params.sandbox?.enabled) options.sandbox = toClaudeSandboxSettings(params.sandbox);
     if (params.sessionId !== undefined) options.resume = params.sessionId;
     if (params.systemPrompt !== undefined) options.systemPrompt = params.systemPrompt;
     // Undefined leaves the SDK default in place.

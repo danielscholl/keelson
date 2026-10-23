@@ -2,20 +2,25 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { realpathSync } from "node:fs";
 import {
+  describeSandboxBackend,
   getAgentProvider,
   getProviderInfoList,
   type IAgentProvider,
   isRegisteredProvider,
+  sandboxSupportFor,
   UnknownProviderError,
 } from "@keelson/providers";
 import {
+  buildSandboxProfile,
   type ChatFrame,
   type ClientFrame,
   chatFrameSchema,
   clientFrameSchema,
   coerceTokenUsage,
   DEFAULT_PROJECT_NAME,
+  EMPTY_SANDBOX_SETTINGS,
   inferToolFamily,
   type MessageChunk,
   modelInfoSchema,
@@ -23,12 +28,17 @@ import {
   type RecallRequest,
   type RecallResponse,
   registeredToolInfoSchema,
-  renameConversationBodySchema,
+  resolveSandboxEnabled,
+  type SandboxProfile,
+  type SandboxSource,
+  sandboxModeSchema,
   type TokenUsage,
   type ToolDefinition,
   tokenUsageHasSpend,
+  updateConversationBodySchema,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
+import type { ResolvedSandboxConfig } from "@keelson/shared/config";
 import { getRegisteredTools } from "@keelson/skills";
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { Hono } from "hono";
@@ -79,6 +89,7 @@ const createConversationBodySchema = z
     seedSystemPrompt: z.string().min(1).max(8000).optional(),
     name: z.string().min(1).max(80).optional(),
     projectId: z.string().optional(),
+    sandbox: sandboxModeSchema.optional(),
   })
   .strict();
 
@@ -229,11 +240,15 @@ export function chatRoutes(
     } catch {
       return c.json({ error: "invalid json body" }, 400);
     }
-    const parsed = renameConversationBodySchema.safeParse(body);
+    const parsed = updateConversationBodySchema.safeParse(body);
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
     }
-    const updated = store.update(id, { name: parsed.data.name });
+    const { name, sandbox } = parsed.data;
+    const updated = store.update(id, {
+      ...(name !== undefined ? { name } : {}),
+      ...(sandbox !== undefined ? { sandbox } : {}),
+    });
     if (!updated) {
       return c.json({ error: `unknown conversation '${id}'` }, 404);
     }
@@ -258,6 +273,24 @@ export function chatRoutes(
     }
     return c.body(null, 204);
   });
+}
+
+// How to turn the sandbox off depends on where the "on" came from: a turn or a
+// saved conversation choice outranks the config default.
+function sandboxOffHint(source: SandboxSource): string {
+  if (source === "config") return "set sandbox.default: false in config.json";
+  if (source === "env") return "unset KEELSON_SANDBOX=on";
+  return 'turn it off for this conversation (sandbox: "off")';
+}
+
+// Grants must name the canonical path (macOS resolves /tmp to /private/tmp), but a
+// cwd that no longer exists should still produce a profile rather than throw.
+function realpathOrSelf(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 // Returns undefined for whitespace-only prompts so the caller skips writing.
@@ -300,6 +333,8 @@ export interface ChatWebSocketDeps {
   // Optional usage ledger. When set, a turn that carries real spend records a
   // `chat`-sourced event; undefined → capture is skipped.
   usageStore?: UsageStore;
+  // Boot-resolved sandbox policy; undefined runs every turn unsandboxed.
+  sandbox?: ResolvedSandboxConfig;
 }
 
 export function chatWebSocketHandlers(
@@ -351,6 +386,7 @@ export function chatWebSocketHandlers(
             : {}),
           ...(deps.policyEngine !== undefined ? { policyEngine: deps.policyEngine } : {}),
           ...(deps.usageStore !== undefined ? { usageStore: deps.usageStore } : {}),
+          ...(deps.sandbox !== undefined ? { sandbox: deps.sandbox } : {}),
         });
       } finally {
         ws.data.chatBusy = false;
@@ -385,6 +421,8 @@ export interface ChatDeps {
   // Optional usage ledger. When set, a turn that carries real spend records a
   // `chat`-sourced event; undefined → capture is skipped.
   usageStore?: UsageStore;
+  // See ChatWebSocketDeps.
+  sandbox?: ResolvedSandboxConfig;
 }
 
 // Worst-case section size is bounded at MAX_ITEMS × CONTENT_CHARS so a
@@ -449,6 +487,12 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   // next-turn fallback see the most recent id.
   if (message.model && message.model !== conv.model) {
     deps.store.update(conversationId, { model: message.model });
+  }
+  // Same for a per-turn sandbox choice, so the next turn and the other surface
+  // inherit it.
+  const frameSandbox = message.sandbox === undefined ? undefined : message.sandbox ? "on" : "off";
+  if (frameSandbox !== undefined && frameSandbox !== conv.sandbox) {
+    deps.store.update(conversationId, { sandbox: frameSandbox });
   }
 
   if (!isRegisteredProvider(message.providerId)) {
@@ -519,6 +563,52 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       : defaultProject
         ? { id: defaultProject.id, rootPath: defaultProject.rootPath }
         : null;
+
+  const sandboxDecision = resolveSandboxEnabled({
+    ...(message.sandbox !== undefined ? { frame: message.sandbox } : {}),
+    ...(conv.sandbox !== undefined ? { conversation: conv.sandbox } : {}),
+    configDefault: deps.sandbox?.default ?? false,
+    ...(deps.sandbox?.floor ? { env: "required" } : {}),
+  });
+  const sandboxSupport = sandboxSupportFor(provider);
+  if (sandboxDecision.enabled && sandboxSupport === "none") {
+    const fix = sandboxDecision.locked
+      ? "KEELSON_SANDBOX=required holds the sandbox on, so switch to a provider that can sandbox"
+      : `switch to a provider that can sandbox, or ${sandboxOffHint(sandboxDecision.source)}`;
+    deps.send(
+      errorFrame(
+        conversationId,
+        `sandbox is on, but ${describeSandboxBackend(message.providerId, sandboxSupport)}: ${fix}`,
+        "SANDBOX_UNAVAILABLE",
+      ),
+    );
+    deps.send(doneFrame(conversationId));
+    return;
+  }
+  const sandboxProfile: SandboxProfile | undefined = sandboxDecision.enabled
+    ? buildSandboxProfile(
+        deps.sandbox?.settings ?? EMPTY_SANDBOX_SETTINGS,
+        cwd,
+        true,
+        realpathOrSelf,
+      )
+    : undefined;
+  // Every policy evaluation this turn sees the sandbox decision; a sandboxed
+  // turn also confines tool path arguments to its granted roots. The gate is
+  // not access-aware, so read-only roots are included and the provider's own
+  // sandbox is what keeps them unwritable.
+  const sandboxScope = {
+    sandbox: { enabled: sandboxDecision.enabled, support: sandboxSupport },
+    ...(sandboxProfile !== undefined
+      ? {
+          cwd,
+          allowedDirectories: [
+            ...sandboxProfile.filesystem.readwrite,
+            ...sandboxProfile.filesystem.readonly,
+          ],
+        }
+      : {}),
+  };
 
   // Harness-owned tools (workflow_*, the per-request authoring set, and, below,
   // note_project) are authoritative: a rib that registers a colliding name must
@@ -600,6 +690,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
         await deps.policyEngine.projectTools(allTools, {
           surface: "chat",
           provider: message.providerId,
+          ...sandboxScope,
         })
       ).allowed;
     } catch (err) {
@@ -618,6 +709,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
         engine.evaluateToolCall(call, {
           surface: "chat",
           provider: message.providerId,
+          ...sandboxScope,
           // A user Stop aborts the turn; cancel any pending ASK so it denies and
           // the call unwinds rather than hanging on a prompt nobody will answer.
           signal: deps.abortSignal,
@@ -631,7 +723,11 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   const evaluateToolResult =
     engine?.resultPhaseActive === true
       ? (call: { tool: string; result: unknown }) =>
-          engine.evaluateToolResult(call, { surface: "chat", provider: message.providerId })
+          engine.evaluateToolResult(call, {
+            surface: "chat",
+            provider: message.providerId,
+            ...sandboxScope,
+          })
       : undefined;
 
   // Request-phase budget gate: when a budget builtin (or a request-phase rib
@@ -646,6 +742,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     const decision = await engine.evaluateRequest({
       surface: "chat",
       provider: message.providerId,
+      ...sandboxScope,
       ...(model !== undefined ? { model } : {}),
       usage,
       prompt: message.prompt,
@@ -677,6 +774,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       ...(gatedTools.length > 0 ? { tools: gatedTools } : {}),
       ...(evaluateToolCall !== undefined ? { evaluateToolCall } : {}),
       ...(evaluateToolResult !== undefined ? { evaluateToolResult } : {}),
+      ...(sandboxProfile !== undefined ? { sandbox: sandboxProfile } : {}),
       systemPrompt,
     })) {
       // Usage is handled BEFORE the abort check — providers deliver it after

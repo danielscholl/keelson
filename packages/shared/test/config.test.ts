@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, normalize } from "node:path";
 import {
   BUILT_IN_PROVIDER_IDS,
   isRibWorkflowGrantAllowed,
@@ -18,6 +18,7 @@ import {
   resolveModelAllowlists,
   resolveRibApprovalGrants,
   resolveRibWorkflowGrants,
+  resolveSandboxConfig,
   resolveWorkflowPreflight,
 } from "../src/config.ts";
 
@@ -460,5 +461,95 @@ describe("resolveRibApprovalGrants", () => {
     expect(isRibWorkflowGrantAllowed(grants, "chat", "fix-issue")).toBe(true);
     expect(isRibWorkflowGrantAllowed(grants, "chat", "resolve-pr")).toBe(true);
     expect(isRibWorkflowGrantAllowed(grants, "chat", "plan-act-evaluate")).toBe(false);
+  });
+});
+
+describe("resolveSandboxConfig", () => {
+  test("defaults: off, no floor, deny outbound, nothing granted beyond cwd", () => {
+    expect(resolveSandboxConfig({}, {})).toEqual({
+      default: false,
+      floor: false,
+      settings: {
+        filesystem: { readwrite: [], readonly: [], denied: [] },
+        network: { outbound: "deny" },
+        env: [],
+      },
+      warnings: [],
+    });
+  });
+
+  test("expands ~, normalizes, drops relative paths with a warning", () => {
+    // A real absolute path on the host platform, so a Windows drive path is
+    // exercised on the Windows runner.
+    const hostAbsolute = join(tmpdir(), "keelson-grant");
+    const resolved = resolveSandboxConfig(
+      {
+        sandbox: {
+          default: true,
+          filesystem: {
+            readwrite: ["~/scratch", "/tmp/a/../b", "/tmp/b"],
+            readonly: ["~", "relative/dir", hostAbsolute],
+            denied: ["~/.ssh"],
+          },
+          network: { outbound: "allow", loopback: true },
+          env: ["GH_TOKEN", "GH_TOKEN"],
+          backend: { codex: { mode: "read-only" } },
+        },
+      },
+      { HOME: "/home/op" },
+    );
+    expect(resolved.default).toBe(true);
+    expect(resolved.settings).toEqual({
+      filesystem: {
+        readwrite: [join("/home/op", "scratch"), normalize("/tmp/b")],
+        readonly: [normalize("/home/op"), normalize(hostAbsolute)],
+        denied: [join("/home/op", ".ssh")],
+      },
+      network: { outbound: "allow", loopback: true },
+      env: ["GH_TOKEN"],
+      backend: { codex: { mode: "read-only" } },
+    });
+    expect(resolved.warnings).toEqual([
+      "sandbox.filesystem.readonly: 'relative/dir' is not absolute; ignored",
+    ]);
+  });
+
+  test("KEELSON_SANDBOX=required sets the floor; on|off replace the config default", () => {
+    expect(resolveSandboxConfig({}, { KEELSON_SANDBOX: "required" })).toMatchObject({
+      floor: true,
+      default: false,
+    });
+    expect(resolveSandboxConfig({}, { KEELSON_SANDBOX: "on" }).default).toBe(true);
+    expect(
+      resolveSandboxConfig({ sandbox: { default: true } }, { KEELSON_SANDBOX: "off" }).default,
+    ).toBe(false);
+  });
+
+  test("an unrecognized KEELSON_SANDBOX value warns and is ignored", () => {
+    const resolved = resolveSandboxConfig({ sandbox: { default: true } }, { KEELSON_SANDBOX: "1" });
+    expect(resolved).toMatchObject({ default: true, floor: false });
+    expect(resolved.warnings).toEqual([
+      "KEELSON_SANDBOX='1' is not one of required, on, off; ignored",
+    ]);
+  });
+
+  test("readKeelsonConfig accepts a sandbox block and tolerates unknown keys in it", () => {
+    const home = mkdtempSync(join(tmpdir(), "keelson-sandbox-config-"));
+    const configBefore = process.env.KEELSON_CONFIG;
+    delete process.env.KEELSON_CONFIG;
+    try {
+      writeFileSync(
+        join(home, "config.json"),
+        JSON.stringify({
+          sandbox: { default: true, futureKey: 1, network: { outbound: "allow" } },
+        }),
+      );
+      const result = readKeelsonConfig(home);
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.config.sandbox?.default).toBe(true);
+    } finally {
+      if (configBefore !== undefined) process.env.KEELSON_CONFIG = configBefore;
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

@@ -33,6 +33,7 @@ export {
   type RegisterClaudeProviderResult,
   registerClaudeProvider,
 } from "./claude/registration.ts";
+export { toClaudeSandboxSettings } from "./claude/sandbox.ts";
 export type { CodexRawEvent } from "./codex/event-bridge.ts";
 export { mapCodexEvent } from "./codex/event-bridge.ts";
 export {
@@ -56,6 +57,11 @@ export {
   type RegisterCodexProviderResult,
   registerCodexProvider,
 } from "./codex/registration.ts";
+export {
+  type CodexSandboxSettings,
+  codexSandboxGaps,
+  toCodexSandbox,
+} from "./codex/sandbox.ts";
 export { buildFriendlyCopilotError } from "./copilot/errors.ts";
 export {
   type CopilotAuthStatus,
@@ -87,6 +93,12 @@ export {
   registerCopilotProvider,
   waitForCopilotModelClasses,
 } from "./copilot/registration.ts";
+export {
+  applyCopilotSandbox,
+  type CopilotSandboxClient,
+  type CopilotSandboxSession,
+  toCopilotSandboxConfig,
+} from "./copilot/sandbox.ts";
 export { UnknownProviderError } from "./errors.ts";
 export { GatewayProvider, type GatewayProviderOptions } from "./gateway/provider.ts";
 export {
@@ -128,6 +140,7 @@ export {
   registerProvider,
   unregisterProvider,
 } from "./registry.ts";
+export { describeSandboxBackend, sandboxSupportFor } from "./sandbox-support.ts";
 export {
   isOnDemandProvider,
   isProviderSdkInstalled,

@@ -18,6 +18,7 @@ import {
   type CodexThread,
   type CodexThreadFactory,
 } from "./factory.ts";
+import { codexSandboxGaps, toCodexSandbox } from "./sandbox.ts";
 
 // Empty → "let codex decide" (no model on the wire). codex resolves its own
 // default from ~/.codex/config.toml, which avoids forcing a model the account
@@ -60,6 +61,7 @@ export const CODEX_CAPABILITIES: ProviderCapabilities = {
   models: CODEX_MODEL_CATALOG.map((m) => m.id),
   defaultModel: CODEX_DEFAULT_MODEL,
   modelClasses: deriveModelClasses(CODEX_MODEL_CATALOG, CODEX_DEFAULT_MODEL),
+  sandbox: "native",
 };
 
 // Agentic by default: codex reads the repo and writes within the conversation's
@@ -118,12 +120,24 @@ export class CodexProvider implements IAgentProvider {
     if (options?.abortSignal?.aborted) return;
 
     const reasoningEffort = mapReasoningEffort(options?.reasoningEffort);
+    const gaps = options?.sandbox !== undefined ? codexSandboxGaps(options.sandbox) : [];
+    if (gaps.length > 0) {
+      yield {
+        type: "error",
+        message: `sandbox unavailable: codex cannot enforce ${gaps.join(", ")}`,
+      };
+      return;
+    }
+    const sandbox = toCodexSandbox(options?.sandbox, {
+      sandboxMode: this.sandboxMode,
+      networkAccessEnabled: this.networkAccessEnabled,
+    });
     let thread: CodexThread;
     try {
       thread = await this.factory.createThread({
         cwd,
-        sandboxMode: this.sandboxMode,
-        networkAccessEnabled: this.networkAccessEnabled,
+        sandboxMode: sandbox.sandboxMode,
+        networkAccessEnabled: sandbox.networkAccessEnabled,
         ...(options?.model ? { model: options.model } : {}),
         ...(resumeSessionId ? { resumeSessionId } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),

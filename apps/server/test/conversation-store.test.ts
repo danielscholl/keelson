@@ -225,8 +225,30 @@ describe("SQLite ConversationStore", () => {
       { version: 19 },
       { version: 20 },
       { version: 21 },
+      { version: 22 },
     ]);
     db2.close();
+  });
+
+  test("sandbox round-trips through create, update, clear, list, and reopen", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createConversationStore(db);
+    const inherited = store.create({ providerId: "stub" });
+    const pinned = store.create({ providerId: "stub", sandbox: "on" });
+    expect(inherited.sandbox).toBeUndefined();
+    expect(pinned.sandbox).toBe("on");
+    expect(store.get(pinned.id)!.sandbox).toBe("on");
+
+    expect(store.update(inherited.id, { sandbox: "off" })!.sandbox).toBe("off");
+    expect(store.update(pinned.id, { sandbox: null })!.sandbox).toBeUndefined();
+    expect(store.update(inherited.id, { name: "renamed" })!.sandbox).toBe("off");
+    db.close();
+
+    const reopened = createConversationStore(openDatabase({ path: dbPath }));
+    expect(Object.fromEntries(reopened.list().map((c) => [c.id, c.sandbox ?? "inherit"]))).toEqual({
+      [inherited.id]: "off",
+      [pinned.id]: "inherit",
+    });
   });
 
   test("create defaults name to undefined", () => {

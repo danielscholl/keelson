@@ -55,6 +55,7 @@ interface MockSession extends CopilotSessionLike {
     model: string;
     options?: { reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" };
   }>;
+  readonly optionsUpdates: Array<Record<string, unknown>>;
 }
 
 interface MockClient extends CopilotClientLike {
@@ -89,6 +90,9 @@ interface MockSdkOptions {
   // the "not connected" / API failure path.
   models?: CopilotModelInfo[];
   listModelsError?: Error;
+  // Drives client.rpc.sandbox.getHostSupport() and session.rpc.options.update().
+  sandboxHost?: { supported: boolean; reason?: string };
+  optionsUpdateResult?: { success: boolean };
 }
 
 interface MockSdkHandle {
@@ -141,6 +145,7 @@ function makeMockSdk(opts: MockSdkOptions = {}): MockSdkHandle {
       model: string;
       options?: { reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" };
     }> = [];
+    const optionsUpdates: Array<Record<string, unknown>> = [];
 
     const session: MockSession = {
       sessionId: "mock-session-id",
@@ -156,6 +161,15 @@ function makeMockSdk(opts: MockSdkOptions = {}): MockSdkHandle {
       },
       get setModelCalls() {
         return setModelCalls;
+      },
+      optionsUpdates,
+      rpc: {
+        options: {
+          update: async (params: Record<string, unknown>) => {
+            optionsUpdates.push(params);
+            return opts.optionsUpdateResult ?? { success: true };
+          },
+        },
       },
       send(options: { prompt: string }): Promise<unknown> {
         if (opts.sendError) return Promise.reject(opts.sendError);
@@ -265,6 +279,9 @@ function makeMockSdk(opts: MockSdkOptions = {}): MockSdkHandle {
         }
       );
     }
+    readonly rpc = {
+      sandbox: { getHostSupport: async () => opts.sandboxHost ?? { supported: true } },
+    };
     async listModels(): Promise<CopilotModelInfo[]> {
       if (opts.listModelsError) throw opts.listModelsError;
       return opts.models ?? [{ id: "auto" }, { id: "gpt-5" }, { id: "claude-sonnet-4.5" }];
@@ -3920,5 +3937,88 @@ describe("projectToolsForCopilot — per-call policy gate", () => {
     const ret = await def.handler({ value: "hi" }, { toolCallId: "tc1" });
     expect(seen).toBe("echo:hi");
     expect(ret).toBe("echo:hi");
+  });
+});
+
+describe("CopilotProvider sandbox", () => {
+  const profile = {
+    enabled: true,
+    filesystem: { readwrite: ["/repo"], readonly: ["/opt/tools"], denied: ["/repo/.env"] },
+    network: { outbound: "deny" as const },
+    env: [],
+  };
+
+  function sandboxedProvider(sdk: MockSdkHandle): CopilotProvider {
+    return new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({
+        sdkLoader: loaderFor(sdk).load,
+        resolveCliPath: () => "/fake/copilot/index.js",
+      }),
+    });
+  }
+
+  it("declares native sandbox support", () => {
+    expect(COPILOT_CAPABILITIES.sandbox).toBe("native");
+  });
+
+  it("applies the profile through session.options.update before sending", async () => {
+    const sdk = makeMockSdk({ scenario: (session) => session.emit("session.idle") });
+    await drain(sandboxedProvider(sdk).sendQuery("hi", "/repo", undefined, { sandbox: profile }));
+    const session = sdk.lastSession()!;
+    expect(session.optionsUpdates).toHaveLength(1);
+    expect(session.optionsUpdates[0]).toMatchObject({
+      sandboxConfigSource: "session_flag",
+      sandboxConfig: {
+        enabled: true,
+        allowBypass: false,
+        userPolicy: { filesystem: { readwritePaths: ["/repo"], deniedPaths: ["/repo/.env"] } },
+      },
+    });
+    expect(session.sent).toEqual([{ prompt: "hi" }]);
+  });
+
+  it("applies it on a resumed session too", async () => {
+    const sdk = makeMockSdk({ scenario: (session) => session.emit("session.idle") });
+    await drain(
+      sandboxedProvider(sdk).sendQuery("again", "/repo", "prior-session", { sandbox: profile }),
+    );
+    expect(sdk.lastSession()!.optionsUpdates).toHaveLength(1);
+  });
+
+  it("leaves the session untouched when the profile is absent or disabled", async () => {
+    const sdk = makeMockSdk({ scenario: (session) => session.emit("session.idle") });
+    const provider = sandboxedProvider(sdk);
+    await drain(provider.sendQuery("hi", "/repo"));
+    expect(sdk.lastSession()!.optionsUpdates).toEqual([]);
+    await drain(
+      provider.sendQuery("hi", "/repo", undefined, { sandbox: { ...profile, enabled: false } }),
+    );
+    expect(sdk.lastSession()!.optionsUpdates).toEqual([]);
+    expect(sdk.lastSessionConfig()).not.toHaveProperty("sandboxConfig");
+  });
+
+  it("fails the turn without sending when the host cannot sandbox", async () => {
+    const sdk = makeMockSdk({
+      sandboxHost: { supported: false, reason: "macOS 15 required" },
+      scenario: (session) => session.emit("session.idle"),
+    });
+    await expect(
+      drain(sandboxedProvider(sdk).sendQuery("hi", "/repo", undefined, { sandbox: profile })),
+    ).rejects.toThrow(
+      "sandbox unavailable: Copilot cannot sandbox on this host: macOS 15 required",
+    );
+    expect(sdk.lastSession()!.sent).toEqual([]);
+  });
+
+  it("fails the turn without sending when the session refuses the policy", async () => {
+    const sdk = makeMockSdk({
+      optionsUpdateResult: { success: false },
+      scenario: (session) => session.emit("session.idle"),
+    });
+    await expect(
+      drain(sandboxedProvider(sdk).sendQuery("hi", "/repo", undefined, { sandbox: profile })),
+    ).rejects.toThrow("Copilot did not accept the sandbox policy");
+    expect(sdk.lastSession()!.sent).toEqual([]);
   });
 });

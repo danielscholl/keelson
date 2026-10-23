@@ -383,6 +383,50 @@ describe("REST chat endpoints", () => {
     expect(res.status).toBe(404);
   });
 
+  test("PATCH /api/conversations/:id sets, keeps, and clears the sandbox choice", async () => {
+    const { app, store } = makeRig();
+    const conv = store.create({ providerId: "stub", name: "keep me" });
+    const patch = (body: unknown) =>
+      app.fetch(
+        new Request(`http://test/api/conversations/${conv.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    const on = await patch({ sandbox: "on" });
+    expect(on.status).toBe(200);
+    const updated = conversationSchema.parse(await on.json());
+    expect(updated.sandbox).toBe("on");
+    expect(updated.name).toBe("keep me");
+
+    expect((await patch({ name: "renamed" })).status).toBe(200);
+    expect(store.get(conv.id)!.sandbox).toBe("on");
+
+    expect((await patch({ sandbox: null })).status).toBe(200);
+    expect(store.get(conv.id)!.sandbox).toBeUndefined();
+
+    expect((await patch({})).status).toBe(400);
+    expect((await patch({ sandbox: "maybe" })).status).toBe(400);
+  });
+
+  test("POST /api/conversations accepts an initial sandbox choice", async () => {
+    const { app } = makeRig();
+    const post = (body: unknown) =>
+      app.fetch(
+        new Request("http://test/api/conversations", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+    const res = await post({ providerId: "stub", sandbox: "off" });
+    expect(res.status).toBe(201);
+    expect(conversationSchema.parse(await res.json()).sandbox).toBe("off");
+    expect((await post({ providerId: "stub", sandbox: true })).status).toBe(400);
+  });
+
   test("DELETE /api/conversations/:id removes and returns 204", async () => {
     const { app, store } = makeRig();
     const conv = store.create({ providerId: "stub" });

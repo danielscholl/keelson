@@ -10,3 +10,7 @@ process.env.KEELSON_DB ??= ":memory:";
 // Route any rib that consults stubs through them by default in tests.
 // Test files that exercise live behavior unset the flag locally.
 process.env.KEELSON_USE_STUBS ??= "1";
+
+// The stub provider cannot sandbox, so an operator's exported KEELSON_SANDBOX
+// would fail every chat test closed. Tests that need it set it themselves.
+delete process.env.KEELSON_SANDBOX;

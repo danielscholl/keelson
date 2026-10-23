@@ -12,12 +12,14 @@ import type {
   Conversation,
   ConversationWorkflowProjection,
   Message,
+  SandboxMode,
   WorkflowRunStatus,
 } from "@keelson/shared";
 import {
   canvasArtifactKey,
   canvasArtifactSlugSchema,
   parsePersistedTokenUsage,
+  sandboxModeSchema,
 } from "@keelson/shared";
 
 export interface CreateConversationInput {
@@ -27,6 +29,7 @@ export interface CreateConversationInput {
   seedSystemPrompt?: string;
   name?: string;
   projectId?: string;
+  sandbox?: SandboxMode;
 }
 
 // Patch shape for `update()`. Each key is optional so callers only pay for
@@ -34,9 +37,11 @@ export interface CreateConversationInput {
 // caller can clear the name back to the "Untitled" placeholder, distinct
 // from omitting the key (no-op). `model` is non-null because there's no
 // "unset" affordance in the UI — the picker always selects a concrete id.
+// `sandbox: null` clears the choice so the conversation inherits the default.
 export interface UpdateConversationPatch {
   name?: string | null;
   model?: string;
+  sandbox?: SandboxMode | null;
 }
 
 export interface ConversationStore {
@@ -76,6 +81,7 @@ interface ConvRow {
   name: string | null;
   seedSystemPrompt: string | null;
   project_id: string | null;
+  sandbox: string | null;
   createdAt: string;
   updatedAt: string;
   // Populated by the LEFT JOIN against workflow_runs in list/get. NULL for
@@ -217,6 +223,8 @@ function rowToConversation(row: ConvRow, messages: Message[]): Conversation {
     updatedAt: row.updatedAt,
   };
   if (row.project_id !== null) conv.projectId = row.project_id;
+  const sandbox = sandboxModeSchema.safeParse(row.sandbox);
+  if (sandbox.success) conv.sandbox = sandbox.data;
   const workflow = workflowProjection(row);
   if (workflow) conv.workflow = workflow;
   return conv;
@@ -227,11 +235,11 @@ export function createConversationStore(
   deps: ConversationStoreDeps = {},
 ): ConversationStore {
   const insertConv = db.prepare(
-    "INSERT INTO conversations(id, providerId, model, providerSessionId, name, seedSystemPrompt, project_id, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO conversations(id, providerId, model, providerSessionId, name, seedSystemPrompt, project_id, sandbox, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const convSelectColumns = `
     c.id, c.providerId, c.model, c.providerSessionId, c.name,
-    c.seedSystemPrompt, c.project_id, c.createdAt, c.updatedAt,
+    c.seedSystemPrompt, c.project_id, c.sandbox, c.createdAt, c.updatedAt,
     w.id AS workflow_run_id,
     w.workflow_name AS workflow_name,
     w.status AS workflow_status
@@ -301,6 +309,7 @@ export function createConversationStore(
   const setSession = db.prepare("UPDATE conversations SET providerSessionId = ? WHERE id = ?");
   const setName = db.prepare("UPDATE conversations SET name = ?, updatedAt = ? WHERE id = ?");
   const setModel = db.prepare("UPDATE conversations SET model = ?, updatedAt = ? WHERE id = ?");
+  const setSandbox = db.prepare("UPDATE conversations SET sandbox = ?, updatedAt = ? WHERE id = ?");
   // Messages cascade via the FK ON DELETE CASCADE on the messages table —
   // PRAGMA foreign_keys is enabled at openDatabase().
   const deleteConv = db.prepare("DELETE FROM conversations WHERE id = ?");
@@ -350,6 +359,7 @@ export function createConversationStore(
         input.name ?? null,
         input.seedSystemPrompt ?? null,
         input.projectId ?? null,
+        input.sandbox ?? null,
         now,
         now,
       );
@@ -364,6 +374,7 @@ export function createConversationStore(
         updatedAt: now,
       };
       if (input.projectId !== undefined) conv.projectId = input.projectId;
+      if (input.sandbox !== undefined) conv.sandbox = input.sandbox;
       return conv;
     },
     appendMessage(id, message, provenance) {
@@ -404,6 +415,9 @@ export function createConversationStore(
       }
       if (patch.model !== undefined) {
         setModel.run(patch.model, now, id);
+      }
+      if (Object.hasOwn(patch, "sandbox")) {
+        setSandbox.run(patch.sandbox ?? null, now, id);
       }
       const refreshed = selectConv.get(id) as ConvRow | null;
       if (!refreshed) return undefined;

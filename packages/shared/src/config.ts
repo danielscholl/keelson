@@ -3,12 +3,21 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, normalize } from "node:path";
 import { z } from "zod";
 import type { ModelClassMap } from "./chat.ts";
 import { credentialServiceIdSchema } from "./chat.ts";
 import { modelPricesSchema } from "./model-prices.ts";
 import { resolveKeelsonHome } from "./paths.ts";
+import {
+  CODEX_SANDBOX_MODES,
+  codexSandboxModeSchema,
+  parseSandboxEnv,
+  type SandboxSettings,
+} from "./sandbox.ts";
+
+export { CODEX_SANDBOX_MODES };
 
 const CONFIG_FILE_NAME = "config.json";
 
@@ -66,12 +75,43 @@ const claudeSettingsSchema = providerSettingsSchema.extend({
 // "workspace-write" (read the repo, write within the project cwd); pin tighter
 // with "read-only" or looser with "danger-full-access". `network` toggles the
 // subprocess's network access (off by default).
-export const CODEX_SANDBOX_MODES = ["read-only", "workspace-write", "danger-full-access"] as const;
 export type CodexSandboxModeConfig = (typeof CODEX_SANDBOX_MODES)[number];
 
 const codexSettingsSchema = providerSettingsSchema.extend({
   sandbox: z.enum(CODEX_SANDBOX_MODES).optional(),
   network: z.boolean().optional(),
+});
+
+// The sandbox block. Not strict, like the rest of this file: a shape mismatch
+// drops the whole config, which is worse than ignoring an unknown key.
+const sandboxPathsConfigSchema = z.array(z.string().min(1));
+const sandboxConfigSchema = z.object({
+  // Whether chat turns run sandboxed when neither the conversation nor the
+  // turn says otherwise. Default false.
+  default: z.boolean().optional(),
+  filesystem: z
+    .object({
+      readwrite: sandboxPathsConfigSchema.optional(),
+      readonly: sandboxPathsConfigSchema.optional(),
+      denied: sandboxPathsConfigSchema.optional(),
+    })
+    .optional(),
+  network: z
+    .object({
+      outbound: z.enum(["allow", "deny"]).optional(),
+      loopback: z.boolean().optional(),
+      allowedHosts: z.array(z.string().min(1)).optional(),
+    })
+    .optional(),
+  env: z.array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/)).optional(),
+  backend: z
+    .object({
+      copilot: z.record(z.string(), z.unknown()).optional(),
+      claude: z.record(z.string(), z.unknown()).optional(),
+      codex: z.object({ mode: codexSandboxModeSchema.optional() }).optional(),
+      pi: z.record(z.string(), z.unknown()).optional(),
+    })
+    .optional(),
 });
 
 // MCP gateway settings. The server exposes the tool registry over MCP when
@@ -232,6 +272,7 @@ const keelsonConfigSchema = z.object({
   claude: claudeSettingsSchema.optional(),
   codex: codexSettingsSchema.optional(),
   mcp: mcpSettingsSchema.optional(),
+  sandbox: sandboxConfigSchema.optional(),
   // Which ribs may call which other ribs' tools. Default-deny without an entry.
   crossRibGrants: crossRibGrantsSchema.optional(),
   ribWorkflowGrants: ribWorkflowGrantsSchema.optional(),
@@ -423,6 +464,64 @@ export function resolveMcpSettings(
           : m.exposeStateChanging !== false,
     toolDenylist: [...new Set([...(m.toolDenylist ?? []), ...envList])],
     requireToken: env.KEELSON_MCP_REQUIRE_TOKEN === "1" ? true : m.requireToken === true,
+  };
+}
+
+// config.sandbox with KEELSON_SANDBOX applied. `floor` (KEELSON_SANDBOX=required)
+// holds every turn on; otherwise `default` is what a turn gets when neither its
+// conversation nor its frame chooses. Paths come back absolute and normalized.
+export interface ResolvedSandboxConfig {
+  default: boolean;
+  floor: boolean;
+  settings: SandboxSettings;
+  warnings: string[];
+}
+
+export function resolveSandboxConfig(
+  config: KeelsonConfig,
+  env: Record<string, string | undefined> = process.env,
+): ResolvedSandboxConfig {
+  const s = config.sandbox ?? {};
+  const warnings: string[] = [];
+  const home = env.HOME?.trim() || homedir();
+  const paths = (field: string, list: readonly string[] | undefined): string[] => {
+    const out: string[] = [];
+    for (const raw of list ?? []) {
+      const expanded = raw === "~" ? home : /^~[\\/]/.test(raw) ? join(home, raw.slice(2)) : raw;
+      if (!isAbsolute(expanded)) {
+        warnings.push(`sandbox.filesystem.${field}: '${raw}' is not absolute; ignored`);
+        continue;
+      }
+      const path = normalize(expanded);
+      if (!out.includes(path)) out.push(path);
+    }
+    return out;
+  };
+  const envSetting = parseSandboxEnv(env.KEELSON_SANDBOX);
+  if (envSetting.kind === "invalid") {
+    warnings.push(`KEELSON_SANDBOX='${envSetting.value}' is not one of required, on, off; ignored`);
+  }
+  const backend = s.backend;
+  return {
+    default: envSetting.kind === "default" ? envSetting.enabled : s.default === true,
+    floor: envSetting.kind === "required",
+    settings: {
+      filesystem: {
+        readwrite: paths("readwrite", s.filesystem?.readwrite),
+        readonly: paths("readonly", s.filesystem?.readonly),
+        denied: paths("denied", s.filesystem?.denied),
+      },
+      network: {
+        outbound: s.network?.outbound ?? "deny",
+        ...(s.network?.loopback !== undefined ? { loopback: s.network.loopback } : {}),
+        ...(s.network?.allowedHosts !== undefined
+          ? { allowedHosts: [...s.network.allowedHosts] }
+          : {}),
+      },
+      env: [...new Set(s.env ?? [])],
+      ...(backend !== undefined && Object.keys(backend).length > 0 ? { backend } : {}),
+    },
+    warnings,
   };
 }
 

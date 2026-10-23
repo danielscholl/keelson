@@ -17,6 +17,7 @@ import type {
   PolicyDecision,
   PolicyEvent,
   PolicySurface,
+  SandboxSupport,
   SessionUsage,
 } from "@keelson/shared";
 import safeRegex from "safe-regex2";
@@ -41,6 +42,7 @@ interface PolicyScopeBase {
   // can scope to its own workflow/node; absent on other surfaces.
   workflowName?: string;
   nodeId?: string;
+  sandbox?: { enabled: boolean; support: SandboxSupport };
 }
 
 export interface PolicyEngineOptions {
@@ -199,6 +201,23 @@ function makeDenylistPolicy(denylist: readonly string[]): Policy {
 }
 
 const CONFINE_PATH_KEYS = new Set(["file_path", "path", "notebook_path"]);
+// Arguments that carry file contents or prose, not paths: a `Write` body that
+// starts with `// Copyright` must not be read as an absolute path.
+const CONTENT_KEYS = new Set([
+  "content",
+  "contents",
+  "new_string",
+  "old_string",
+  "new_source",
+  "file_text",
+  "old_str",
+  "new_str",
+  "insert_text",
+  "text",
+  "body",
+  "description",
+  "prompt",
+]);
 
 function expandConfinedPath(input: string, cwd: string): string {
   const trimmed = input.trim();
@@ -309,6 +328,9 @@ function collectPathCandidates(value: unknown, key?: string, out: string[] = [])
       }
       return out;
     }
+    if (key !== undefined && CONTENT_KEYS.has(key)) return out;
+    // No path spans lines; a multi-line value is content under some other name.
+    if (trimmed.includes("\n")) return out;
     if (looksLikeFilesystemPath(trimmed)) out.push(trimmed);
     return out;
   }
@@ -726,6 +748,7 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
       : {}),
     ...(base.workflowName !== undefined ? { workflowName: base.workflowName } : {}),
     ...(base.nodeId !== undefined ? { nodeId: base.nodeId } : {}),
+    ...(base.sandbox !== undefined ? { sandbox: { ...base.sandbox } } : {}),
   });
 
   const toolCallEvent = (

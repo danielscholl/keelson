@@ -26,6 +26,7 @@ export * from "./policy.ts";
 export * from "./projects.ts";
 export * from "./rib.ts";
 export * from "./run-timing.ts";
+export * from "./sandbox.ts";
 export * from "./snapshots.ts";
 export * from "./tools.ts";
 export * from "./usage.ts";
