@@ -955,18 +955,19 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     }
   }
 
-  let worktreePolicy: { enabled?: boolean; branch?: string } | undefined;
+  let worktreePolicy: WorkflowDefinition["worktree"];
   if (obj.worktree && typeof obj.worktree === "object" && !Array.isArray(obj.worktree)) {
     const raw = obj.worktree as Record<string, unknown>;
     const enabled = typeof raw.enabled === "boolean" ? raw.enabled : undefined;
-    const branch =
-      typeof raw.branch === "string" && raw.branch.trim().length > 0
-        ? raw.branch.trim()
-        : undefined;
-    if (enabled !== undefined || branch !== undefined) {
+    const trimmed = (v: unknown): string | undefined =>
+      typeof v === "string" && v.trim().length > 0 ? v.trim() : undefined;
+    const branch = trimmed(raw.branch);
+    const base = trimmed(raw.base);
+    if (enabled !== undefined || branch !== undefined || base !== undefined) {
       worktreePolicy = {
         ...(enabled !== undefined ? { enabled } : {}),
         ...(branch !== undefined ? { branch } : {}),
+        ...(base !== undefined ? { base } : {}),
       };
     }
   }
