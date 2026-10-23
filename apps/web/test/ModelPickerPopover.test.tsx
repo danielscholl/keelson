@@ -27,14 +27,18 @@ const copilotProvider: ProviderInfo = {
   builtIn: true,
 };
 
-function renderPicker(providers: ProviderInfo[], modelsByProvider: Record<string, ModelInfo[]>) {
+function renderPicker(
+  providers: ProviderInfo[],
+  modelsByProvider: Record<string, ModelInfo[]>,
+  favorites: { providerId: string; modelId: string }[] = [],
+) {
   return render(
     <ModelPickerPopover
       popoverId="test-popover"
       providers={providers}
       modelsByProvider={modelsByProvider}
       activeRef={null}
-      favorites={[]}
+      favorites={favorites}
       lockedProviderId={null}
       onSelect={() => {}}
       onToggleFavorite={() => {}}
@@ -43,6 +47,30 @@ function renderPicker(providers: ProviderInfo[], modelsByProvider: Record<string
 }
 
 describe("ModelPickerPopover", () => {
+  test("keeps a ★ default the static list offers when the live catalog omits it", () => {
+    renderPicker(
+      [{ ...copilotProvider, capabilities: { ...copilotProvider.capabilities, models: ["auto"] } }],
+      { copilot: [{ id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol" }] },
+      [{ providerId: "copilot", modelId: "auto" }],
+    );
+    expect(screen.getByText("auto")).toBeDefined();
+  });
+
+  test("hides a ★ model its loaded catalog no longer offers, keeping unloaded ones", () => {
+    renderPicker(
+      [copilotProvider, piProvider],
+      { copilot: [{ id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol" }] },
+      [
+        { providerId: "copilot", modelId: "gpt-5.6-terra" },
+        { providerId: "copilot", modelId: "gpt-6.1-sol" },
+        { providerId: "pi", modelId: "rec/flint" },
+      ],
+    );
+    expect(screen.queryByText("gpt-5.6-terra")).toBeNull();
+    expect(screen.getAllByText("GPT-6.1 Sol").length).toBeGreaterThan(0);
+    expect(screen.getByText("rec/flint")).toBeDefined();
+  });
+
   test("sub-groups a multi-vendor (pi) section by vendor with pretty labels", () => {
     renderPicker([piProvider], {
       pi: [

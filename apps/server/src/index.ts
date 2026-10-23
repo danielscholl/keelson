@@ -817,6 +817,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     {
       projectsStore,
       ...(bootstrap.defaultProvider ? { defaultProvider: bootstrap.defaultProvider } : {}),
+      modelAllowlists: bootstrap.modelAllowlists,
       workflowTools: harnessTools,
       workflowAuthoringTools,
     },

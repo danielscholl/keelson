@@ -55,6 +55,7 @@ enabled.
 | `defaultProvider` | string | The provider new chats and the workflow fallback preselect, when it is enabled. Falls back when it is not. See [The default provider](#the-default-provider). |
 | `claude.auth` | `"auto"` \| `"subscription"` \| `"api-key"` | How the Claude provider picks a credential. Default `auto`. See [Claude credentials](#claude-credentials). |
 | `copilot.modelClasses`, `claude.modelClasses`, `codex.modelClasses`, `pi.modelClasses` | object | Optional `fast`, `balanced`, and `deep` model-id overrides for portable workflow tiers. See [Model classes](#model-classes). |
+| `copilot.models`, `claude.models`, `codex.models`, `pi.models` | string[] | Model ids the model picker offers for that provider. Omit to list every model. See [Narrowing the model picker](#narrowing-the-model-picker). |
 | `codex.sandbox` | `"read-only"` \| `"workspace-write"` \| `"danger-full-access"` | How much the Codex subprocess may touch. Default `workspace-write`. See [Codex](#codex-community-provider). |
 | `codex.network` | boolean | Whether the Codex subprocess may reach the network. Default `false`. |
 | `mcp` | object | Tunes the MCP gateway, the `/api/mcp` endpoint other agents call. See [MCP gateway](#mcp-gateway). |
@@ -152,6 +153,26 @@ when the three effective classes request the same id, including `auto` or a
 single-model gateway. `--strict` makes that warning a failing exit status. Set
 gateway overrides in that gateway's `modelClasses` field under
 [`gateways`](#gateways), not in a root provider block.
+
+## Narrowing the model picker
+
+A provider's catalog can list many models, including older generations. Set
+`models` in that provider's block to the ids the picker should offer:
+
+```json
+{
+  "copilot": {
+    "models": ["auto", "claude-opus-5.5", "claude-sonnet-5.5", "gpt-6.1-sol"]
+  }
+}
+```
+
+The list only changes what the web picker and the CLI's model choices show while
+the server is running. A workflow node or a turn that names another model still
+runs it. Ids must match the provider's catalog exactly. Look them up at the
+`/api/providers/<id>/models` endpoint before you set `models`, since afterward it
+returns only the filtered list. An id the catalog doesn't offer is ignored.
+Restart the server after editing the list.
 
 ## Claude credentials
 

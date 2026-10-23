@@ -15,6 +15,7 @@ import {
   resolveDefaultProvider,
   resolveEnabledProviders,
   resolveMcpSettings,
+  resolveModelAllowlists,
   resolveRibApprovalGrants,
   resolveRibWorkflowGrants,
   resolveWorkflowPreflight,
@@ -164,6 +165,14 @@ describe("readKeelsonConfig", () => {
     expect(readKeelsonConfig(home)).toEqual({ ok: true, config: {} });
   });
 
+  test("accepts a provider's models allowlist", () => {
+    writeConfig(JSON.stringify({ copilot: { models: ["auto", "gpt-6.1-sol"] } }));
+    expect(readKeelsonConfig(home)).toEqual({
+      ok: true,
+      config: { copilot: { models: ["auto", "gpt-6.1-sol"] } },
+    });
+  });
+
   test("a valid file returns its config", () => {
     writeConfig(JSON.stringify({ defaultProvider: "claude" }));
     expect(readKeelsonConfig(home)).toEqual({ ok: true, config: { defaultProvider: "claude" } });
@@ -265,6 +274,18 @@ describe("resolveEnabledProviders", () => {
       "stub",
       "copilot",
     ]);
+  });
+});
+
+describe("resolveModelAllowlists", () => {
+  test("collects each provider's models list and omits providers without one", () => {
+    expect(
+      resolveModelAllowlists({
+        copilot: { models: ["auto", "claude-opus-5.5"] },
+        pi: { model: "rec/flint" },
+        claude: { models: [] },
+      }),
+    ).toEqual({ copilot: ["auto", "claude-opus-5.5"], claude: [] });
   });
 });
 

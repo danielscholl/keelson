@@ -37,6 +37,20 @@ export function toModelCompletions(
     });
 }
 
+// The default a /model completion keeps selectable. A provider's static model
+// list always carries its own default, so a non-empty list without it means the
+// server's picker allowlist excluded it; turns still run on it when no model is
+// named.
+export function offeredDefault(
+  defaultModel: string | undefined,
+  staticModels: readonly string[],
+): string | undefined {
+  if (defaultModel === undefined) return undefined;
+  return staticModels.length === 0 || staticModels.includes(defaultModel)
+    ? defaultModel
+    : undefined;
+}
+
 export interface ModelLoaderDeps {
   // The live probe (the server's GET /api/providers/:id/models, which itself
   // degrades to the provider's curated list when the SDK probe fails).

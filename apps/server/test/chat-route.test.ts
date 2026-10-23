@@ -125,6 +125,37 @@ describe("REST chat endpoints", () => {
     expect(body.models).toEqual([{ id: "stub-echo" }]);
   });
 
+  test("a provider's models allowlist narrows both picker endpoints", async () => {
+    const { app } = makeRig({ modelAllowlists: { stub: ["nope"] } });
+    const list = (await (await app.fetch(new Request("http://test/api/providers"))).json()) as {
+      providers: Array<{ id: string; capabilities: { models: string[] } }>;
+    };
+    expect(list.providers.find((p) => p.id === "stub")?.capabilities.models).toEqual([]);
+    const live = (await (
+      await app.fetch(new Request("http://test/api/providers/stub/models"))
+    ).json()) as { models: Array<{ id: string }> };
+    expect(live.models).toEqual([]);
+
+    const { app: kept } = makeRig({ modelAllowlists: { stub: ["stub-echo"] } });
+    const keptLive = (await (
+      await kept.fetch(new Request("http://test/api/providers/stub/models"))
+    ).json()) as { models: Array<{ id: string }> };
+    expect(keptLive.models).toEqual([{ id: "stub-echo" }]);
+  });
+
+  test("a provider named like an Object.prototype member has no allowlist", async () => {
+    if (!isRegisteredProvider("constructor")) {
+      registerProvider(makeSpyProvider("constructor", () => {}));
+    }
+    const { app } = makeRig({ modelAllowlists: {} });
+    const list = await app.fetch(new Request("http://test/api/providers"));
+    expect(list.status).toBe(200);
+    const live = (await (
+      await app.fetch(new Request("http://test/api/providers/constructor/models"))
+    ).json()) as { models: Array<{ id: string }> };
+    expect(live.models).toEqual([{ id: "spy-model" }]);
+  });
+
   test("GET /api/providers/:id/models 404 for unknown provider", async () => {
     const { app } = makeRig();
     const res = await app.fetch(new Request("http://test/api/providers/does-not-exist/models"));

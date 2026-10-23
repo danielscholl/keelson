@@ -54,7 +54,7 @@ import {
   parseSlashCommand,
   relativeAge,
 } from "./format.ts";
-import { createModelLoader, toModelCompletions } from "./models.ts";
+import { createModelLoader, offeredDefault, toModelCompletions } from "./models.ts";
 import {
   detectGitBranch,
   detectGitRoot,
@@ -396,7 +396,10 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
           toModelCompletions(
             await loadModels(session.providerId),
             prefix,
-            defaultModelFor(setup.providers, session.providerId),
+            offeredDefault(
+              defaultModelFor(setup.providers, session.providerId),
+              setup.providers.find((p) => p.id === session.providerId)?.capabilities.models ?? [],
+            ),
           ),
       },
       run: (arg) => {
