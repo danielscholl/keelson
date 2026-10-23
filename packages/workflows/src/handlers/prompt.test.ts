@@ -3284,6 +3284,20 @@ describe("makePromptHandler — sandbox", () => {
       expect(calls[0]?.options?.disallowedTools).toEqual(["bash"]);
     });
 
+    test("a canonical Bash denylist entry withholds it too", async () => {
+      const { provider, calls } = toolProvider();
+      const turns: SandboxBashTurn[] = [];
+      await makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+        denylist: ["Bash"],
+        sandbox: policy(true),
+        sandboxBashTool: bashTool(turns),
+      }).handle(stubNode, buildCtx());
+      expect(turns).toEqual([]);
+      expect(calls[0]?.options?.disallowedTools).toEqual(["bash"]);
+    });
+
     test("an unsandboxed node or a native-support provider gets no host bash", async () => {
       const turns: SandboxBashTurn[] = [];
       const off = toolProvider();

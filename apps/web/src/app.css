@@ -1484,7 +1484,8 @@ button.tab:focus-visible {
   opacity: 1;
   cursor: default;
 }
-.chat-sandbox-chip[aria-pressed="false"] {
+.chat-sandbox-chip[aria-pressed="false"],
+.chat-sandbox-chip[aria-pressed="mixed"] {
   background: transparent;
   border-color: var(--border);
   color: var(--muted);

@@ -14,6 +14,7 @@ import {
   EMPTY_SANDBOX_SETTINGS,
   mergeSandboxProfile,
   parseSandboxEnv,
+  resolveClientSandbox,
   resolveSandboxEnabled,
   type SandboxProfile,
   sandboxProfileSchema,
@@ -307,5 +308,43 @@ describe("describeSandboxStatus", () => {
     expect(sandboxUnsupportedWarning("stub", "none")).toContain(
       "switch to a provider that can sandbox",
     );
+  });
+});
+
+describe("resolveClientSandbox", () => {
+  const policy = { default: true, floor: false };
+
+  test("with the policy known it resolves like the server", () => {
+    expect(resolveClientSandbox({ policy })).toEqual({
+      enabled: true,
+      source: "config",
+      locked: false,
+    });
+    expect(resolveClientSandbox({ policy, conversation: "off" })?.source).toBe("conversation");
+    expect(resolveClientSandbox({ policy, conversation: "off", choice: true })?.enabled).toBe(true);
+    expect(
+      resolveClientSandbox({ policy: { default: false, floor: true }, choice: false }),
+    ).toEqual({ enabled: true, source: "floor", locked: true });
+  });
+
+  test("with the policy unread it guesses nothing, but a choice or a saved row still counts", () => {
+    expect(resolveClientSandbox({})).toBeUndefined();
+    expect(resolveClientSandbox({ conversation: "on" })?.enabled).toBe(true);
+    expect(resolveClientSandbox({ choice: false })).toEqual({
+      enabled: false,
+      source: "frame",
+      locked: false,
+    });
+  });
+
+  test("status says the server default applies when nothing resolves", () => {
+    expect(
+      describeSandboxStatus({
+        providerId: "claude",
+        support: "native",
+        platform: "darwin",
+        profile: "unavailable",
+      })[0],
+    ).toBe("sandbox: server default (its policy could not be read)");
   });
 });

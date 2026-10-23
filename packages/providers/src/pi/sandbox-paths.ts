@@ -2,9 +2,9 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { existsSync, realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { SandboxProfile } from "@keelson/shared";
 import type { ToolCallGate } from "../types.ts";
 
@@ -16,12 +16,23 @@ const READ_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const SEARCH_TOOLS = new Set(["grep", "find"]);
 const WRITE_TOOLS = new Set(["write", "edit"]);
 
-// Resolves symlinks through the nearest existing ancestor, so a new file under
-// a symlinked directory is judged where it would really land.
-function canonical(path: string): string {
+function entryExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Resolves symlinks through the nearest existing entry, so a new file under a
+// symlinked directory is judged where it would really land. lstat, not
+// existsSync: a dangling link is an entry, and since its target cannot be
+// resolved the result is undefined and the call is refused.
+function canonical(path: string): string | undefined {
   const tail: string[] = [];
   let current = path;
-  while (!existsSync(current)) {
+  while (!entryExists(current)) {
     const parent = dirname(current);
     if (parent === current) return path;
     tail.unshift(basename(current));
@@ -30,13 +41,17 @@ function canonical(path: string): string {
   try {
     return join(realpathSync(current), ...tail);
   } catch {
-    return path;
+    return undefined;
   }
+}
+
+function canonicalRoot(path: string): string {
+  return canonical(path) ?? path;
 }
 
 function inside(root: string, path: string): boolean {
   const rel = relative(root, path);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 export function sandboxPathRefusal(
@@ -55,20 +70,21 @@ export function sandboxPathRefusal(
       : "";
   const expanded =
     raw === "~" ? homedir() : raw.startsWith("~/") ? join(homedir(), raw.slice(2)) : raw;
-  const target = canonical(resolve(cwd, expanded || "."));
   const shown = raw || ".";
-  const denied = profile.filesystem.denied.map(canonical);
+  const target = canonical(resolve(cwd, expanded || "."));
+  if (target === undefined) return `path '${shown}' goes through a link the sandbox cannot resolve`;
+  const denied = profile.filesystem.denied.map(canonicalRoot);
   if (denied.some((d) => inside(d, target))) return `path '${shown}' is denied by the sandbox`;
   if (SEARCH_TOOLS.has(tool) && denied.some((d) => inside(target, d))) {
     return `path '${shown}' contains a path the sandbox denies; search a narrower path`;
   }
-  const writable = profile.filesystem.readwrite.map(canonical);
+  const writable = profile.filesystem.readwrite.map(canonicalRoot);
   if (write) {
     return writable.some((r) => inside(r, target))
       ? undefined
       : `path '${shown}' is not writable in the sandbox`;
   }
-  const readable = [...writable, ...profile.filesystem.readonly.map(canonical)];
+  const readable = [...writable, ...profile.filesystem.readonly.map(canonicalRoot)];
   return readable.some((r) => inside(r, target))
     ? undefined
     : `path '${shown}' is outside the sandbox's readable roots`;

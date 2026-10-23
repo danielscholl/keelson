@@ -15,6 +15,13 @@ describe("SandboxChip", () => {
     expect(screen.getByRole("button").getAttribute("aria-pressed")).toBe("true");
   });
 
+  test("an unknown server default reads as mixed, not as off", () => {
+    render(<SandboxChip enabled={undefined} onToggle={() => {}} />);
+    const chip = screen.getByRole("button");
+    expect(chip.getAttribute("aria-pressed")).toBe("mixed");
+    expect(chip.getAttribute("aria-label")).toContain("follows the server's default");
+  });
+
   test("a locked chip stays on, cannot be clicked, and says why", () => {
     let toggles = 0;
     render(<SandboxChip enabled locked onToggle={() => toggles++} />);

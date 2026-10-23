@@ -102,11 +102,11 @@ export function createSandboxedBashTool(opts: SandboxedBashToolOptions): ToolDef
       }
       const profile = resolution.profile;
       const bash = resolveBash();
-      const launchDir = createSandboxLaunchDir();
-      // stderr is folded into stdout so the result reads like pi's own bash.
-      const script = writeSandboxBody(launchDir, "command.sh", `exec 2>&1\n${command}\n`);
       const timeoutSec = timeout ?? opts.defaultTimeoutSec;
+      const launchDir = createSandboxLaunchDir();
       try {
+        // stderr is folded into stdout so the result reads like pi's own bash.
+        const script = writeSandboxBody(launchDir, "command.sh", `exec 2>&1\n${command}\n`);
         const outcome = await runSubprocess({
           cmd: bash.cmd,
           args: [script],

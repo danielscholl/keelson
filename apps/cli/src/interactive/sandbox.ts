@@ -4,7 +4,7 @@
 
 import {
   describeSandboxStatus,
-  resolveSandboxEnabled,
+  resolveClientSandbox,
   SANDBOX_LOCKED_MESSAGE,
   type SandboxMode,
   type SandboxResolution,
@@ -14,23 +14,24 @@ import {
 import type { ServerSandboxConfig } from "../http/chat-client.ts";
 import { parseSandboxArg } from "./format.ts";
 
+// Nothing here picks a value on the user's behalf: with no choice and no saved
+// row, the frame carries no `sandbox` and the server's own default applies.
 export interface SandboxSessionState {
   providerId: string;
   conversationId?: string;
-  // What every turn's frame sends.
-  sandbox: boolean;
-  // True while a choice not yet saved on a row overrides it: `--sandbox`, or a
-  // `/sandbox` made before the conversation exists.
-  sandboxChosen: boolean;
+  // A choice no row holds yet: `--sandbox`, or `/sandbox` before the
+  // conversation exists. The only sandbox value a frame or create carries.
+  sandboxChoice?: boolean;
   // `--sandbox` / `--no-sandbox`, which applies again to every new conversation.
   sandboxFlag?: boolean;
-  // The conversation's saved choice, for the status source.
+  // The conversation's saved choice.
   sandboxConversation?: SandboxMode;
 }
 
 export interface SandboxCommandDeps {
   session: SandboxSessionState;
-  config: ServerSandboxConfig;
+  // Undefined when /api/config could not be read.
+  config: ServerSandboxConfig | undefined;
   busy: () => boolean;
   supportFor: (providerId: string) => SandboxSupport;
   patchConversation: (id: string, mode: SandboxMode) => Promise<unknown>;
@@ -39,68 +40,55 @@ export interface SandboxCommandDeps {
   warn: (line: string) => void;
 }
 
-// What a session starts with: the floor, else the hydrated conversation, else
-// the server default. `--sandbox/--no-sandbox` counts as a session choice.
 export function initialSandboxState(
-  config: ServerSandboxConfig,
   conversation: SandboxMode | undefined,
   flag: boolean | undefined,
-): Pick<SandboxSessionState, "sandbox" | "sandboxChosen" | "sandboxFlag" | "sandboxConversation"> {
-  const resolution = resolveSandboxEnabled({
-    ...(flag !== undefined ? { frame: flag } : {}),
-    ...(conversation !== undefined ? { conversation } : {}),
-    configDefault: config.default,
-    ...(config.floor ? { env: "required" } : {}),
-  });
+): Pick<SandboxSessionState, "sandboxChoice" | "sandboxFlag" | "sandboxConversation"> {
   return {
-    sandbox: resolution.enabled,
-    sandboxChosen: flag !== undefined,
-    ...(flag !== undefined ? { sandboxFlag: flag } : {}),
+    ...(flag !== undefined ? { sandboxChoice: flag, sandboxFlag: flag } : {}),
     ...(conversation !== undefined ? { sandboxConversation: conversation } : {}),
   };
 }
 
+// Undefined when the outcome rests on a server default this session cannot see.
 export function sessionSandboxResolution(
   session: SandboxSessionState,
-  config: ServerSandboxConfig,
-): SandboxResolution {
-  return resolveSandboxEnabled({
-    ...(session.sandboxChosen ? { frame: session.sandbox } : {}),
+  config: ServerSandboxConfig | undefined,
+): SandboxResolution | undefined {
+  return resolveClientSandbox({
+    ...(session.sandboxChoice !== undefined ? { choice: session.sandboxChoice } : {}),
     ...(session.sandboxConversation !== undefined
       ? { conversation: session.sandboxConversation }
       : {}),
-    configDefault: config.default,
-    ...(config.floor ? { env: "required" } : {}),
+    ...(config !== undefined ? { policy: config } : {}),
   });
 }
 
 // Leaving a conversation drops its choice, as the SPA does: the next one starts
-// from `--sandbox`, else the default, not from the row just left.
-export function leaveConversationSandbox(
-  session: SandboxSessionState,
-  config: ServerSandboxConfig,
-): void {
-  session.sandboxConversation = undefined;
-  session.sandboxChosen = session.sandboxFlag !== undefined;
-  if (session.sandboxFlag !== undefined) session.sandbox = session.sandboxFlag;
-  session.sandbox = sessionSandboxResolution(session, config).enabled;
+// from `--sandbox`, else the server default, not from the row just left.
+export function leaveConversationSandbox(session: SandboxSessionState): void {
+  delete session.sandboxConversation;
+  if (session.sandboxFlag !== undefined) session.sandboxChoice = session.sandboxFlag;
+  else delete session.sandboxChoice;
 }
 
-// The pump created the row carrying the session's choice, so it is saved there.
+// The pump's create carried any pending choice, so the row now holds it.
 export function adoptCreatedConversationSandbox(
   session: SandboxSessionState,
   saved: SandboxMode | undefined,
 ): void {
-  session.sandboxConversation = saved ?? (session.sandbox ? "on" : "off");
-  session.sandboxChosen = false;
+  const pending = session.sandboxChoice;
+  const mode = saved ?? (pending !== undefined ? (pending ? "on" : "off") : undefined);
+  if (mode !== undefined) session.sandboxConversation = mode;
+  delete session.sandboxChoice;
 }
 
 export function footerSandbox(
   session: SandboxSessionState,
-  config: ServerSandboxConfig,
+  config: ServerSandboxConfig | undefined,
 ): "on" | "required" | undefined {
-  if (config.floor) return "required";
-  return session.sandbox ? "on" : undefined;
+  if (config?.floor) return "required";
+  return sessionSandboxResolution(session, config)?.enabled ? "on" : undefined;
 }
 
 export async function runSandboxCommand(arg: string, deps: SandboxCommandDeps): Promise<void> {
@@ -112,14 +100,15 @@ export async function runSandboxCommand(arg: string, deps: SandboxCommandDeps): 
   }
   const support = deps.supportFor(session.providerId);
   if (parsed === "status") {
+    const resolution = sessionSandboxResolution(session, config);
     // The server's runtime and profile, not this process's: the server runs the turn.
     for (const line of describeSandboxStatus({
-      resolution: sessionSandboxResolution(session, config),
+      ...(resolution !== undefined ? { resolution } : {}),
       providerId: session.providerId,
       support,
-      platform: config.platform ?? process.platform,
-      profile: config.profile ?? config.summary,
-      ...(config.runtime !== undefined ? { runtime: config.runtime } : {}),
+      platform: config?.platform ?? process.platform,
+      profile: config?.profile ?? config?.summary ?? "unavailable",
+      ...(config?.runtime !== undefined ? { runtime: config.runtime } : {}),
     })) {
       deps.info(line);
     }
@@ -130,19 +119,18 @@ export async function runSandboxCommand(arg: string, deps: SandboxCommandDeps): 
     return;
   }
   const wanted = parsed === "on";
-  if (!wanted && config.floor) {
+  if (!wanted && config?.floor) {
     deps.warn(SANDBOX_LOCKED_MESSAGE);
     return;
   }
-  session.sandbox = wanted;
-  // Held as a pending choice until a row saves it; the frame carries it either way.
-  session.sandboxChosen = true;
+  // Pending until a row saves it; the next frame carries it either way.
+  session.sandboxChoice = wanted;
   deps.onChange();
   if (session.conversationId !== undefined) {
     try {
       await deps.patchConversation(session.conversationId, wanted ? "on" : "off");
       session.sandboxConversation = wanted ? "on" : "off";
-      session.sandboxChosen = false;
+      delete session.sandboxChoice;
     } catch (err) {
       deps.warn(`✗ saving the sandbox choice: ${err instanceof Error ? err.message : String(err)}`);
     }

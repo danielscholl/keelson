@@ -74,6 +74,11 @@ let postRibActionResult: RibActionResponse = { ok: true };
 let sandboxConfig = { default: false, floor: false, summary: "sandbox off", platform: "darwin" };
 const conversationPatches: Array<{ id: string; patch: unknown }> = [];
 const sentFrames: ClientFrame[] = [];
+const createCalls: Array<{ providerId: string; options: unknown }> = [];
+// Holds a PATCH open, or fails it, so the toggle's in-flight and revert paths show.
+let patchGate: Promise<void> | null = null;
+let patchFails = false;
+let configFails = false;
 let ledgerPricedEvents = 0;
 let ledgerUnpricedEvents = 0;
 
@@ -86,7 +91,10 @@ mock.module("../src/api.ts", () => ({
   ...realApi,
   cloneProject: async () => ({ id: "project-2", name: "copy" }),
   completeRibCommand: async () => [],
-  createConversation: async () => conversations[0],
+  createConversation: async (providerId: string, options: unknown) => {
+    createCalls.push({ providerId, options });
+    return conversations[0];
+  },
   createProject: async () => ({ id: "project-1", name: "default" }),
   deleteProject: async () => undefined,
   fetchProviderModels: async () => [{ id: "stub-model" }],
@@ -188,6 +196,10 @@ beforeEach(() => {
   sandboxConfig = { default: false, floor: false, summary: "sandbox off", platform: "darwin" };
   conversationPatches.length = 0;
   sentFrames.length = 0;
+  createCalls.length = 0;
+  patchGate = null;
+  patchFails = false;
+  configFails = false;
   for (const c of conversations) delete c.sandbox;
 });
 
@@ -296,6 +308,7 @@ describe("Chat sandbox", () => {
   beforeEach(() => {
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      if (path === "/api/config" && configFails) return new Response("down", { status: 503 });
       if (path === "/api/config") {
         return Response.json({
           schemaVersion: "",
@@ -306,6 +319,8 @@ describe("Chat sandbox", () => {
       const m = /^\/api\/conversations\/([^/]+)$/.exec(path);
       if (m && init?.method === "DELETE") return new Response(null, { status: 204 });
       if (m && init?.method === "PATCH") {
+        if (patchGate) await patchGate;
+        if (patchFails) return new Response("nope", { status: 500 });
         const patch = JSON.parse(String(init.body)) as { sandbox?: "on" | "off" };
         conversationPatches.push({ id: m[1]!, patch });
         const conv = conversations.find((c) => c.id === m[1])!;
@@ -333,16 +348,85 @@ describe("Chat sandbox", () => {
     await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("true"));
   });
 
-  test("every request frame carries the sandbox choice", async () => {
+  const send = (text: string) => {
+    const box = screen.getByPlaceholderText(/Type a message/);
+    fireEvent.change(box, { target: { value: text } });
+    fireEvent.keyDown(box, { key: "Enter" });
+  };
+
+  test("a saved row speaks for itself: the frame carries no override", async () => {
     conversations[0]!.sandbox = "on";
     renderChat();
     await screen.findByText("Send this summary");
     await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("true"));
-    const box = screen.getByPlaceholderText(/Type a message/);
-    fireEvent.change(box, { target: { value: "hello" } });
-    fireEvent.keyDown(box, { key: "Enter" });
+    send("hello");
     await waitFor(() => expect(sentFrames.length).toBe(1));
-    expect(sentFrames[0]?.message).toMatchObject({ type: "request", sandbox: true });
+    expect(sentFrames[0]?.message).not.toHaveProperty("sandbox");
+  });
+
+  test("a toggle applies at once, so a send during its save carries the new value", async () => {
+    let release = () => {};
+    patchGate = new Promise<void>((r) => {
+      release = r;
+    });
+    renderChat();
+    await screen.findByText("Send this summary");
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("false"));
+    fireEvent.click(chip());
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("true"));
+    // A second toggle waits for the first save.
+    expect((chip() as HTMLButtonElement).disabled).toBe(true);
+    send("hello");
+    await waitFor(() => expect(sentFrames.length).toBe(1));
+    expect(sentFrames[0]?.message).toMatchObject({ sandbox: true });
+    release();
+    await waitFor(() =>
+      expect(conversationPatches).toEqual([{ id: "conv-1", patch: { sandbox: "on" } }]),
+    );
+  });
+
+  test("a failed save reverts the chip and says why", async () => {
+    patchFails = true;
+    renderChat();
+    await screen.findByText("Send this summary");
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("false"));
+    fireEvent.click(chip());
+    expect(await screen.findByText(/saving the sandbox choice failed/)).toBeDefined();
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("false"));
+  });
+
+  test("an unread /api/config picks nothing: the chip is mixed and a fresh chat sends no override", async () => {
+    sessionStorage.removeItem("keelson.conversationId");
+    configFails = true;
+    renderChat();
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("mixed"));
+    await waitFor(() =>
+      expect((screen.getByPlaceholderText(/Type a message/) as HTMLTextAreaElement).disabled).toBe(
+        false,
+      ),
+    );
+    send("hello");
+    await waitFor(() => expect(sentFrames.length).toBe(1));
+    expect(sentFrames[0]?.message).not.toHaveProperty("sandbox");
+    expect(createCalls[0]?.options).not.toHaveProperty("sandbox");
+  });
+
+  test("a choice made before the chat exists goes on the create and the frame", async () => {
+    sessionStorage.removeItem("keelson.conversationId");
+    renderChat();
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("false"));
+    await waitFor(() =>
+      expect((screen.getByPlaceholderText(/Type a message/) as HTMLTextAreaElement).disabled).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(chip());
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("true"));
+    send("hello");
+    await waitFor(() => expect(sentFrames.length).toBe(1));
+    expect(createCalls[0]?.options).toMatchObject({ sandbox: "on" });
+    expect(sentFrames[0]?.message).toMatchObject({ sandbox: true });
+    expect(conversationPatches).toEqual([]);
   });
 
   test("clicking the chip saves the choice on the open conversation", async () => {

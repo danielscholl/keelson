@@ -56,6 +56,21 @@ describe("pi file tools under a sandboxed turn", () => {
     expect(refuse("read", "link-out/x")).toContain("outside the sandbox's readable roots");
   });
 
+  test("a '..'-prefixed name is an ordinary entry, so a denied directory still covers it", () => {
+    expect(refuse("read", "secrets/..env")).toBe("path 'secrets/..env' is denied by the sandbox");
+    expect(refuse("write", "..notes.md")).toBeUndefined();
+  });
+
+  test("a dangling link fails closed instead of reading as a new file", () => {
+    symlinkSync(join(outside, "new.txt"), join(cwd, "dangling"));
+    symlinkSync(join(outside, "missing-dir"), join(cwd, "dangling-dir"));
+    expect(refuse("write", "dangling")).toBe(
+      "path 'dangling' goes through a link the sandbox cannot resolve",
+    );
+    expect(refuse("write", "dangling-dir/new.txt")).toContain("cannot resolve");
+    expect(refuse("read", "dangling")).toContain("cannot resolve");
+  });
+
   test("other tools pass through to the wrapped gate", async () => {
     const seen: string[] = [];
     const gate = withSandboxPathGate(

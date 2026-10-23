@@ -302,6 +302,9 @@ export interface MakePromptHandlerOptions {
 export const DEFAULT_TOOL_DENYLIST: readonly string[] = [];
 
 const SANDBOXED_BASH_TOOL = "bash";
+// Operator denylists name the shell canonically too; without a policy engine
+// (the CLI's offline path) nothing else maps `Bash` onto the injected tool.
+const SHELL_DENY_NAMES = [SANDBOXED_BASH_TOOL, "Bash"];
 
 // Parses KEELSON_WORKFLOW_TOOL_DENYLIST. Unset means the default; an explicit
 // empty string means allow everything.
@@ -592,7 +595,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       sandboxProfile !== undefined &&
       sandboxSupport === "tool" &&
       opts.sandboxBashTool !== undefined &&
-      !denySet.has(SANDBOXED_BASH_TOOL)
+      !SHELL_DENY_NAMES.some((name) => denySet.has(name))
         ? opts.sandboxBashTool({
             ...sandboxContextFor(ctx),
             scratchDir: prepareSandboxScratch(ctx.artifactsDir, ctx.nodeId),

@@ -9,7 +9,7 @@ import {
   parseWorkflowDescription,
   type ReasoningEffortLevel,
   type RegisteredToolInfo,
-  resolveSandboxEnabled,
+  resolveClientSandbox,
   SANDBOX_LOCKED_MESSAGE,
   type SandboxMode,
   sandboxUnsupportedWarning,
@@ -473,13 +473,17 @@ export function Chat({
     setSandboxChoice(undefined);
     setSandboxConversation(undefined);
   }, []);
-  const sandboxResolution = resolveSandboxEnabled({
-    ...(sandboxChoice !== undefined ? { frame: sandboxChoice } : {}),
+  // Only an explicit choice goes on the wire; with none, the server's own
+  // resolution supplies the default, so a pending or unread config picks nothing.
+  const sandboxResolution = resolveClientSandbox({
+    ...(sandboxChoice !== undefined ? { choice: sandboxChoice } : {}),
     ...(sandboxConversation !== undefined ? { conversation: sandboxConversation } : {}),
-    configDefault: sandboxConfig?.default ?? false,
-    ...(sandboxConfig?.floor ? { env: "required" } : {}),
+    ...(sandboxConfig !== null ? { policy: sandboxConfig } : {}),
   });
-  const sandboxEnabled = sandboxResolution.enabled;
+  const sandboxEnabled = sandboxResolution?.enabled;
+  // One PATCH at a time, so overlapping toggles cannot land out of order.
+  const [sandboxSaving, setSandboxSaving] = useState(false);
+  const sandboxSavingRef = useRef(false);
   const sandboxSupport = selectedProvider?.capabilities.sandbox ?? "none";
   useEffect(() => {
     let cancelled = false;
@@ -1157,11 +1161,13 @@ export function Chat({
             ...(seedForCreate ? { seedSystemPrompt: seedForCreate } : {}),
             ...(nameForCreate ? { name: nameForCreate } : {}),
             ...(activeProjectId ? { projectId: activeProjectId } : {}),
-            sandbox: sandboxEnabled ? "on" : "off",
+            ...(sandboxChoice !== undefined ? { sandbox: sandboxChoice ? "on" : "off" } : {}),
           });
           convoId = c.id;
           setSandboxChoice(undefined);
-          setSandboxConversation(c.sandbox ?? (sandboxEnabled ? "on" : "off"));
+          setSandboxConversation(
+            c.sandbox ?? (sandboxChoice !== undefined ? (sandboxChoice ? "on" : "off") : undefined),
+          );
           setConversationId(c.id);
           conversationIdRef.current = c.id;
           // Clear only after the server has persisted — a thrown
@@ -1220,7 +1226,7 @@ export function Chat({
           ...(selectedModel ? { model: selectedModel } : {}),
           ...(supportsThinking ? { thinking: thinkingEnabled } : {}),
           ...(supportsEffort ? { reasoningEffort } : {}),
-          sandbox: sandboxEnabled,
+          ...(sandboxChoice !== undefined ? { sandbox: sandboxChoice } : {}),
         },
       });
 
@@ -1233,7 +1239,7 @@ export function Chat({
       conversationsList,
       ensureWs,
       reasoningEffort,
-      sandboxEnabled,
+      sandboxChoice,
       selectedModel,
       selectedModelInfo,
       selectedProviderId,
@@ -1476,29 +1482,44 @@ export function Chat({
     [activeProjectId, startRun],
   );
 
-  // Saves the choice on the open conversation, or holds it for the one the
-  // next send creates. Shared by the chip and `/sandbox on|off`.
+  // Applies the choice at once (a send meanwhile carries it on its frame, which
+  // the server mirrors onto the row), then saves it on the open conversation;
+  // a failed save reverts it. With no conversation it waits for the next create.
+  // Shared by the chip and `/sandbox on|off`.
   const applySandbox = useCallback(
     async (wanted: boolean): Promise<CommandResult> => {
       if (!wanted && sandboxConfig?.floor) return failResult(SANDBOX_LOCKED_MESSAGE);
+      if (sandboxSavingRef.current) return failResult("still saving the last sandbox choice");
       const mode: SandboxMode = wanted ? "on" : "off";
       const id = conversationIdRef.current;
+      const previous = sandboxChoice;
+      setSandboxChoice(wanted);
       if (id !== null) {
-        const updated = await updateConversation(id, { sandbox: mode });
-        if (conversationIdRef.current === id) {
-          setSandboxChoice(undefined);
-          setSandboxConversation(updated.sandbox ?? mode);
+        sandboxSavingRef.current = true;
+        setSandboxSaving(true);
+        try {
+          const updated = await updateConversation(id, { sandbox: mode });
+          if (conversationIdRef.current === id) {
+            setSandboxChoice(undefined);
+            setSandboxConversation(updated.sandbox ?? mode);
+          }
+          conversationsList.patchLocal(id, { sandbox: mode });
+        } catch (e: unknown) {
+          if (conversationIdRef.current === id) setSandboxChoice(previous);
+          return failResult(
+            `saving the sandbox choice failed: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        } finally {
+          sandboxSavingRef.current = false;
+          setSandboxSaving(false);
         }
-        conversationsList.patchLocal(id, { sandbox: mode });
-      } else {
-        setSandboxChoice(wanted);
       }
       const warning = wanted
         ? sandboxUnsupportedWarning(selectedProviderId, sandboxSupport)
         : undefined;
       return okResult(warning ? `sandbox → on\n${warning}` : `sandbox → ${mode}`);
     },
-    [conversationsList, sandboxConfig, sandboxSupport, selectedProviderId],
+    [conversationsList, sandboxChoice, sandboxConfig, sandboxSupport, selectedProviderId],
   );
 
   const dispatchSandboxCommand = useCallback(
@@ -1508,7 +1529,7 @@ export function Chat({
       if (parsed.kind === "status") {
         return okResult(
           describeSandboxStatus({
-            resolution: sandboxResolution,
+            ...(sandboxResolution !== undefined ? { resolution: sandboxResolution } : {}),
             providerId: selectedProviderId,
             support: sandboxSupport,
             platform: sandboxConfig?.platform ?? "unknown",
@@ -1523,7 +1544,7 @@ export function Chat({
   );
 
   const onToggleSandbox = useCallback(() => {
-    void applySandbox(!sandboxEnabled)
+    void applySandbox(sandboxEnabled !== true)
       .then((result) => {
         const lines = result.message.split("\n");
         if (!result.ok) toast.push({ kind: "error", message: result.message });
@@ -2478,9 +2499,9 @@ export function Chat({
             <SandboxChip
               enabled={sandboxEnabled}
               onToggle={onToggleSandbox}
-              locked={sandboxResolution.locked}
+              locked={sandboxResolution?.locked === true}
               unsupported={sandboxSupport === "none"}
-              disabled={streaming || hydrating}
+              disabled={streaming || hydrating || sandboxSaving}
             />
             {selectedModelInfo?.supports?.reasoningEffort === true && (
               <ReasoningEffortChip

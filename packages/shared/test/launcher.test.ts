@@ -9,6 +9,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildMxcConfig,
   hostLauncher,
@@ -158,7 +159,8 @@ describe("resolveMxcExecutor", () => {
   test("finds the arm64 executor inside the installed SDK", () => {
     expect(resolveMxcExecutor(darwin)).toEqual({
       ok: true,
-      path: "/home/k/node_modules/@microsoft/mxc-sdk/bin/arm64/mxc-exec-mac",
+      // Built with the platform join, as the resolver does.
+      path: join("/home/k/node_modules/@microsoft/mxc-sdk", "bin", "arm64", "mxc-exec-mac"),
       source: "package",
       version: "1.0.1",
     });

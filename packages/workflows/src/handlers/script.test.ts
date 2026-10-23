@@ -318,7 +318,7 @@ describe("makeScriptHandler — sandbox", () => {
       expect(files.get("body.ts")).toBe(body);
       // The shim restores exactly the filtered env the launcher was given.
       expect(JSON.parse(files.get("env.json") ?? "{}")).toEqual(specs[0]?.env);
-      expect(files.get("shim.ts")).toContain(join(launchDir, "env.json"));
+      expect(files.get("shim.ts")).toContain(JSON.stringify(join(launchDir, "env.json")));
       expect(existsSync(launchDir)).toBe(false);
     } finally {
       rmSync(artifacts, { recursive: true, force: true });

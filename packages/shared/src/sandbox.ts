@@ -120,6 +120,27 @@ export function resolveSandboxEnabled(input: {
   return { enabled: input.configDefault, source: "config", locked: false };
 }
 
+// A client's view of the outcome: an explicit choice no row holds yet, the
+// row's saved one, and the server policy from /api/config. Undefined when the
+// outcome rests on a policy the client could not read.
+export function resolveClientSandbox(input: {
+  choice?: boolean;
+  conversation?: SandboxMode;
+  policy?: { default: boolean; floor: boolean };
+}): SandboxResolution | undefined {
+  if (input.policy === undefined && input.choice === undefined) {
+    return input.conversation !== undefined
+      ? { enabled: input.conversation === "on", source: "conversation", locked: false }
+      : undefined;
+  }
+  return resolveSandboxEnabled({
+    ...(input.choice !== undefined ? { frame: input.choice } : {}),
+    ...(input.conversation !== undefined ? { conversation: input.conversation } : {}),
+    configDefault: input.policy?.default ?? false,
+    ...(input.policy?.floor ? { env: "required" } : {}),
+  });
+}
+
 function union(...lists: readonly (readonly string[] | undefined)[]): string[] {
   const out: string[] = [];
   for (const list of lists) {
@@ -258,7 +279,8 @@ const SOURCE_LABELS: Record<SandboxSource, string> = {
 };
 
 export interface SandboxStatusInput {
-  resolution: SandboxResolution;
+  // Absent when the outcome rests on a server policy the caller could not read.
+  resolution?: SandboxResolution;
   providerId: string;
   support: SandboxSupport;
   platform: string;
@@ -272,14 +294,16 @@ export interface SandboxStatusInput {
 export function describeSandboxStatus(input: SandboxStatusInput): string[] {
   const { resolution, providerId, support } = input;
   const lines = [
-    `sandbox: ${resolution.enabled ? "on" : "off"} (${SOURCE_LABELS[resolution.source]})`,
+    resolution === undefined
+      ? "sandbox: server default (its policy could not be read)"
+      : `sandbox: ${resolution.enabled ? "on" : "off"} (${SOURCE_LABELS[resolution.source]})`,
   ];
   const backend =
     providerId === "stub"
       ? "stub runs no tools (n/a)"
       : describeSandboxBackend(providerId, support, input.platform);
   lines.push(
-    `provider: ${backend}${resolution.enabled && support === "none" ? "; turns fail closed while the sandbox is on" : ""}`,
+    `provider: ${backend}${resolution?.enabled !== false && support === "none" ? "; turns fail closed while the sandbox is on" : ""}`,
   );
   if (input.runtime !== undefined) lines.push(`runtime: ${input.runtime}`);
   lines.push(`profile: ${input.profile}`);

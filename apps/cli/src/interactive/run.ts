@@ -75,6 +75,7 @@ import {
   leaveConversationSandbox,
   runSandboxCommand,
   type SandboxSessionState,
+  sessionSandboxResolution,
 } from "./sandbox.ts";
 import { brass, dim, editorTheme, navy, red } from "./theme.ts";
 import {
@@ -104,15 +105,10 @@ interface SessionSetup {
   binding: ProjectBinding;
   welcome: WelcomeData;
   ribCommands: CommandRef[];
-  sandboxConfig: ServerSandboxConfig;
+  // Undefined when /api/config could not be read: no value is guessed for it.
+  sandboxConfig?: ServerSandboxConfig;
   conversationSandbox?: SandboxMode;
 }
-
-const SANDBOX_CONFIG_UNKNOWN: ServerSandboxConfig = {
-  default: false,
-  floor: false,
-  summary: "sandbox policy unavailable",
-};
 
 function defaultModelFor(providers: readonly ProviderInfoRow[], id: string): string | undefined {
   const def = providers.find((p) => p.id === id)?.capabilities.defaultModel;
@@ -155,8 +151,7 @@ async function prepareSession(opts: InteractiveChatOptions): Promise<SessionSetu
   const ribs = ribsRes.status === "fulfilled" ? ribsRes.value : [];
   const conversations = convsRes.status === "fulfilled" ? convsRes.value : [];
   const ribCommands = commandsRes.status === "fulfilled" ? commandsRes.value : [];
-  const sandboxConfig =
-    sandboxRes.status === "fulfilled" ? sandboxRes.value : SANDBOX_CONFIG_UNKNOWN;
+  const sandboxConfig = sandboxRes.status === "fulfilled" ? sandboxRes.value : undefined;
   const recent = conversations
     .filter((c) => c.updatedAt !== undefined)
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
@@ -185,7 +180,7 @@ async function prepareSession(opts: InteractiveChatOptions): Promise<SessionSetu
     binding,
     welcome,
     ribCommands,
-    sandboxConfig,
+    ...(sandboxConfig !== undefined ? { sandboxConfig } : {}),
     ...(conversationSandbox !== undefined ? { conversationSandbox } : {}),
   };
 }
@@ -218,7 +213,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
     providerId: setup.providerId,
     model: setup.model,
     ...(setup.conversationId !== undefined ? { conversationId: setup.conversationId } : {}),
-    ...initialSandboxState(setup.sandboxConfig, setup.conversationSandbox, opts.sandbox),
+    ...initialSandboxState(setup.conversationSandbox, opts.sandbox),
     binding: setup.binding,
     // One-shot seed for the next conversation the pump creates (the `/mind` path),
     // cleared once applied so later turns in the same chat don't re-seed.
@@ -269,7 +264,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
     tui.requestRender();
   };
   refreshSandboxFooter();
-  if (opts.sandbox === false && setup.sandboxConfig.floor) warn(SANDBOX_LOCKED_MESSAGE);
+  if (opts.sandbox === false && setup.sandboxConfig?.floor) warn(SANDBOX_LOCKED_MESSAGE);
   const refreshActivity = (): void => {
     footer.set({ activity: busy ? "working" : activeRuns > 0 ? "workflow" : "idle" });
     tui.requestRender();
@@ -277,7 +272,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
 
   const resetConversation = (reason: string): void => {
     session.conversationId = undefined;
-    leaveConversationSandbox(session, setup.sandboxConfig);
+    leaveConversationSandbox(session);
     refreshSandboxFooter();
     resetTranscript(surface, reason);
   };
@@ -433,7 +428,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
           ...(session.model !== undefined ? { model: session.model } : { model: undefined }),
         });
         resetConversation(`provider ${arg}`);
-        const unsupported = session.sandbox
+        const unsupported = sessionSandboxResolution(session, setup.sandboxConfig)?.enabled
           ? sandboxUnsupportedWarning(arg, sandboxSupportFor(arg))
           : undefined;
         if (unsupported !== undefined) warn(unsupported);
@@ -685,7 +680,9 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
               ? { seedSystemPrompt: session.seedSystemPrompt }
               : {}),
             ...(session.conversationName !== undefined ? { name: session.conversationName } : {}),
-            sandbox: session.sandbox ? "on" : "off",
+            ...(session.sandboxChoice !== undefined
+              ? { sandbox: session.sandboxChoice ? "on" : "off" }
+              : {}),
           });
           session.conversationId = conv.id;
           adoptCreatedConversationSandbox(session, conv.sandbox);
@@ -709,7 +706,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
           ...(session.model !== undefined ? { model: session.model } : {}),
           ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
           ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
-          sandbox: session.sandbox,
+          ...(session.sandboxChoice !== undefined ? { sandbox: session.sandboxChoice } : {}),
           onChunk: (chunk) => {
             dropLoader();
             if (chunk.type === "usage") {
