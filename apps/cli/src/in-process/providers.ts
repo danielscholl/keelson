@@ -120,20 +120,15 @@ export function bootstrapCliProviders(): ProviderBootstrapResult {
     }
     if (id === "pi") {
       // Self-managed auth — no keyring credential to pass.
+      // No policy engine runs in-process, so pi's built-in and extension tools
+      // stay off here rather than run outside the operator's denylist and gates.
       registerPiProvider({
-        builtinTools: config.pi?.builtinTools !== false,
+        builtinTools: false,
         ...(config.pi?.concurrency !== undefined ? { concurrency: config.pi.concurrency } : {}),
         ...(config.pi?.vendors !== undefined ? { vendors: config.pi.vendors } : {}),
         ...(config.pi?.model ? { defaultModel: config.pi.model } : {}),
-        ...(config.pi?.extensions !== undefined ? { extensions: config.pi.extensions } : {}),
-        ...(config.pi?.bashTimeoutSec !== undefined
-          ? { bashTimeoutSec: config.pi.bashTimeoutSec }
-          : {}),
         ...(config.pi?.repeatCallLimit !== undefined
           ? { repeatCallLimit: config.pi.repeatCallLimit }
-          : {}),
-        ...(config.pi?.extensionTools !== undefined
-          ? { extensionTools: config.pi.extensionTools }
           : {}),
       });
       registered.push("pi");

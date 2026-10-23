@@ -213,6 +213,19 @@ export class PiProvider implements IAgentProvider {
         : undefined;
 
     const requestedModel = options?.model || this.capabilities.defaultModel || undefined;
+    // The vendor slot is held per generation, not per turn: freed while tools
+    // run and reacquired before pi's next request.
+    let vendor = "";
+    let held: (() => void) | null = null;
+    const generation = {
+      start: async () => {
+        if (held === null) held = await this.slots.acquire(vendor, options?.abortSignal);
+      },
+      end: () => {
+        held?.();
+        held = null;
+      },
+    };
     let session: PiSession;
     try {
       session = await this.factory.createSession({
@@ -233,6 +246,7 @@ export class PiProvider implements IAgentProvider {
         builtinTools: this.builtinTools,
         bashTimeoutSec: this.bashTimeoutSec,
         repeatCallLimit: this.repeatCallLimit,
+        generation,
         ...(this.extensionPaths.length > 0 ? { extensionPaths: this.extensionPaths } : {}),
         ...(this.extensionTools.length > 0 ? { extensionTools: this.extensionTools } : {}),
         ...(options?.allowedTools !== undefined ? { allowedTools: options.allowedTools } : {}),
@@ -277,15 +291,15 @@ export class PiProvider implements IAgentProvider {
       };
     }
 
-    const vendor = session.modelRef?.split("/")[0] ?? "";
+    vendor = session.modelRef?.split("/")[0] ?? "";
     if (this.slots.isSaturated(vendor)) {
       yield { type: "system", content: `Waiting for a free '${vendor}' slot…` };
     }
-    const release = await this.slots.acquire(vendor, options?.abortSignal);
+    await generation.start();
     // Unlimited vendors hand back a slot even for an aborted signal, and an abort
     // can land between the reservation and this continuation.
-    if (release === null || options?.abortSignal?.aborted) {
-      release?.();
+    if (held === null || options?.abortSignal?.aborted) {
+      generation.end();
       disposeQuietly(session);
       return;
     }
@@ -331,7 +345,7 @@ export class PiProvider implements IAgentProvider {
         // Released when pi's turn actually ends, not when the consumer stops
         // reading: an abort asks pi to stop, but the slot frees only once it has.
         options?.abortSignal?.removeEventListener("abort", onAbort);
-        release();
+        generation.end();
         disposeQuietly(session);
         queue.close();
       }

@@ -6,7 +6,11 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { PiRawEvent } from "./event-bridge.ts";
-import { createPiGateExtension, type PiToolGates } from "./gate-extension.ts";
+import {
+  createPiGateExtension,
+  type PiGenerationHooks,
+  type PiToolGates,
+} from "./gate-extension.ts";
 import { filterPiTools } from "./tool-filter.ts";
 import type { PiProjectedTool } from "./tool-projection.ts";
 
@@ -59,6 +63,8 @@ export interface PiCreateSessionParams {
   extensionTools?: readonly string[];
   // Default timeout for bash calls that set none (config `pi.bashTimeoutSec`).
   bashTimeoutSec?: number;
+  // See PiGateOptions.generation.
+  generation?: PiGenerationHooks;
   // config `pi.repeatCallLimit`; see PiGateOptions.
   repeatCallLimit?: number;
   // A workflow node's allowed_tools / denied_tools, applied to the built-in and
@@ -147,6 +153,7 @@ export class PiAgentSessionFactory implements PiSessionFactory {
             ...(params.repeatCallLimit !== undefined
               ? { repeatCallLimit: params.repeatCallLimit }
               : {}),
+            ...(params.generation !== undefined ? { generation: params.generation } : {}),
           }) as never,
         },
       ],

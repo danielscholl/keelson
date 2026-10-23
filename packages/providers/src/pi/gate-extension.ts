@@ -30,6 +30,7 @@ interface PiToolResultEventLike {
   isError: boolean;
 }
 export interface PiGateExtensionApi {
+  on(event: "before_provider_request", handler: () => Promise<undefined>): unknown;
   on(
     event: "tool_call",
     handler: (event: PiToolCallEventLike) => Promise<{ block: true; reason: string } | undefined>,
@@ -50,6 +51,15 @@ export interface PiGateOptions {
   // this many times in the session; unset or 0 disables. Local models can
   // cycle through the same few lookups indefinitely.
   repeatCallLimit?: number;
+  // Bracket each model generation so a per-vendor slot is held while pi
+  // generates and freed while its tools run (a tool can wait on another turn
+  // for the same vendor, such as a workflow_run child).
+  generation?: PiGenerationHooks;
+}
+
+export interface PiGenerationHooks {
+  start: () => Promise<void>;
+  end: () => void;
 }
 
 function resultText(content: readonly PiContentPart[]): string {
@@ -72,7 +82,16 @@ export function createPiGateExtension(
     const repeats = new Map<string, { result: string; count: number }>();
     const repeatBlocked = new Set<string>();
     const callKey = (toolName: string, input: unknown) => `${toolName}\0${JSON.stringify(input)}`;
+    if (options.generation !== undefined) {
+      const { start } = options.generation;
+      // pi awaits this before every provider request, retries included.
+      pi.on("before_provider_request", async () => {
+        await start();
+        return undefined;
+      });
+    }
     pi.on("tool_call", async (event) => {
+      options.generation?.end();
       // pi applies tool_call input mutations before the tool runs.
       if (event.toolName === "bash" && options.bashTimeoutSec !== undefined) {
         const input = event.input as { timeout?: unknown } | null;

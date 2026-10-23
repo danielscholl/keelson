@@ -1108,6 +1108,7 @@ function loadGate(
     ) => handlers.tool_result?.({ toolName, content, isError, input, toolCallId } as never),
     callWithId: (toolName: string, input: unknown, toolCallId: string) =>
       handlers.tool_call?.({ toolName, input, toolCallId } as never),
+    request: () => handlers.before_provider_request?.({} as never),
   };
 }
 
@@ -1120,6 +1121,24 @@ describe("createPiGateExtension", () => {
       block: true,
       reason: "Tool 'Bash' denied by policy: no shell",
     });
+  });
+
+  test("brackets generations: provider requests start one, tool calls end it", async () => {
+    const log: string[] = [];
+    const gate = loadGate({}, [], {
+      generation: {
+        start: async () => {
+          log.push("start");
+        },
+        end: () => {
+          log.push("end");
+        },
+      },
+    });
+    expect(await gate.request()).toBeUndefined();
+    await gate.call("workflow_run", {});
+    await gate.request();
+    expect(log).toEqual(["start", "end", "start"]);
   });
 
   test("gates built-ins under their canonical policy name, then pi's own", async () => {
@@ -1376,6 +1395,41 @@ describe("PiProvider abort and teardown", () => {
       },
     };
     expect(await collect(new PiProvider({ factory }).sendQuery("hi", "/tmp"))).toEqual([]);
+  });
+});
+
+describe("PiProvider generation-scoped slots", () => {
+  test("a tool run frees the slot for another turn and the next generation waits", async () => {
+    const slots = new PiVendorSlots({ rec: 1 });
+    const seen: string[] = [];
+    const factory: PiSessionFactory = {
+      async createSession(params) {
+        const generation = params.generation;
+        if (generation === undefined) throw new Error("no generation hooks");
+        return {
+          modelRef: "rec/flint",
+          subscribe: () => () => {},
+          prompt: async () => {
+            // The model asked for a tool: pi's tool_call hook ends the generation.
+            generation.end();
+            const child = await slots.acquire("rec");
+            seen.push("child ran");
+            let resumed = false;
+            const next = generation.start().then(() => {
+              resumed = true;
+            });
+            await new Promise((r) => setTimeout(r, 0));
+            seen.push(resumed ? "parent jumped the queue" : "parent waiting");
+            child?.();
+            await next;
+            seen.push("parent resumed");
+          },
+        };
+      },
+    };
+    await collect(new PiProvider({ factory, slots }).sendQuery("hi", "/tmp"));
+    expect(seen).toEqual(["child ran", "parent waiting", "parent resumed"]);
+    expect(slots.isSaturated("rec")).toBe(false);
   });
 });
 

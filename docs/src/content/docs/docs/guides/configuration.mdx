@@ -265,7 +265,9 @@ Make it the default and keep turns on it:
   allows no vendor; leave the key out to allow every vendor.
 - `pi.concurrency` queues turns per pi vendor. A local engine that serves one
   generation at a time answers an overlapping request with HTTP 429, and
-  parallel workflow nodes overlap constantly.
+  parallel workflow nodes overlap constantly. A turn holds its slot only while
+  the model generates and frees it while tools run, so a chat that starts a
+  workflow does not block that workflow's own pi nodes.
 - `pi.repeatCallLimit` (default 3) blocks a tool call once the identical call
   has returned the identical result that many times in one turn, and tells the
   model to use the result it already has. Local models can otherwise cycle
@@ -298,7 +300,9 @@ keelson home. Extensions read their own settings; pi-web-access reads
 Every tool a pi turn can call, including pi's built-in `read`, `bash`, `edit`,
 `write`, `grep`, `find`, and `ls` and any allowed extension tool, runs behind the
 same per-call and per-result policy gates as keelson's own tools. Set
-`pi.builtinTools: false` to turn the built-ins off. An extension runs inside the
+`pi.builtinTools: false` to turn the built-ins off. With the server down, the
+CLI runs pi in-process without those gates, so built-in and extension tools are
+off there and only keelson's own tools are offered. An extension runs inside the
 keelson server process with the same trust as a rib, so install only ones you
 would install as a rib. There is no session resume yet, so each turn starts
 fresh. Run `keelson doctor` to confirm pi found a credential.
