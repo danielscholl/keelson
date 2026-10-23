@@ -44,6 +44,11 @@
       "types": "./dist/exec.d.ts",
       "default": "./dist/exec.js"
     },
+    "./launcher": {
+      "bun": "./src/launcher.ts",
+      "types": "./dist/launcher.d.ts",
+      "default": "./dist/launcher.js"
+    },
     "./paths": {
       "bun": "./src/paths.ts",
       "types": "./dist/paths.d.ts",

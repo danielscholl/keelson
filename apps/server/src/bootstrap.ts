@@ -101,6 +101,7 @@ import {
   type PromptToolCallGate,
   type PromptToolGate,
   type PromptToolResultGate,
+  parseToolDenylist,
   parseWorkflow,
   validateWorkflowInvariants,
   type WorkflowDefinition,
@@ -1745,16 +1746,7 @@ export function bootstrapPromptHandler(
 }
 
 // Exported for tests; not public.
-export function parseToolDenylist(raw: string | undefined): readonly string[] {
-  // Unset → default denylist (empty today).
-  if (raw === undefined) return DEFAULT_TOOL_DENYLIST;
-  // Explicit empty string is "allow everything" — same as the default today.
-  if (raw.trim() === "") return [];
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
+export { parseToolDenylist };
 
 // Exported for tests; not public.
 export function parsePromptTimeoutMs(raw: string | undefined): number | undefined {

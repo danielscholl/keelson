@@ -13,8 +13,16 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { NodeStreamEvent } from "../executor.ts";
 import type { NodeOutput } from "../schema/index.ts";
-import { buildSubprocessEnv, ENV_VALUE_MAX_CHARS, killProcessTree } from "./subprocess.ts";
+import type { ProcessLauncher, SpawnHandle, SpawnSpec } from "./launcher.ts";
+import {
+  buildSubprocessEnv,
+  ENV_VALUE_MAX_CHARS,
+  killProcessTree,
+  runSubprocess,
+  SubprocessSpawnError,
+} from "./subprocess.ts";
 
 function upstreamOf(id: string, output: string): ReadonlyMap<string, NodeOutput> {
   return new Map<string, NodeOutput>([
@@ -361,5 +369,168 @@ describe("buildSubprocessEnv — env value cap (issue #442)", () => {
       expect(value.startsWith("HEAD-MARKER")).toBe(true);
       expect(value.endsWith("TAIL-MARKER")).toBe(true);
     }
+  });
+});
+
+// A pid no real process group can own, so the `-pid` group signal fails with
+// ESRCH and runSubprocess falls through to the stub's own kill().
+const UNOWNED_PID = 2_147_483_646;
+
+function streamOf(text: string): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      if (text.length > 0) controller.enqueue(new TextEncoder().encode(text));
+      controller.close();
+    },
+  });
+}
+
+interface StubLauncher extends ProcessLauncher {
+  specs: SpawnSpec[];
+  signals: (NodeJS.Signals | number | undefined)[];
+}
+
+// `exitCode` set: the child exits on its own. Unset: it runs until killed and
+// exits 143, as a SIGTERM'd process reports.
+function stubLauncher(opts: { stdout?: string; stderr?: string; exitCode?: number }): StubLauncher {
+  const specs: SpawnSpec[] = [];
+  const signals: (NodeJS.Signals | number | undefined)[] = [];
+  return {
+    id: "host",
+    specs,
+    signals,
+    spawn(spec): SpawnHandle {
+      specs.push(spec);
+      let settle: (code: number) => void = () => {};
+      const exited = new Promise<number>((resolve) => {
+        settle = resolve;
+      });
+      if (opts.exitCode !== undefined) settle(opts.exitCode);
+      return {
+        pid: UNOWNED_PID,
+        stdout: streamOf(opts.stdout ?? ""),
+        stderr: streamOf(opts.stderr ?? ""),
+        exited,
+        kill(signal) {
+          signals.push(signal);
+          settle(143);
+        },
+      };
+    },
+  };
+}
+
+function subprocessOpts(launcher: ProcessLauncher, overrides: { timeoutMs?: number } = {}) {
+  const events: NodeStreamEvent[] = [];
+  const ctrl = new AbortController();
+  return {
+    events,
+    ctrl,
+    opts: {
+      cmd: "bash",
+      args: ["-c", "echo hi"],
+      cwd: "/work",
+      env: { KEELSON_RUN_ID: "run-1" },
+      timeoutMs: overrides.timeoutMs ?? 60_000,
+      abortSignal: ctrl.signal,
+      emit: (event: NodeStreamEvent) => events.push(event),
+      launcher,
+    },
+  };
+}
+
+describe("runSubprocess — launcher seam", () => {
+  // Stubbed so win32's taskkill path never reaches a real process.
+  const withSpawnSyncStubbed = async (fn: () => Promise<void>): Promise<void> => {
+    const spawn = spyOn(Bun, "spawnSync").mockReturnValue(
+      undefined as unknown as ReturnType<typeof Bun.spawnSync>,
+    );
+    try {
+      await fn();
+    } finally {
+      spawn.mockRestore();
+    }
+  };
+
+  test("hands the spec to the injected launcher and reads its streams and exit code", async () => {
+    await withSpawnSyncStubbed(async () => {
+      const launcher = stubLauncher({
+        stdout: "first\nsecond\n",
+        stderr: "warned\n",
+        exitCode: 3,
+      });
+      const { events, opts } = subprocessOpts(launcher);
+      const outcome = await runSubprocess({ ...opts, trimTrailingNewline: true });
+
+      expect(launcher.specs).toEqual([
+        { cmd: "bash", args: ["-c", "echo hi"], cwd: "/work", env: { KEELSON_RUN_ID: "run-1" } },
+      ]);
+      expect(events).toEqual([
+        { type: "node_log", line: "first" },
+        { type: "node_log", line: "second" },
+      ]);
+      expect(outcome).toEqual({
+        stdoutText: "first\nsecond",
+        stderrTail: "warned",
+        exitCode: 3,
+        killReason: null,
+      });
+    });
+  });
+
+  test("abort kills the launched handle and reports the abort", async () => {
+    await withSpawnSyncStubbed(async () => {
+      const launcher = stubLauncher({});
+      const { ctrl, opts } = subprocessOpts(launcher);
+      const pending = runSubprocess(opts);
+      ctrl.abort();
+      const outcome = await pending;
+
+      expect(outcome.killReason).toBe("abort");
+      expect(outcome.exitCode).toBe(143);
+      expect(launcher.signals.length).toBeGreaterThan(0);
+      if (process.platform !== "win32") expect(launcher.signals[0]).toBe("SIGTERM");
+    });
+  });
+
+  test("timeout kills the launched handle and reports the timeout", async () => {
+    await withSpawnSyncStubbed(async () => {
+      const launcher = stubLauncher({});
+      const { opts } = subprocessOpts(launcher, { timeoutMs: 10 });
+      const outcome = await runSubprocess(opts);
+
+      expect(outcome.killReason).toBe("timeout");
+      expect(launcher.signals.length).toBeGreaterThan(0);
+    });
+  });
+
+  test("a launcher that throws surfaces as SubprocessSpawnError", async () => {
+    const cause = new Error("spawn mxc-exec-mac ENOENT");
+    const launcher: ProcessLauncher = {
+      id: "mxc",
+      spawn() {
+        throw cause;
+      },
+    };
+    const { opts } = subprocessOpts(launcher);
+    const err = await runSubprocess(opts).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SubprocessSpawnError);
+    expect((err as SubprocessSpawnError).cause).toBe(cause);
+    expect((err as SubprocessSpawnError).message).toBe("spawn mxc-exec-mac ENOENT");
+  });
+
+  test("defaults to the host launcher when none is injected", async () => {
+    const { opts } = subprocessOpts(stubLauncher({ exitCode: 0 }));
+    const outcome = await runSubprocess({
+      ...opts,
+      cmd: process.execPath,
+      args: ["-e", "console.log('from-host')"],
+      cwd: process.cwd(),
+      env: { ...(process.env as Record<string, string>) },
+      launcher: undefined,
+      trimTrailingNewline: true,
+    });
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.stdoutText).toBe("from-host");
   });
 });

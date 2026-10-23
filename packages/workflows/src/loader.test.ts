@@ -82,6 +82,46 @@ nodes:
     expect(result.workflow?.requiresProject).toBeUndefined();
   });
 
+  test("worktree enabled, branch, and base all survive onto the workflow", () => {
+    const result = parseWorkflow(
+      `
+name: based
+description: branches from a release line
+worktree:
+  enabled: true
+  branch: "keelson/{workflow}/{run_id_short}"
+  base: " release/1.x "
+nodes:
+  - id: ok
+    bash: echo ok
+`,
+      "based.yaml",
+    );
+    expect(result.error).toBeNull();
+    expect(result.workflow?.worktree).toEqual({
+      enabled: true,
+      branch: "keelson/{workflow}/{run_id_short}",
+      base: "release/1.x",
+    });
+  });
+
+  test("worktree base alone is kept as the policy", () => {
+    const result = parseWorkflow(
+      `
+name: base-only
+description: base without enabled or branch
+worktree:
+  base: main
+nodes:
+  - id: ok
+    bash: echo ok
+`,
+      "base-only.yaml",
+    );
+    expect(result.error).toBeNull();
+    expect(result.workflow?.worktree).toEqual({ base: "main" });
+  });
+
   test("minimal workflow with one prompt node", () => {
     const yaml = `
 name: hello
