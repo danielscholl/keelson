@@ -3,9 +3,19 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { SandboxProfile } from "@keelson/shared";
 import { sandboxPathRefusal, withSandboxPathGate } from "../src/pi/sandbox-paths.ts";
 
@@ -62,6 +72,69 @@ describe("pi file tools under a sandboxed turn", () => {
     expect(sandboxPathRefusal("edit", { path: "vendor" }, nested, cwd)).toContain("not writable");
     expect(sandboxPathRefusal("read", { path: "vendor/a.ts" }, nested, cwd)).toBeUndefined();
     expect(sandboxPathRefusal("write", { path: "src/a.ts" }, nested, cwd)).toBeUndefined();
+  });
+
+  test("paths are normalised as pi normalises them before any check", () => {
+    const home: SandboxProfile = {
+      ...profile,
+      filesystem: { ...profile.filesystem, denied: [join(homedir(), ".ssh")] },
+    };
+    expect(sandboxPathRefusal("read", { path: "@~/.ssh/id_rsa" }, home, cwd)).toBe(
+      "path '@~/.ssh/id_rsa' is denied by the sandbox",
+    );
+    expect(refuse("read", "@secrets/token")).toContain("denied by the sandbox");
+    expect(refuse("read", pathToFileURL(join(secrets, "token")).href)).toContain(
+      "denied by the sandbox",
+    );
+    expect(refuse("read", pathToFileURL(join(outside, "x")).href)).toContain(
+      "outside the sandbox's readable roots",
+    );
+    expect(refuse("read", "file:///tmp/a%2Fb")).toBe(
+      "path 'file:///tmp/a%2Fb' is not a file URL the sandbox can resolve",
+    );
+    const spaced: SandboxProfile = {
+      ...profile,
+      filesystem: { ...profile.filesystem, denied: [join(cwd, "my secrets")] },
+    };
+    expect(sandboxPathRefusal("read", { path: "my\u00A0secrets/k" }, spaced, cwd)).toContain(
+      "denied by the sandbox",
+    );
+  });
+
+  // APFS and NTFS fold case by default; a case-sensitive tmpdir has nothing to bypass.
+  mkdirSync(join(cwd, ".keelson"), { recursive: true });
+  writeFileSync(join(cwd, ".keelson", "keelson.db"), "");
+  const foldsCase = existsSync(join(cwd, ".KEELSON", "KEELSON.DB"));
+  test.skipIf(!foldsCase)("a case variant of a denied or read-only path is refused", () => {
+    const db = join(cwd, ".keelson", "keelson.db");
+    const lib = join(cwd, "lib");
+    mkdirSync(lib, { recursive: true });
+    const cased: SandboxProfile = {
+      ...profile,
+      filesystem: { readwrite: [cwd], readonly: [lib], denied: [db] },
+    };
+    expect(sandboxPathRefusal("read", { path: ".keelson/Keelson.db" }, cased, cwd)).toContain(
+      "denied by the sandbox",
+    );
+    expect(sandboxPathRefusal("grep", { path: ".KEELSON" }, cased, cwd)).toContain(
+      "contains a path the sandbox denies",
+    );
+    expect(sandboxPathRefusal("write", { path: "LIB/a.ts" }, cased, cwd)).toContain("not writable");
+    expect(sandboxPathRefusal("read", { path: "LIB/a.ts" }, cased, cwd)).toBeUndefined();
+  });
+
+  test("a hard link to a denied file is refused: roots match by identity, not spelling", () => {
+    const key = join(cwd, "deploy.key");
+    writeFileSync(key, "");
+    linkSync(key, join(cwd, "alias"));
+    const linked: SandboxProfile = {
+      ...profile,
+      filesystem: { ...profile.filesystem, denied: [key] },
+    };
+    expect(sandboxPathRefusal("read", { path: "alias" }, linked, cwd)).toBe(
+      "path 'alias' is denied by the sandbox",
+    );
+    expect(sandboxPathRefusal("write", { path: "alias" }, linked, cwd)).toContain("denied");
   });
 
   test("a symlink out of the project is judged where it lands", () => {

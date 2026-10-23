@@ -228,6 +228,13 @@ describe("when /api/config could not be read", () => {
     await h.run("off");
     expect(h.enabled()).toBe(false);
   });
+
+  test("an off is only requested, since an unread floor may still hold it on", async () => {
+    const h = harness({ config: null, session: { sandboxConversation: "off" } });
+    expect(footerSandbox(h.session, h.config)).toBeUndefined();
+    await h.run("status");
+    expect(h.info[0]).toBe("sandbox: off requested; server policy unknown");
+  });
 });
 
 describe("initialSandboxState", () => {

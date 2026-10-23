@@ -2518,6 +2518,7 @@ export function Chat({
             )}
             <SandboxChip
               enabled={sandboxEnabled}
+              unconfirmed={sandboxResolution?.unconfirmed === true}
               onToggle={onToggleSandbox}
               locked={sandboxResolution?.locked === true}
               unsupported={sandboxSupport === "none"}

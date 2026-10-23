@@ -102,6 +102,9 @@ export interface SandboxResolution {
   source: SandboxSource;
   // True when the floor holds the sandbox on and a user toggle cannot clear it.
   locked: boolean;
+  // A client's off it cannot confirm: the server policy it could not read may
+  // hold a floor that keeps the sandbox on.
+  unconfirmed?: true;
 }
 
 export function resolveSandboxEnabled(input: {
@@ -128,10 +131,17 @@ export function resolveClientSandbox(input: {
   conversation?: SandboxMode;
   policy?: { default: boolean; floor: boolean };
 }): SandboxResolution | undefined {
-  if (input.policy === undefined && input.choice === undefined) {
-    return input.conversation !== undefined
-      ? { enabled: input.conversation === "on", source: "conversation", locked: false }
-      : undefined;
+  if (input.policy === undefined) {
+    const requested =
+      input.choice ?? (input.conversation !== undefined ? input.conversation === "on" : undefined);
+    if (requested === undefined) return undefined;
+    // On holds under any floor; off is only a request until the policy is read.
+    return {
+      enabled: requested,
+      source: input.choice !== undefined ? "frame" : "conversation",
+      locked: false,
+      ...(requested ? {} : { unconfirmed: true as const }),
+    };
   }
   return resolveSandboxEnabled({
     ...(input.choice !== undefined ? { frame: input.choice } : {}),
@@ -296,14 +306,16 @@ export function describeSandboxStatus(input: SandboxStatusInput): string[] {
   const lines = [
     resolution === undefined
       ? "sandbox: server default (its policy could not be read)"
-      : `sandbox: ${resolution.enabled ? "on" : "off"} (${SOURCE_LABELS[resolution.source]})`,
+      : resolution.unconfirmed
+        ? "sandbox: off requested; server policy unknown"
+        : `sandbox: ${resolution.enabled ? "on" : "off"} (${SOURCE_LABELS[resolution.source]})`,
   ];
   const backend =
     providerId === "stub"
       ? "stub runs no tools (n/a)"
       : describeSandboxBackend(providerId, support, input.platform);
   lines.push(
-    `provider: ${backend}${resolution?.enabled !== false && support === "none" ? "; turns fail closed while the sandbox is on" : ""}`,
+    `provider: ${backend}${(resolution?.enabled !== false || resolution.unconfirmed) && support === "none" ? "; turns fail closed while the sandbox is on" : ""}`,
   );
   if (input.runtime !== undefined) lines.push(`runtime: ${input.runtime}`);
   lines.push(`profile: ${input.profile}`);

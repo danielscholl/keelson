@@ -330,11 +330,32 @@ describe("resolveClientSandbox", () => {
   test("with the policy unread it guesses nothing, but a choice or a saved row still counts", () => {
     expect(resolveClientSandbox({})).toBeUndefined();
     expect(resolveClientSandbox({ conversation: "on" })?.enabled).toBe(true);
+    expect(resolveClientSandbox({ choice: true })).toEqual({
+      enabled: true,
+      source: "frame",
+      locked: false,
+    });
+  });
+
+  test("with the policy unread an off is only requested, since a floor may hold it on", () => {
     expect(resolveClientSandbox({ choice: false })).toEqual({
       enabled: false,
       source: "frame",
       locked: false,
+      unconfirmed: true,
     });
+    expect(resolveClientSandbox({ conversation: "off" })?.unconfirmed).toBe(true);
+    expect(resolveClientSandbox({ conversation: "on", choice: false })?.unconfirmed).toBe(true);
+    expect(resolveClientSandbox({ policy, choice: false })?.unconfirmed).toBeUndefined();
+    const lines = describeSandboxStatus({
+      resolution: resolveClientSandbox({ choice: false })!,
+      providerId: "copilot",
+      support: "none",
+      platform: "darwin",
+      profile: "unavailable",
+    });
+    expect(lines[0]).toBe("sandbox: off requested; server policy unknown");
+    expect(lines[1]).toContain("turns fail closed while the sandbox is on");
   });
 
   test("status says the server default applies when nothing resolves", () => {

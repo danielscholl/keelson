@@ -527,4 +527,17 @@ describe("Chat sandbox", () => {
     expect(await screen.findByText(/sandbox: on \(saved on this conversation\)/)).toBeDefined();
     expect(screen.getByText(/stub runs no tools \(n\/a\); turns fail closed/)).toBeDefined();
   });
+
+  test("a saved off with /api/config unread is only requested, so the chip is mixed", async () => {
+    conversations[0]!.sandbox = "off";
+    configFails = true;
+    renderChat();
+    await screen.findByText("Send this summary");
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("mixed"));
+    expect(chip().getAttribute("aria-label")).toContain("Sandbox off requested");
+    const box = screen.getByPlaceholderText(/Type a message/);
+    fireEvent.change(box, { target: { value: "/sandbox status" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(await screen.findByText(/sandbox: off requested; server policy unknown/)).toBeDefined();
+  });
 });
