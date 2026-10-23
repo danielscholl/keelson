@@ -221,6 +221,8 @@ async function runReviewer(
       : {}),
     ...(reviewer.effort !== undefined ? { effort: reviewer.effort } : {}),
     ...(reviewer.allowed_tools !== undefined ? { allowed_tools: reviewer.allowed_tools } : {}),
+    // The reviewer is the approval node's agent turn, so it runs under that node's sandbox.
+    ...(node.sandbox !== undefined ? { sandbox: node.sandbox } : {}),
     output_format: APPROVAL_REVIEWER_OUTPUT_FORMAT,
   } as unknown as DagNode;
 

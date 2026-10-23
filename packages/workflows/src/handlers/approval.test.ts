@@ -9,9 +9,17 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { NodeContext } from "../executor.ts";
 import type { DagNode, WorkflowDefinition } from "../schema/index.ts";
 import { type AwaitApproval, makeApprovalHandler } from "./approval.ts";
+import {
+  makePromptHandler,
+  type PromptHandlerProvider,
+  type PromptHandlerSendOptions,
+} from "./prompt.ts";
+import { createSandboxPolicy } from "./sandbox.ts";
 
 function buildCtx(opts: { abortSignal?: AbortSignal; resolvedBody?: string }): NodeContext {
   return {
@@ -594,5 +602,44 @@ describe("parseReviewerVerdict", () => {
       const parsed = parseReviewerVerdict(value);
       expect(parsed.ok).toBe(false);
     }
+  });
+});
+
+describe("makeApprovalHandler — reviewer sandbox", () => {
+  test("the reviewer turn runs under the approval node's sandbox", async () => {
+    const seen: (PromptHandlerSendOptions | undefined)[] = [];
+    const provider: PromptHandlerProvider = {
+      getType: () => "claude",
+      getCapabilities: () => ({ sandbox: "native" }),
+      async *sendQuery(_prompt, _cwd, _resume, options) {
+        seen.push(options);
+        yield { type: "text", content: '{"decision":"approve","confidence":95,"reason":"ok"}' };
+      },
+    };
+    const home = join(tmpdir(), "keelson-approval-sandbox-home");
+    const promptHandler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      sandbox: createSandboxPolicy({
+        floor: false,
+        defaultEnabled: false,
+        home,
+        dbPath: join(home, "keelson.db"),
+        bundledBinDir: join(home, "bin"),
+        resolveGitCommonDir: () => undefined,
+      }),
+    });
+    const handler = makeApprovalHandler({
+      awaitApproval: async () => "human",
+      reviewer: { promptHandler },
+    });
+    const node = {
+      id: "review-plan",
+      approval: { message: "Approve?", reviewer: { prompt: "Check it." } },
+      sandbox: { enabled: true, network: { outbound: "allow" } },
+    } as unknown as DagNode;
+    await handler.handle(node, buildCtx({ resolvedBody: "Approve?" }));
+    expect(seen[0]?.sandbox?.enabled).toBe(true);
+    expect(seen[0]?.sandbox?.network.outbound).toBe("allow");
   });
 });
