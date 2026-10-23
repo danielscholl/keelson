@@ -246,7 +246,17 @@ command). The options below apply to the one-shot form.
 | `--conversation <id>` | Continue an existing conversation (server-up only). |
 | `--thinking` | Enable Claude extended thinking for the turn. |
 | `--reasoning-effort <level>` | Copilot reasoning tier. |
+| `--sandbox`, `--no-sandbox` | Sandbox this chat's tools, or run them unsandboxed, over the conversation's saved choice and the default. Also applies to interactive chat. `KEELSON_SANDBOX=required` keeps the sandbox on regardless. |
 | `--base-url <url>` | An explicit server URL. |
+
+In interactive chat, `/sandbox` controls the same choice for the open
+conversation. The SPA has the same command and a Sandbox chip, and both
+surfaces read the choice saved on the conversation.
+
+| Command | Does |
+| --- | --- |
+| `/sandbox on`, `/sandbox off` | Turn the sandbox on or off for this conversation and save the choice on it. The footer shows `⛨ sandbox`, or `⛨ sandbox (required)` under `KEELSON_SANDBOX=required`, which refuses `off`. Turning it on with a provider that cannot sandbox warns at once, because its turns fail closed. Not available while a turn streams. |
+| `/sandbox status`, `/sandbox` | Show whether the sandbox is on and why (the floor, this session, the conversation, or the default), how the provider confines its tools, the runtime on this host, and the operator policy. |
 
 ## Maintenance
 

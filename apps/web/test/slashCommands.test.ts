@@ -6,6 +6,7 @@ import {
   isCommittedToCommand,
   matchRibArgContext,
   matchSlashCommand,
+  parseSandboxCommand,
   parseWorkflowCommand,
   ribCommandToSlash,
   SLASH_COMMANDS,
@@ -259,5 +260,21 @@ describe("matchRibArgContext", () => {
   test("null for base commands and unknown names", () => {
     expect(matchRibArgContext("/workflow run x", MERGED)).toBeNull();
     expect(matchRibArgContext("/nope x", MERGED)).toBeNull();
+  });
+});
+
+describe("/sandbox", () => {
+  test("is a base command in the session family", () => {
+    expect(matchSlashCommand("/sandbox on")).toMatchObject({ name: "sandbox", family: "session" });
+    expect(filterSlashCommands("/sand").map((c) => c.name)).toEqual(["sandbox"]);
+    expect(isCommittedToCommand("/sandbox ")).toBe(true);
+  });
+
+  test("parseSandboxCommand reads on, off, and status, with bare as status", () => {
+    expect(parseSandboxCommand("on")).toEqual({ kind: "on" });
+    expect(parseSandboxCommand(" OFF ")).toEqual({ kind: "off" });
+    expect(parseSandboxCommand("status")).toEqual({ kind: "status" });
+    expect(parseSandboxCommand("")).toEqual({ kind: "status" });
+    expect(parseSandboxCommand("maybe")).toEqual({ kind: "usage" });
   });
 });

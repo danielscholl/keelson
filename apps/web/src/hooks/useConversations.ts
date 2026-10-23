@@ -2,8 +2,8 @@ import type { Conversation } from "@keelson/shared";
 import { useCallback, useEffect, useState } from "react";
 import {
   deleteConversation as apiDeleteConversation,
-  renameConversation as apiRenameConversation,
   listConversations,
+  updateConversation,
 } from "../api.ts";
 
 export interface UseConversationsResult {
@@ -44,7 +44,7 @@ export function useConversations(): UseConversationsResult {
   }, [refresh]);
 
   const rename = useCallback(async (id: string, name: string) => {
-    const updated = await apiRenameConversation(id, name);
+    const updated = await updateConversation(id, { name });
     setConversations((prev) => prev.map((c) => (c.id === id ? updated : c)));
   }, []);
 

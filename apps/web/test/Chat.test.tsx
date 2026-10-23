@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
-import type { Conversation, RibActionResponse } from "@keelson/shared";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import type { ClientFrame, Conversation, RibActionResponse } from "@keelson/shared";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CanvasProvider } from "../src/components/Canvas/CanvasHost.tsx";
 import { ToastHost } from "../src/components/Toast.tsx";
@@ -71,10 +71,19 @@ function armConversationGate(): void {
 
 const postRibActionCalls: Array<{ id: string; action: unknown }> = [];
 let postRibActionResult: RibActionResponse = { ok: true };
+let sandboxConfig = { default: false, floor: false, summary: "sandbox off", platform: "darwin" };
+const conversationPatches: Array<{ id: string; patch: unknown }> = [];
+const sentFrames: ClientFrame[] = [];
 let ledgerPricedEvents = 0;
 let ledgerUnpricedEvents = 0;
 
+// Spread the real modules so an export this file doesn't stub stays linkable
+// for every later test file; bun's module mocks are process-wide.
+const realApi = await import("../src/api.ts");
+const realWs = await import("../src/ws.ts");
+
 mock.module("../src/api.ts", () => ({
+  ...realApi,
   cloneProject: async () => ({ id: "project-2", name: "copy" }),
   completeRibCommand: async () => [],
   createConversation: async () => conversations[0],
@@ -126,6 +135,18 @@ mock.module("../src/api.ts", () => ({
   startWorkflowRun: async () => ({ runId: "run-1" }),
 }));
 
+mock.module("../src/ws.ts", () => ({
+  ...realWs,
+  createReconnectingChatWs: (callbacks: { onStateChange?: (state: string) => void }) => {
+    queueMicrotask(() => callbacks.onStateChange?.("open"));
+    return {
+      send: (frame: ClientFrame) => sentFrames.push(frame),
+      close: () => {},
+      getState: () => "open" as const,
+    };
+  },
+}));
+
 mock.module("../src/hooks/useRibs.ts", () => ({
   useRibs: () => ({ status: "ready", ribs: ribFixture.ribs, error: null, refresh: () => {} }),
 }));
@@ -164,6 +185,10 @@ beforeEach(() => {
   releaseConversationGate = null;
   ledgerPricedEvents = 0;
   ledgerUnpricedEvents = 0;
+  sandboxConfig = { default: false, floor: false, summary: "sandbox off", platform: "darwin" };
+  conversationPatches.length = 0;
+  sentFrames.length = 0;
+  for (const c of conversations) delete c.sandbox;
 });
 
 describe("Chat conversation usage", () => {
@@ -256,5 +281,100 @@ describe("Chat composer auto-grow", () => {
     fireEvent.change(textarea, { target: { value: "a\nb\nc\nd\ne\nf\ng\nh\ni\nj" } });
 
     expect(textarea.style.height).toBe("320px");
+  });
+});
+
+describe("Chat sandbox", () => {
+  const chip = () => screen.getByRole("button", { name: /^Sandbox/ });
+  // happy-dom has no Popover API; the slash picker opens one on "/".
+  const proto = HTMLElement.prototype as unknown as Record<string, unknown>;
+  proto.showPopover ??= () => {};
+  proto.hidePopover ??= () => {};
+  // fetchConfig and updateConversation stay real (a stub would leak into other
+  // files), so the server they reach is faked here.
+  const realFetch = globalThis.fetch;
+  beforeEach(() => {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/config") {
+        return Response.json({
+          schemaVersion: "",
+          wireProtocolVersion: "",
+          sandbox: sandboxConfig,
+        });
+      }
+      const m = /^\/api\/conversations\/([^/]+)$/.exec(path);
+      if (m && init?.method === "PATCH") {
+        const patch = JSON.parse(String(init.body)) as { sandbox?: "on" | "off" };
+        conversationPatches.push({ id: m[1]!, patch });
+        const conv = conversations.find((c) => c.id === m[1])!;
+        return Response.json({ ...conv, ...patch });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  test("the chip follows the server default until a conversation's saved choice hydrates", async () => {
+    sandboxConfig = { ...sandboxConfig, default: true };
+    conversations[0]!.sandbox = "off";
+    renderChat();
+    await screen.findByText("Send this summary");
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("false"));
+  });
+
+  test("a fresh chat seeds the chip from /api/config", async () => {
+    sessionStorage.removeItem("keelson.conversationId");
+    sandboxConfig = { ...sandboxConfig, default: true };
+    renderChat();
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("true"));
+  });
+
+  test("every request frame carries the sandbox choice", async () => {
+    conversations[0]!.sandbox = "on";
+    renderChat();
+    await screen.findByText("Send this summary");
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("true"));
+    const box = screen.getByPlaceholderText(/Type a message/);
+    fireEvent.change(box, { target: { value: "hello" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(sentFrames.length).toBe(1));
+    expect(sentFrames[0]?.message).toMatchObject({ type: "request", sandbox: true });
+  });
+
+  test("clicking the chip saves the choice on the open conversation", async () => {
+    renderChat();
+    await screen.findByText("Send this summary");
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("false"));
+    fireEvent.click(chip());
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("true"));
+    expect(conversationPatches).toEqual([{ id: "conv-1", patch: { sandbox: "on" } }]);
+  });
+
+  test("/sandbox off is refused while KEELSON_SANDBOX=required holds the floor", async () => {
+    sandboxConfig = { ...sandboxConfig, floor: true };
+    renderChat();
+    await screen.findByText("Send this summary");
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("true"));
+    expect((chip() as HTMLButtonElement).disabled).toBe(true);
+    const box = screen.getByPlaceholderText(/Type a message/);
+    fireEvent.change(box, { target: { value: "/sandbox off" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(await screen.findByText(/KEELSON_SANDBOX=required holds the sandbox on/)).toBeDefined();
+    expect(conversationPatches).toEqual([]);
+  });
+
+  test("/sandbox status prints the same lines as the CLI", async () => {
+    conversations[0]!.sandbox = "on";
+    renderChat();
+    await screen.findByText("Send this summary");
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("true"));
+    const box = screen.getByPlaceholderText(/Type a message/);
+    fireEvent.change(box, { target: { value: "/sandbox status" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(await screen.findByText(/sandbox: on \(saved on this conversation\)/)).toBeDefined();
+    expect(screen.getByText(/stub runs no tools \(n\/a\); turns fail closed/)).toBeDefined();
   });
 });

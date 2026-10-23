@@ -3,11 +3,16 @@ import {
   type ChatFrame,
   type Conversation,
   DEFAULT_PROJECT_NAME,
+  describeSandboxStatus,
   type ModelInfo,
   type ProviderInfo,
   parseWorkflowDescription,
   type ReasoningEffortLevel,
   type RegisteredToolInfo,
+  resolveSandboxEnabled,
+  SANDBOX_LOCKED_MESSAGE,
+  type SandboxMode,
+  sandboxUnsupportedWarning,
   type TokenUsage,
   tokenUsageHasSpend,
   WIRE_PROTOCOL_VERSION,
@@ -20,6 +25,7 @@ import {
   createConversation,
   createProject,
   deleteProject,
+  fetchConfig,
   fetchProviderModels,
   fetchProviders,
   fetchTools,
@@ -32,7 +38,9 @@ import {
   listWorkflows,
   postRibAction,
   resolveAgent,
+  type ServerSandboxConfig,
   startWorkflowRun,
+  updateConversation,
 } from "../api.ts";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
 import { AuthWarning } from "../components/Chat/AuthWarning.tsx";
@@ -44,6 +52,7 @@ import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../components/Chat/ProjectPickerPopover.tsx";
 import { ReasoningEffortChip } from "../components/Chat/ReasoningEffortChip.tsx";
 import { ReasoningEffortPopover } from "../components/Chat/ReasoningEffortPopover.tsx";
+import { SandboxChip } from "../components/Chat/SandboxChip.tsx";
 import { Sidebar } from "../components/Chat/Sidebar.tsx";
 import { SlashCommandPopover } from "../components/Chat/SlashCommandPopover.tsx";
 import { ThinkingBlock } from "../components/Chat/ThinkingBlock.tsx";
@@ -77,6 +86,7 @@ import {
   isCommittedToCommand,
   matchRibArgContext,
   matchSlashCommand,
+  parseSandboxCommand,
   parseWorkflowCommand,
   ribCommandToSlash,
   SLASH_COMMANDS,
@@ -316,7 +326,20 @@ const ROLE_LABEL: Record<Role, string> = {
   command: "Command",
 };
 
-// Auth/sign-in errors get a sticky toast; everything else gets a normal one.
+// The server's SANDBOX_UNAVAILABLE frame and a provider's own refusal (pi's
+// error chunk) are one failure to the user, so both read the same way.
+function isSandboxError(message: string, code?: string): boolean {
+  return (
+    code === "SANDBOX_UNAVAILABLE" ||
+    /^sandbox (unavailable|required but unavailable|is on, but)\b/i.test(message)
+  );
+}
+
+// Auth/sign-in and sandbox errors get a sticky toast; everything else gets a normal one.
+function isStickyError(message: string, code?: string): boolean {
+  return isAuthError(message) || isSandboxError(message, code);
+}
+
 function isAuthError(message: string): boolean {
   const m = message.toLowerCase();
   return (
@@ -437,6 +460,34 @@ export function Chat({
   // resetting after each send would surprise the user.
   const [reasoningEffort, setReasoningEffort] =
     useState<ReasoningEffortLevel>(DEFAULT_REASONING_EFFORT);
+  // The sandbox resolves like the server's: the floor, then a choice made
+  // before this chat has a row, then the row's saved choice, then the default.
+  const [sandboxConfig, setSandboxConfig] = useState<ServerSandboxConfig | null>(null);
+  const [sandboxChoice, setSandboxChoice] = useState<boolean | undefined>(undefined);
+  const [sandboxConversation, setSandboxConversation] = useState<SandboxMode | undefined>(
+    undefined,
+  );
+  const sandboxResolution = resolveSandboxEnabled({
+    ...(sandboxChoice !== undefined ? { frame: sandboxChoice } : {}),
+    ...(sandboxConversation !== undefined ? { conversation: sandboxConversation } : {}),
+    configDefault: sandboxConfig?.default ?? false,
+    ...(sandboxConfig?.floor ? { env: "required" } : {}),
+  });
+  const sandboxEnabled = sandboxResolution.enabled;
+  const sandboxSupport = selectedProvider?.capabilities.sandbox ?? "none";
+  useEffect(() => {
+    let cancelled = false;
+    fetchConfig()
+      .then((config) => {
+        if (!cancelled) setSandboxConfig(config.sandbox);
+      })
+      .catch(() => {
+        // The chip stays at the off default; a real outage surfaces elsewhere.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Sending during transcript hydration would reuse the stored conversationId
   // with the fallback providerId, mixing providers in one conversation.
   const [hydrating, setHydrating] = useState<boolean>(() => conversationIdRef.current !== null);
@@ -717,6 +768,8 @@ export function Chat({
         // different providerId.
         setSelectedProviderId(conv.providerId);
         setSelectedModel(conv.model ?? "");
+        setSandboxChoice(undefined);
+        setSandboxConversation(conv.sandbox);
         // Lane-seeded chats hide the auto-sent first user turn — but ONLY
         // when its content exactly matches the kickoff string. If the user
         // edited the prefilled prompt before auto-send fired, their actual
@@ -845,7 +898,7 @@ export function Chat({
           });
         } else if (payload.type === "error") {
           setError(payload.message);
-          if (isAuthError(payload.message)) {
+          if (isStickyError(payload.message)) {
             toast.push({ kind: "error", message: payload.message, ttlMs: 0 });
           } else {
             toast.push({ kind: "error", message: payload.message });
@@ -979,7 +1032,7 @@ export function Chat({
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
         );
-        if (isAuthError(frame.event.message)) {
+        if (isStickyError(frame.event.message, frame.event.code)) {
           toast.push({ kind: "error", message: frame.event.message, ttlMs: 0 });
         } else {
           toast.push({ kind: "error", message: frame.event.message });
@@ -1098,8 +1151,11 @@ export function Chat({
             ...(seedForCreate ? { seedSystemPrompt: seedForCreate } : {}),
             ...(nameForCreate ? { name: nameForCreate } : {}),
             ...(activeProjectId ? { projectId: activeProjectId } : {}),
+            sandbox: sandboxEnabled ? "on" : "off",
           });
           convoId = c.id;
+          setSandboxChoice(undefined);
+          setSandboxConversation(c.sandbox ?? (sandboxEnabled ? "on" : "off"));
           setConversationId(c.id);
           conversationIdRef.current = c.id;
           // Clear only after the server has persisted — a thrown
@@ -1158,6 +1214,7 @@ export function Chat({
           ...(selectedModel ? { model: selectedModel } : {}),
           ...(supportsThinking ? { thinking: thinkingEnabled } : {}),
           ...(supportsEffort ? { reasoningEffort } : {}),
+          sandbox: sandboxEnabled,
         },
       });
 
@@ -1170,6 +1227,7 @@ export function Chat({
       conversationsList,
       ensureWs,
       reasoningEffort,
+      sandboxEnabled,
       selectedModel,
       selectedModelInfo,
       selectedProviderId,
@@ -1410,6 +1468,64 @@ export function Chat({
     },
     [activeProjectId, startRun],
   );
+
+  // Saves the choice on the open conversation, or holds it for the one the
+  // next send creates. Shared by the chip and `/sandbox on|off`.
+  const applySandbox = useCallback(
+    async (wanted: boolean): Promise<CommandResult> => {
+      if (!wanted && sandboxConfig?.floor) return failResult(SANDBOX_LOCKED_MESSAGE);
+      const mode: SandboxMode = wanted ? "on" : "off";
+      const id = conversationIdRef.current;
+      if (id !== null) {
+        const updated = await updateConversation(id, { sandbox: mode });
+        if (conversationIdRef.current === id) {
+          setSandboxChoice(undefined);
+          setSandboxConversation(updated.sandbox ?? mode);
+        }
+        conversationsList.patchLocal(id, { sandbox: mode });
+      } else {
+        setSandboxChoice(wanted);
+      }
+      const warning = wanted
+        ? sandboxUnsupportedWarning(selectedProviderId, sandboxSupport)
+        : undefined;
+      return okResult(warning ? `sandbox → on\n${warning}` : `sandbox → ${mode}`);
+    },
+    [conversationsList, sandboxConfig, sandboxSupport, selectedProviderId],
+  );
+
+  const dispatchSandboxCommand = useCallback(
+    async (rest: string): Promise<CommandResult> => {
+      const parsed = parseSandboxCommand(rest);
+      if (parsed.kind === "usage") return failResult("usage: /sandbox [on|off|status]");
+      if (parsed.kind === "status") {
+        return okResult(
+          describeSandboxStatus({
+            resolution: sandboxResolution,
+            providerId: selectedProviderId,
+            support: sandboxSupport,
+            platform: sandboxConfig?.platform ?? "unknown",
+            profile: sandboxConfig?.profile ?? sandboxConfig?.summary ?? "unavailable",
+            ...(sandboxConfig?.runtime !== undefined ? { runtime: sandboxConfig.runtime } : {}),
+          }).join("\n"),
+        );
+      }
+      return applySandbox(parsed.kind === "on");
+    },
+    [applySandbox, sandboxConfig, sandboxResolution, sandboxSupport, selectedProviderId],
+  );
+
+  const onToggleSandbox = useCallback(() => {
+    void applySandbox(!sandboxEnabled)
+      .then((result) => {
+        const lines = result.message.split("\n");
+        if (!result.ok) toast.push({ kind: "error", message: result.message });
+        else if (lines.length > 1) toast.push({ kind: "error", message: lines[1] ?? "" });
+      })
+      .catch((e: unknown) => {
+        toast.push({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+      });
+  }, [applySandbox, sandboxEnabled, toast]);
 
   // Invoke a rib command server-side and perform the returned effect: render a
   // message inline, start a workflow run, or open one of the rib's agents as a
@@ -1672,7 +1788,9 @@ export function Chat({
             ? dispatchProjectCommand
             : matched.name === "workflow"
               ? dispatchWorkflowCommand
-              : null;
+              : matched.name === "sandbox"
+                ? dispatchSandboxCommand
+                : null;
       if (dispatcher) {
         const commandMessageId = newId();
         setMessages((prev) => [
@@ -1742,6 +1860,7 @@ export function Chat({
     commandsReady,
     dispatchProjectCommand,
     dispatchWorkflowCommand,
+    dispatchSandboxCommand,
     dispatchRibCommand,
     doSend,
     hydrating,
@@ -1897,6 +2016,8 @@ export function Chat({
           }
           setSelectedProviderId(conv.providerId);
           setSelectedModel(conv.model ?? "");
+          setSandboxChoice(undefined);
+          setSandboxConversation(conv.sandbox);
           // Switching onto the same reasoning model wouldn't fire the
           // model-watch effect; reset the tier explicitly so the prior
           // chat's pick doesn't leak.
@@ -1953,6 +2074,8 @@ export function Chat({
     autoSendPromptRef.current = null;
     pendingSeedRef.current = null;
     pendingNameRef.current = null;
+    setSandboxChoice(undefined);
+    setSandboxConversation(undefined);
     // Re-seed from latest settings so a fresh chat picks up changes since
     // this view mounted (starring, sending on a different provider).
     const ref = pickInitialRef(
@@ -2336,6 +2459,13 @@ export function Chat({
                 disabled={streaming}
               />
             )}
+            <SandboxChip
+              enabled={sandboxEnabled}
+              onToggle={onToggleSandbox}
+              locked={sandboxResolution.locked}
+              unsupported={sandboxSupport === "none"}
+              disabled={streaming || hydrating}
+            />
             {selectedModelInfo?.supports?.reasoningEffort === true && (
               <ReasoningEffortChip
                 level={reasoningEffort}

@@ -18,7 +18,12 @@ const conversations: Conversation[] = [
   },
 ];
 
+// fetchConfig and updateConversation stay real: a stub here would leak into
+// every later test file, since bun's module mocks are process-wide.
+const realApi = await import("../src/api.ts");
+
 mock.module("../src/api.ts", () => ({
+  ...realApi,
   cloneProject: async () => ({ id: "project-2", name: "copy" }),
   completeRibCommand: async () => [],
   createConversation: async () => conversations[0],
