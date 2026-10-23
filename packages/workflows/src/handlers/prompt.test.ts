@@ -9,6 +9,7 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NodeContext, NodeStreamEvent, NotebookAdapter } from "../executor.ts";
@@ -3190,6 +3191,100 @@ describe("makePromptHandler — sandbox", () => {
     expect(result.error).toContain("cannot sandbox its tools");
     expect(result.sandbox).toBe("off");
     expect(calls).toEqual([]);
+  });
+
+  describe("a provider that sandboxes through a host tool", () => {
+    const toolProvider = () =>
+      makeSpyProvider({
+        type: "pi",
+        capabilities: { sandbox: "tool" },
+        chunks: [{ type: "text", content: "ok" }],
+      });
+    const bashTool =
+      (turns: { cwd: string; scratchDir: string }[]) =>
+      (turn: { cwd: string; scratchDir: string }) => {
+        turns.push(turn);
+        return { name: "bash", description: "sandboxed" };
+      };
+
+    test("gets the host's sandboxed bash, built over a scratch under the run's artifacts", async () => {
+      const { provider, calls } = toolProvider();
+      const turns: { cwd: string; scratchDir: string }[] = [];
+      const artifactsDir = mkdtempSync(join(tmpdir(), "keelson-prompt-bash-"));
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [{ name: "workflow_run" }],
+        sandbox: policy(true),
+        sandboxBashTool: bashTool(turns),
+      });
+      const result = await handler.handle(stubNode, { ...buildCtx(), artifactsDir });
+      expect(result).toMatchObject({
+        status: "succeeded",
+        sandbox: "provider",
+        sandboxBackend: "pi",
+      });
+      expect(calls[0]?.options?.tools?.map((t) => t.name)).toEqual(["workflow_run", "bash"]);
+      expect(turns).toEqual([
+        { cwd: process.cwd(), scratchDir: join(artifactsDir, "sandbox", "n1") },
+      ]);
+      rmSync(artifactsDir, { recursive: true, force: true });
+    });
+
+    test("a node that denies bash still gets the tool, with the denial forwarded for the provider's rails", async () => {
+      const { provider, calls } = toolProvider();
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+        sandbox: policy(true),
+        sandboxBashTool: bashTool([]),
+      });
+      const node = { id: "n1", prompt: "", denied_tools: ["Bash"] } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx());
+      expect(result.status).toBe("succeeded");
+      expect(calls[0]?.options?.disallowedTools).toEqual(["Bash"]);
+    });
+
+    test("an operator denylist entry withholds the tool and denies the shell outright", async () => {
+      const { provider, calls } = toolProvider();
+      const turns: { cwd: string; scratchDir: string }[] = [];
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+        denylist: ["bash"],
+        sandbox: policy(true),
+        sandboxBashTool: bashTool(turns),
+      });
+      const result = await handler.handle(stubNode, buildCtx());
+      expect(result.status).toBe("succeeded");
+      expect(turns).toEqual([]);
+      expect(calls[0]?.options?.tools).toBeUndefined();
+      expect(calls[0]?.options?.disallowedTools).toEqual(["bash"]);
+    });
+
+    test("an unsandboxed node or a native-support provider gets no host bash", async () => {
+      const turns: { cwd: string; scratchDir: string }[] = [];
+      const off = toolProvider();
+      await makePromptHandler({
+        getProvider: () => off.provider,
+        getRegisteredTools: () => [],
+        sandbox: policy(false),
+        sandboxBashTool: bashTool(turns),
+      }).handle(stubNode, buildCtx());
+      const native = makeSpyProvider({
+        type: "claude",
+        capabilities: { sandbox: "native" },
+        chunks: [{ type: "text", content: "ok" }],
+      });
+      await makePromptHandler({
+        getProvider: () => native.provider,
+        getRegisteredTools: () => [],
+        sandbox: policy(true),
+        sandboxBashTool: bashTool(turns),
+      }).handle(stubNode, buildCtx());
+      expect(turns).toEqual([]);
+      expect(off.calls[0]?.options?.tools).toBeUndefined();
+      expect(native.calls[0]?.options?.tools).toBeUndefined();
+    });
   });
 
   test("default off sends no profile and reports off", async () => {

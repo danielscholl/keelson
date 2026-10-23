@@ -106,6 +106,7 @@ import {
   DEFAULT_TOOL_DENYLIST,
   discoverWorkflows,
   isGitRepo,
+  type MakePromptHandlerOptions,
   makePromptHandler,
   type NodeHandler,
   type PromptHandlerProvider,
@@ -1746,6 +1747,7 @@ export function bootstrapPromptHandler(
     evaluateResponse?: PromptResponseGate;
     requestGate?: PromptRequestGate;
     sandbox?: SandboxPolicy;
+    sandboxBashTool?: MakePromptHandlerOptions["sandboxBashTool"];
   } = {},
 ): NodeHandler | undefined {
   const providers = getProviderInfoList();
@@ -1808,6 +1810,7 @@ export function bootstrapPromptHandler(
   return makePromptHandler({
     getProvider,
     ...(opts.sandbox ? { sandbox: opts.sandbox } : {}),
+    ...(opts.sandboxBashTool ? { sandboxBashTool: opts.sandboxBashTool } : {}),
     // Resolve absent or unavailable preferences to the registered boot default.
     resolveProviderId: (id) => (id !== undefined && isRegisteredProvider(id) ? id : providerId),
     resolveModelClass: (id, modelClass) => readModelClassOverride(config, id)?.[modelClass],

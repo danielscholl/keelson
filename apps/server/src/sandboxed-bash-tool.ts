@@ -34,12 +34,21 @@ export interface SandboxedBashToolOptions {
   policy: SandboxPolicy;
   // Per-conversation scratch: home/, tmp/, caches, and each call's script.
   scratchDir: string;
-  // Env the sandboxed shell starts from before the policy filters it.
-  baseEnv: Readonly<Record<string, string>>;
+  // Env the sandboxed shell starts from before the policy filters it; defaults
+  // to this process's env.
+  baseEnv?: Readonly<Record<string, string>>;
   defaultTimeoutSec: number;
 }
 
 let callCounter = 0;
+
+function definedEnv(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined,
+    ),
+  );
+}
 
 function truncateTail(text: string): string {
   let lines = text.split("\n");
@@ -92,7 +101,7 @@ export function createSandboxedBashTool(opts: SandboxedBashToolOptions): ToolDef
           args: [script],
           cwd: ctx.cwd,
           env: opts.policy.envFor(
-            prependPath({ ...opts.baseEnv }, bash.pathDirs),
+            prependPath({ ...(opts.baseEnv ?? definedEnv()) }, bash.pathDirs),
             profile,
             opts.scratchDir,
           ),

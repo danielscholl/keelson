@@ -15,6 +15,7 @@ import {
   registerStubProvider,
   waitForCopilotModelClasses,
 } from "@keelson/providers";
+import { createSandboxedBashTool } from "@keelson/server/sandboxed-bash-tool";
 import {
   loadKeelsonConfig,
   readModelClassOverride,
@@ -290,6 +291,16 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   });
   const promptHandler = makePromptHandler({
     sandbox,
+    ...(executor.ok
+      ? {
+          sandboxBashTool: ({ scratchDir }: { scratchDir: string }) =>
+            createSandboxedBashTool({
+              policy: sandbox,
+              scratchDir,
+              defaultTimeoutSec: config.pi?.bashTimeoutSec ?? 300,
+            }) as unknown as { name: string; [k: string]: unknown },
+        }
+      : {}),
     getProvider: (id) => {
       const target = id ?? providerId;
       if (!isRegisteredProvider(target)) {

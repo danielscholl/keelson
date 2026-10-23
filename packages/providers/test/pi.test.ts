@@ -1761,6 +1761,44 @@ describe("PiProvider — sandbox", () => {
     expect(captured?.builtinTools).toBe(true);
   });
 
+  test("the rails gate the supplied bash by capability, as they gate pi's own", async () => {
+    const seen: (string[] | undefined)[] = [];
+    const provider = new PiProvider({
+      factory: fakeFactory([{ type: "agent_end" }], {
+        capture: (p) => seen.push(p.customTools?.map((t) => t.name)),
+      }),
+      sandboxSupport: "tool",
+    });
+    const turn = (rails: { allowedTools?: string[]; disallowedTools?: string[] }) =>
+      collect(
+        provider.sendQuery("hi", "/repo", undefined, {
+          tools: [tool("bash"), tool("workflow_run")],
+          sandbox: profile,
+          ...rails,
+        }),
+      );
+    await turn({ allowedTools: ["Bash", "workflow_run"] });
+    await turn({ disallowedTools: ["Bash"] });
+    expect(seen).toEqual([["workflow_run", "bash"], ["workflow_run"]]);
+  });
+
+  test("a sandboxed turn whose rails deny the shell runs without one", async () => {
+    let captured: PiCreateSessionParams | undefined;
+    const chunks = await collect(
+      new PiProvider({
+        factory: fakeFactory([{ type: "agent_end" }], { capture: (p) => (captured = p) }),
+        sandboxSupport: "tool",
+      }).sendQuery("hi", "/repo", undefined, {
+        tools: [tool("workflow_run")],
+        disallowedTools: ["bash"],
+        sandbox: profile,
+      }),
+    );
+    expect(chunks.some((c) => c.type === "error")).toBe(false);
+    expect(captured?.excludeBuiltinTools).toEqual(["bash"]);
+    expect(captured?.customTools?.map((t) => t.name)).toEqual(["workflow_run"]);
+  });
+
   test("an unsandboxed turn keeps pi's own bash", async () => {
     let captured: PiCreateSessionParams | undefined;
     const provider = new PiProvider({

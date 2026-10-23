@@ -8,6 +8,10 @@
     ".": {
       "bun": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./sandboxed-bash-tool": {
+      "bun": "./src/sandboxed-bash-tool.ts",
+      "default": "./src/sandboxed-bash-tool.ts"
     }
   },
   "scripts": {

@@ -545,21 +545,21 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // a workflow prompt node only sees a rib tool it explicitly `allowed_tools`.
   const sandbox = bootstrapSandbox();
   const sandboxPolicy = bootstrapSandboxPolicy(sandbox, { home: KEELSON_HOME, dbPath: DB_PATH });
-  const sandboxBashBaseEnv = Object.fromEntries(
-    Object.entries(process.env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    ),
-  );
   const sandboxBashTool = (turn: { cwd: string; conversationId: string }) =>
     createSandboxedBashTool({
       policy: sandboxPolicy,
       scratchDir: prepareSandboxScratch(join(KEELSON_HOME, "scratch", "chat"), turn.conversationId),
-      baseEnv: sandboxBashBaseEnv,
       defaultTimeoutSec: loadKeelsonConfig().pi?.bashTimeoutSec ?? 300,
     });
   const promptHandler = bootstrapPromptHandler({
     defaultOffTools: ribs.tools.map((t) => t.name),
     sandbox: sandboxPolicy,
+    sandboxBashTool: ({ scratchDir }) =>
+      createSandboxedBashTool({
+        policy: sandboxPolicy,
+        scratchDir,
+        defaultTimeoutSec: loadKeelsonConfig().pi?.bashTimeoutSec ?? 300,
+      }) as unknown as { name: string; [k: string]: unknown },
     // Final global gate for workflow prompt nodes — the engine owns the operator
     // denylist + rib policies here, so the handler's own floor stands down.
     projectTools: (candidates, provider, meta) =>
