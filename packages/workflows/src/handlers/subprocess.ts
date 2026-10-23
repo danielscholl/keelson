@@ -90,7 +90,7 @@ export function killProcessTree(proc: { readonly pid?: number; kill(): void }): 
  * decides how to render the result into a `NodeResult` (label/runtime/exit
  * formatting differ between bash and script).
  *
- * Throws `SubprocessSpawnError` synchronously if the launcher's spawn fails
+ * Rejects with `SubprocessSpawnError` if the launcher's spawn fails
  * (typically ENOENT for a missing executable). Otherwise resolves with the
  * captured stdout, stderr tail, exit code, and kill reason.
  */

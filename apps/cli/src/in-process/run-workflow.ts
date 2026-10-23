@@ -25,6 +25,7 @@ import {
   bashHandler,
   checkWorkflowCatalog,
   createWorktree,
+  DEFAULT_TOOL_DENYLIST,
   type DiscoveryRoot,
   defaultRunUntilBashProbe,
   discoverWorkflows,
@@ -295,8 +296,11 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
     getRegisteredTools: () =>
       getRegisteredTools() as unknown as readonly { name: string; [k: string]: unknown }[],
     // No policy engine runs headless, so the handler carries the operator floor
-    // the server folds into its engine.
-    denylist: parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST),
+    // the server folds into its engine, default entries included.
+    denylist: [
+      ...DEFAULT_TOOL_DENYLIST,
+      ...parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST),
+    ],
   });
   const approvalHandler = makeApprovalHandler({
     awaitApproval: async (_runId, nodeId, message) => {
