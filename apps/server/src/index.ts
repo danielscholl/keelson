@@ -47,7 +47,9 @@ import {
   bootstrapPromptHandler,
   bootstrapProviders,
   bootstrapRibs,
+  bootstrapSandbox,
   bootstrapWorkflows,
+  describeSandboxPolicy,
   prepareRibWorkflows,
   registerRibTools,
 } from "./bootstrap.ts";
@@ -721,6 +723,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // and WORKSPACE_ROOT is known); constructed + mounted alongside the other
   // routes below, and torn down in drain before ribs dispose.
   const mcpSettings = resolveMcpSettings(loadKeelsonConfig());
+  const sandbox = bootstrapSandbox();
   let mcpRoutes: McpRoutesHandle | null = null;
 
   const drain = async (): Promise<void> => {
@@ -804,6 +807,11 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     c.json({
       schemaVersion: SCHEMA_VERSION,
       wireProtocolVersion: WIRE_PROTOCOL_VERSION,
+      sandbox: {
+        default: sandbox.default,
+        floor: sandbox.floor,
+        summary: describeSandboxPolicy(sandbox),
+      },
     }),
   );
 
@@ -915,6 +923,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     workflowAuthoringTools,
     usageStore,
     ...(policyEngine ? { policyEngine } : {}),
+    sandbox,
   });
   const workflowRunHandlers = workflowRunWebSocketHandlers({
     subscribers: workflowSubscribers,

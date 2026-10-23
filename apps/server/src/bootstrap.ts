@@ -66,6 +66,8 @@ import type {
   WorkspaceLease,
 } from "@keelson/shared";
 import {
+  buildSandboxProfile,
+  describeSandboxProfile,
   recallRequestSchema,
   resumeWorkflowRunBodySchema,
   writebackRequestSchema,
@@ -75,7 +77,9 @@ import {
   type CrossRibGrants,
   isCrossRibGrantAllowed,
   isRibWorkflowGrantAllowed,
+  type KeelsonConfig,
   loadKeelsonConfig,
+  type ResolvedSandboxConfig,
   type RibWorkflowGrants,
   readModelClassOverride,
   resolveCrossRibGrants,
@@ -84,6 +88,7 @@ import {
   resolveModelAllowlists,
   resolveRibApprovalGrants,
   resolveRibWorkflowGrants,
+  resolveSandboxConfig,
 } from "@keelson/shared/config";
 import { runJSON, runText } from "@keelson/shared/exec";
 import { projectWorkflowsDir } from "@keelson/shared/paths";
@@ -1572,6 +1577,24 @@ function toDiscoveryNotice(w: WorkflowLoadWarning): WorkflowDiscoveryNotice {
     ...(w.nodeId ? { nodeId: w.nodeId } : {}),
     message: w.message,
   };
+}
+
+// The sandbox policy chat turns resolve against: config.sandbox plus
+// KEELSON_SANDBOX, read once at boot like the other operator knobs.
+export function bootstrapSandbox(
+  config: KeelsonConfig = loadKeelsonConfig(),
+  env: Record<string, string | undefined> = process.env,
+): ResolvedSandboxConfig {
+  const resolved = resolveSandboxConfig(config, env);
+  for (const warning of resolved.warnings) console.warn(`[sandbox] ${warning}`);
+  return resolved;
+}
+
+// The one-line policy text GET /api/config serves to both clients.
+export function describeSandboxPolicy(policy: ResolvedSandboxConfig): string {
+  const enabled = policy.floor || policy.default;
+  const text = describeSandboxProfile(buildSandboxProfile(policy.settings, "<project>", enabled));
+  return policy.floor ? `${text} (required by KEELSON_SANDBOX)` : text;
 }
 
 // Construct the unified policy engine: the operator denylist floor

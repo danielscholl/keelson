@@ -17,6 +17,7 @@ import type {
   PolicyDecision,
   PolicyEvent,
   PolicySurface,
+  SandboxSupport,
   SessionUsage,
 } from "@keelson/shared";
 import safeRegex from "safe-regex2";
@@ -41,6 +42,7 @@ interface PolicyScopeBase {
   // can scope to its own workflow/node; absent on other surfaces.
   workflowName?: string;
   nodeId?: string;
+  sandbox?: { enabled: boolean; support: SandboxSupport };
 }
 
 export interface PolicyEngineOptions {
@@ -726,6 +728,7 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
       : {}),
     ...(base.workflowName !== undefined ? { workflowName: base.workflowName } : {}),
     ...(base.nodeId !== undefined ? { nodeId: base.nodeId } : {}),
+    ...(base.sandbox !== undefined ? { sandbox: { ...base.sandbox } } : {}),
   });
 
   const toolCallEvent = (

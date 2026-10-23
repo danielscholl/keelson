@@ -20,12 +20,18 @@ beforeAll(async () => {
   // fires just by running this /api/config unit test). KEELSON_DB is already
   // :memory: via test-setup.
   home = join(mkdtempSync(join(tmpdir(), "keelson-config-route-")), "keelson");
-  for (const k of ["KEELSON_HOME", "KEELSON_WORKSPACE", "KEELSON_DISABLE_SCHEDULER"]) {
+  for (const k of [
+    "KEELSON_HOME",
+    "KEELSON_WORKSPACE",
+    "KEELSON_DISABLE_SCHEDULER",
+    "KEELSON_SANDBOX",
+  ]) {
     savedEnv[k] = process.env[k];
   }
   process.env.KEELSON_HOME = home;
   process.env.KEELSON_WORKSPACE = home;
   process.env.KEELSON_DISABLE_SCHEDULER = "1";
+  delete process.env.KEELSON_SANDBOX;
   // Ephemeral port so the test never collides with a dev server on 7878.
   handle = await startServer({ port: 0 });
 });
@@ -49,5 +55,13 @@ describe("GET /api/config", () => {
     };
     expect(body.schemaVersion).toBe(SCHEMA_VERSION);
     expect(body.wireProtocolVersion).toBe(WIRE_PROTOCOL_VERSION);
+  });
+
+  test("reports the sandbox policy, off by default with no floor", async () => {
+    const res = await fetch(new URL("/api/config", handle.url));
+    const body = (await res.json()) as {
+      sandbox: { default: boolean; floor: boolean; summary: string };
+    };
+    expect(body.sandbox).toEqual({ default: false, floor: false, summary: "sandbox off" });
   });
 });

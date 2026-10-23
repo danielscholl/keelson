@@ -1313,3 +1313,61 @@ describe("createPolicyEngine — evaluateResponse", () => {
     });
   });
 });
+
+describe("createPolicyEngine — sandbox context", () => {
+  const sandboxedChat = {
+    surface: "chat" as const,
+    sandbox: { enabled: true, support: "native" as const },
+  };
+
+  it("hands the turn's sandbox decision to rib policies on every phase", async () => {
+    const seen: unknown[] = [];
+    const recorder: Policy = {
+      id: "sandbox-reader",
+      evaluate(_event, ctx) {
+        seen.push(ctx.sandbox);
+        return { outcome: "allow" };
+      },
+    };
+    const engine = createPolicyEngine({ ribPolicies: [{ ribId: "guard", policy: recorder }] });
+    await engine.projectTools([{ name: "repo_read" }], sandboxedChat);
+    await engine.evaluateToolCall({ tool: "repo_read" }, sandboxedChat);
+    await engine.evaluateRequest({ ...sandboxedChat, prompt: "hi" });
+    expect(seen).toEqual([
+      { enabled: true, support: "native" },
+      { enabled: true, support: "native" },
+      { enabled: true, support: "native" },
+    ]);
+    await engine.evaluateToolCall({ tool: "repo_read" }, chat);
+    expect(seen[3]).toBeUndefined();
+  });
+
+  it("lets a rib policy deny shell on an unsandboxed turn", async () => {
+    const shellNeedsSandbox: Policy = {
+      id: "shell-needs-sandbox",
+      on: [{ phase: "tool_call", tool: "Bash" }],
+      evaluate: (_event, ctx) =>
+        ctx.sandbox?.enabled ? { outcome: "allow" } : { outcome: "deny", reason: "unsandboxed" },
+    };
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "guard", policy: shellNeedsSandbox }],
+    });
+    expect((await engine.evaluateToolCall({ tool: "Bash" }, chat)).outcome).toBe("deny");
+    expect(await engine.evaluateToolCall({ tool: "Bash" }, sandboxedChat)).toEqual({
+      outcome: "allow",
+    });
+  });
+
+  it("ask_on_shell still asks on a sandboxed turn", async () => {
+    let asked = 0;
+    const engine = createPolicyEngine({
+      askOnShell: true,
+      requestApproval: async () => {
+        asked++;
+        return "reject";
+      },
+    });
+    expect((await engine.evaluateToolCall({ tool: "Bash" }, sandboxedChat)).outcome).toBe("deny");
+    expect(asked).toBe(1);
+  });
+});

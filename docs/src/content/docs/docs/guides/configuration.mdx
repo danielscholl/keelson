@@ -59,6 +59,7 @@ enabled.
 | `codex.sandbox` | `"read-only"` \| `"workspace-write"` \| `"danger-full-access"` | How much the Codex subprocess may touch. Default `workspace-write`. See [Codex](#codex-community-provider). |
 | `codex.network` | boolean | Whether the Codex subprocess may reach the network. Default `false`. |
 | `mcp` | object | Tunes the MCP gateway, the `/api/mcp` endpoint other agents call. See [MCP gateway](#mcp-gateway). |
+| `sandbox` | object | Whether chat turns confine the agent's own tools, and what the confined tools may reach. Default off. See [Sandbox](#sandbox). |
 | `crossRibGrants` | object of `caller: { target: [tool] }` | Which ribs may call which other ribs' tools. Default-deny without an entry. See [Cross-rib grants](#cross-rib-grants). |
 | `ribWorkflowGrants` | object of `rib: [workflow]` | Which ribs may start which catalog workflows. Default-deny without an entry. See [Rib workflow grants](#rib-workflow-grants). |
 | `ribApprovalGrants` | object of `rib: [workflow]` | Which ribs may answer the approval gates of which workflows, on runs they started. Default-deny without an entry. See [Rib approval grants](#rib-approval-grants). |
@@ -620,6 +621,51 @@ MCP](../using-mcp/) is the task guide.
 Each key has a `KEELSON_MCP_*` environment override (see below) that wins over
 the config value, the same way `KEELSON_PROVIDERS` wins over `providers`.
 
+## Sandbox
+
+A sandboxed chat turn hands the provider a policy that confines the agent's own
+shell and file tools: the project directory is writable, the paths you list are
+granted or denied, and outbound network is denied unless you allow it. Copilot,
+Claude, and Codex enforce it with their own sandboxes. A turn on a provider that
+cannot sandbox (pi, gateways, the stub) fails with `SANDBOX_UNAVAILABLE` rather
+than running unconfined. Keelson's own tools run inside the server process and
+are not sandboxed; on a sandboxed turn their path arguments are confined to the
+writable roots. Workflow nodes ignore this block.
+
+```jsonc
+{
+  "sandbox": {
+    "default": false,
+    "filesystem": {
+      "readwrite": ["~/scratch"],
+      "readonly": ["/opt/homebrew"],
+      "denied": ["~/.ssh"]
+    },
+    "network": { "outbound": "deny", "loopback": false },
+    "env": [],
+    "backend": { "codex": { "mode": "workspace-write" } }
+  }
+}
+```
+
+| Key | Type | What it does |
+|---|---|---|
+| `default` | boolean | Whether a chat turn is sandboxed when neither its conversation nor the turn chooses. Default `false`. |
+| `filesystem.readwrite` | string array | Writable paths beyond the project directory, which is always writable. |
+| `filesystem.readonly` | string array | Paths granted read-only. |
+| `filesystem.denied` | string array | Paths the confined tools may not read or write. |
+| `network.outbound` | `"allow"` \| `"deny"` | Whether confined tools reach the network. Default `deny`. |
+| `network.loopback` | boolean | Whether they reach local addresses, including the keelson server. Default `false`. |
+| `network.allowedHosts` | string array | With `outbound: "allow"`, the only hosts they may reach. Enforced by Copilot and Claude, not Codex. |
+| `env` | string array | Variable names an operator wants passed into the sandbox. Not yet honored by the provider backends. |
+| `backend` | object | Per-provider settings spread over the mapped policy (`copilot`, `claude`), or a stricter Codex `mode`. Codex never runs looser than `workspace-write` while sandboxed. |
+
+Paths take an absolute path or one starting with `~`; a relative path is ignored
+with a warning at boot. A conversation remembers its own choice (`PATCH
+/api/conversations/:id` with `{ "sandbox": "on" }`, `"off"`, or `null` to inherit),
+and a turn can choose for itself with `sandbox` on the chat request frame.
+`KEELSON_SANDBOX` (below) overrides `default`, and `required` holds every turn on.
+
 ## Environment variables
 
 The config file covers providers; these variables cover the rest and override
@@ -638,6 +684,7 @@ replacing it, so a grant from either source stands.
 | `KEELSON_WORKFLOW_PROVIDER` | first real provider | Provider that backs workflow `prompt` nodes. |
 | `KEELSON_WORKFLOW_TOOL_DENYLIST` | unset | Operator floor: tool names no workflow `prompt` node may use, subtracted on top of whatever a node allows. |
 | `KEELSON_APPROVAL_REVIEWER` | unset | Operator floor: set to `off` to disable every approval-node `reviewer`, so all gates pause for a human. See [Workflow nodes](../../reference/workflow-nodes/#reviewer). |
+| `KEELSON_SANDBOX` | unset | `on` or `off` replaces the config file's `sandbox.default`; a conversation or turn that chooses still wins. `required` is an operator floor: every chat turn is sandboxed and nothing can turn it off. Any other value is ignored with a warning at boot. See [Sandbox](#sandbox). |
 | `KEELSON_ASK_ON_SHELL` | unset | Set to `1` to pause for human approval before any shell or file-mutating call. See [Governance](../governance/#approvals). |
 | `KEELSON_TURN_BUDGET` | unset | Positive integer: cap a session's model-calling turns. A downgrade gate, not a wall. See [Budgets](../governance/#budgets). |
 | `KEELSON_COST_BUDGET` | unset | Positive integer: cap a session's accumulated input+output tokens. Same downgrade-gate behavior. |

@@ -30,7 +30,7 @@ describe("migrations", () => {
         version: number;
       }>
     ).map((r) => r.version);
-    expect(versions).toEqual([12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+    expect(versions).toEqual([12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
 
     expect(tableNames(db)).toContain("conversations");
     expect(tableNames(db)).toContain("memories");
@@ -50,6 +50,10 @@ describe("migrations", () => {
     expect(tableNames(db)).toContain("usage_events");
     expect(tableNames(db)).toContain("ops");
     expect(tableNames(db)).toContain("catalog_model_prices");
+    const convColumns = db.query("PRAGMA table_info(conversations)").all() as Array<{
+      name: string;
+    }>;
+    expect(convColumns.map((column) => column.name)).toContain("sandbox");
     db.close();
   });
 
@@ -62,6 +66,8 @@ describe("migrations", () => {
     db.exec("CREATE TABLE workflow_runs (id TEXT PRIMARY KEY, worktree_path TEXT);");
     db.exec("CREATE TABLE workflow_node_outputs (run_id TEXT, node_id TEXT);");
     db.exec("CREATE TABLE usage_events (id INTEGER PRIMARY KEY);");
+    db.exec("CREATE TABLE conversations (id TEXT PRIMARY KEY);");
+    db.exec("INSERT INTO conversations VALUES ('existing-conv');");
     for (let v = 1; v <= 12; v += 1) {
       db.prepare("INSERT INTO schema_version(version) VALUES (?)").run(v);
     }
@@ -75,8 +81,12 @@ describe("migrations", () => {
     }>;
     expect(nodeColumns.map((column) => column.name)).toContain("approval_json");
     expect(db.query("SELECT MAX(version) AS v FROM schema_version").get() as { v: number }).toEqual(
-      { v: 21 },
+      { v: 22 },
     );
+    expect(db.query("SELECT id, sandbox FROM conversations").get()).toEqual({
+      id: "existing-conv",
+      sandbox: null,
+    });
     db.close();
   });
 
@@ -102,7 +112,7 @@ describe("migrations", () => {
 
     expect(tableNames(db)).toEqual(before);
     expect(db.query("SELECT count(*) AS c FROM schema_version").get() as { c: number }).toEqual({
-      c: 10,
+      c: 11,
     });
     db.close();
   });
@@ -115,6 +125,7 @@ describe("migrations", () => {
       CREATE TABLE workflow_runs (id TEXT PRIMARY KEY, worktree_path TEXT);
       CREATE TABLE workflow_node_outputs (run_id TEXT, node_id TEXT);
       CREATE TABLE usage_events (id INTEGER PRIMARY KEY);
+      CREATE TABLE conversations (id TEXT PRIMARY KEY);
       INSERT INTO workflow_runs VALUES ('existing-run', NULL);
       INSERT INTO workflow_runs VALUES ('retained-worktree', '/repo/.worktrees/retained');
     `);

@@ -406,6 +406,13 @@ const migrations: Migration[] = [
       db.exec("ALTER TABLE usage_events ADD COLUMN cache_write_1h_tokens INTEGER;");
     },
   },
+  {
+    version: 22,
+    description: "remember each conversation's sandbox choice ('on', 'off', or NULL to inherit)",
+    up: (db) => {
+      db.exec("ALTER TABLE conversations ADD COLUMN sandbox TEXT;");
+    },
+  },
 ];
 
 // The lowest version this build can apply. A database stamped below it was
