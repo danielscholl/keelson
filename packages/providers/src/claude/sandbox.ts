@@ -28,7 +28,9 @@ export function toClaudeSandboxSettings(profile: SandboxProfile): Record<string,
     filesystem: {
       allowWrite: [...filesystem.readwrite],
       allowRead: [...filesystem.readonly],
-      denyWrite: [...filesystem.denied],
+      // allowRead does not revoke a write grant inherited from a writable
+      // parent, so read-only roots are write-denied explicitly.
+      denyWrite: [...new Set([...filesystem.readonly, ...filesystem.denied])],
       denyRead: [...filesystem.denied],
     },
     ...profile.backend?.claude,

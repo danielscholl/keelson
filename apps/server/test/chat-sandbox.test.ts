@@ -6,7 +6,7 @@ import "./test-setup.ts";
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, normalize } from "node:path";
 import {
   type ProviderCapabilities,
   registerProvider,
@@ -109,15 +109,16 @@ describe("chat sandbox resolution", () => {
       const project = projects.create({ name: "linked", rootPath: link });
       const provider = recordingProvider("native");
       const conv = store.create({ providerId: provider.id, projectId: project.id });
+      const scratch = join(tmpdir(), "keelson-chat-sandbox-grant");
 
       await run(store, frame(conv.id, provider.id, true), {
         projectsStore: projects,
-        sandbox: resolveSandboxConfig({ sandbox: { filesystem: { readwrite: ["/scratch"] } } }, {}),
+        sandbox: resolveSandboxConfig({ sandbox: { filesystem: { readwrite: [scratch] } } }, {}),
       });
 
       const profile = provider.calls[0]?.sandbox;
       expect(profile?.enabled).toBe(true);
-      expect(profile?.filesystem.readwrite).toEqual([realpathSync(root), "/scratch"]);
+      expect(profile?.filesystem.readwrite).toEqual([realpathSync(root), normalize(scratch)]);
       expect(store.get(conv.id)?.sandbox).toBe("on");
     } finally {
       if (link !== root) rmSync(link, { force: true });
@@ -153,8 +154,22 @@ describe("chat sandbox resolution", () => {
     expect(sent.map((f) => f.event.type)).toEqual(["error", "done"]);
     const error = sent[0]?.event;
     expect(error?.type === "error" && error.code).toBe("SANDBOX_UNAVAILABLE");
-    expect(error?.type === "error" && error.message).toContain("/sandbox off");
-    expect(error?.type === "error" && error.message).toContain("sandbox.default: false");
+    expect(error?.type === "error" && error.message).toContain(
+      'turn it off for this conversation (sandbox: "off")',
+    );
+  });
+
+  test("when the config default turned it on, the hint names the config key", async () => {
+    const store = makeStore();
+    const provider = recordingProvider(undefined);
+    const conv = store.create({ providerId: provider.id });
+    const sent = await run(store, frame(conv.id, provider.id), {
+      sandbox: resolveSandboxConfig({ sandbox: { default: true } }, {}),
+    });
+    const error = sent[0]?.event;
+    expect(error?.type === "error" && error.message).toContain(
+      "set sandbox.default: false in config.json",
+    );
   });
 
   test("an unsandboxable provider still runs when the sandbox is off", async () => {
@@ -218,5 +233,13 @@ describe("chat sandbox resolution", () => {
     expect(seen[0]?.allowedDirectories).toEqual([realpathSync(process.cwd())]);
     expect(seen[1]?.sandbox).toEqual({ enabled: false, support: "native" });
     expect(seen[1]?.allowedDirectories).toBeUndefined();
+
+    // Read-only grants pass the path gate too; the provider's sandbox keeps them unwritable.
+    const tools = join(tmpdir(), "keelson-chat-readonly-tools");
+    await run(store, frame(conv.id, provider.id, true), {
+      policyEngine: engine,
+      sandbox: resolveSandboxConfig({ sandbox: { filesystem: { readonly: [tools] } } }, {}),
+    });
+    expect(seen[2]?.allowedDirectories).toEqual([realpathSync(process.cwd()), normalize(tools)]);
   });
 });

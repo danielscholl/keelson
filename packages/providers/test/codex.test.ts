@@ -595,6 +595,25 @@ describe("CodexProvider — sandbox", () => {
     expect(captured?.networkAccessEnabled).toBe(false);
   });
 
+  test("a profile codex cannot enforce ends the turn before a thread starts", async () => {
+    let created = false;
+    const chunks = await collect(
+      new CodexProvider({
+        factory: fakeFactory([], {
+          capture: () => {
+            created = true;
+          },
+        }),
+      }).sendQuery("x", "/r", undefined, {
+        sandbox: { ...profile, filesystem: { ...profile.filesystem, denied: ["/r/.env"] } },
+      }),
+    );
+    expect(created).toBe(false);
+    expect(chunks).toEqual([
+      { type: "error", message: "sandbox unavailable: codex cannot enforce denied paths" },
+    ]);
+  });
+
   test("without a profile the configured mode and network stand", async () => {
     let captured: CodexCreateThreadParams | undefined;
     await collect(

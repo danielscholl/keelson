@@ -57,7 +57,11 @@ export {
   type RegisterCodexProviderResult,
   registerCodexProvider,
 } from "./codex/registration.ts";
-export { type CodexSandboxSettings, toCodexSandbox } from "./codex/sandbox.ts";
+export {
+  type CodexSandboxSettings,
+  codexSandboxGaps,
+  toCodexSandbox,
+} from "./codex/sandbox.ts";
 export { buildFriendlyCopilotError } from "./copilot/errors.ts";
 export {
   type CopilotAuthStatus,

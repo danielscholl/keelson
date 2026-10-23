@@ -30,6 +30,7 @@ import {
   registeredToolInfoSchema,
   resolveSandboxEnabled,
   type SandboxProfile,
+  type SandboxSource,
   sandboxModeSchema,
   type TokenUsage,
   type ToolDefinition,
@@ -272,6 +273,14 @@ export function chatRoutes(
     }
     return c.body(null, 204);
   });
+}
+
+// How to turn the sandbox off depends on where the "on" came from: a turn or a
+// saved conversation choice outranks the config default.
+function sandboxOffHint(source: SandboxSource): string {
+  if (source === "config") return "set sandbox.default: false in config.json";
+  if (source === "env") return "unset KEELSON_SANDBOX=on";
+  return 'turn it off for this conversation (sandbox: "off")';
 }
 
 // Grants must name the canonical path (macOS resolves /tmp to /private/tmp), but a
@@ -565,7 +574,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   if (sandboxDecision.enabled && sandboxSupport === "none") {
     const fix = sandboxDecision.locked
       ? "KEELSON_SANDBOX=required holds the sandbox on, so switch to a provider that can sandbox"
-      : "switch to a provider that can sandbox, or run /sandbox off (or set sandbox.default: false in config.json)";
+      : `switch to a provider that can sandbox, or ${sandboxOffHint(sandboxDecision.source)}`;
     deps.send(
       errorFrame(
         conversationId,
@@ -585,11 +594,19 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       )
     : undefined;
   // Every policy evaluation this turn sees the sandbox decision; a sandboxed
-  // turn also confines keelson tools' path arguments to its writable roots.
+  // turn also confines tool path arguments to its granted roots. The gate is
+  // not access-aware, so read-only roots are included and the provider's own
+  // sandbox is what keeps them unwritable.
   const sandboxScope = {
     sandbox: { enabled: sandboxDecision.enabled, support: sandboxSupport },
     ...(sandboxProfile !== undefined
-      ? { cwd, allowedDirectories: sandboxProfile.filesystem.readwrite }
+      ? {
+          cwd,
+          allowedDirectories: [
+            ...sandboxProfile.filesystem.readwrite,
+            ...sandboxProfile.filesystem.readonly,
+          ],
+        }
       : {}),
   };
 

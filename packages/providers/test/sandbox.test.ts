@@ -10,6 +10,7 @@ import { describe, expect, test } from "bun:test";
 import type { SandboxProfile } from "@keelson/shared";
 import {
   applyCopilotSandbox,
+  codexSandboxGaps,
   describeSandboxBackend,
   StubProvider,
   sandboxSupportFor,
@@ -122,9 +123,19 @@ describe("toClaudeSandboxSettings", () => {
       filesystem: {
         allowWrite: ["/repo"],
         allowRead: ["/opt/tools"],
-        denyWrite: ["/home/op/.ssh"],
+        denyWrite: ["/opt/tools", "/home/op/.ssh"],
         denyRead: ["/home/op/.ssh"],
       },
+    });
+  });
+
+  test("a read-only child of a writable root is write-denied", () => {
+    const settings = toClaudeSandboxSettings(
+      profile({ filesystem: { readwrite: ["/repo"], readonly: ["/repo/vendor"], denied: [] } }),
+    );
+    expect(settings.filesystem).toMatchObject({
+      allowWrite: ["/repo"],
+      denyWrite: ["/repo/vendor"],
     });
   });
 
@@ -180,6 +191,28 @@ describe("toCodexSandbox", () => {
     expect(
       toCodexSandbox(profile({ backend: { codex: { mode: "read-only" } } }), baseline).sandboxMode,
     ).toBe("read-only");
+  });
+});
+
+describe("codexSandboxGaps", () => {
+  const clean = profile({
+    filesystem: { readwrite: ["/repo"], readonly: ["/opt/tools"], denied: [] },
+  });
+
+  test("a profile codex can express has no gaps; a disabled one never does", () => {
+    expect(codexSandboxGaps(clean)).toEqual([]);
+    expect(codexSandboxGaps(profile({ enabled: false }))).toEqual([]);
+  });
+
+  test("denied paths, read-only roots under a writable one, and host allowlists are gaps", () => {
+    expect(
+      codexSandboxGaps(
+        profile({
+          filesystem: { readwrite: ["/repo"], readonly: ["/repo/vendor"], denied: ["/repo/.env"] },
+          network: { outbound: "allow", allowedHosts: ["github.com"] },
+        }),
+      ),
+    ).toEqual(["denied paths", "read-only paths inside a writable root", "a host allowlist"]);
   });
 });
 

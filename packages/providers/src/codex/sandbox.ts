@@ -6,6 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+import { isAbsolute, relative } from "node:path";
 import type { SandboxProfile } from "@keelson/shared";
 import type { CodexSandboxMode } from "./factory.ts";
 
@@ -19,6 +20,30 @@ const STRICTNESS: Record<CodexSandboxMode, number> = {
   "workspace-write": 1,
   "danger-full-access": 2,
 };
+
+// What an enabled profile asks for that codex's thread options cannot express:
+// codex reads anywhere and writes all of cwd, with only an on/off network
+// switch. A non-empty result means the turn must not run.
+export function codexSandboxGaps(profile: SandboxProfile): string[] {
+  if (!profile.enabled) return [];
+  const gaps: string[] = [];
+  if (profile.filesystem.denied.length > 0) gaps.push("denied paths");
+  const inside = (child: string, parent: string) => {
+    const rel = relative(parent, child);
+    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  };
+  if (
+    profile.filesystem.readonly.some((ro) =>
+      profile.filesystem.readwrite.some((rw) => inside(ro, rw)),
+    )
+  ) {
+    gaps.push("read-only paths inside a writable root");
+  }
+  if (profile.network.outbound === "allow" && (profile.network.allowedHosts?.length ?? 0) > 0) {
+    gaps.push("a host allowlist");
+  }
+  return gaps;
+}
 
 // An enabled profile caps codex at workspace-write, so a configured or
 // backend-requested danger-full-access cannot leave the sandbox, and network

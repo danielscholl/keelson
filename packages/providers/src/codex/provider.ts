@@ -18,7 +18,7 @@ import {
   type CodexThread,
   type CodexThreadFactory,
 } from "./factory.ts";
-import { toCodexSandbox } from "./sandbox.ts";
+import { codexSandboxGaps, toCodexSandbox } from "./sandbox.ts";
 
 // Empty → "let codex decide" (no model on the wire). codex resolves its own
 // default from ~/.codex/config.toml, which avoids forcing a model the account
@@ -120,6 +120,14 @@ export class CodexProvider implements IAgentProvider {
     if (options?.abortSignal?.aborted) return;
 
     const reasoningEffort = mapReasoningEffort(options?.reasoningEffort);
+    const gaps = options?.sandbox !== undefined ? codexSandboxGaps(options.sandbox) : [];
+    if (gaps.length > 0) {
+      yield {
+        type: "error",
+        message: `sandbox unavailable: codex cannot enforce ${gaps.join(", ")}`,
+      };
+      return;
+    }
     const sandbox = toCodexSandbox(options?.sandbox, {
       sandboxMode: this.sandboxMode,
       networkAccessEnabled: this.networkAccessEnabled,

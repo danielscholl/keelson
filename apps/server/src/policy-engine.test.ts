@@ -1371,3 +1371,45 @@ describe("createPolicyEngine — sandbox context", () => {
     expect(asked).toBe(1);
   });
 });
+
+describe("createPolicyEngine — path confinement reads paths, not contents", () => {
+  const root = mkdtempSync(join(tmpdir(), "keelson-confine-content-"));
+  const scope = { surface: "chat" as const, cwd: root, allowedDirectories: [root] };
+
+  it("a Write whose content starts like an absolute path is allowed inside the root", async () => {
+    const engine = createPolicyEngine();
+    const decision = await engine.evaluateToolCall(
+      {
+        tool: "Write",
+        args: { file_path: join(root, "a.ts"), content: "// Copyright 2026\n/usr/bin/env node\n" },
+      },
+      scope,
+    );
+    expect(decision).toEqual({ outcome: "allow" });
+  });
+
+  it("Edit and MultiEdit strings are not treated as paths", async () => {
+    const engine = createPolicyEngine();
+    expect(
+      await engine.evaluateToolCall(
+        {
+          tool: "MultiEdit",
+          args: {
+            file_path: join(root, "a.ts"),
+            edits: [{ old_string: "/etc/passwd", new_string: "/var/other" }],
+          },
+        },
+        scope,
+      ),
+    ).toEqual({ outcome: "allow" });
+  });
+
+  it("a path argument outside the root is still denied", async () => {
+    const engine = createPolicyEngine();
+    const decision = await engine.evaluateToolCall(
+      { tool: "Write", args: { file_path: join(tmpdir(), "outside.ts"), content: "x" } },
+      scope,
+    );
+    expect(decision.outcome).toBe("deny");
+  });
+});
