@@ -89,6 +89,12 @@ export {
   type ScriptRuntime,
 } from "./handlers/discovery.ts";
 export {
+  hostLauncher,
+  type ProcessLauncher,
+  type SpawnHandle,
+  type SpawnSpec,
+} from "./handlers/launcher.ts";
+export {
   defaultRunUntilBashProbe,
   type MakeLoopHandlerOptions,
   makeLoopHandler,

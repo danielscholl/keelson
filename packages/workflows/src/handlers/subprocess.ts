@@ -26,6 +26,7 @@ import { join } from "node:path";
 
 import type { NodeStreamEvent } from "../executor.ts";
 import type { NodeOutput } from "../schema/index.ts";
+import { hostLauncher, type ProcessLauncher, type SpawnHandle } from "./launcher.ts";
 
 export const SUBPROCESS_DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 export const STDERR_TAIL_MAX_CHARS = 400;
@@ -46,6 +47,7 @@ export interface SubprocessOptions {
   emit: (event: NodeStreamEvent) => void;
   /** Trim a single trailing newline from captured stdout before returning. */
   trimTrailingNewline?: boolean;
+  launcher?: ProcessLauncher;
 }
 
 export interface SubprocessOutcome {
@@ -83,51 +85,20 @@ export function killProcessTree(proc: { readonly pid?: number; kill(): void }): 
   }
 }
 
-// Windows exposes the search path as `Path`; Bun.spawn resolves a bare command
-// against `PATH` (uppercase) when handed an explicit env, so an env derived from
-// `process.env` (which only carries `Path`) fails ENOENT for `bun`/`uv`/etc.
-// Mirror the value onto `PATH`. No-op on POSIX and when `PATH` is already set.
-function ensureSpawnPath(env: Record<string, string>): Record<string, string> {
-  if (!IS_WINDOWS || env.PATH !== undefined) return env;
-  for (const key of Object.keys(env)) {
-    if (key.toUpperCase() === "PATH") {
-      env.PATH = env[key] as string;
-      break;
-    }
-  }
-  return env;
-}
-
 /**
  * Spawn a subprocess with the shared timeout/abort/drain machinery. Caller
  * decides how to render the result into a `NodeResult` (label/runtime/exit
  * formatting differ between bash and script).
  *
- * Throws `SubprocessSpawnError` synchronously if `Bun.spawn` itself fails
+ * Throws `SubprocessSpawnError` synchronously if the launcher's spawn fails
  * (typically ENOENT for a missing executable). Otherwise resolves with the
  * captured stdout, stderr tail, exit code, and kill reason.
  */
 export async function runSubprocess(opts: SubprocessOptions): Promise<SubprocessOutcome> {
-  let proc: ReturnType<typeof Bun.spawn>;
+  const launcher = opts.launcher ?? hostLauncher;
+  let proc: SpawnHandle;
   try {
-    proc = Bun.spawn([opts.cmd, ...opts.args], {
-      cwd: opts.cwd,
-      env: ensureSpawnPath({ ...opts.env }),
-      stdout: "pipe",
-      stderr: "pipe",
-      stdin: "ignore",
-      // The backgrounded server has no console on Windows (detached launch), so
-      // an unhidden console child would flash a visible window on every spawn.
-      windowsHide: true,
-      // POSIX-only: a new process group lets the kill-group dance below reap a
-      // daemonizing grandchild that escapes the immediate child. Windows has no
-      // POSIX process groups, and Bun's `detached` there suppresses stdout/stderr
-      // capture (empty output) — so omit it on Windows and lean on `taskkill /T`
-      // for tree termination instead.
-      // biome-ignore lint/suspicious/noTsIgnore: Bun supports `detached` at runtime; types lag.
-      // @ts-ignore
-      detached: !IS_WINDOWS,
-    });
+    proc = launcher.spawn({ cmd: opts.cmd, args: opts.args, cwd: opts.cwd, env: opts.env });
   } catch (err) {
     throw new SubprocessSpawnError(err);
   }
@@ -186,7 +157,7 @@ export async function runSubprocess(opts: SubprocessOptions): Promise<Subprocess
   const stdoutCapture: string[] = [];
   let stdoutBytes = 0;
   const stdoutPromise = streamLines(
-    proc.stdout as ReadableStream<Uint8Array> | null,
+    proc.stdout,
     (line) => opts.emit({ type: "node_log", line }),
     (chunk) => {
       if (stdoutBytes < STDOUT_CAPTURE_MAX_BYTES) {
@@ -197,7 +168,7 @@ export async function runSubprocess(opts: SubprocessOptions): Promise<Subprocess
   );
 
   const stderrBox = { text: "" };
-  const stderrPromise = streamStderr(proc.stderr as ReadableStream<Uint8Array> | null, stderrBox);
+  const stderrPromise = streamStderr(proc.stderr, stderrBox);
 
   let exitCode: number | null;
   try {
