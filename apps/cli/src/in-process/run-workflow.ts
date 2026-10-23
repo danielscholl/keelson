@@ -21,6 +21,7 @@ import {
   resolveSandboxConfig,
   resolveWorkflowPreflight,
 } from "@keelson/shared/config";
+import { createMxcRuntime, resolveMxcExecutor } from "@keelson/shared/launcher";
 import { keelsonPaths, resolveKeelsonHome } from "@keelson/shared/paths";
 import { getRegisteredTools } from "@keelson/skills";
 import {
@@ -273,16 +274,19 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   // a pause callout and no second client to resume the run, so an approval
   // node fails immediately with a clear message. Operators who need
   // approval should route through `keelson start` + the SPA.
-  // Same policy the server builds; headless runs ship no sandbox runtime either,
-  // so a node that resolves sandboxed fails closed here too.
+  // Same policy and runtime resolution the server uses, so a headless run
+  // sandboxes (or fails closed) exactly as a server-routed one would.
   const sandboxConfig = resolveSandboxConfig(config);
   for (const warning of sandboxConfig.warnings) console.warn(`[sandbox] ${warning}`);
   const home = resolveKeelsonHome();
+  const executor = resolveMxcExecutor();
   const sandbox = createOperatorSandboxPolicy(sandboxConfig, {
     home,
     dbPath: keelsonPaths(home).dbPath,
     bundledBinDir: bundledBinDir(),
-    unavailableReason: "this build has no sandbox runtime",
+    ...(executor.ok
+      ? { runtime: createMxcRuntime({ executorPath: executor.path }) }
+      : { unavailableReason: executor.reason }),
   });
   const promptHandler = makePromptHandler({
     sandbox,

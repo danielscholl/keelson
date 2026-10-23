@@ -20,6 +20,7 @@ import {
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
 import { resolveSandboxConfig } from "@keelson/shared/config";
+import { z } from "zod";
 import { handleChatRequest } from "../src/chat-handler.ts";
 import { type ConversationStore, createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
@@ -203,6 +204,28 @@ describe("chat sandbox resolution", () => {
     expect(error?.type === "error" && error.code).toBe("SANDBOX_UNAVAILABLE");
     expect(error?.type === "error" && error.message).toContain("KEELSON_SANDBOX=required");
     expect(error?.type === "error" && error.message).not.toContain("/sandbox off");
+  });
+
+  test("a provider with tool support gets the host's sandboxed bash on a sandboxed turn only", async () => {
+    const store = makeStore();
+    const provider = recordingProvider("tool");
+    const conv = store.create({ providerId: provider.id });
+    const seenTurns: Array<{ cwd: string; conversationId: string }> = [];
+    const sandboxBashTool = (turn: { cwd: string; conversationId: string }) => {
+      seenTurns.push(turn);
+      return {
+        name: "bash",
+        description: "sandboxed",
+        inputSchema: z.object({ command: z.string() }),
+        execute: async () => {},
+      };
+    };
+    await run(store, frame(conv.id, provider.id, true), { sandboxBashTool });
+    await run(store, frame(conv.id, provider.id, false), { sandboxBashTool });
+    expect(provider.calls[0]?.tools?.filter((t) => t.name === "bash")).toHaveLength(1);
+    expect(provider.calls[0]?.tools?.find((t) => t.name === "bash")?.description).toBe("sandboxed");
+    expect(provider.calls[1]?.tools?.some((t) => t.name === "bash") ?? false).toBe(false);
+    expect(seenTurns).toEqual([{ cwd: process.cwd(), conversationId: conv.id }]);
   });
 
   test("policy evaluation sees the sandbox decision and the writable roots", async () => {

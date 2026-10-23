@@ -1,0 +1,110 @@
+// Copyright 2026, Daniel Scholl
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { MessageChunk } from "@keelson/shared";
+import { hostLauncher } from "@keelson/shared/launcher";
+import {
+  createSandboxPolicy,
+  prepareSandboxScratch,
+  type SandboxProfile,
+} from "@keelson/workflows";
+import { createSandboxedBashTool } from "../src/sandboxed-bash-tool.ts";
+
+const POSIX = process.platform !== "win32";
+const root = realpathSync(mkdtempSync(join(tmpdir(), "keelson-sbash-")));
+afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+function tool(runtime = true) {
+  const profiles: SandboxProfile[] = [];
+  const policy = createSandboxPolicy({
+    floor: false,
+    defaultEnabled: false,
+    home: join(root, "home"),
+    dbPath: join(root, "home", "keelson.db"),
+    bundledBinDir: join(root, "bin"),
+    resolveGitCommonDir: () => undefined,
+    ...(runtime
+      ? {
+          runtime: {
+            backend: "fake",
+            createLauncher: (profile: SandboxProfile) => {
+              profiles.push(profile);
+              return hostLauncher;
+            },
+          },
+        }
+      : {}),
+  });
+  return {
+    profiles,
+    bash: createSandboxedBashTool({
+      policy,
+      scratchDir: prepareSandboxScratch(root, "conv-1"),
+      baseEnv: { PATH: "/usr/bin:/bin", SECRET_TOKEN: "leak-me" },
+      defaultTimeoutSec: 30,
+    }),
+  };
+}
+
+async function run(bash: ReturnType<typeof tool>["bash"], input: unknown) {
+  const chunks: MessageChunk[] = [];
+  await bash.execute(input, {
+    cwd: root,
+    emit: (c) => chunks.push(c),
+    abortSignal: new AbortController().signal,
+  });
+  return chunks.find((c) => c.type === "tool_result") as
+    | { type: "tool_result"; content: string; isError?: boolean }
+    | undefined;
+}
+
+describe.skipIf(!POSIX)("createSandboxedBashTool", () => {
+  test("keeps pi's bash name and parameters", () => {
+    const { bash } = tool();
+    expect(bash.name).toBe("bash");
+    expect(bash.inputSchema.safeParse({ command: "ls", timeout: 5 }).success).toBe(true);
+    expect(bash.inputSchema.safeParse({}).success).toBe(false);
+  });
+
+  test("runs under the bash default profile and folds stderr into the result", async () => {
+    const { bash, profiles } = tool();
+    const result = await run(bash, {
+      command: 'echo out; echo err >&2; echo "secret=${SECRET_TOKEN:-none}"',
+    });
+    expect(result).toEqual({
+      type: "tool_result",
+      toolUseId: "",
+      content: "out\nerr\nsecret=none",
+    } as never);
+    expect(profiles[0]?.filesystem.denied.length).toBeGreaterThan(0);
+    expect(profiles[0]?.filesystem.readwrite).toContain(root);
+    expect(profiles[0]?.network.outbound).toBe("deny");
+  });
+
+  test("a non-zero exit is an error ending in pi's status line", async () => {
+    const result = await run(tool().bash, { command: "echo partial; exit 3" });
+    expect(result?.isError).toBe(true);
+    expect(result?.content).toBe("partial\n\nCommand exited with code 3");
+  });
+
+  test("a timeout is reported in seconds", async () => {
+    const result = await run(tool().bash, { command: "sleep 5", timeout: 0.2 });
+    expect(result?.isError).toBe(true);
+    expect(result?.content).toBe("Command timed out after 0.2 seconds");
+  });
+
+  test("with no runtime it refuses instead of running unconfined", async () => {
+    const result = await run(tool(false).bash, { command: "echo nope" });
+    expect(result?.isError).toBe(true);
+    expect(result?.content).toContain("sandbox required but unavailable");
+  });
+});

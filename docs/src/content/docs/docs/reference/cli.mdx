@@ -161,6 +161,17 @@ provider enabled in `config.json` whose SDK is not installed is left
 unregistered rather than offered and broken; `keelson doctor` reports it. See
 [Providers](../providers/#the-provider-matrix).
 
+## Sandbox
+
+| Command | Does |
+| --- | --- |
+| `keelson sandbox install` | Install the sandbox runtime (the `@microsoft/mxc-sdk` executor, about 100 MB) into the home and confirm it runs with a dry run. macOS 15 or later on Apple silicon. |
+| `keelson sandbox status` | Show whether the sandbox is on by default or required by `KEELSON_SANDBOX`, which executor would run, and whether a dry run passes. |
+
+The runtime is what confines sandboxed workflow `bash` and `script` nodes and
+pi's shell; Copilot, Claude, and Codex use their own sandboxes. Restart the
+server after installing it. See [Sandbox](../../guides/configuration/#sandbox).
+
 ## Ribs
 
 | Command | Does |

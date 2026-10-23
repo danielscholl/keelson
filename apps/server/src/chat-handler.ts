@@ -335,6 +335,9 @@ export interface ChatWebSocketDeps {
   usageStore?: UsageStore;
   // Boot-resolved sandbox policy; undefined runs every turn unsandboxed.
   sandbox?: ResolvedSandboxConfig;
+  // Builds the sandboxed `bash` a provider with "tool" support (pi) needs on a
+  // sandboxed turn; undefined leaves such a turn to fail closed in the provider.
+  sandboxBashTool?: (turn: { cwd: string; conversationId: string }) => ToolDefinition;
 }
 
 export function chatWebSocketHandlers(
@@ -387,6 +390,7 @@ export function chatWebSocketHandlers(
           ...(deps.policyEngine !== undefined ? { policyEngine: deps.policyEngine } : {}),
           ...(deps.usageStore !== undefined ? { usageStore: deps.usageStore } : {}),
           ...(deps.sandbox !== undefined ? { sandbox: deps.sandbox } : {}),
+          ...(deps.sandboxBashTool !== undefined ? { sandboxBashTool: deps.sandboxBashTool } : {}),
         });
       } finally {
         ws.data.chatBusy = false;
@@ -423,6 +427,7 @@ export interface ChatDeps {
   usageStore?: UsageStore;
   // See ChatWebSocketDeps.
   sandbox?: ResolvedSandboxConfig;
+  sandboxBashTool?: (turn: { cwd: string; conversationId: string }) => ToolDefinition;
 }
 
 // Worst-case section size is bounded at MAX_ITEMS × CONTENT_CHARS so a
@@ -631,7 +636,14 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     recallProjectId !== undefined && deps.projectNotebookStore !== undefined
       ? createNoteProjectTool({ store: deps.projectNotebookStore, projectId: recallProjectId })
       : undefined;
-  const allTools = noteTool ? [...tools.filter((t) => t.name !== noteTool.name), noteTool] : tools;
+  const withNote = noteTool ? [...tools.filter((t) => t.name !== noteTool.name), noteTool] : tools;
+  const sandboxBash =
+    sandboxDecision.enabled && sandboxSupport === "tool"
+      ? deps.sandboxBashTool?.({ cwd, conversationId })
+      : undefined;
+  const allTools = sandboxBash
+    ? [...withNote.filter((t) => t.name !== sandboxBash.name), sandboxBash]
+    : withNote;
 
   // Recall failures warn-and-continue with the section omitted; the turn
   // proceeds with whatever systemPrompt the seed would have produced.

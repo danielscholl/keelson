@@ -91,6 +91,12 @@ import {
   resolveSandboxConfig,
 } from "@keelson/shared/config";
 import { runJSON, runText } from "@keelson/shared/exec";
+import {
+  createMxcRuntime,
+  type MxcExecutorResolution,
+  type MxcRuntime,
+  resolveMxcExecutor,
+} from "@keelson/shared/launcher";
 import { projectWorkflowsDir } from "@keelson/shared/paths";
 import { getRegisteredTools, isRegisteredTool, registerTool } from "@keelson/skills";
 import {
@@ -157,6 +163,8 @@ export interface BootstrapProvidersOptions {
   // Overrides the on-disk SDK probe. Tests use it to exercise the not-installed
   // path without uninstalling a package the checkout depends on.
   isSdkInstalled?: (id: string) => boolean;
+  // Overrides the sandbox-executor probe pi's sandbox capability depends on.
+  sandboxRuntimeAvailable?: () => boolean;
 }
 
 export interface BootstrapProvidersResult {
@@ -214,6 +222,10 @@ export function bootstrapProviders(options: BootstrapProvidersOptions): Bootstra
         // so nothing to thread through getCredential.
         registerPiProvider({
           builtinTools: config.pi?.builtinTools !== false,
+          // pi's shell is replaced by a host-sandboxed bash only when a runtime exists.
+          sandboxSupport: (options.sandboxRuntimeAvailable ?? (() => resolveMxcExecutor().ok))()
+            ? "tool"
+            : "none",
           ...(config.pi?.concurrency !== undefined ? { concurrency: config.pi.concurrency } : {}),
           ...(config.pi?.vendors !== undefined ? { vendors: config.pi.vendors } : {}),
           ...(config.pi?.model ? { defaultModel: config.pi.model } : {}),
@@ -1594,16 +1606,43 @@ export function bootstrapSandbox(
   return resolved;
 }
 
-// The workflow-node policy over the same resolved config chat uses. No runtime
-// ships yet, so a node that resolves sandboxed fails closed.
+// The sandbox runtime this host can run: Seatbelt through the MXC executor when
+// it resolves, else the reason a sandboxed node will fail closed.
+export function resolveSandboxRuntime(
+  resolve: () => MxcExecutorResolution = () => resolveMxcExecutor(),
+): { runtime: MxcRuntime; executor: string } | { unavailableReason: string } {
+  const executor = resolve();
+  return executor.ok
+    ? { runtime: createMxcRuntime({ executorPath: executor.path }), executor: executor.path }
+    : { unavailableReason: executor.reason };
+}
+
+// The workflow-node policy over the same resolved config chat uses, with the
+// host's runtime when there is one. One boot line says which, and only warns
+// when a sandbox that is on would have nothing to run under.
 export function bootstrapSandboxPolicy(
   resolved: ResolvedSandboxConfig,
-  deps: { home: string; dbPath: string },
+  deps: {
+    home: string;
+    dbPath: string;
+    runtime?: ReturnType<typeof resolveSandboxRuntime>;
+  },
 ): SandboxPolicy {
+  const runtime = deps.runtime ?? resolveSandboxRuntime();
+  if ("runtime" in runtime) {
+    console.log(`[sandbox] runtime: seatbelt via ${runtime.executor}`);
+  } else if (resolved.floor || resolved.default) {
+    console.warn(
+      `[sandbox] sandbox is on but unavailable: ${runtime.unavailableReason}; sandboxed nodes and turns will fail closed`,
+    );
+  }
   return createOperatorSandboxPolicy(resolved, {
-    ...deps,
+    home: deps.home,
+    dbPath: deps.dbPath,
     bundledBinDir: bundledBinDir(),
-    unavailableReason: "this build has no sandbox runtime",
+    ...("runtime" in runtime
+      ? { runtime: runtime.runtime }
+      : { unavailableReason: runtime.unavailableReason }),
   });
 }
 

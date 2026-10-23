@@ -133,6 +133,7 @@ describe("keelson CLI smoke", () => {
       "db",
       "providers",
       "ribs",
+      "sandbox",
       "server",
       "toolchain",
       "workflow-resolution",

@@ -6,6 +6,7 @@ import { type AuthDeps, runAuthCheck } from "../checks/auth.ts";
 import { type DbDeps, runDbCheck } from "../checks/db.ts";
 import { type ProvidersDeps, runProvidersCheck } from "../checks/providers.ts";
 import { type RibsDeps, runRibsCheck } from "../checks/ribs.ts";
+import { runSandboxCheck, type SandboxDeps } from "../checks/sandbox.ts";
 import { runServerCheck, type ServerDeps } from "../checks/server.ts";
 import { runToolchainCheck, type ToolchainDeps } from "../checks/toolchain.ts";
 import { type CategoryResult, type DoctorReport, tally } from "../checks/types.ts";
@@ -26,6 +27,7 @@ export interface DoctorDeps {
   workflowResolution?: WorkflowResolutionDeps;
   providers?: ProvidersDeps;
   ribs?: RibsDeps;
+  sandbox?: SandboxDeps;
 }
 
 export interface DoctorOptions {
@@ -47,6 +49,7 @@ export async function buildDoctorReport(
     runWorkflowResolutionCheck(deps.workflowResolution),
     runProvidersCheck(deps.providers),
     runRibsCheck(deps.ribs),
+    runSandboxCheck(deps.sandbox),
   ]);
   return { categories, summary: tally(categories), strict };
 }

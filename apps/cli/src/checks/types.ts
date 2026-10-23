@@ -12,7 +12,8 @@ export type CheckCategory =
   | "workflows"
   | "workflow-resolution"
   | "providers"
-  | "ribs";
+  | "ribs"
+  | "sandbox";
 
 export interface CheckResult {
   name: string;

@@ -626,11 +626,20 @@ the config value, the same way `KEELSON_PROVIDERS` wins over `providers`.
 A sandboxed chat turn hands the provider a policy that confines the agent's own
 shell and file tools: the project directory is writable, the paths you list are
 granted or denied, and outbound network is denied unless you allow it. Copilot,
-Claude, and Codex enforce it with their own sandboxes. A turn on a provider that
-cannot sandbox (pi, gateways, the stub) fails with `SANDBOX_UNAVAILABLE` rather
-than running unconfined. Keelson's own tools run inside the server process and
-are not sandboxed; on a sandboxed turn their path arguments are confined to the
-writable roots. Workflow nodes ignore this block.
+Claude, and Codex enforce it with their own sandboxes. Pi's shell runs through
+Keelson's sandbox runtime instead, so a sandboxed pi turn needs that runtime
+installed. A turn on a provider that cannot sandbox (gateways, the stub) fails
+with `SANDBOX_UNAVAILABLE` rather than running unconfined. Keelson's own tools
+run inside the server process and are not sandboxed; on a sandboxed turn their
+path arguments are confined to the granted roots.
+
+Workflow `bash` and `script` nodes that resolve sandboxed run under Keelson's
+sandbox runtime, macOS Seatbelt through the MXC executor. It needs macOS 15 or
+later on Apple silicon; install it with `keelson sandbox install` and check it
+with `keelson sandbox status` or `keelson doctor`. Without it, a sandboxed node
+fails closed and names the fix. Under Seatbelt, a bun started inside a
+sandboxed bash node sees an empty environment; use a script node with
+`runtime: bun`, or opt the node out with `sandbox: { enabled: false }`.
 
 ```jsonc
 {
@@ -684,6 +693,7 @@ replacing it, so a grant from either source stands.
 | `KEELSON_WORKFLOW_PROVIDER` | first real provider | Provider that backs workflow `prompt` nodes. |
 | `KEELSON_WORKFLOW_TOOL_DENYLIST` | unset | Operator floor: tool names no workflow `prompt` node may use, subtracted on top of whatever a node allows. |
 | `KEELSON_APPROVAL_REVIEWER` | unset | Operator floor: set to `off` to disable every approval-node `reviewer`, so all gates pause for a human. See [Workflow nodes](../../reference/workflow-nodes/#reviewer). |
+| `KEELSON_MXC_EXEC` | unset | Path to an `mxc-exec-mac` build to use as the sandbox runtime instead of the one `keelson sandbox install` puts in the home. For development builds of the executor. |
 | `KEELSON_SANDBOX` | unset | `on` or `off` replaces the config file's `sandbox.default`; a conversation or turn that chooses still wins. `required` is an operator floor: every chat turn is sandboxed and nothing can turn it off. Any other value is ignored with a warning at boot. See [Sandbox](#sandbox). |
 | `KEELSON_ASK_ON_SHELL` | unset | Set to `1` to pause for human approval before any shell or file-mutating call. See [Governance](../governance/#approvals). |
 | `KEELSON_TURN_BUDGET` | unset | Positive integer: cap a session's model-calling turns. A downgrade gate, not a wall. See [Budgets](../governance/#budgets). |
