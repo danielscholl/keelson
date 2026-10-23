@@ -50,6 +50,20 @@ describe("pi file tools under a sandboxed turn", () => {
     expect(refuse("write", "secrets/k")).toBe("path 'secrets/k' is denied by the sandbox");
   });
 
+  test("a read-only root nested in a writable one refuses writes but allows reads", () => {
+    const vendor = join(cwd, "vendor");
+    const nested: SandboxProfile = {
+      ...profile,
+      filesystem: { readwrite: [cwd], readonly: [vendor], denied: [] },
+    };
+    expect(sandboxPathRefusal("write", { path: "vendor/a.ts" }, nested, cwd)).toBe(
+      "path 'vendor/a.ts' is not writable in the sandbox",
+    );
+    expect(sandboxPathRefusal("edit", { path: "vendor" }, nested, cwd)).toContain("not writable");
+    expect(sandboxPathRefusal("read", { path: "vendor/a.ts" }, nested, cwd)).toBeUndefined();
+    expect(sandboxPathRefusal("write", { path: "src/a.ts" }, nested, cwd)).toBeUndefined();
+  });
+
   test("a symlink out of the project is judged where it lands", () => {
     symlinkSync(outside, join(cwd, "link-out"));
     expect(refuse("write", "link-out/x")).toContain("not writable");

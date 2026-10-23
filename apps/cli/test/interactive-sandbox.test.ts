@@ -36,6 +36,7 @@ function harness(
     support?: SandboxSupport;
     busy?: boolean;
     patchFails?: boolean;
+    holdPatches?: boolean;
   } = {},
 ) {
   const config = opts.config === null ? undefined : (opts.config ?? OFF);
@@ -43,6 +44,9 @@ function harness(
   const patches: { id: string; mode: SandboxMode }[] = [];
   const info: string[] = [];
   const warn: string[] = [];
+  const releases: (() => void)[] = [];
+  let inFlight = 0;
+  let maxInFlight = 0;
   let changes = 0;
   const run = (arg: string) =>
     runSandboxCommand(arg, {
@@ -53,13 +57,35 @@ function harness(
       patchConversation: async (id, mode) => {
         if (opts.patchFails) throw new Error("server said no");
         patches.push({ id, mode });
+        if (!opts.holdPatches) return;
+        maxInFlight = Math.max(maxInFlight, ++inFlight);
+        await new Promise<void>((r) => releases.push(r));
+        inFlight--;
       },
       onChange: () => changes++,
       info: (l) => info.push(l),
       warn: (l) => warn.push(l),
     });
   const enabled = () => sessionSandboxResolution(session, config)?.enabled;
-  return { session, config, patches, info, warn, run, enabled, changes: () => changes };
+  // Lets queued microtasks (the next chained save) run.
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const release = async () => {
+    releases.shift()?.();
+    await settle();
+  };
+  return {
+    session,
+    config,
+    patches,
+    info,
+    warn,
+    run,
+    enabled,
+    release,
+    settle,
+    maxInFlight: () => maxInFlight,
+    changes: () => changes,
+  };
 }
 
 describe("/sandbox", () => {
@@ -87,6 +113,37 @@ describe("/sandbox", () => {
     expect(h.session.sandboxChoice).toBe(true);
     expect(h.enabled()).toBe(true);
     expect(h.warn[0]).toContain("saving the sandbox choice: server said no");
+  });
+
+  test("overlapping saves run one at a time, so the last choice is the one saved", async () => {
+    const h = harness({ session: { conversationId: "c1" }, holdPatches: true });
+    const off = h.run("off");
+    const on = h.run("on");
+    await h.settle();
+    expect(h.patches).toEqual([{ id: "c1", mode: "off" }]);
+    await h.release();
+    expect(h.session.sandboxConversation).toBe("off");
+    expect(h.session.sandboxChoice).toBe(true);
+    expect(h.enabled()).toBe(true);
+    await h.release();
+    await Promise.all([off, on]);
+    expect(h.patches.map((p) => p.mode)).toEqual(["off", "on"]);
+    expect(h.maxInFlight()).toBe(1);
+    expect(h.session.sandboxConversation).toBe("on");
+    expect(h.session.sandboxChoice).toBeUndefined();
+  });
+
+  test("a save that lands after leaving the conversation leaves the new state alone", async () => {
+    const h = harness({ session: { conversationId: "c1" }, holdPatches: true });
+    const on = h.run("on");
+    await h.settle();
+    leaveConversationSandbox(h.session);
+    h.session.conversationId = "c2";
+    await h.release();
+    await on;
+    expect(h.patches).toEqual([{ id: "c1", mode: "on" }]);
+    expect(h.session.sandboxConversation).toBeUndefined();
+    expect(h.session.sandboxChoice).toBeUndefined();
   });
 
   test("off is refused while KEELSON_SANDBOX=required holds the floor", async () => {

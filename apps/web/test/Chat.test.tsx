@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { ClientFrame, Conversation, RibActionResponse } from "@keelson/shared";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CanvasProvider } from "../src/components/Canvas/CanvasHost.tsx";
 import { ToastHost } from "../src/components/Toast.tsx";
 import { ribFixture } from "./ribsFixture.ts";
@@ -79,6 +79,7 @@ const createCalls: Array<{ providerId: string; options: unknown }> = [];
 let patchGate: Promise<void> | null = null;
 let patchFails = false;
 let configFails = false;
+let wsCallbacks: { onFrame?: (frame: unknown) => void } | null = null;
 let ledgerPricedEvents = 0;
 let ledgerUnpricedEvents = 0;
 
@@ -145,7 +146,11 @@ mock.module("../src/api.ts", () => ({
 
 mock.module("../src/ws.ts", () => ({
   ...realWs,
-  createReconnectingChatWs: (callbacks: { onStateChange?: (state: string) => void }) => {
+  createReconnectingChatWs: (callbacks: {
+    onStateChange?: (state: string) => void;
+    onFrame?: (frame: unknown) => void;
+  }) => {
+    wsCallbacks = callbacks;
     queueMicrotask(() => callbacks.onStateChange?.("open"));
     return {
       send: (frame: ClientFrame) => sentFrames.push(frame),
@@ -385,7 +390,7 @@ describe("Chat sandbox", () => {
     );
   });
 
-  test("a failed save reverts the chip and says why", async () => {
+  test("a failed save adopts the row's value and says why", async () => {
     patchFails = true;
     renderChat();
     await screen.findByText("Send this summary");
@@ -393,6 +398,47 @@ describe("Chat sandbox", () => {
     fireEvent.click(chip());
     expect(await screen.findByText(/saving the sandbox choice failed/)).toBeDefined();
     await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("false"));
+  });
+
+  test("a failed save after a send adopts what that send persisted, not the old value", async () => {
+    conversations[0]!.sandbox = "on";
+    let release = () => {};
+    patchGate = new Promise<void>((r) => {
+      release = r;
+    });
+    patchFails = true;
+    renderChat();
+    await screen.findByText("Send this summary");
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("true"));
+    fireEvent.click(chip());
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("false"));
+    send("hello");
+    await waitFor(() => expect(sentFrames.length).toBe(1));
+    expect(sentFrames[0]?.message).toMatchObject({ sandbox: false });
+    // The server mirrored the frame's choice onto the row before the PATCH failed.
+    conversations[0]!.sandbox = "off";
+    release();
+    expect(await screen.findByText(/saving the sandbox choice failed/)).toBeDefined();
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("false"));
+  });
+
+  test("a hydrated row's choice survives the recreate after the server lost it", async () => {
+    conversations[0]!.sandbox = "on";
+    renderChat();
+    await screen.findByText("Send this summary");
+    await waitFor(() => expect(chip().getAttribute("aria-pressed")).toBe("true"));
+    send("hello");
+    await waitFor(() => expect(sentFrames.length).toBe(1));
+    expect(sentFrames[0]?.message).not.toHaveProperty("sandbox");
+    act(() => {
+      wsCallbacks?.onFrame?.({
+        conversationId: "conv-1",
+        event: { type: "error", code: "UNKNOWN_CONVERSATION", message: "unknown conversation" },
+      });
+    });
+    await waitFor(() => expect(sentFrames.length).toBe(2));
+    expect(createCalls[0]?.options).toMatchObject({ sandbox: "on" });
+    expect(sentFrames[1]?.message).toMatchObject({ sandbox: true });
   });
 
   test("an unread /api/config picks nothing: the chip is mixed and a fresh chat sends no override", async () => {

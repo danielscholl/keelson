@@ -601,10 +601,13 @@ export function Chat({
     hideUserMessage: boolean;
     seedForCreate: string | undefined;
     nameForCreate: string | undefined;
+    // What the turn ran under, so a recreate keeps a hydrated row's choice.
+    sandboxForRetry: boolean | undefined;
   } | null>(null);
   const lastRetriedUserIdRef = useRef<string | null>(null);
   const doSendRef = useRef<
-    ((prompt: string, opts?: { hideUserMessage?: boolean }) => Promise<void>) | null
+    | ((prompt: string, opts?: { hideUserMessage?: boolean; sandbox?: boolean }) => Promise<void>)
+    | null
   >(null);
   // Ref-shim so switchActiveProject can abort a live stream without
   // forward-declaring abortActiveStream (which depends on later state).
@@ -1023,6 +1026,9 @@ export function Chat({
             }
             void doSendRef.current?.(pending.prompt, {
               hideUserMessage: pending.hideUserMessage,
+              ...(pending.sandboxForRetry !== undefined
+                ? { sandbox: pending.sandboxForRetry }
+                : {}),
             });
             return;
           }
@@ -1135,7 +1141,7 @@ export function Chat({
   }, [handleFrame, toast]);
 
   const doSend = useCallback(
-    async (prompt: string, opts?: { hideUserMessage?: boolean }) => {
+    async (prompt: string, opts?: { hideUserMessage?: boolean; sandbox?: boolean }) => {
       if (!selectedProviderId) {
         setError("No provider selected");
         return;
@@ -1151,6 +1157,9 @@ export function Chat({
       let seedForCreate: string | undefined;
       let nameForCreate: string | undefined;
 
+      const choice = opts?.sandbox ?? sandboxChoice;
+      const sandboxForRetry =
+        choice ?? (sandboxConversation !== undefined ? sandboxConversation === "on" : undefined);
       let convoId = conversationIdRef.current;
       if (!convoId) {
         seedForCreate = pendingSeedRef.current ?? undefined;
@@ -1161,12 +1170,12 @@ export function Chat({
             ...(seedForCreate ? { seedSystemPrompt: seedForCreate } : {}),
             ...(nameForCreate ? { name: nameForCreate } : {}),
             ...(activeProjectId ? { projectId: activeProjectId } : {}),
-            ...(sandboxChoice !== undefined ? { sandbox: sandboxChoice ? "on" : "off" } : {}),
+            ...(choice !== undefined ? { sandbox: choice ? "on" : "off" } : {}),
           });
           convoId = c.id;
           setSandboxChoice(undefined);
           setSandboxConversation(
-            c.sandbox ?? (sandboxChoice !== undefined ? (sandboxChoice ? "on" : "off") : undefined),
+            c.sandbox ?? (choice !== undefined ? (choice ? "on" : "off") : undefined),
           );
           setConversationId(c.id);
           conversationIdRef.current = c.id;
@@ -1208,6 +1217,7 @@ export function Chat({
         hideUserMessage: opts?.hideUserMessage ?? false,
         seedForCreate,
         nameForCreate,
+        sandboxForRetry,
       };
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
 
@@ -1226,7 +1236,7 @@ export function Chat({
           ...(selectedModel ? { model: selectedModel } : {}),
           ...(supportsThinking ? { thinking: thinkingEnabled } : {}),
           ...(supportsEffort ? { reasoningEffort } : {}),
-          ...(sandboxChoice !== undefined ? { sandbox: sandboxChoice } : {}),
+          ...(choice !== undefined ? { sandbox: choice } : {}),
         },
       });
 
@@ -1240,6 +1250,7 @@ export function Chat({
       ensureWs,
       reasoningEffort,
       sandboxChoice,
+      sandboxConversation,
       selectedModel,
       selectedModelInfo,
       selectedProviderId,
@@ -1483,8 +1494,11 @@ export function Chat({
   );
 
   // Applies the choice at once (a send meanwhile carries it on its frame, which
-  // the server mirrors onto the row), then saves it on the open conversation;
-  // a failed save reverts it. With no conversation it waits for the next create.
+  // the server mirrors onto the row), then saves it on the open conversation.
+  // A failed save adopts whatever the row now holds, since a frame sent during
+  // the save may have persisted the choice anyway; if the row cannot be read the
+  // choice stays pending for the next frame. With no conversation it waits for
+  // the next create.
   // Shared by the chip and `/sandbox on|off`.
   const applySandbox = useCallback(
     async (wanted: boolean): Promise<CommandResult> => {
@@ -1492,7 +1506,6 @@ export function Chat({
       if (sandboxSavingRef.current) return failResult("still saving the last sandbox choice");
       const mode: SandboxMode = wanted ? "on" : "off";
       const id = conversationIdRef.current;
-      const previous = sandboxChoice;
       setSandboxChoice(wanted);
       if (id !== null) {
         sandboxSavingRef.current = true;
@@ -1505,7 +1518,14 @@ export function Chat({
           }
           conversationsList.patchLocal(id, { sandbox: mode });
         } catch (e: unknown) {
-          if (conversationIdRef.current === id) setSandboxChoice(previous);
+          const row = await getConversation(id).catch(() => null);
+          if (row !== null) {
+            if (conversationIdRef.current === id) {
+              setSandboxChoice(undefined);
+              setSandboxConversation(row.sandbox);
+            }
+            conversationsList.patchLocal(id, { sandbox: row.sandbox });
+          }
           return failResult(
             `saving the sandbox choice failed: ${e instanceof Error ? e.message : String(e)}`,
           );
@@ -1519,7 +1539,7 @@ export function Chat({
         : undefined;
       return okResult(warning ? `sandbox → on\n${warning}` : `sandbox → ${mode}`);
     },
-    [conversationsList, sandboxChoice, sandboxConfig, sandboxSupport, selectedProviderId],
+    [conversationsList, sandboxConfig, sandboxSupport, selectedProviderId],
   );
 
   const dispatchSandboxCommand = useCallback(

@@ -79,12 +79,14 @@ export function sandboxPathRefusal(
     return `path '${shown}' contains a path the sandbox denies; search a narrower path`;
   }
   const writable = profile.filesystem.readwrite.map(canonicalRoot);
+  const readonly = profile.filesystem.readonly.map(canonicalRoot);
   if (write) {
-    return writable.some((r) => inside(r, target))
+    // A read-only root carves out of a writable one, as the OS sandbox does.
+    return writable.some((r) => inside(r, target)) && !readonly.some((r) => inside(r, target))
       ? undefined
       : `path '${shown}' is not writable in the sandbox`;
   }
-  const readable = [...writable, ...profile.filesystem.readonly.map(canonicalRoot)];
+  const readable = [...writable, ...readonly];
   return readable.some((r) => inside(r, target))
     ? undefined
     : `path '${shown}' is outside the sandbox's readable roots`;

@@ -28,6 +28,8 @@ export interface SandboxSessionState {
   sandboxConversation?: SandboxMode;
 }
 
+const pendingSaves = new WeakMap<SandboxSessionState, Promise<void>>();
+
 export interface SandboxCommandDeps {
   session: SandboxSessionState;
   // Undefined when /api/config could not be read.
@@ -126,14 +128,27 @@ export async function runSandboxCommand(arg: string, deps: SandboxCommandDeps): 
   // Pending until a row saves it; the next frame carries it either way.
   session.sandboxChoice = wanted;
   deps.onChange();
-  if (session.conversationId !== undefined) {
-    try {
-      await deps.patchConversation(session.conversationId, wanted ? "on" : "off");
-      session.sandboxConversation = wanted ? "on" : "off";
-      delete session.sandboxChoice;
-    } catch (err) {
-      deps.warn(`✗ saving the sandbox choice: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  const id = session.conversationId;
+  if (id !== undefined) {
+    const mode: SandboxMode = wanted ? "on" : "off";
+    // The slash dispatcher does not await handlers, so saves are chained to
+    // land in the order they were asked for.
+    const save = (pendingSaves.get(session) ?? Promise.resolve()).then(async () => {
+      try {
+        await deps.patchConversation(id, mode);
+        // A save that lands after the session left the row must not touch the
+        // state of the conversation it is on now.
+        if (session.conversationId !== id) return;
+        session.sandboxConversation = mode;
+        if (session.sandboxChoice === wanted) delete session.sandboxChoice;
+      } catch (err) {
+        deps.warn(
+          `✗ saving the sandbox choice: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    });
+    pendingSaves.set(session, save);
+    await save;
   }
   deps.info(`sandbox → ${parsed}`);
   const unsupported = wanted ? sandboxUnsupportedWarning(session.providerId, support) : undefined;
