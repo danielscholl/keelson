@@ -287,11 +287,21 @@ function builtInDenied(opts: { home: string; dbPath: string; hostHome: string })
   );
 }
 
-export function sandboxUnavailableMessage(reason: string, floor: boolean): string {
+// "runtime": no executor on this host, so installing one is the fix.
+// "provider": the node's provider cannot confine its tools, so installing does nothing.
+export type SandboxUnavailableKind = "runtime" | "provider";
+
+export function sandboxUnavailableMessage(
+  reason: string,
+  floor: boolean,
+  kind: SandboxUnavailableKind = "runtime",
+): string {
   const optOut = floor
     ? "unset `KEELSON_SANDBOX=required`, which ignores `enabled: false`"
     : "set `sandbox: { enabled: false }` on the node";
-  return `sandbox required but unavailable: ${reason}; run \`keelson sandbox install\` or ${optOut}`;
+  const fix =
+    kind === "provider" ? "switch to a provider that can sandbox" : "run `keelson sandbox install`";
+  return `sandbox required but unavailable: ${reason}; ${fix} or ${optOut}`;
 }
 
 export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPolicy {
@@ -359,6 +369,7 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
             fail: sandboxUnavailableMessage(
               `provider '${ctx.provider.id}' cannot sandbox its tools`,
               opts.floor,
+              "provider",
             ),
           };
         }

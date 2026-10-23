@@ -125,6 +125,20 @@ describe("resolve: precedence and floor", () => {
     const res = policy.resolve(undefined, { ...ctx, provider: { id: "stub", support: "none" } });
     expect(res.outcome).toBe("off");
     expect(res.fail).toContain("provider 'stub' cannot sandbox its tools");
+    expect(res.fail).toContain("switch to a provider that can sandbox");
+    expect(res.fail).toContain("KEELSON_SANDBOX=required");
+    expect(res.fail).not.toContain("keelson sandbox install");
+  });
+
+  test("a provider failure without the floor names the node opt-out, not the install", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const res = policy.resolve(
+      { enabled: true },
+      { ...ctx, provider: { id: "stub", support: "none" } },
+    );
+    expect(res.fail).toBe(
+      "sandbox required but unavailable: provider 'stub' cannot sandbox its tools; switch to a provider that can sandbox or set `sandbox: { enabled: false }` on the node",
+    );
   });
 
   test("a `..` path fails the node with a readable reason", () => {

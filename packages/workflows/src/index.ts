@@ -139,6 +139,7 @@ export {
   type SandboxResolution,
   type SandboxResolveContext,
   type SandboxRuntime,
+  type SandboxUnavailableKind,
   sandboxUnavailableMessage,
   writeSandboxBody,
 } from "./handlers/sandbox.ts";
