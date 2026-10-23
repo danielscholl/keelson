@@ -133,6 +133,23 @@ describe("/sandbox", () => {
     expect(h.session.sandboxChoice).toBeUndefined();
   });
 
+  test("on, off, on: the frame carries on until the last save lands", async () => {
+    const h = harness({ session: { conversationId: "c1" }, holdPatches: true });
+    const runs = [h.run("on"), h.run("off"), h.run("on")];
+    await h.settle();
+    await h.release();
+    expect(h.session.sandboxChoice).toBe(true);
+    await h.release();
+    expect(h.session.sandboxConversation).toBe("off");
+    expect(h.session.sandboxChoice).toBe(true);
+    expect(h.enabled()).toBe(true);
+    await h.release();
+    await Promise.all(runs);
+    expect(h.patches.map((p) => p.mode)).toEqual(["on", "off", "on"]);
+    expect(h.session.sandboxConversation).toBe("on");
+    expect(h.session.sandboxChoice).toBeUndefined();
+  });
+
   test("a save that lands after leaving the conversation leaves the new state alone", async () => {
     const h = harness({ session: { conversationId: "c1" }, holdPatches: true });
     const on = h.run("on");

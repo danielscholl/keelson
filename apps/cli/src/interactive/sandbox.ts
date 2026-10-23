@@ -29,6 +29,7 @@ export interface SandboxSessionState {
 }
 
 const pendingSaves = new WeakMap<SandboxSessionState, Promise<void>>();
+const latestSave = new WeakMap<SandboxSessionState, number>();
 
 export interface SandboxCommandDeps {
   session: SandboxSessionState;
@@ -131,6 +132,8 @@ export async function runSandboxCommand(arg: string, deps: SandboxCommandDeps): 
   const id = session.conversationId;
   if (id !== undefined) {
     const mode: SandboxMode = wanted ? "on" : "off";
+    const seq = (latestSave.get(session) ?? 0) + 1;
+    latestSave.set(session, seq);
     // The slash dispatcher does not await handlers, so saves are chained to
     // land in the order they were asked for.
     const save = (pendingSaves.get(session) ?? Promise.resolve()).then(async () => {
@@ -140,7 +143,9 @@ export async function runSandboxCommand(arg: string, deps: SandboxCommandDeps): 
         // state of the conversation it is on now.
         if (session.conversationId !== id) return;
         session.sandboxConversation = mode;
-        if (session.sandboxChoice === wanted) delete session.sandboxChoice;
+        // Only the newest save settles the pending choice; an older one with the
+        // same value would otherwise clear a choice a later save still owes.
+        if (latestSave.get(session) === seq) delete session.sandboxChoice;
       } catch (err) {
         deps.warn(
           `✗ saving the sandbox choice: ${err instanceof Error ? err.message : String(err)}`,

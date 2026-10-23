@@ -26,7 +26,11 @@ import {
 } from "@keelson/shared";
 import { loadKeelsonConfig } from "@keelson/shared/config";
 import { getRegisteredTools } from "@keelson/skills";
-import { prepareSandboxScratch } from "@keelson/workflows";
+import {
+  DEFAULT_TOOL_DENYLIST,
+  parseToolDenylist,
+  prepareSandboxScratch,
+} from "@keelson/workflows";
 
 import {
   bootstrapCliProviders,
@@ -35,6 +39,8 @@ import {
   pickDefaultProvider,
 } from "./providers.ts";
 import { cliSandbox, SandboxUnavailableError } from "./sandbox.ts";
+
+const SANDBOXED_BASH_TOOL = "bash";
 
 export interface ChatHeadlessOptions {
   message: string;
@@ -110,9 +116,19 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
   const sandboxProfile: SandboxProfile | undefined = decision.enabled
     ? buildSandboxProfile(sandbox.resolved.settings, opts.cwd, true, realpathSync)
     : undefined;
+  // No policy engine runs headless, so the operator floor the server folds into
+  // its engine applies here, as on the offline workflow path.
+  const denied = new Set([
+    ...DEFAULT_TOOL_DENYLIST,
+    ...parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST),
+  ]);
+  const shellWithheld =
+    sandboxProfile !== undefined &&
+    support === "tool" &&
+    (denied.has(SANDBOXED_BASH_TOOL) || denied.has("Bash"));
   // A one-shot has no conversation to key a scratch by, so it gets its own.
   const scratchRoot =
-    sandboxProfile !== undefined && support === "tool"
+    sandboxProfile !== undefined && support === "tool" && !shellWithheld
       ? mkdtempSync(join(tmpdir(), "keelson-chat-sandbox-"))
       : undefined;
   const sandboxBash: ToolDefinition | undefined =
@@ -123,9 +139,10 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
           defaultTimeoutSec: config.pi?.bashTimeoutSec ?? 300,
         })
       : undefined;
+  const registered = getRegisteredTools().filter((t) => !denied.has(t.name));
   const tools = sandboxBash
-    ? [...getRegisteredTools().filter((t) => t.name !== sandboxBash.name), sandboxBash]
-    : getRegisteredTools();
+    ? [...registered.filter((t) => t.name !== sandboxBash.name), sandboxBash]
+    : registered;
   const systemPrompt = buildOneShotSystemPrompt();
   // Match the SPA picker (apps/web/src/views/Chat.tsx:126-129): when
   // --model is omitted, forward the provider's configured defaultModel
@@ -145,6 +162,9 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
       ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
       ...(tools.length > 0 && opts.allowedTools === undefined ? { tools } : {}),
       ...(opts.allowedTools !== undefined ? { allowedTools: [...opts.allowedTools] } : {}),
+      // Denied outright, so the provider neither demands the withheld shell nor
+      // falls back to its own.
+      ...(shellWithheld ? { disallowedTools: [SANDBOXED_BASH_TOOL] } : {}),
       ...(systemPrompt !== undefined ? { systemPrompt } : {}),
       ...(sandboxProfile !== undefined ? { sandbox: sandboxProfile } : {}),
     })) {
