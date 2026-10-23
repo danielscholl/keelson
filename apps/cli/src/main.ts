@@ -23,6 +23,7 @@ import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/proj
 import { runProviderAdd, runProviderList, runProviderRemove } from "./commands/provider.ts";
 import { runRibAdd, runRibList, runRibReload, runRibRemove, runRibShow } from "./commands/rib.ts";
 import { runRibUpdate } from "./commands/rib-update.ts";
+import { runSandboxInstall, runSandboxStatus } from "./commands/sandbox.ts";
 import {
   runServe,
   runServeRestart,
@@ -590,6 +591,26 @@ export function buildProgram(): Command {
       const { json } = globalOpts(this);
       const baseUrl = requireNonEmpty(json, "--base-url", removeOpts.baseUrl);
       await runProviderRemove(id, { json, ...(baseUrl ? { baseUrl } : {}) });
+    });
+
+  const sandbox = program
+    .command("sandbox")
+    .description("sandbox runtime (install, status) — the macOS Seatbelt executor");
+
+  sandbox
+    .command("install")
+    .description("install the sandbox executor into the keelson home and check it runs")
+    .action(async function sandboxInstallAction(this: Command) {
+      const { json } = globalOpts(this);
+      await runSandboxInstall({ json });
+    });
+
+  sandbox
+    .command("status")
+    .description("show the sandbox default, the floor, and whether the runtime is usable")
+    .action(async function sandboxStatusAction(this: Command) {
+      const { json } = globalOpts(this);
+      await runSandboxStatus({ json });
     });
 
   const rib = program

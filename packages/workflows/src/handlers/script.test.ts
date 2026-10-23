@@ -283,7 +283,7 @@ describe("makeScriptHandler — sandbox", () => {
 
   const bunNode = { id: "s", script: "x", runtime: "bun" } as unknown as DagNode;
 
-  test("an inline bun body runs as `bun --no-env-file <scratch>/body.ts`", async () => {
+  test("an inline bun body runs as `bun --no-env-file --preload <shim> <scratch>/body.ts`", async () => {
     const artifacts = await mkdtemp(join(tmpdir(), "keelson-script-sandbox-"));
     try {
       const { policy, specs } = recordingPolicy(true);
@@ -300,8 +300,17 @@ describe("makeScriptHandler — sandbox", () => {
       });
       const bodyFile = join(artifacts, "sandbox", "s", "body.ts");
       expect(specs[0]?.cmd).toBe("bun");
-      expect(specs[0]?.args).toEqual(["--no-env-file", bodyFile]);
+      const scratch = join(artifacts, "sandbox", "s");
+      expect(specs[0]?.args).toEqual([
+        "--no-env-file",
+        "--preload",
+        join(scratch, "shim.ts"),
+        bodyFile,
+      ]);
       expect(readFileSync(bodyFile, "utf8")).toBe(body);
+      // The shim restores exactly the filtered env the launcher was given.
+      expect(JSON.parse(readFileSync(join(scratch, "env.json"), "utf8"))).toEqual(specs[0]?.env);
+      expect(readFileSync(join(scratch, "shim.ts"), "utf8")).toContain(join(scratch, "env.json"));
     } finally {
       rmSync(artifacts, { recursive: true, force: true });
     }

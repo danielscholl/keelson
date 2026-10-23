@@ -455,6 +455,12 @@ describe("runDoctor exit-code rollup", () => {
         }),
         envProviders: "",
       },
+      // The sandbox check otherwise resolves the host's executor and config.
+      sandbox: {
+        resolve: () => ({ ok: true as const, path: "/fake/mxc-exec-mac", source: "env" as const }),
+        sandboxConfig: () => ({ default: false, floor: false }),
+        probe: async () => ({ ok: true as const }),
+      },
     };
   }
 

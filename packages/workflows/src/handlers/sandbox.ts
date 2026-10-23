@@ -44,6 +44,8 @@ export interface SandboxProfile {
 export interface SandboxRuntime {
   readonly backend: string;
   createLauncher(profile: SandboxProfile, scratch: string): ProcessLauncher;
+  // What this backend does differently from what the profile literally asks.
+  warnings?(profile: SandboxProfile): readonly string[];
 }
 
 export interface SandboxResolution {
@@ -53,6 +55,8 @@ export interface SandboxResolution {
   backend?: string;
   // Set when the sandbox is on but cannot be enforced; the node fails with it.
   fail?: string;
+  // Caveats the backend reports for this profile; handlers emit them as node warnings.
+  warnings?: readonly string[];
 }
 
 export interface SandboxResolveContext {
@@ -370,7 +374,13 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
           ),
         };
       }
-      return { profile, outcome: "mxc", backend: opts.runtime.backend };
+      const warnings = opts.runtime.warnings?.(profile) ?? [];
+      return {
+        profile,
+        outcome: "mxc",
+        backend: opts.runtime.backend,
+        ...(warnings.length > 0 ? { warnings } : {}),
+      };
     },
     launcherFor(profile, scratch) {
       if (opts.runtime === undefined) {
@@ -465,6 +475,28 @@ export function tagSandboxResult(
     sandbox: resolution.outcome,
     ...(resolution.backend !== undefined ? { sandboxBackend: resolution.backend } : {}),
   };
+}
+
+export function emitSandboxWarnings(
+  ctx: NodeContext,
+  resolution: SandboxResolution | undefined,
+): void {
+  for (const message of resolution?.warnings ?? []) ctx.emit({ type: "node_warning", message });
+}
+
+// Under Seatbelt bun cannot read its cwd's ancestor directories, and when that
+// lookup fails it starts with an empty environment. A preload restores the
+// node's (already filtered) env from a file before the body runs.
+export function writeBunEnvShim(scratch: string, env: Readonly<Record<string, string>>): string {
+  const envPath = join(scratch, "env.json");
+  writeFileSync(envPath, JSON.stringify(env), { mode: 0o600 });
+  const shimPath = join(scratch, "shim.ts");
+  writeFileSync(
+    shimPath,
+    `Object.assign(process.env, JSON.parse(require("node:fs").readFileSync(${JSON.stringify(envPath)}, "utf8")));\n`,
+    { mode: 0o600 },
+  );
+  return shimPath;
 }
 
 // The body rides in a file, never argv: a runtime may wrap the command in its

@@ -28,6 +28,7 @@ import {
 import type { DagNode } from "../schema/index.ts";
 import { bundledBinDir, forgeShimPath } from "../seed.ts";
 import {
+  emitSandboxWarnings,
   prepareSandboxScratch,
   type SandboxPolicy,
   type SandboxResolution,
@@ -99,6 +100,8 @@ async function runBash(
     const env = prependPath(nodeEnv, [bundledBinDir(), ...bash.pathDirs]);
     const profile = resolution?.profile;
     if (policy !== undefined && profile) {
+      emitSandboxWarnings(ctx, resolution);
+      if (BARE_BUN.test(shellBody)) ctx.emit({ type: "node_warning", message: NESTED_BUN_WARNING });
       const scratch = prepareSandboxScratch(ctx.artifactsDir, ctx.nodeId);
       outcome = await runSubprocess({
         cmd: bash.cmd,
@@ -157,5 +160,11 @@ async function runBash(
   }
   return { status: "succeeded", output: { kind: "text", text: stdoutText } };
 }
+
+// A bun started from inside the sandboxed shell cannot read its cwd's ancestor
+// directories and so starts with an empty environment.
+const BARE_BUN = /(^|[\s;&|(`])bun(\s|$)/m;
+const NESTED_BUN_WARNING =
+  "under the macOS sandbox a bun started inside this bash node sees an empty environment; use a script node with runtime: bun, or set sandbox: { enabled: false } on this node";
 
 export const bashHandler: NodeHandler = makeBashHandler();

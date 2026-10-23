@@ -33,7 +33,12 @@ import {
 } from "@keelson/shared/config";
 import { keelsonPaths, resolveKeelsonHome, ribDataDir } from "@keelson/shared/paths";
 import { clearServerState, readServerState, writeServerState } from "@keelson/shared/server-state";
-import { bundledWorkflowsDir, installForgeOnPath, seedStarterAssets } from "@keelson/workflows";
+import {
+  bundledWorkflowsDir,
+  installForgeOnPath,
+  prepareSandboxScratch,
+  seedStarterAssets,
+} from "@keelson/workflows";
 import type { Server } from "bun";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -90,6 +95,7 @@ import { createProjectsStore, type ProjectsStore } from "./projects-store.ts";
 import { installRedactedConsole } from "./redact.ts";
 import { allRegions, createRunEventDispatcher } from "./ribs.ts";
 import { ribsRoutes } from "./ribs-handler.ts";
+import { createSandboxedBashTool } from "./sandboxed-bash-tool.ts";
 import { createScheduler, deriveSurfaceSchedules, makeBoundKeyResolver } from "./scheduler.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
 import { createSnapshotManager } from "./snapshot-manager.ts";
@@ -539,6 +545,18 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // a workflow prompt node only sees a rib tool it explicitly `allowed_tools`.
   const sandbox = bootstrapSandbox();
   const sandboxPolicy = bootstrapSandboxPolicy(sandbox, { home: KEELSON_HOME, dbPath: DB_PATH });
+  const sandboxBashBaseEnv = Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined,
+    ),
+  );
+  const sandboxBashTool = (turn: { cwd: string; conversationId: string }) =>
+    createSandboxedBashTool({
+      policy: sandboxPolicy,
+      scratchDir: prepareSandboxScratch(join(KEELSON_HOME, "scratch", "chat"), turn.conversationId),
+      baseEnv: sandboxBashBaseEnv,
+      defaultTimeoutSec: loadKeelsonConfig().pi?.bashTimeoutSec ?? 300,
+    });
   const promptHandler = bootstrapPromptHandler({
     defaultOffTools: ribs.tools.map((t) => t.name),
     sandbox: sandboxPolicy,
@@ -928,6 +946,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     usageStore,
     ...(policyEngine ? { policyEngine } : {}),
     sandbox,
+    sandboxBashTool,
   });
   const workflowRunHandlers = workflowRunWebSocketHandlers({
     subscribers: workflowSubscribers,

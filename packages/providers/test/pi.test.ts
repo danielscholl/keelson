@@ -1723,3 +1723,76 @@ describe("PiProvider repeatCallLimit", () => {
     expect(seen).toEqual([3, 0]);
   });
 });
+
+describe("PiProvider — sandbox", () => {
+  const profile = {
+    enabled: true,
+    filesystem: { readwrite: ["/repo"], readonly: [], denied: [] },
+    network: { outbound: "deny" as const },
+    env: [],
+  };
+  const tool = (name: string): ToolDefinition => ({
+    name,
+    description: name,
+    inputSchema: z.object({ command: z.string() }),
+    execute: async () => {},
+  });
+
+  test("capability is tool only when the host has a sandbox runtime", () => {
+    expect(new PiProvider({ factory: fakeFactory([]) }).getCapabilities().sandbox).toBeUndefined();
+    expect(
+      new PiProvider({ factory: fakeFactory([]), sandboxSupport: "tool" }).getCapabilities()
+        .sandbox,
+    ).toBe("tool");
+    expect(piCapabilities("rec/flint", "tool").sandbox).toBe("tool");
+  });
+
+  test("a sandboxed turn swaps pi's built-in bash for the supplied one", async () => {
+    let captured: PiCreateSessionParams | undefined;
+    const provider = new PiProvider({
+      factory: fakeFactory([{ type: "agent_end" }], { capture: (p) => (captured = p) }),
+      sandboxSupport: "tool",
+    });
+    await collect(
+      provider.sendQuery("hi", "/repo", undefined, { tools: [tool("bash")], sandbox: profile }),
+    );
+    expect(captured?.excludeBuiltinTools).toEqual(["bash"]);
+    expect(captured?.customTools?.map((t) => t.name)).toEqual(["bash"]);
+    expect(captured?.builtinTools).toBe(true);
+  });
+
+  test("an unsandboxed turn keeps pi's own bash", async () => {
+    let captured: PiCreateSessionParams | undefined;
+    const provider = new PiProvider({
+      factory: fakeFactory([{ type: "agent_end" }], { capture: (p) => (captured = p) }),
+      sandboxSupport: "tool",
+    });
+    await collect(provider.sendQuery("hi", "/repo"));
+    expect(captured?.excludeBuiltinTools).toBeUndefined();
+  });
+
+  test("fails closed before a session when no sandboxed bash arrives or there is no runtime", async () => {
+    let created = 0;
+    const factory = fakeFactory([{ type: "agent_end" }], { capture: () => created++ });
+    const noTool = await collect(
+      new PiProvider({ factory, sandboxSupport: "tool" }).sendQuery("hi", "/repo", undefined, {
+        tools: [tool("workflow_run")],
+        sandbox: profile,
+      }),
+    );
+    expect(noTool).toEqual([
+      {
+        type: "error",
+        message: "sandbox unavailable: no sandboxed bash tool was supplied for this pi turn",
+      },
+    ]);
+    const noRuntime = await collect(
+      new PiProvider({ factory }).sendQuery("hi", "/repo", undefined, {
+        tools: [tool("bash")],
+        sandbox: profile,
+      }),
+    );
+    expect(noRuntime[0]).toMatchObject({ type: "error" });
+    expect(created).toBe(0);
+  });
+});

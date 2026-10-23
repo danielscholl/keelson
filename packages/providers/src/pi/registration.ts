@@ -53,7 +53,7 @@ export function registerPiProvider(
       id: "pi",
       displayName: "Pi (community)",
       factory: () => new PiProvider({ ...providerOptions, slots }),
-      capabilities: piCapabilities(providerOptions.defaultModel),
+      capabilities: piCapabilities(providerOptions.defaultModel, providerOptions.sandboxSupport),
       builtIn: true,
       // No credentialServiceId: pi owns its own ~/.pi/agent/auth.json + vendor
       // env keys, so there is nothing in the keelson keychain to surface.
