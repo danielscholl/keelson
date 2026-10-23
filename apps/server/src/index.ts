@@ -56,8 +56,11 @@ import {
   bootstrapSandboxPolicy,
   bootstrapWorkflows,
   describeSandboxPolicy,
+  describeSandboxPolicyGrants,
+  describeSandboxRuntime,
   prepareRibWorkflows,
   registerRibTools,
+  resolveSandboxRuntime,
 } from "./bootstrap.ts";
 import { createCanvasTools } from "./canvas-tools.ts";
 import { chatRoutes, chatWebSocketHandlers, handleChatUpgrade } from "./chat-handler.ts";
@@ -544,22 +547,30 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // the placeholder handler in that case. Rib tools are passed as default-off so
   // a workflow prompt node only sees a rib tool it explicitly `allowed_tools`.
   const sandbox = bootstrapSandbox();
-  const sandboxPolicy = bootstrapSandboxPolicy(sandbox, { home: KEELSON_HOME, dbPath: DB_PATH });
-  const sandboxBashBaseEnv = Object.fromEntries(
-    Object.entries(process.env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    ),
-  );
+  const sandboxRuntime = resolveSandboxRuntime();
+  const sandboxPolicy = bootstrapSandboxPolicy(sandbox, {
+    home: KEELSON_HOME,
+    dbPath: DB_PATH,
+    runtime: sandboxRuntime,
+  });
   const sandboxBashTool = (turn: { cwd: string; conversationId: string }) =>
     createSandboxedBashTool({
       policy: sandboxPolicy,
       scratchDir: prepareSandboxScratch(join(KEELSON_HOME, "scratch", "chat"), turn.conversationId),
-      baseEnv: sandboxBashBaseEnv,
       defaultTimeoutSec: loadKeelsonConfig().pi?.bashTimeoutSec ?? 300,
     });
   const promptHandler = bootstrapPromptHandler({
     defaultOffTools: ribs.tools.map((t) => t.name),
     sandbox: sandboxPolicy,
+    sandboxBashTool: ({ scratchDir, nodeSandbox, workflowSandbox, artifactsDir }) =>
+      createSandboxedBashTool({
+        policy: sandboxPolicy,
+        scratchDir,
+        ...(nodeSandbox !== undefined ? { nodeSandbox } : {}),
+        ...(workflowSandbox !== undefined ? { workflowSandbox } : {}),
+        ...(artifactsDir !== undefined ? { artifactsDir } : {}),
+        defaultTimeoutSec: loadKeelsonConfig().pi?.bashTimeoutSec ?? 300,
+      }) as unknown as { name: string; [k: string]: unknown },
     // Final global gate for workflow prompt nodes — the engine owns the operator
     // denylist + rib policies here, so the handler's own floor stands down.
     projectTools: (candidates, provider, meta) =>
@@ -833,6 +844,9 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
         default: sandbox.default,
         floor: sandbox.floor,
         summary: describeSandboxPolicy(sandbox),
+        profile: describeSandboxPolicyGrants(sandbox),
+        runtime: describeSandboxRuntime(sandboxRuntime),
+        platform: process.platform,
       },
     }),
   );

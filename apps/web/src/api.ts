@@ -52,6 +52,7 @@ import {
   reviewActionResponseSchema,
   reviewListResponseSchema,
   ribActionResponseSchema,
+  type SandboxMode,
   type SnapshotFrame,
   snapshotFrameSchema,
   startWorkflowRunResponseSchema,
@@ -72,9 +73,21 @@ import {
   type WorkflowRunSummary,
 } from "@keelson/shared";
 
+export interface ServerSandboxConfig {
+  default: boolean;
+  floor: boolean;
+  summary: string;
+  // What a sandboxed turn may touch, whether or not the sandbox is on.
+  profile?: string;
+  runtime?: string;
+  platform?: string;
+}
+
 export interface ServerConfig {
   schemaVersion: string;
   wireProtocolVersion: string;
+  // A server predating the sandbox reads as off with no floor.
+  sandbox: ServerSandboxConfig;
 }
 
 type ApiErrorBody = "text" | "json-error";
@@ -127,11 +140,21 @@ export async function fetchConfig(): Promise<ServerConfig> {
   const body = await apiRequest<{
     schemaVersion?: unknown;
     wireProtocolVersion?: unknown;
+    sandbox?: Partial<Record<keyof ServerSandboxConfig, unknown>>;
   }>("/api/config");
+  const s = body.sandbox ?? {};
   return {
     schemaVersion: typeof body.schemaVersion === "string" ? body.schemaVersion : "",
     wireProtocolVersion:
       typeof body.wireProtocolVersion === "string" ? body.wireProtocolVersion : "",
+    sandbox: {
+      default: s.default === true,
+      floor: s.floor === true,
+      summary: typeof s.summary === "string" ? s.summary : "sandbox off",
+      ...(typeof s.profile === "string" ? { profile: s.profile } : {}),
+      ...(typeof s.runtime === "string" ? { runtime: s.runtime } : {}),
+      ...(typeof s.platform === "string" ? { platform: s.platform } : {}),
+    },
   };
 }
 
@@ -239,11 +262,20 @@ export async function listConversations(): Promise<Conversation[]> {
   return body.conversations;
 }
 
-export async function renameConversation(id: string, name: string): Promise<Conversation> {
+// `sandbox: null` clears the conversation's choice so it inherits the default.
+export interface ConversationPatch {
+  name?: string;
+  sandbox?: SandboxMode | null;
+}
+
+export async function updateConversation(
+  id: string,
+  patch: ConversationPatch,
+): Promise<Conversation> {
   return apiRequest<Conversation>(`/api/conversations/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(patch),
     label: `/api/conversations/${id}`,
   });
 }
@@ -261,6 +293,7 @@ export interface CreateConversationOptions {
   seedSystemPrompt?: string;
   name?: string;
   projectId?: string;
+  sandbox?: SandboxMode;
 }
 
 export async function createConversation(
@@ -276,6 +309,7 @@ export async function createConversation(
       ...(options.seedSystemPrompt ? { seedSystemPrompt: options.seedSystemPrompt } : {}),
       ...(options.name ? { name: options.name } : {}),
       ...(options.projectId ? { projectId: options.projectId } : {}),
+      ...(options.sandbox ? { sandbox: options.sandbox } : {}),
     }),
   });
 }

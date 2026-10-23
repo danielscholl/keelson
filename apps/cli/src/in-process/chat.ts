@@ -2,15 +2,35 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  describeSandboxBackend,
   disposeAllProviders,
   getAgentProvider,
   getProviderInfoList,
+  sandboxSupportFor,
   UnknownProviderError,
 } from "@keelson/providers";
-import type { MessageChunk, ReasoningEffortLevel, TokenUsage } from "@keelson/shared";
-import { coerceTokenUsage } from "@keelson/shared";
+import { createSandboxedBashTool } from "@keelson/server/sandboxed-bash-tool";
+import {
+  buildSandboxProfile,
+  coerceTokenUsage,
+  type MessageChunk,
+  type ReasoningEffortLevel,
+  resolveSandboxEnabled,
+  type SandboxProfile,
+  type TokenUsage,
+  type ToolDefinition,
+} from "@keelson/shared";
+import { loadKeelsonConfig } from "@keelson/shared/config";
 import { getRegisteredTools } from "@keelson/skills";
+import {
+  DEFAULT_TOOL_DENYLIST,
+  parseToolDenylist,
+  prepareSandboxScratch,
+} from "@keelson/workflows";
 
 import {
   bootstrapCliProviders,
@@ -18,6 +38,9 @@ import {
   isRegisteredProvider,
   pickDefaultProvider,
 } from "./providers.ts";
+import { cliSandbox, SandboxUnavailableError } from "./sandbox.ts";
+
+const SANDBOXED_BASH_TOOL = "bash";
 
 export interface ChatHeadlessOptions {
   message: string;
@@ -29,6 +52,8 @@ export interface ChatHeadlessOptions {
   abortSignal?: AbortSignal;
   // SDK-level tool whitelist; an empty list means the turn runs with no tools.
   allowedTools?: readonly string[];
+  // `--sandbox` / `--no-sandbox`; absent falls to KEELSON_SANDBOX, then config.
+  sandbox?: boolean;
   // False when the caller makes several turns and drains providers itself:
   // a disposed Copilot singleton cannot serve another turn.
   disposeProviders?: boolean;
@@ -72,7 +97,52 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
     );
   }
   const provider = getAgentProvider(providerId);
-  const tools = getRegisteredTools();
+  const config = loadKeelsonConfig();
+  const sandbox = cliSandbox(config);
+  const decision = resolveSandboxEnabled({
+    ...(opts.sandbox !== undefined ? { frame: opts.sandbox } : {}),
+    configDefault: sandbox.resolved.default,
+    ...(sandbox.resolved.floor ? { env: "required" } : {}),
+  });
+  const support = sandboxSupportFor(provider);
+  if (decision.enabled && support === "none") {
+    const fix = decision.locked
+      ? "KEELSON_SANDBOX=required holds the sandbox on, so switch to a provider that can sandbox"
+      : "switch to a provider that can sandbox, or pass --no-sandbox";
+    throw new SandboxUnavailableError(
+      `sandbox is on, but ${describeSandboxBackend(providerId, support)}: ${fix}`,
+    );
+  }
+  const sandboxProfile: SandboxProfile | undefined = decision.enabled
+    ? buildSandboxProfile(sandbox.resolved.settings, opts.cwd, true, realpathSync)
+    : undefined;
+  // No policy engine runs headless, so the operator floor the server folds into
+  // its engine applies here, as on the offline workflow path.
+  const denied = new Set([
+    ...DEFAULT_TOOL_DENYLIST,
+    ...parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST),
+  ]);
+  const shellWithheld =
+    sandboxProfile !== undefined &&
+    support === "tool" &&
+    (denied.has(SANDBOXED_BASH_TOOL) || denied.has("Bash"));
+  // A one-shot has no conversation to key a scratch by, so it gets its own.
+  const scratchRoot =
+    sandboxProfile !== undefined && support === "tool" && !shellWithheld
+      ? mkdtempSync(join(tmpdir(), "keelson-chat-sandbox-"))
+      : undefined;
+  const sandboxBash: ToolDefinition | undefined =
+    scratchRoot !== undefined
+      ? createSandboxedBashTool({
+          policy: sandbox.policy,
+          scratchDir: prepareSandboxScratch(scratchRoot, "chat"),
+          defaultTimeoutSec: config.pi?.bashTimeoutSec ?? 300,
+        })
+      : undefined;
+  const registered = getRegisteredTools().filter((t) => !denied.has(t.name));
+  const tools = sandboxBash
+    ? [...registered.filter((t) => t.name !== sandboxBash.name), sandboxBash]
+    : registered;
   const systemPrompt = buildOneShotSystemPrompt();
   // Match the SPA picker (apps/web/src/views/Chat.tsx:126-129): when
   // --model is omitted, forward the provider's configured defaultModel
@@ -92,7 +162,11 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
       ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
       ...(tools.length > 0 && opts.allowedTools === undefined ? { tools } : {}),
       ...(opts.allowedTools !== undefined ? { allowedTools: [...opts.allowedTools] } : {}),
+      // Denied outright, so the provider neither demands the withheld shell nor
+      // falls back to its own.
+      ...(shellWithheld ? { disallowedTools: [SANDBOXED_BASH_TOOL] } : {}),
       ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+      ...(sandboxProfile !== undefined ? { sandbox: sandboxProfile } : {}),
     })) {
       if (chunk.type === "usage") {
         const coerced = coerceTokenUsage(chunk.usage);
@@ -107,6 +181,7 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
     // One-shot path: no server outlives this turn to drain providers, so reap
     // any warm subprocess here before the CLI exits rather than orphaning it.
     if (opts.disposeProviders !== false) await disposeAllProviders();
+    if (scratchRoot !== undefined) rmSync(scratchRoot, { recursive: true, force: true });
   }
 
   return { providerId, text, ...(usage !== undefined ? { usage } : {}) };

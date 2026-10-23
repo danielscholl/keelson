@@ -3,10 +3,10 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { NodeContext } from "../executor.ts";
 import type { DagNode, WorkflowDefinition } from "../schema/index.ts";
 import { hostLauncher, type ProcessLauncher, type SpawnSpec } from "./launcher.ts";
@@ -255,6 +255,8 @@ describe("makeScriptHandler — uv (python)", () => {
 describe("makeScriptHandler — sandbox", () => {
   function recordingPolicy(runtime: boolean) {
     const specs: SpawnSpec[] = [];
+    // Launch files are removed once the spawn exits, so read them at spawn.
+    const files = new Map<string, string>();
     const home = join(tmpdir(), "keelson-script-sandbox-home");
     const policy = createSandboxPolicy({
       floor: false,
@@ -271,6 +273,11 @@ describe("makeScriptHandler — sandbox", () => {
                 id: "mxc",
                 spawn: (spec) => {
                   specs.push(spec);
+                  const launchDir = dirname(spec.args[spec.args.length - 1] ?? "");
+                  for (const name of ["body.ts", "body.py", "shim.ts", "env.json"]) {
+                    const path = join(launchDir, name);
+                    if (existsSync(path)) files.set(name, readFileSync(path, "utf8"));
+                  }
                   return hostLauncher.spawn(spec);
                 },
               }),
@@ -278,15 +285,15 @@ describe("makeScriptHandler — sandbox", () => {
           }
         : {}),
     });
-    return { policy, specs };
+    return { policy, specs, files };
   }
 
   const bunNode = { id: "s", script: "x", runtime: "bun" } as unknown as DagNode;
 
-  test("an inline bun body runs as `bun --no-env-file --preload <shim> <scratch>/body.ts`", async () => {
+  test("an inline bun body runs as `bun --no-env-file --preload <shim> <launch>/body.ts`", async () => {
     const artifacts = await mkdtemp(join(tmpdir(), "keelson-script-sandbox-"));
     try {
-      const { policy, specs } = recordingPolicy(true);
+      const { policy, specs, files } = recordingPolicy(true);
       const body = "console.log('from ' + process.env.KEELSON_RUN_ID)";
       const result = await makeScriptHandler({ sandbox: policy }).handle(bunNode, {
         ...buildCtx({ cwd: process.cwd(), body }),
@@ -298,19 +305,21 @@ describe("makeScriptHandler — sandbox", () => {
         sandbox: "mxc",
         sandboxBackend: "fake",
       });
-      const bodyFile = join(artifacts, "sandbox", "s", "body.ts");
       expect(specs[0]?.cmd).toBe("bun");
-      const scratch = join(artifacts, "sandbox", "s");
+      const bodyFile = specs[0]?.args[3] ?? "";
+      const launchDir = dirname(bodyFile);
+      expect(launchDir.startsWith(artifacts)).toBe(false);
       expect(specs[0]?.args).toEqual([
         "--no-env-file",
         "--preload",
-        join(scratch, "shim.ts"),
-        bodyFile,
+        join(launchDir, "shim.ts"),
+        join(launchDir, "body.ts"),
       ]);
-      expect(readFileSync(bodyFile, "utf8")).toBe(body);
+      expect(files.get("body.ts")).toBe(body);
       // The shim restores exactly the filtered env the launcher was given.
-      expect(JSON.parse(readFileSync(join(scratch, "env.json"), "utf8"))).toEqual(specs[0]?.env);
-      expect(readFileSync(join(scratch, "shim.ts"), "utf8")).toContain(join(scratch, "env.json"));
+      expect(JSON.parse(files.get("env.json") ?? "{}")).toEqual(specs[0]?.env);
+      expect(files.get("shim.ts")).toContain(JSON.stringify(join(launchDir, "env.json")));
+      expect(existsSync(launchDir)).toBe(false);
     } finally {
       rmSync(artifacts, { recursive: true, force: true });
     }

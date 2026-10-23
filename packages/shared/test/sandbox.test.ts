@@ -10,13 +10,16 @@ import { describe, expect, test } from "bun:test";
 import {
   buildSandboxProfile,
   describeSandboxProfile,
+  describeSandboxStatus,
   EMPTY_SANDBOX_SETTINGS,
   mergeSandboxProfile,
   parseSandboxEnv,
+  resolveClientSandbox,
   resolveSandboxEnabled,
   type SandboxProfile,
   sandboxProfileSchema,
   sandboxSupportSchema,
+  sandboxUnsupportedWarning,
 } from "../src/sandbox.ts";
 
 const profile = (overrides: Partial<SandboxProfile> = {}): SandboxProfile => ({
@@ -241,5 +244,128 @@ describe("describeSandboxProfile", () => {
       "sandbox on · writes /repo +1 · 1 read-only · 2 denied · network outbound allowed + loopback · env GH_TOKEN",
     );
     expect(text).not.toContain("\n");
+  });
+});
+
+describe("describeSandboxStatus", () => {
+  const base = {
+    providerId: "claude",
+    support: "native" as const,
+    platform: "darwin",
+    profile: "writes <project> · network outbound denied",
+  };
+
+  test("names the source, the provider backend, the runtime, and the profile", () => {
+    expect(
+      describeSandboxStatus({
+        ...base,
+        resolution: { enabled: true, source: "conversation", locked: false },
+        runtime: "seatbelt via /x",
+      }),
+    ).toEqual([
+      "sandbox: on (saved on this conversation)",
+      "provider: Claude Code sandbox (Seatbelt)",
+      "runtime: seatbelt via /x",
+      "profile: writes <project> · network outbound denied",
+    ]);
+  });
+
+  test("a provider that cannot sandbox says turns fail closed only while it is on", () => {
+    const pi = { ...base, providerId: "gateway-x", support: "none" as const };
+    expect(
+      describeSandboxStatus({
+        ...pi,
+        resolution: { enabled: true, source: "floor", locked: true },
+      })[1],
+    ).toBe(
+      "provider: gateway-x cannot sandbox its tools; turns fail closed while the sandbox is on",
+    );
+    expect(
+      describeSandboxStatus({
+        ...pi,
+        resolution: { enabled: false, source: "config", locked: false },
+      })[1],
+    ).toBe("provider: gateway-x cannot sandbox its tools");
+  });
+
+  test("the stub reads as n/a", () => {
+    expect(
+      describeSandboxStatus({
+        ...base,
+        providerId: "stub",
+        support: "none",
+        resolution: { enabled: false, source: "config", locked: false },
+      }),
+    ).toEqual([
+      "sandbox: off (config default)",
+      "provider: stub runs no tools (n/a)",
+      "profile: writes <project> · network outbound denied",
+    ]);
+  });
+
+  test("sandboxUnsupportedWarning fires only for a provider that cannot sandbox", () => {
+    expect(sandboxUnsupportedWarning("claude", "native")).toBeUndefined();
+    expect(sandboxUnsupportedWarning("stub", "none")).toContain(
+      "switch to a provider that can sandbox",
+    );
+  });
+});
+
+describe("resolveClientSandbox", () => {
+  const policy = { default: true, floor: false };
+
+  test("with the policy known it resolves like the server", () => {
+    expect(resolveClientSandbox({ policy })).toEqual({
+      enabled: true,
+      source: "config",
+      locked: false,
+    });
+    expect(resolveClientSandbox({ policy, conversation: "off" })?.source).toBe("conversation");
+    expect(resolveClientSandbox({ policy, conversation: "off", choice: true })?.enabled).toBe(true);
+    expect(
+      resolveClientSandbox({ policy: { default: false, floor: true }, choice: false }),
+    ).toEqual({ enabled: true, source: "floor", locked: true });
+  });
+
+  test("with the policy unread it guesses nothing, but a choice or a saved row still counts", () => {
+    expect(resolveClientSandbox({})).toBeUndefined();
+    expect(resolveClientSandbox({ conversation: "on" })?.enabled).toBe(true);
+    expect(resolveClientSandbox({ choice: true })).toEqual({
+      enabled: true,
+      source: "frame",
+      locked: false,
+    });
+  });
+
+  test("with the policy unread an off is only requested, since a floor may hold it on", () => {
+    expect(resolveClientSandbox({ choice: false })).toEqual({
+      enabled: false,
+      source: "frame",
+      locked: false,
+      unconfirmed: true,
+    });
+    expect(resolveClientSandbox({ conversation: "off" })?.unconfirmed).toBe(true);
+    expect(resolveClientSandbox({ conversation: "on", choice: false })?.unconfirmed).toBe(true);
+    expect(resolveClientSandbox({ policy, choice: false })?.unconfirmed).toBeUndefined();
+    const lines = describeSandboxStatus({
+      resolution: resolveClientSandbox({ choice: false })!,
+      providerId: "copilot",
+      support: "none",
+      platform: "darwin",
+      profile: "unavailable",
+    });
+    expect(lines[0]).toBe("sandbox: off requested; server policy unknown");
+    expect(lines[1]).toContain("turns fail closed while the sandbox is on");
+  });
+
+  test("status says the server default applies when nothing resolves", () => {
+    expect(
+      describeSandboxStatus({
+        providerId: "claude",
+        support: "native",
+        platform: "darwin",
+        profile: "unavailable",
+      })[0],
+    ).toBe("sandbox: server default (its policy could not be read)");
   });
 });

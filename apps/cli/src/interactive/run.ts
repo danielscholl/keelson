@@ -14,19 +14,24 @@ import {
   Text,
   TuiMainScreen,
 } from "@earendil-works/pi-tui";
-import type {
-  CommandCompletion,
-  CommandRef,
-  Project,
-  ReasoningEffortLevel,
-  TokenUsage,
-  WorkflowFrame,
+import {
+  type CommandCompletion,
+  type CommandRef,
+  type Project,
+  type ReasoningEffortLevel,
+  SANDBOX_LOCKED_MESSAGE,
+  type SandboxMode,
+  type SandboxSupport,
+  sandboxUnsupportedWarning,
+  type TokenUsage,
+  type WorkflowFrame,
 } from "@keelson/shared";
 import pkg from "../../package.json" with { type: "json" };
 import { EXIT_FAIL, EXIT_NO_SERVER, EXIT_OK } from "../exit.ts";
 import {
   chatViaServer,
   createConversation,
+  fetchSandboxConfig,
   getConversation,
   listConversations,
   listProviderModels,
@@ -34,6 +39,8 @@ import {
   type ProviderInfoRow,
   pickDefaultHttpProvider,
   resolveAgent,
+  type ServerSandboxConfig,
+  updateConversation,
 } from "../http/chat-client.ts";
 import { completeRibCommand, invokeRibCommand, listRibCommands } from "../http/commands-client.ts";
 import { createProject, listProjects } from "../http/projects-client.ts";
@@ -61,6 +68,15 @@ import {
   type ProjectBinding,
   resolveProjectBinding,
 } from "./project.ts";
+import {
+  adoptCreatedConversationSandbox,
+  footerSandbox,
+  initialSandboxState,
+  leaveConversationSandbox,
+  runSandboxCommand,
+  type SandboxSessionState,
+  sessionSandboxResolution,
+} from "./sandbox.ts";
 import { brass, dim, editorTheme, navy, red } from "./theme.ts";
 import {
   AssistantTurnView,
@@ -77,6 +93,8 @@ export interface InteractiveChatOptions {
   conversationId?: string;
   thinking?: boolean;
   reasoningEffort?: ReasoningEffortLevel;
+  // `--sandbox` / `--no-sandbox`: this session's choice over the saved one.
+  sandbox?: boolean;
 }
 
 interface SessionSetup {
@@ -87,6 +105,9 @@ interface SessionSetup {
   binding: ProjectBinding;
   welcome: WelcomeData;
   ribCommands: CommandRef[];
+  // Undefined when /api/config could not be read: no value is guessed for it.
+  sandboxConfig?: ServerSandboxConfig;
+  conversationSandbox?: SandboxMode;
 }
 
 function defaultModelFor(providers: readonly ProviderInfoRow[], id: string): string | undefined {
@@ -98,10 +119,12 @@ async function prepareSession(opts: InteractiveChatOptions): Promise<SessionSetu
   const { providers, defaultProvider } = await listProviders(opts.baseUrl);
   let providerId: string;
   let model = opts.model;
+  let conversationSandbox: SandboxMode | undefined;
   if (opts.conversationId) {
     const conv = await getConversation(opts.baseUrl, opts.conversationId);
     providerId = conv.providerId;
     model = model ?? conv.model;
+    conversationSandbox = conv.sandbox;
   } else {
     providerId = opts.provider ?? pickDefaultHttpProvider(providers, defaultProvider);
   }
@@ -119,14 +142,16 @@ async function prepareSession(opts: InteractiveChatOptions): Promise<SessionSetu
 
   // Welcome-card data is decorative; a failing endpoint degrades to an empty
   // section rather than blocking the session.
-  const [ribsRes, convsRes, commandsRes] = await Promise.allSettled([
+  const [ribsRes, convsRes, commandsRes, sandboxRes] = await Promise.allSettled([
     listRibs(opts.baseUrl),
     listConversations(opts.baseUrl),
     listRibCommands(opts.baseUrl),
+    fetchSandboxConfig(opts.baseUrl),
   ]);
   const ribs = ribsRes.status === "fulfilled" ? ribsRes.value : [];
   const conversations = convsRes.status === "fulfilled" ? convsRes.value : [];
   const ribCommands = commandsRes.status === "fulfilled" ? commandsRes.value : [];
+  const sandboxConfig = sandboxRes.status === "fulfilled" ? sandboxRes.value : undefined;
   const recent = conversations
     .filter((c) => c.updatedAt !== undefined)
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
@@ -155,6 +180,8 @@ async function prepareSession(opts: InteractiveChatOptions): Promise<SessionSetu
     binding,
     welcome,
     ribCommands,
+    ...(sandboxConfig !== undefined ? { sandboxConfig } : {}),
+    ...(conversationSandbox !== undefined ? { conversationSandbox } : {}),
   };
 }
 
@@ -177,10 +204,16 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
 
   const terminal = new ProcessTerminal();
   const tui = new TuiMainScreen(terminal);
-  const session = {
+  const session: SandboxSessionState & {
+    model: string | undefined;
+    binding: ProjectBinding;
+    seedSystemPrompt: string | undefined;
+    conversationName: string | undefined;
+  } = {
     providerId: setup.providerId,
     model: setup.model,
-    conversationId: setup.conversationId,
+    ...(setup.conversationId !== undefined ? { conversationId: setup.conversationId } : {}),
+    ...initialSandboxState(setup.conversationSandbox, opts.sandbox),
     binding: setup.binding,
     // One-shot seed for the next conversation the pump creates (the `/mind` path),
     // cleared once applied so later turns in the same chat don't re-seed.
@@ -226,6 +259,12 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
     meter: formatUsageMeter(undefined, usageTotals),
     activity: "idle",
   });
+  const refreshSandboxFooter = (): void => {
+    footer.set({ sandbox: footerSandbox(session, setup.sandboxConfig) });
+    tui.requestRender();
+  };
+  refreshSandboxFooter();
+  if (opts.sandbox === false && setup.sandboxConfig?.floor) warn(SANDBOX_LOCKED_MESSAGE);
   const refreshActivity = (): void => {
     footer.set({ activity: busy ? "working" : activeRuns > 0 ? "workflow" : "idle" });
     tui.requestRender();
@@ -233,6 +272,8 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
 
   const resetConversation = (reason: string): void => {
     session.conversationId = undefined;
+    leaveConversationSandbox(session);
+    refreshSandboxFooter();
     resetTranscript(surface, reason);
   };
 
@@ -262,6 +303,8 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
     return all;
   };
   const chatProviders = setup.providers.filter((p) => p.id !== "workflow");
+  const sandboxSupportFor = (id: string): SandboxSupport =>
+    setup.providers.find((p) => p.id === id)?.capabilities.sandbox ?? "none";
 
   // Live per-provider model lists for the `/model` picker, coalesced and cached
   // for the session. Falls back to the static capabilities list the server
@@ -385,6 +428,10 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
           ...(session.model !== undefined ? { model: session.model } : { model: undefined }),
         });
         resetConversation(`provider ${arg}`);
+        const unsupported = sessionSandboxResolution(session, setup.sandboxConfig)?.enabled
+          ? sandboxUnsupportedWarning(arg, sandboxSupportFor(arg))
+          : undefined;
+        if (unsupported !== undefined) warn(unsupported);
       },
     },
     {
@@ -443,6 +490,28 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
         footer.set({ projectName: match.name });
         resetConversation(`project ${match.name}`);
       },
+    },
+    {
+      command: {
+        name: "sandbox",
+        description: "turn the sandbox on or off for this conversation, or show its status",
+        argumentHint: "[on|off|status]",
+        getArgumentCompletions: (prefix) =>
+          (["on", "off", "status"] as const)
+            .filter((v) => v.startsWith(prefix))
+            .map((v) => ({ value: v, label: v })),
+      },
+      run: (arg) =>
+        runSandboxCommand(arg, {
+          session,
+          config: setup.sandboxConfig,
+          busy: () => busy,
+          supportFor: sandboxSupportFor,
+          patchConversation: (id, mode) => updateConversation(opts.baseUrl, id, { sandbox: mode }),
+          onChange: refreshSandboxFooter,
+          info,
+          warn,
+        }),
     },
     {
       command: { name: "workflows", description: "list runnable workflows" },
@@ -611,8 +680,12 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
               ? { seedSystemPrompt: session.seedSystemPrompt }
               : {}),
             ...(session.conversationName !== undefined ? { name: session.conversationName } : {}),
+            ...(session.sandboxChoice !== undefined
+              ? { sandbox: session.sandboxChoice ? "on" : "off" }
+              : {}),
           });
           session.conversationId = conv.id;
+          adoptCreatedConversationSandbox(session, conv.sandbox);
           // One-shot: the seed belongs to this conversation only.
           session.seedSystemPrompt = undefined;
           session.conversationName = undefined;
@@ -633,6 +706,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
           ...(session.model !== undefined ? { model: session.model } : {}),
           ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
           ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
+          ...(session.sandboxChoice !== undefined ? { sandbox: session.sandboxChoice } : {}),
           onChunk: (chunk) => {
             dropLoader();
             if (chunk.type === "usage") {

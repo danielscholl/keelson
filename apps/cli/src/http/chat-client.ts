@@ -13,6 +13,8 @@ import {
   type OpenChatSeed,
   openChatSeedSchema,
   type ReasoningEffortLevel,
+  type SandboxMode,
+  type SandboxSupport,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
 
@@ -31,6 +33,8 @@ export interface ConversationRow {
   id: string;
   providerId: string;
   model?: string;
+  // Absent: the conversation inherits the server's sandbox default.
+  sandbox?: SandboxMode;
 }
 
 export interface ProviderCapabilitiesRow {
@@ -38,6 +42,7 @@ export interface ProviderCapabilitiesRow {
   // providerCapabilitiesSchema.
   defaultModel: string;
   models: string[];
+  sandbox?: SandboxSupport;
 }
 
 export interface ProviderInfoRow {
@@ -56,6 +61,7 @@ export interface CreateConversationOpts {
   // Seed an agent's system prompt + name (the open-as-chat path).
   seedSystemPrompt?: string;
   name?: string;
+  sandbox?: SandboxMode;
 }
 
 // The server's resolved default (config.defaultProvider) wins; otherwise
@@ -96,6 +102,7 @@ export async function createConversation(
       ...(opts.projectId ? { projectId: opts.projectId } : {}),
       ...(opts.seedSystemPrompt ? { seedSystemPrompt: opts.seedSystemPrompt } : {}),
       ...(opts.name ? { name: opts.name } : {}),
+      ...(opts.sandbox ? { sandbox: opts.sandbox } : {}),
     }),
   });
   if (!res.ok) {
@@ -103,6 +110,58 @@ export async function createConversation(
     throw new HttpError(res.status, `POST /api/conversations failed: ${res.status} ${body}`);
   }
   return (await res.json()) as ConversationRow;
+}
+
+// `sandbox: null` clears the conversation's choice so it inherits the default.
+export interface ConversationPatch {
+  name?: string;
+  sandbox?: SandboxMode | null;
+}
+
+export async function updateConversation(
+  baseUrl: string,
+  id: string,
+  patch: ConversationPatch,
+): Promise<ConversationRow> {
+  const res = await fetch(`${normalizeBase(baseUrl)}/api/conversations/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: jsonHeaders(baseUrl),
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new HttpError(res.status, `PATCH /api/conversations/${id} failed: ${res.status} ${body}`);
+  }
+  return (await res.json()) as ConversationRow;
+}
+
+export interface ServerSandboxConfig {
+  default: boolean;
+  floor: boolean;
+  summary: string;
+  // What a sandboxed turn may touch, whether or not the sandbox is on.
+  profile?: string;
+  runtime?: string;
+  platform?: string;
+}
+
+// The server's sandbox policy from GET /api/config; a server predating it
+// reads as off with no floor.
+export async function fetchSandboxConfig(baseUrl: string): Promise<ServerSandboxConfig> {
+  const res = await fetch(`${normalizeBase(baseUrl)}/api/config`, {
+    headers: { accept: "application/json", origin: originHeader(baseUrl) },
+  });
+  if (!res.ok) throw new HttpError(res.status, `GET /api/config failed: ${res.status}`);
+  const body = (await res.json()) as { sandbox?: Partial<ServerSandboxConfig> };
+  const s = body.sandbox ?? {};
+  return {
+    default: s.default === true,
+    floor: s.floor === true,
+    summary: typeof s.summary === "string" ? s.summary : "sandbox off",
+    ...(typeof s.profile === "string" ? { profile: s.profile } : {}),
+    ...(typeof s.runtime === "string" ? { runtime: s.runtime } : {}),
+    ...(typeof s.platform === "string" ? { platform: s.platform } : {}),
+  };
 }
 
 // Agents (the GET /api/agents source). Both reach the server's /api/agents routes;
@@ -221,6 +280,7 @@ export interface ChatViaServerOptions {
   model?: string;
   thinking?: boolean;
   reasoningEffort?: ReasoningEffortLevel;
+  sandbox?: boolean;
   onChunk?: (chunk: MessageChunk) => void;
   signal?: AbortSignal;
 }
@@ -230,6 +290,8 @@ export interface ChatViaServerResult {
   // server emitted a chat-level error frame before the done frame.
   errored: boolean;
   errorMessage?: string;
+  // The error frame's code, e.g. SANDBOX_UNAVAILABLE.
+  errorCode?: string;
 }
 
 // Open the chat WS, send a single request frame, stream chunks until done.
@@ -247,6 +309,7 @@ export function chatViaServer(opts: ChatViaServerOptions): Promise<ChatViaServer
       ...(opts.model ? { model: opts.model } : {}),
       ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
       ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
+      ...(opts.sandbox !== undefined ? { sandbox: opts.sandbox } : {}),
     },
   };
 
@@ -262,6 +325,7 @@ export function chatViaServer(opts: ChatViaServerOptions): Promise<ChatViaServer
 
     let errored = false;
     let errorMessage: string | undefined;
+    let errorCode: string | undefined;
     // The server emits a `done` chat-event (or a `done` message chunk
     // inside one) on every successful turn. Tracking it here means a
     // mid-stream socket close (server restart, network blip) is reported
@@ -304,6 +368,7 @@ export function chatViaServer(opts: ChatViaServerOptions): Promise<ChatViaServer
         } else if (event.type === "error") {
           errored = true;
           errorMessage = event.message;
+          errorCode = event.code;
         } else if (event.type === "done") {
           finish();
         }
@@ -328,7 +393,11 @@ export function chatViaServer(opts: ChatViaServerOptions): Promise<ChatViaServer
         errored = true;
         errorMessage = "chat stream ended without a terminal frame (server unreachable mid-turn?)";
       }
-      resolve({ errored, ...(errorMessage ? { errorMessage } : {}) });
+      resolve({
+        errored,
+        ...(errorMessage ? { errorMessage } : {}),
+        ...(errorCode ? { errorCode } : {}),
+      });
     });
     ws.addEventListener("error", (ev) => {
       opts.signal?.removeEventListener("abort", onAbort);

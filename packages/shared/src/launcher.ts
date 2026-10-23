@@ -292,6 +292,14 @@ export function buildMxcConfig(profile: SandboxProfile, spec: SpawnSpec): Record
   };
 }
 
+// Seatbelt filters egress all-or-nothing, so a host allowlist would silently
+// widen to every destination.
+export function mxcProfileRefusal(profile: SandboxProfile): string | undefined {
+  return profile.network.outbound === "allow" && (profile.network.allowedHosts?.length ?? 0) > 0
+    ? "the macOS sandbox cannot limit outbound traffic to network.allowedHosts; remove allowedHosts to allow all outbound, or keep outbound denied"
+    : undefined;
+}
+
 export function mxcProfileWarnings(profile: SandboxProfile): string[] {
   return profile.network.loopback
     ? [
@@ -316,21 +324,43 @@ export function rewriteMxcStderrLine(line: string): string {
   return line;
 }
 
-function rewriteStderr(
+// The executor's own lines are short; a longer partial line is the child's,
+// so it passes through as it arrives instead of buffering without bound.
+const MAX_PENDING_STDERR = 8192;
+
+export function rewriteMxcStderr(
   stream: ReadableStream<Uint8Array> | null,
 ): ReadableStream<Uint8Array> | null {
   if (stream === null) return null;
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let pending = "";
+  // True while forwarding the rest of an oversized line unrewritten.
+  let passthrough = false;
   return stream.pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, controller) {
-        pending += decoder.decode(chunk, { stream: true });
+        let text = decoder.decode(chunk, { stream: true });
+        if (passthrough) {
+          const nl = text.indexOf("\n");
+          if (nl === -1) {
+            controller.enqueue(encoder.encode(text));
+            return;
+          }
+          controller.enqueue(encoder.encode(text.slice(0, nl + 1)));
+          text = text.slice(nl + 1);
+          passthrough = false;
+        }
+        pending += text;
         const lines = pending.split("\n");
         pending = lines.pop() ?? "";
         for (const line of lines)
           controller.enqueue(encoder.encode(`${rewriteMxcStderrLine(line)}\n`));
+        if (pending.length > MAX_PENDING_STDERR) {
+          controller.enqueue(encoder.encode(pending));
+          pending = "";
+          passthrough = true;
+        }
       },
       flush(controller) {
         pending += decoder.decode();
@@ -340,28 +370,28 @@ function rewriteStderr(
   );
 }
 
-let configCounter = 0;
-
 export interface CreateMxcLauncherOptions {
   executorPath: string;
   scratchDir: string;
+  // A directory no sandboxed process can write; the config must not be
+  // rewritable between this write and the executor's read.
+  launchDir: string;
   profile: SandboxProfile;
 }
 
-// Runs each spawn under the profile: the config goes to a 0600 file in scratch
-// (argv length and `ps` visibility rule out --config-base64), and the executor
-// leads its own process group so keelson's `-pgid` kill reaches the sandboxed tree.
+// Runs each spawn under the profile: the config goes to an exclusively created
+// 0600 file in the launch dir (argv length and `ps` visibility rule out
+// --config-base64), and the executor leads its own process group so keelson's
+// `-pgid` kill reaches the sandboxed tree.
 export function createMxcLauncher(opts: CreateMxcLauncherOptions): ProcessLauncher {
   return {
     id: "mxc",
     spawn(spec) {
       mkdirSync(opts.scratchDir, { recursive: true, mode: 0o700 });
-      const configPath = join(
-        opts.scratchDir,
-        `mxc-${process.pid}-${++configCounter}-${randomBytes(4).toString("hex")}.json`,
-      );
+      const configPath = join(opts.launchDir, `mxc-${randomBytes(8).toString("hex")}.json`);
       writeFileSync(configPath, JSON.stringify(buildMxcConfig(opts.profile, spec)), {
         mode: 0o600,
+        flag: "wx",
       });
       const proc = Bun.spawn([opts.executorPath, configPath], {
         cwd: opts.scratchDir,
@@ -378,7 +408,7 @@ export function createMxcLauncher(opts: CreateMxcLauncherOptions): ProcessLaunch
       return {
         pid: proc.pid,
         stdout: proc.stdout,
-        stderr: rewriteStderr(proc.stderr),
+        stderr: rewriteMxcStderr(proc.stderr),
         exited,
         kill: (signal) => proc.kill(signal),
       };
@@ -389,15 +419,22 @@ export function createMxcLauncher(opts: CreateMxcLauncherOptions): ProcessLaunch
 // Structural mirror of `@keelson/workflows`'s SandboxRuntime.
 export interface MxcRuntime {
   readonly backend: "seatbelt";
-  createLauncher(profile: SandboxProfile, scratch: string): ProcessLauncher;
+  createLauncher(profile: SandboxProfile, scratch: string, launchDir: string): ProcessLauncher;
   warnings(profile: SandboxProfile): string[];
+  refusal(profile: SandboxProfile): string | undefined;
 }
 
 export function createMxcRuntime(opts: { executorPath: string }): MxcRuntime {
   return {
     backend: "seatbelt",
-    createLauncher: (profile, scratch) =>
-      createMxcLauncher({ executorPath: opts.executorPath, scratchDir: scratch, profile }),
+    createLauncher: (profile, scratch, launchDir) =>
+      createMxcLauncher({
+        executorPath: opts.executorPath,
+        scratchDir: scratch,
+        launchDir,
+        profile,
+      }),
     warnings: mxcProfileWarnings,
+    refusal: mxcProfileRefusal,
   };
 }

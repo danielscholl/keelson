@@ -11,7 +11,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MessageChunk } from "@keelson/shared";
-import { hostLauncher } from "@keelson/shared/launcher";
+import { hostLauncher, type ProcessLauncher } from "@keelson/shared/launcher";
 import {
   createSandboxPolicy,
   prepareSandboxScratch,
@@ -23,7 +23,11 @@ const POSIX = process.platform !== "win32";
 const root = realpathSync(mkdtempSync(join(tmpdir(), "keelson-sbash-")));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-function tool(runtime = true) {
+function tool(
+  runtime = true,
+  launcher: ProcessLauncher = hostLauncher,
+  extra: Partial<Parameters<typeof createSandboxedBashTool>[0]> = {},
+) {
   const profiles: SandboxProfile[] = [];
   const policy = createSandboxPolicy({
     floor: false,
@@ -38,7 +42,7 @@ function tool(runtime = true) {
             backend: "fake",
             createLauncher: (profile: SandboxProfile) => {
               profiles.push(profile);
-              return hostLauncher;
+              return launcher;
             },
           },
         }
@@ -49,8 +53,9 @@ function tool(runtime = true) {
     bash: createSandboxedBashTool({
       policy,
       scratchDir: prepareSandboxScratch(root, "conv-1"),
-      baseEnv: { PATH: "/usr/bin:/bin", SECRET_TOKEN: "leak-me" },
+      baseEnv: { PATH: "/usr/bin:/bin", SECRET_TOKEN: "leak-me", GH_TOKEN: "gh-x" },
       defaultTimeoutSec: 30,
+      ...extra,
     }),
   };
 }
@@ -100,6 +105,55 @@ describe.skipIf(!POSIX)("createSandboxedBashTool", () => {
     const result = await run(tool().bash, { command: "sleep 5", timeout: 0.2 });
     expect(result?.isError).toBe(true);
     expect(result?.content).toBe("Command timed out after 0.2 seconds");
+  });
+
+  test("a runtime launch failure on stderr reaches the model before the status line", async () => {
+    // What the MXC launcher's rewrite leaves on stderr when the executor refuses.
+    const refusing: ProcessLauncher = {
+      id: "mxc",
+      spawn: (spec) =>
+        hostLauncher.spawn({
+          ...spec,
+          cmd: "/bin/sh",
+          args: ["-c", 'echo "sandbox launch failed: backend refused" >&2; exit 255'],
+        }),
+    };
+    const result = await run(tool(true, refusing).bash, { command: "echo never" });
+    expect(result).toMatchObject({
+      isError: true,
+      content: "sandbox launch failed: backend refused\n\nCommand exited with code 255",
+    });
+  });
+
+  test("leaves no launch file in the conversation scratch a later command could plant over", async () => {
+    const { bash } = tool();
+    await run(bash, { command: "true" });
+    const scratch = prepareSandboxScratch(root, "conv-1");
+    const entries = await Array.fromAsync(
+      new Bun.Glob("*").scan({ cwd: scratch, onlyFiles: true }),
+    );
+    expect(entries).toEqual([]);
+  });
+
+  test("a workflow node's and its workflow's sandbox blocks shape the shell, over the bash default", async () => {
+    const { bash, profiles } = tool(true, hostLauncher, {
+      workflowSandbox: { env: ["GH_TOKEN"] },
+      nodeSandbox: { network: { outbound: "allow" } },
+      artifactsDir: join(root, "artifacts"),
+    });
+    const result = await run(bash, { command: 'echo "gh=${GH_TOKEN:-none}"' });
+    expect(result?.content).toBe("gh=gh-x");
+    expect(profiles[0]?.network.outbound).toBe("allow");
+    expect(profiles[0]?.filesystem.readwrite).toContain(join(root, "artifacts"));
+    // Still the bash default underneath: credentials and keelson state denied.
+    expect(profiles[0]?.filesystem.denied).toContain(join(root, "home", "keelson.db"));
+  });
+
+  test("chat passes no blocks and keeps network off and extra env out", async () => {
+    const { bash, profiles } = tool();
+    const result = await run(bash, { command: 'echo "gh=${GH_TOKEN:-none}"' });
+    expect(result?.content).toBe("gh=none");
+    expect(profiles[0]?.network.outbound).toBe("deny");
   });
 
   test("with no runtime it refuses instead of running unconfined", async () => {

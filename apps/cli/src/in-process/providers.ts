@@ -29,6 +29,7 @@ import {
   resolveDefaultProvider,
   resolveEnabledProviders,
 } from "@keelson/shared/config";
+import { resolveMxcExecutor } from "@keelson/shared/launcher";
 
 const KEYRING_SERVICE = "keelson" as const;
 
@@ -124,6 +125,9 @@ export function bootstrapCliProviders(): ProviderBootstrapResult {
       // stay off here rather than run outside the operator's denylist and gates.
       registerPiProvider({
         builtinTools: false,
+        // A sandboxed turn's only shell is the host's sandboxed bash, which the
+        // offline workflow path supplies when the runtime resolves.
+        sandboxSupport: resolveMxcExecutor().ok ? "tool" : "none",
         ...(config.pi?.concurrency !== undefined ? { concurrency: config.pi.concurrency } : {}),
         ...(config.pi?.vendors !== undefined ? { vendors: config.pi.vendors } : {}),
         ...(config.pi?.model ? { defaultModel: config.pi.model } : {}),

@@ -8,6 +8,7 @@ import {
   formatTokens,
   formatUsageMeter,
   parseRunArg,
+  parseSandboxArg,
   parseSlashCommand,
   relativeAge,
 } from "../src/interactive/format.ts";
@@ -100,5 +101,19 @@ describe("parseRunArg", () => {
 
   test("keeps values containing '='", () => {
     expect(parseRunArg("wf query=a=b")).toEqual({ name: "wf", inputs: { query: "a=b" } });
+  });
+});
+
+describe("parseSandboxArg", () => {
+  test("on, off, and status, with a bare /sandbox reading as status", () => {
+    expect(parseSandboxArg("on")).toBe("on");
+    expect(parseSandboxArg(" OFF ")).toBe("off");
+    expect(parseSandboxArg("status")).toBe("status");
+    expect(parseSandboxArg("")).toBe("status");
+  });
+
+  test("anything else is rejected", () => {
+    expect(parseSandboxArg("maybe")).toBeNull();
+    expect(parseSandboxArg("on now")).toBeNull();
   });
 });

@@ -1449,6 +1449,62 @@ button.tab:focus-visible {
   color: inherit;
 }
 
+/* Sandbox toggle. Same lit/cold contrast as .chat-thinking-chip; a locked
+   chip (KEELSON_SANDBOX=required) stays lit but inert, and an on chip whose
+   provider cannot sandbox reads as a warning because its turns fail closed. */
+.chat-sandbox-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgb(var(--accent-rgb) / 0.28);
+  color: var(--accent);
+  border: 1px solid rgb(var(--accent-rgb) / 0.7);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 80ms ease, background 80ms ease,
+    color 80ms ease, opacity 80ms ease;
+}
+.chat-sandbox-chip:hover:not(:disabled) {
+  border-color: rgb(var(--accent-rgb) / 0.95);
+  background: rgb(var(--accent-rgb) / 0.36);
+}
+.chat-sandbox-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.chat-sandbox-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.chat-sandbox-chip[data-locked="true"]:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.chat-sandbox-chip[aria-pressed="false"],
+.chat-sandbox-chip[aria-pressed="mixed"] {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--muted);
+  font-weight: 400;
+}
+.chat-sandbox-chip[aria-pressed="false"]:hover:not(:disabled) {
+  border-color: var(--muted);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  color: var(--fg);
+}
+.chat-sandbox-chip[data-unsupported="true"] {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.chat-sandbox-chip-label {
+  color: inherit;
+}
+
 /* F10.6 — Per-turn reasoning-effort tier chip. Sibling of .chat-thinking-chip
    but always "lit" — every tier (low/medium/high/xhigh) is a valid pick, so
    there's no on/off contrast. Renders only when the active model declares

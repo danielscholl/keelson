@@ -16,6 +16,8 @@ import { type PiCatalogSource, realPiCatalogSource } from "./catalog.ts";
 import { PiVendorSlots } from "./concurrency.ts";
 import { mapPiEvent, mapPiFinishReason } from "./event-bridge.ts";
 import { PiAgentSessionFactory, type PiSession, type PiSessionFactory } from "./factory.ts";
+import { withSandboxPathGate } from "./sandbox-paths.ts";
+import { filterPiTools } from "./tool-filter.ts";
 import { projectToolsForPi } from "./tool-projection.ts";
 
 // Empty → "let pi decide" (no model on the wire). pi is multi-vendor, so there
@@ -203,6 +205,14 @@ export class PiProvider implements IAgentProvider {
     // A sandboxed turn runs shell only through the host's sandboxed `bash`; with
     // no such tool pi would fall back to its own, unconfined one.
     const sandboxed = options?.sandbox?.enabled === true;
+    // The supplied bash stands in for pi's built-in, so the rails gate it by
+    // capability the way they gate the built-in, not by exact name.
+    const sandboxBash = sandboxed
+      ? options?.tools?.find((t) => t.name === PI_SANDBOXED_BASH_TOOL)
+      : undefined;
+    const shellAllowed =
+      filterPiTools([PI_SANDBOXED_BASH_TOOL], options?.allowedTools, options?.disallowedTools)
+        .length > 0;
     if (sandboxed) {
       if (this.capabilities.sandbox !== "tool") {
         yield {
@@ -211,7 +221,7 @@ export class PiProvider implements IAgentProvider {
         };
         return;
       }
-      if (!options?.tools?.some((t) => t.name === PI_SANDBOXED_BASH_TOOL)) {
+      if (shellAllowed && sandboxBash === undefined) {
         yield {
           type: "error",
           message: "sandbox unavailable: no sandboxed bash tool was supplied for this pi turn",
@@ -220,12 +230,23 @@ export class PiProvider implements IAgentProvider {
       }
     }
 
+    const toolCallGate =
+      sandboxed && options?.sandbox !== undefined
+        ? withSandboxPathGate(options.evaluateToolCall, options.sandbox, cwd)
+        : options?.evaluateToolCall;
     const queue = new ChunkQueue();
     // The workflow handler's allow-list branch doesn't subtract the node's own
     // denials, so the rails apply here too, as the copilot adapter does.
     const railTools =
       options?.tools !== undefined
-        ? filterToolsByRail([...options.tools], options?.allowedTools, options?.disallowedTools)
+        ? [
+            ...filterToolsByRail(
+              options.tools.filter((t) => t !== sandboxBash),
+              options?.allowedTools,
+              options?.disallowedTools,
+            ),
+            ...(sandboxBash !== undefined && shellAllowed ? [sandboxBash] : []),
+          ]
         : undefined;
     const customTools =
       options !== undefined && railTools !== undefined && railTools.length > 0
@@ -234,9 +255,7 @@ export class PiProvider implements IAgentProvider {
             pushChunk: (chunk) => queue.push(chunk),
             ...(options.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
             ...(options.turnContext !== undefined ? { turnContext: options.turnContext } : {}),
-            ...(options.evaluateToolCall !== undefined
-              ? { evaluateToolCall: options.evaluateToolCall }
-              : {}),
+            ...(toolCallGate !== undefined ? { evaluateToolCall: toolCallGate } : {}),
             ...(options.evaluateToolResult !== undefined
               ? { evaluateToolResult: options.evaluateToolResult }
               : {}),
@@ -267,9 +286,7 @@ export class PiProvider implements IAgentProvider {
           : {}),
         ...(customTools !== undefined ? { customTools } : {}),
         gates: {
-          ...(options?.evaluateToolCall !== undefined
-            ? { evaluateToolCall: options.evaluateToolCall }
-            : {}),
+          ...(toolCallGate !== undefined ? { evaluateToolCall: toolCallGate } : {}),
           ...(options?.evaluateToolResult !== undefined
             ? { evaluateToolResult: options.evaluateToolResult }
             : {}),

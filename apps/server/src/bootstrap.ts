@@ -67,6 +67,7 @@ import type {
 } from "@keelson/shared";
 import {
   buildSandboxProfile,
+  describeSandboxGrants,
   describeSandboxProfile,
   recallRequestSchema,
   resumeWorkflowRunBodySchema,
@@ -106,6 +107,7 @@ import {
   DEFAULT_TOOL_DENYLIST,
   discoverWorkflows,
   isGitRepo,
+  type MakePromptHandlerOptions,
   makePromptHandler,
   type NodeHandler,
   type PromptHandlerProvider,
@@ -1646,6 +1648,17 @@ export function bootstrapSandboxPolicy(
   });
 }
 
+export function describeSandboxRuntime(runtime: ReturnType<typeof resolveSandboxRuntime>): string {
+  return "runtime" in runtime
+    ? `seatbelt via ${runtime.executor}`
+    : `unavailable: ${runtime.unavailableReason}`;
+}
+
+// What a sandboxed turn may touch under the operator policy, on or off.
+export function describeSandboxPolicyGrants(policy: ResolvedSandboxConfig): string {
+  return describeSandboxGrants(buildSandboxProfile(policy.settings, "<project>", true));
+}
+
 // The one-line policy text GET /api/config serves to both clients.
 export function describeSandboxPolicy(policy: ResolvedSandboxConfig): string {
   const enabled = policy.floor || policy.default;
@@ -1746,6 +1759,7 @@ export function bootstrapPromptHandler(
     evaluateResponse?: PromptResponseGate;
     requestGate?: PromptRequestGate;
     sandbox?: SandboxPolicy;
+    sandboxBashTool?: MakePromptHandlerOptions["sandboxBashTool"];
   } = {},
 ): NodeHandler | undefined {
   const providers = getProviderInfoList();
@@ -1808,6 +1822,7 @@ export function bootstrapPromptHandler(
   return makePromptHandler({
     getProvider,
     ...(opts.sandbox ? { sandbox: opts.sandbox } : {}),
+    ...(opts.sandboxBashTool ? { sandboxBashTool: opts.sandboxBashTool } : {}),
     // Resolve absent or unavailable preferences to the registered boot default.
     resolveProviderId: (id) => (id !== undefined && isRegisteredProvider(id) ? id : providerId),
     resolveModelClass: (id, modelClass) => readModelClassOverride(config, id)?.[modelClass],

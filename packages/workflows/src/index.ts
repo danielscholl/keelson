@@ -119,13 +119,16 @@ export {
   type PromptToolGate,
   type PromptToolResultGate,
   parseToolDenylist,
+  type SandboxBashTurn,
   type WorkflowNodeMeta,
 } from "./handlers/prompt.ts";
 export {
   type CreateSandboxPolicyOptions,
   createOperatorSandboxPolicy,
+  createSandboxLaunchDir,
   createSandboxPolicy,
   defaultSandboxProfile,
+  disposeSandboxLaunchDir,
   mergeSandboxProfiles,
   type OperatorSandboxConfig,
   pickSandboxEnv,
@@ -139,6 +142,7 @@ export {
   type SandboxResolution,
   type SandboxResolveContext,
   type SandboxRuntime,
+  type SandboxUnavailableKind,
   sandboxUnavailableMessage,
   writeSandboxBody,
 } from "./handlers/sandbox.ts";

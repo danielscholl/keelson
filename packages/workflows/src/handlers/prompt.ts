@@ -27,9 +27,10 @@
  */
 
 import type { NodeContext, NodeHandler, NodeResult, NodeTokenUsage } from "../executor.ts";
-import type { DagNode } from "../schema/index.ts";
+import type { DagNode, NodeSandbox } from "../schema/index.ts";
 import { buildOutputFormatSuffix, extractJsonValue } from "./output-format.ts";
 import {
+  prepareSandboxScratch,
   type SandboxPolicy,
   type SandboxProfile,
   type SandboxResolution,
@@ -210,6 +211,14 @@ export type PromptRequestGate = (
   provider?: string,
 ) => Promise<{ outcome: "allow" } | { outcome: "deny"; reason: string }>;
 
+export interface SandboxBashTurn {
+  cwd: string;
+  scratchDir: string;
+  artifactsDir?: string;
+  nodeSandbox?: NodeSandbox;
+  workflowSandbox?: NodeSandbox;
+}
+
 export interface MakePromptHandlerOptions {
   /**
    * Resolves the provider to use for this node from its registered effective id.
@@ -277,6 +286,13 @@ export interface MakePromptHandlerOptions {
   // When set, a sandboxed node hands its profile to the provider, and one on a
   // provider that cannot sandbox fails closed.
   sandbox?: SandboxPolicy;
+  // The host's sandboxed `bash`, added to a sandboxed node whose provider
+  // confines shell only through a supplied tool (support "tool").
+  // The node's and workflow's `sandbox` blocks shape that shell's profile.
+  sandboxBashTool?: (turn: SandboxBashTurn) => {
+    name: string;
+    [k: string]: unknown;
+  };
 }
 
 // Default denylist is empty — Keelson core has no built-in tools, and ribs
@@ -284,6 +300,11 @@ export interface MakePromptHandlerOptions {
 // KEELSON_WORKFLOW_TOOL_DENYLIST to forbid specific tool names, or pass
 // `denylist` explicitly when constructing the prompt handler.
 export const DEFAULT_TOOL_DENYLIST: readonly string[] = [];
+
+const SANDBOXED_BASH_TOOL = "bash";
+// Operator denylists name the shell canonically too; without a policy engine
+// (the CLI's offline path) nothing else maps `Bash` onto the injected tool.
+const SHELL_DENY_NAMES = [SANDBOXED_BASH_TOOL, "Bash"];
 
 // Parses KEELSON_WORKFLOW_TOOL_DENYLIST. Unset means the default; an explicit
 // empty string means allow everything.
@@ -316,7 +337,10 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
     return ctx.providerOverride ?? opts.resolveProviderId?.(pin) ?? pin;
   };
 
-  const resolveSandbox = (node: DagNode, ctx: NodeContext): SandboxResolution | undefined => {
+  const resolveSandbox = (
+    node: DagNode,
+    ctx: NodeContext,
+  ): { resolution: SandboxResolution; support: "native" | "tool" | "none" } | undefined => {
     if (opts.sandbox === undefined) return undefined;
     const providerId = effectiveProviderFor(node, ctx);
     let support: "native" | "tool" | "none" = "none";
@@ -328,16 +352,20 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
     } catch {
       // An unresolvable provider fails in the turn itself; here it just cannot sandbox.
     }
-    return opts.sandbox.resolve(node.sandbox, {
-      ...sandboxContextFor(ctx),
-      provider: { id: label ?? "default", support },
-    });
+    return {
+      resolution: opts.sandbox.resolve(node.sandbox, {
+        ...sandboxContextFor(ctx),
+        provider: { id: label ?? "default", support },
+      }),
+      support,
+    };
   };
 
   const handleTurn = async (
     node: DagNode,
     ctx: NodeContext,
     sandboxProfile: SandboxProfile | undefined,
+    sandboxSupport: "native" | "tool" | "none" | undefined,
   ): Promise<NodeResult> => {
     // Lifecycle: beforeNode (memory recall plugs in here). Errors here
     // MUST NOT take the node down — the seam is a hook, not an oracle.
@@ -561,6 +589,22 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
     // widened by a node's allowed_tools. The engine contains a faulty policy to
     // itself (skips it) internally, so a throw here is an unexpected fault —
     // keep the node-resolved tools (fail open) and warn rather than failing the node.
+    // Added after the node rails because the provider matches its shell tool to
+    // allowed_tools / denied_tools by capability (Bash, shell), not by name.
+    const sandboxBash =
+      sandboxProfile !== undefined &&
+      sandboxSupport === "tool" &&
+      opts.sandboxBashTool !== undefined &&
+      !SHELL_DENY_NAMES.some((name) => denySet.has(name))
+        ? opts.sandboxBashTool({
+            ...sandboxContextFor(ctx),
+            scratchDir: prepareSandboxScratch(ctx.artifactsDir, ctx.nodeId),
+            ...(node.sandbox !== undefined ? { nodeSandbox: node.sandbox } : {}),
+          })
+        : undefined;
+    if (sandboxBash !== undefined) {
+      filteredTools = [...filteredTools.filter((t) => t.name !== sandboxBash.name), sandboxBash];
+    }
     if (opts.projectTools) {
       try {
         filteredTools = await opts.projectTools(filteredTools, effectiveProviderId, nodeMeta);
@@ -570,6 +614,17 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       }
     }
     const registeredToolNames = new Set(filteredTools.map((tool) => bareToolName(tool.name)));
+    // A sandboxed shell the operator or a policy withheld is denied outright, so
+    // the provider neither demands the tool nor falls back to its own shell.
+    const shellWithheld =
+      sandboxProfile !== undefined &&
+      sandboxSupport === "tool" &&
+      opts.sandboxBashTool !== undefined &&
+      !filteredTools.some((t) => t.name === SANDBOXED_BASH_TOOL);
+    const deniedForProvider =
+      shellWithheld && !(nodeDenied ?? []).includes(SANDBOXED_BASH_TOOL)
+        ? [...(nodeDenied ?? []), SANDBOXED_BASH_TOOL]
+        : nodeDenied;
 
     // Bind the node's effective provider id + teardown signal so the provider
     // gets a thunk that takes only the call. `handlerExit` fires on run cancel or
@@ -754,7 +809,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           ...(effort !== undefined ? { reasoningEffort: effort } : {}),
           ...(effectiveSystemPrompt !== undefined ? { systemPrompt: effectiveSystemPrompt } : {}),
           ...(nodeAllowed !== undefined ? { allowedTools: nodeAllowed } : {}),
-          ...(nodeDenied !== undefined ? { disallowedTools: nodeDenied } : {}),
+          ...(deniedForProvider !== undefined ? { disallowedTools: deniedForProvider } : {}),
           ...(nodeHooks !== undefined ? { hooks: nodeHooks } : {}),
           ...(sandboxProfile !== undefined ? { sandbox: sandboxProfile } : {}),
           ...(boundToolCallGate !== undefined ? { evaluateToolCall: boundToolCallGate } : {}),
@@ -1022,7 +1077,8 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
   return {
     type: "prompt",
     async handle(node, ctx): Promise<NodeResult> {
-      const resolution = resolveSandbox(node, ctx);
+      const sandbox = resolveSandbox(node, ctx);
+      const resolution = sandbox?.resolution;
       if (resolution?.fail !== undefined) {
         return tagSandboxResult(
           { status: "failed", output: { kind: "text", text: "" }, error: resolution.fail },
@@ -1030,7 +1086,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
         );
       }
       return tagSandboxResult(
-        await handleTurn(node, ctx, resolution?.profile ?? undefined),
+        await handleTurn(node, ctx, resolution?.profile ?? undefined, sandbox?.support),
         resolution,
       );
     },

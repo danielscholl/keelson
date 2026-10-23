@@ -106,6 +106,7 @@ function subprocess(
     launcher: createMxcLauncher({
       executorPath: launcherExec,
       scratchDir: scratch,
+      launchDir: mkdtempSync(join(root, "launch-")),
       profile: profile(),
     }),
   });
@@ -132,17 +133,20 @@ describe.skipIf(!POSIX)("createMxcLauncher through runSubprocess", () => {
     expect(outcome.exitCode).toBe(7);
   });
 
-  test("the config is written as a 0600 file, is a seatbelt request, and is removed after exit", async () => {
+  test("the config goes to the launch dir, never scratch, as a 0600 seatbelt request removed after exit", async () => {
     const scratch = mkdtempSync(join(root, "scratch-"));
+    const launchDir = mkdtempSync(join(root, "launch-"));
     const handle = createMxcLauncher({
       executorPath: fakeExec,
       scratchDir: scratch,
+      launchDir,
       profile: profile(),
     }).spawn({ cmd: "true", args: [], cwd: root, env: { PATH: "/usr/bin:/bin" } });
     expect(await handle.exited).toBe(0);
-    const files = (await Array.fromAsync(new Bun.Glob("mxc-*").scan(scratch))).sort();
+    expect(await Array.fromAsync(new Bun.Glob("mxc-*").scan(scratch))).toEqual([]);
+    const files = (await Array.fromAsync(new Bun.Glob("mxc-*").scan(launchDir))).sort();
     expect(files.filter((f) => f.endsWith(".json"))).toEqual([]);
-    const seen = JSON.parse(readFileSync(join(scratch, files[0] ?? ""), "utf8"));
+    const seen = JSON.parse(readFileSync(join(launchDir, files[0] ?? ""), "utf8"));
     expect(seen).toMatchObject({ version: "1.0.0", containment: "seatbelt" });
     expect(seen.process.timeout).toBeUndefined();
   });

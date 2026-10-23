@@ -121,6 +121,15 @@ describe.skipIf(!LIVE)("MXC Seatbelt runtime (live)", () => {
     });
   });
 
+  test("a sandboxed command cannot write beside its own launch files", async () => {
+    const result = await makeBashHandler({ sandbox: policy() }).handle(
+      bashNode,
+      ctx('touch "$(dirname "$0")/planted" && echo planted'),
+    );
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Operation not permitted");
+  });
+
   test("an abort kills a sandboxed sleep 30 within 3 seconds", async () => {
     const ctrl = new AbortController();
     const started = Date.now();

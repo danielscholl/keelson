@@ -10,13 +10,14 @@
 // keelson owns that process's policy; a prompt node's default defers to its
 // provider's sandbox, so it denies nothing an operator did not configure.
 
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, isAbsolute, join, normalize, relative, resolve } from "node:path";
 
 import type { NodeContext, NodeResult, SandboxOutcome } from "../executor.ts";
 import type { NodeSandbox } from "../schema/index.ts";
 import type { ProcessLauncher } from "./launcher.ts";
+import { SubprocessSpawnError } from "./subprocess.ts";
 
 // Structural mirror of `@keelson/shared`'s SandboxProfile; a server test keeps
 // the two assignable to each other.
@@ -43,9 +44,13 @@ export interface SandboxProfile {
 // launcher that runs a node's process under the profile.
 export interface SandboxRuntime {
   readonly backend: string;
-  createLauncher(profile: SandboxProfile, scratch: string): ProcessLauncher;
+  // `launchDir` holds the files the spawn reads (see createSandboxLaunchDir);
+  // the runtime writes its own config there too.
+  createLauncher(profile: SandboxProfile, scratch: string, launchDir: string): ProcessLauncher;
   // What this backend does differently from what the profile literally asks.
   warnings?(profile: SandboxProfile): readonly string[];
+  // Why this backend cannot enforce the profile at all; the node fails closed.
+  refusal?(profile: SandboxProfile): string | undefined;
 }
 
 export interface SandboxResolution {
@@ -70,7 +75,7 @@ export interface SandboxResolveContext {
 
 export interface SandboxPolicy {
   resolve(nodeSandbox: NodeSandbox | undefined, ctx: SandboxResolveContext): SandboxResolution;
-  launcherFor(profile: SandboxProfile, scratch: string): ProcessLauncher;
+  launcherFor(profile: SandboxProfile, scratch: string, launchDir: string): ProcessLauncher;
   // The env a sandboxed process gets; see pickSandboxEnv.
   envFor(
     env: Readonly<Record<string, string>>,
@@ -287,11 +292,21 @@ function builtInDenied(opts: { home: string; dbPath: string; hostHome: string })
   );
 }
 
-export function sandboxUnavailableMessage(reason: string, floor: boolean): string {
+// "runtime": no executor on this host, so installing one is the fix.
+// "provider": the node's provider cannot confine its tools, so installing does nothing.
+export type SandboxUnavailableKind = "runtime" | "provider";
+
+export function sandboxUnavailableMessage(
+  reason: string,
+  floor: boolean,
+  kind: SandboxUnavailableKind = "runtime",
+): string {
   const optOut = floor
     ? "unset `KEELSON_SANDBOX=required`, which ignores `enabled: false`"
     : "set `sandbox: { enabled: false }` on the node";
-  return `sandbox required but unavailable: ${reason}; run \`keelson sandbox install\` or ${optOut}`;
+  const fix =
+    kind === "provider" ? "switch to a provider that can sandbox" : "run `keelson sandbox install`";
+  return `sandbox required but unavailable: ${reason}; ${fix} or ${optOut}`;
 }
 
 export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPolicy {
@@ -359,6 +374,7 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
             fail: sandboxUnavailableMessage(
               `provider '${ctx.provider.id}' cannot sandbox its tools`,
               opts.floor,
+              "provider",
             ),
           };
         }
@@ -374,6 +390,10 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
           ),
         };
       }
+      const refusal = opts.runtime.refusal?.(profile);
+      if (refusal !== undefined) {
+        return { profile, outcome: "off", fail: `sandbox cannot be enforced: ${refusal}` };
+      }
       const warnings = opts.runtime.warnings?.(profile) ?? [];
       return {
         profile,
@@ -382,20 +402,33 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
         ...(warnings.length > 0 ? { warnings } : {}),
       };
     },
-    launcherFor(profile, scratch) {
+    launcherFor(profile, scratch, launchDir) {
       if (opts.runtime === undefined) {
         throw new Error("launcherFor called without a sandbox runtime");
       }
-      const withScratch = isCovered(scratch, profile.filesystem.readwrite)
-        ? profile
-        : {
-            ...profile,
-            filesystem: {
-              ...profile.filesystem,
-              readwrite: union(profile.filesystem.readwrite, [canonical(scratch)]),
-            },
-          };
-      return opts.runtime.createLauncher(withScratch, scratch);
+      const launch = canonical(launchDir);
+      const readwrite = isCovered(scratch, profile.filesystem.readwrite)
+        ? profile.filesystem.readwrite
+        : union(profile.filesystem.readwrite, [canonical(scratch)]);
+      // A launch file a sandboxed process could rewrite would let it widen the
+      // next spawn's grants or run code under another node's profile.
+      if (isCovered(launch, readwrite)) {
+        throw new SubprocessSpawnError(
+          `sandbox launch directory ${launch} is inside a writable grant; refusing to launch`,
+        );
+      }
+      return opts.runtime.createLauncher(
+        {
+          ...profile,
+          filesystem: {
+            ...profile.filesystem,
+            readwrite,
+            readonly: union(profile.filesystem.readonly, [launch]),
+          },
+        },
+        scratch,
+        launch,
+      );
     },
     envFor(env, profile, scratch) {
       return pickSandboxEnv(env, { scratch, hostHome, allow: profile.env });
@@ -487,23 +520,32 @@ export function emitSandboxWarnings(
 // Under Seatbelt bun cannot read its cwd's ancestor directories, and when that
 // lookup fails it starts with an empty environment. A preload restores the
 // node's (already filtered) env from a file before the body runs.
-export function writeBunEnvShim(scratch: string, env: Readonly<Record<string, string>>): string {
-  const envPath = join(scratch, "env.json");
-  writeFileSync(envPath, JSON.stringify(env), { mode: 0o600 });
-  const shimPath = join(scratch, "shim.ts");
-  writeFileSync(
-    shimPath,
+export function writeBunEnvShim(launchDir: string, env: Readonly<Record<string, string>>): string {
+  const envPath = writeSandboxBody(launchDir, "env.json", JSON.stringify(env));
+  return writeSandboxBody(
+    launchDir,
+    "shim.ts",
     `Object.assign(process.env, JSON.parse(require("node:fs").readFileSync(${JSON.stringify(envPath)}, "utf8")));\n`,
-    { mode: 0o600 },
   );
-  return shimPath;
 }
 
 // The body rides in a file, never argv: a runtime may wrap the command in its
 // own shell, and argv is length-limited and visible to `ps`.
-export function writeSandboxBody(scratch: string, name: string, body: string): string {
-  const path = join(scratch, name);
-  writeFileSync(path, body, { mode: 0o600 });
+// A fresh 0700 directory for one spawn's launch files, outside every writable
+// grant (launcherFor checks) and granted to the sandbox read-only. Remove it
+// with disposeSandboxLaunchDir once the spawn exits.
+export function createSandboxLaunchDir(): string {
+  return mkdtempSync(join(tmpdir(), "keelson-launch-"));
+}
+
+export function disposeSandboxLaunchDir(launchDir: string): void {
+  rmSync(launchDir, { recursive: true, force: true });
+}
+
+// Exclusive create: never follows or reuses a path that already exists.
+export function writeSandboxBody(launchDir: string, name: string, body: string): string {
+  const path = join(launchDir, name);
+  writeFileSync(path, body, { mode: 0o600, flag: "wx" });
   return path;
 }
 

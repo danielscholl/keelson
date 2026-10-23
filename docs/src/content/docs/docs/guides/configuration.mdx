@@ -665,7 +665,7 @@ sandboxed bash node sees an empty environment; use a script node with
 | `filesystem.denied` | string array | Paths the confined tools may not read or write. |
 | `network.outbound` | `"allow"` \| `"deny"` | Whether confined tools reach the network. Default `deny`. |
 | `network.loopback` | boolean | Whether they reach local addresses, including the keelson server. Default `false`. |
-| `network.allowedHosts` | string array | With `outbound: "allow"`, the only hosts they may reach. Enforced by Copilot and Claude, not Codex. |
+| `network.allowedHosts` | string array | With `outbound: "allow"`, the only hosts they may reach. Enforced by Copilot and Claude. Codex and the macOS runtime cannot filter by host, so a profile that sets it fails closed there instead of allowing every host. |
 | `env` | string array | Variable names an operator wants passed into the sandbox. Not yet honored by the provider backends. |
 | `backend` | object | Per-provider settings spread over the mapped policy (`copilot`, `claude`), or a stricter Codex `mode`. Codex never runs looser than `workspace-write` while sandboxed. |
 

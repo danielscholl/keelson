@@ -9,9 +9,9 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { NodeContext, NodeStreamEvent } from "../executor.ts";
 import type { DagNode, NodeOutput, WorkflowDefinition } from "../schema/index.ts";
 import { bashHandler, makeBashHandler } from "./bash.ts";
@@ -436,6 +436,8 @@ describe("makeBashHandler — sandbox", () => {
   function recordingPolicy(runtime: boolean, defaultEnabled = true) {
     const specs: SpawnSpec[] = [];
     const profiles: SandboxProfile[] = [];
+    // Launch files are gone once the spawn exits, so capture them at spawn.
+    const launched: { path: string; content: string; mode: number }[] = [];
     const home = join(tmpdir(), "keelson-bash-sandbox-home");
     const policy = createSandboxPolicy({
       floor: false,
@@ -454,6 +456,14 @@ describe("makeBashHandler — sandbox", () => {
                   id: "mxc",
                   spawn: (spec) => {
                     specs.push(spec);
+                    const path = spec.args[0];
+                    if (path !== undefined && existsSync(path)) {
+                      launched.push({
+                        path,
+                        content: readFileSync(path, "utf8"),
+                        mode: statSync(path).mode & 0o777,
+                      });
+                    }
                     return hostLauncher.spawn(spec);
                   },
                 };
@@ -462,17 +472,17 @@ describe("makeBashHandler — sandbox", () => {
           }
         : {}),
     });
-    return { policy, specs, profiles };
+    return { policy, specs, profiles, launched };
   }
 
   function sandboxCtx(body: string, artifactsDir: string): NodeContext {
     return { ...buildCtx({ resolvedBody: body }), artifactsDir };
   }
 
-  test("runs the body from <artifacts>/sandbox/<node>/body.sh through the runtime's launcher", async () => {
+  test("runs the body from a host-only launch dir through the runtime's launcher", async () => {
     const artifacts = mkdtempSync(join(tmpdir(), "keelson-bash-sandbox-"));
     try {
-      const { policy, specs, profiles } = recordingPolicy(true);
+      const { policy, specs, profiles, launched } = recordingPolicy(true);
       const body = "echo sandboxed-$KEELSON_RUN_ID";
       const result = await makeBashHandler({ sandbox: policy }).handle(
         stubNode,
@@ -485,12 +495,16 @@ describe("makeBashHandler — sandbox", () => {
       expect(result.sandboxBackend).toBe("fake");
 
       const scratch = join(artifacts, "sandbox", "n1");
-      const bodyFile = join(scratch, "body.sh");
+      const bodyFile = launched[0]?.path ?? "";
       expect(specs[0]?.args).toEqual([bodyFile]);
-      expect(readFileSync(bodyFile, "utf8")).toBe(body);
-      if (process.platform !== "win32") {
-        expect(statSync(bodyFile).mode & 0o777).toBe(0o600);
-      }
+      expect(basename(bodyFile)).toBe("body.sh");
+      expect(launched[0]?.content).toBe(body);
+      if (process.platform !== "win32") expect(launched[0]?.mode).toBe(0o600);
+      // Outside every writable grant, readable by the sandbox, gone afterwards.
+      const launchDir = join(realpathSync(tmpdir()), basename(dirname(bodyFile)));
+      expect(profiles[0]?.filesystem.readwrite.some((rw) => launchDir.startsWith(rw))).toBe(false);
+      expect(profiles[0]?.filesystem.readonly).toContain(launchDir);
+      expect(existsSync(dirname(bodyFile))).toBe(false);
       expect(specs[0]?.env.HOME).toBe(join(scratch, "home"));
       expect(specs[0]?.env.TMPDIR).toBe(join(scratch, "tmp"));
       expect(

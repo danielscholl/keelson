@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NodeContext, NodeHandler, NodeResult } from "../executor.ts";
@@ -904,7 +904,7 @@ describe("makeLoopHandler — substitution in loop.prompt", () => {
 });
 
 describe("makeRunUntilBashProbe — sandbox", () => {
-  function policyWith(runtime: boolean, specs: SpawnSpec[]) {
+  function policyWith(runtime: boolean, specs: SpawnSpec[], bodies: string[] = []) {
     const home = join(tmpdir(), "keelson-loop-sandbox-home");
     return createSandboxPolicy({
       floor: false,
@@ -921,6 +921,9 @@ describe("makeRunUntilBashProbe — sandbox", () => {
                 id: "mxc",
                 spawn: (spec) => {
                   specs.push(spec);
+                  const script = spec.args[0];
+                  if (script !== undefined && existsSync(script))
+                    bodies.push(readFileSync(script, "utf8"));
                   return hostLauncher.spawn(spec);
                 },
               }),
@@ -930,11 +933,12 @@ describe("makeRunUntilBashProbe — sandbox", () => {
     });
   }
 
-  test("a sandboxed probe runs its script from <artifacts>/sandbox/<node>-until/until.sh", async () => {
+  test("a sandboxed probe runs its script from a host-only launch dir, removed after", async () => {
     const artifacts = mkdtempSync(join(tmpdir(), "keelson-loop-sandbox-"));
     try {
       const specs: SpawnSpec[] = [];
-      const probe = makeRunUntilBashProbe({ sandbox: policyWith(true, specs) });
+      const bodies: string[] = [];
+      const probe = makeRunUntilBashProbe({ sandbox: policyWith(true, specs, bodies) });
       const result = await probe("exit 0", {
         cwd: process.cwd(),
         signal: new AbortController().signal,
@@ -944,9 +948,11 @@ describe("makeRunUntilBashProbe — sandbox", () => {
         nodeId: "retry",
       });
       expect(result.exitCode).toBe(0);
-      const script = join(artifacts, "sandbox", "retry-until", "until.sh");
-      expect(specs[0]?.args).toEqual([script]);
-      expect(readFileSync(script, "utf8")).toBe("exit 0");
+      const script = specs[0]?.args[0] ?? "";
+      expect(script.endsWith("until.sh")).toBe(true);
+      expect(script.startsWith(artifacts)).toBe(false);
+      expect(bodies).toEqual(["exit 0"]);
+      expect(existsSync(script)).toBe(false);
     } finally {
       rmSync(artifacts, { recursive: true, force: true });
     }

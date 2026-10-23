@@ -74,3 +74,12 @@ export function parseRunArg(arg: string): { name: string; inputs: Record<string,
   }
   return { name, inputs };
 }
+
+export type SandboxArg = "on" | "off" | "status";
+
+// A bare `/sandbox` reads as status.
+export function parseSandboxArg(arg: string): SandboxArg | null {
+  const word = arg.trim().toLowerCase();
+  if (word === "") return "status";
+  return word === "on" || word === "off" || word === "status" ? word : null;
+}

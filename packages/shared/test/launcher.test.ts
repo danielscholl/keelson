@@ -9,11 +9,14 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildMxcConfig,
   hostLauncher,
+  mxcProfileRefusal,
   mxcProfileWarnings,
   resolveMxcExecutor,
+  rewriteMxcStderr,
   rewriteMxcStderrLine,
   type SpawnSpec,
   shellJoin,
@@ -156,7 +159,8 @@ describe("resolveMxcExecutor", () => {
   test("finds the arm64 executor inside the installed SDK", () => {
     expect(resolveMxcExecutor(darwin)).toEqual({
       ok: true,
-      path: "/home/k/node_modules/@microsoft/mxc-sdk/bin/arm64/mxc-exec-mac",
+      // Built with the platform join, as the resolver does.
+      path: join("/home/k/node_modules/@microsoft/mxc-sdk", "bin", "arm64", "mxc-exec-mac"),
       source: "package",
       version: "1.0.1",
     });
@@ -281,5 +285,61 @@ describe("rewriteMxcStderrLine", () => {
     );
     expect(rewriteMxcStderrLine("ls: Operation not permitted")).toBe("ls: Operation not permitted");
     expect(rewriteMxcStderrLine('{"error": not json')).toBe('{"error": not json');
+  });
+});
+
+describe("mxcProfileRefusal", () => {
+  const base: SandboxProfile = {
+    enabled: true,
+    filesystem: { readwrite: ["/tmp"], readonly: [], denied: [] },
+    network: { outbound: "allow" },
+    env: [],
+  };
+
+  test("refuses a host allowlist Seatbelt would widen to every destination", () => {
+    expect(
+      mxcProfileRefusal({ ...base, network: { outbound: "allow", allowedHosts: ["github.com"] } }),
+    ).toContain("cannot limit outbound traffic to network.allowedHosts");
+  });
+
+  test("accepts all-or-nothing egress", () => {
+    expect(mxcProfileRefusal(base)).toBeUndefined();
+    expect(mxcProfileRefusal({ ...base, network: { outbound: "deny" } })).toBeUndefined();
+    expect(
+      mxcProfileRefusal({ ...base, network: { outbound: "deny", allowedHosts: ["github.com"] } }),
+    ).toBeUndefined();
+  });
+});
+
+describe("rewriteMxcStderr", () => {
+  async function pipe(chunks: string[]): Promise<{ out: string; reads: string[] }> {
+    const encoder = new TextEncoder();
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const c of chunks) controller.enqueue(encoder.encode(c));
+        controller.close();
+      },
+    });
+    const reads: string[] = [];
+    const decoder = new TextDecoder();
+    const reader = rewriteMxcStderr(source)?.getReader();
+    for (;;) {
+      const next = await reader?.read();
+      if (next === undefined || next.done) break;
+      reads.push(decoder.decode(next.value));
+    }
+    return { out: reads.join(""), reads };
+  }
+
+  test("rewrites the executor's envelope line by line", async () => {
+    const { out } = await pipe(['plain\n{"error":{"message":"nope"}}', "\n"]);
+    expect(out).toBe("plain\nsandbox launch failed: nope\n");
+  });
+
+  test("forwards an oversized newline-free line as it arrives instead of holding it", async () => {
+    const big = "x".repeat(10_000);
+    const { out, reads } = await pipe([big, "y".repeat(100), '\n{"error":{"message":"late"}}\n']);
+    expect(reads[0]).toBe(big);
+    expect(out).toBe(`${big}${"y".repeat(100)}\nsandbox launch failed: late\n`);
   });
 });

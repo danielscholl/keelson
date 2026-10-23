@@ -102,6 +102,9 @@ export interface SandboxResolution {
   source: SandboxSource;
   // True when the floor holds the sandbox on and a user toggle cannot clear it.
   locked: boolean;
+  // A client's off it cannot confirm: the server policy it could not read may
+  // hold a floor that keeps the sandbox on.
+  unconfirmed?: true;
 }
 
 export function resolveSandboxEnabled(input: {
@@ -118,6 +121,34 @@ export function resolveSandboxEnabled(input: {
   }
   if (env.kind === "default") return { enabled: env.enabled, source: "env", locked: false };
   return { enabled: input.configDefault, source: "config", locked: false };
+}
+
+// A client's view of the outcome: an explicit choice no row holds yet, the
+// row's saved one, and the server policy from /api/config. Undefined when the
+// outcome rests on a policy the client could not read.
+export function resolveClientSandbox(input: {
+  choice?: boolean;
+  conversation?: SandboxMode;
+  policy?: { default: boolean; floor: boolean };
+}): SandboxResolution | undefined {
+  if (input.policy === undefined) {
+    const requested =
+      input.choice ?? (input.conversation !== undefined ? input.conversation === "on" : undefined);
+    if (requested === undefined) return undefined;
+    // On holds under any floor; off is only a request until the policy is read.
+    return {
+      enabled: requested,
+      source: input.choice !== undefined ? "frame" : "conversation",
+      locked: false,
+      ...(requested ? {} : { unconfirmed: true as const }),
+    };
+  }
+  return resolveSandboxEnabled({
+    ...(input.choice !== undefined ? { frame: input.choice } : {}),
+    ...(input.conversation !== undefined ? { conversation: input.conversation } : {}),
+    configDefault: input.policy?.default ?? false,
+    ...(input.policy?.floor ? { env: "required" } : {}),
+  });
 }
 
 function union(...lists: readonly (readonly string[] | undefined)[]): string[] {
@@ -200,7 +231,11 @@ function definedOnly<T extends object>(value: T): Partial<T> {
 }
 
 export function describeSandboxProfile(p: SandboxProfile): string {
-  if (!p.enabled) return "sandbox off";
+  return p.enabled ? `sandbox on · ${describeSandboxGrants(p)}` : "sandbox off";
+}
+
+// What a profile lets a sandboxed tool do, whether or not it is enabled.
+export function describeSandboxGrants(p: SandboxProfile): string {
   const [first, ...rest] = p.filesystem.readwrite;
   const writes =
     first === undefined ? "none" : rest.length > 0 ? `${first} +${rest.length}` : first;
@@ -217,5 +252,84 @@ export function describeSandboxProfile(p: SandboxProfile): string {
     `network ${network}${p.network.loopback ? " + loopback" : ""}`,
     p.env.length > 0 ? `env ${p.env.join(", ")}` : "no extra env",
   ];
-  return `sandbox on · ${parts.join(" · ")}`;
+  return parts.join(" · ");
+}
+
+const NATIVE_BACKENDS: Record<string, Partial<Record<string, string>>> = {
+  copilot: { darwin: "Seatbelt", linux: "bubblewrap", win32: "ProcessContainer" },
+  claude: { darwin: "Seatbelt", linux: "bubblewrap" },
+  codex: { darwin: "Seatbelt", linux: "Landlock", win32: "Windows sandbox" },
+};
+
+const NATIVE_NAMES: Record<string, string> = {
+  copilot: "Copilot CLI sandbox",
+  claude: "Claude Code sandbox",
+  codex: "Codex sandbox",
+};
+
+// `platform` is the server host's, which a browser client learns from /api/config.
+export function describeSandboxBackend(
+  providerId: string,
+  support: SandboxSupport,
+  platform: string,
+): string {
+  if (support === "none") return `${providerId} cannot sandbox its tools`;
+  if (support === "tool") return `${providerId} shell runs in the Keelson sandbox`;
+  const name = NATIVE_NAMES[providerId] ?? `${providerId} native sandbox`;
+  const backend = NATIVE_BACKENDS[providerId]?.[platform];
+  return backend !== undefined ? `${name} (${backend})` : `${name} (unsupported on ${platform})`;
+}
+
+const SOURCE_LABELS: Record<SandboxSource, string> = {
+  floor: "required by KEELSON_SANDBOX=required",
+  frame: "set for this session",
+  conversation: "saved on this conversation",
+  env: "KEELSON_SANDBOX default",
+  config: "config default",
+};
+
+export interface SandboxStatusInput {
+  // Absent when the outcome rests on a server policy the caller could not read.
+  resolution?: SandboxResolution;
+  providerId: string;
+  support: SandboxSupport;
+  platform: string;
+  // What a sandboxed turn may touch, from /api/config.
+  profile: string;
+  // The server host's runtime line, from /api/config.
+  runtime?: string;
+}
+
+// The `/sandbox status` text, identical on the CLI and the SPA.
+export function describeSandboxStatus(input: SandboxStatusInput): string[] {
+  const { resolution, providerId, support } = input;
+  const lines = [
+    resolution === undefined
+      ? "sandbox: server default (its policy could not be read)"
+      : resolution.unconfirmed
+        ? "sandbox: off requested; server policy unknown"
+        : `sandbox: ${resolution.enabled ? "on" : "off"} (${SOURCE_LABELS[resolution.source]})`,
+  ];
+  const backend =
+    providerId === "stub"
+      ? "stub runs no tools (n/a)"
+      : describeSandboxBackend(providerId, support, input.platform);
+  lines.push(
+    `provider: ${backend}${(resolution?.enabled !== false || resolution.unconfirmed) && support === "none" ? "; turns fail closed while the sandbox is on" : ""}`,
+  );
+  if (input.runtime !== undefined) lines.push(`runtime: ${input.runtime}`);
+  lines.push(`profile: ${input.profile}`);
+  return lines;
+}
+
+export const SANDBOX_LOCKED_MESSAGE =
+  "KEELSON_SANDBOX=required holds the sandbox on; unset it to turn the sandbox off";
+
+export function sandboxUnsupportedWarning(
+  providerId: string,
+  support: SandboxSupport,
+): string | undefined {
+  return support === "none"
+    ? `${providerId} cannot sandbox its tools, so turns fail closed while the sandbox is on; switch to a provider that can sandbox`
+    : undefined;
 }

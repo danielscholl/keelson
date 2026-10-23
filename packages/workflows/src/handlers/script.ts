@@ -31,6 +31,8 @@ import type { DagNode } from "../schema/index.ts";
 import { resolveScript, type ScriptRuntime } from "./discovery.ts";
 import { failed, formatSubprocessFailure, isInlineScript } from "./helpers.ts";
 import {
+  createSandboxLaunchDir,
+  disposeSandboxLaunchDir,
   emitSandboxWarnings,
   prepareSandboxScratch,
   type SandboxPolicy,
@@ -92,10 +94,16 @@ export function makeScriptHandler(opts: MakeScriptHandlerOptions = {}): NodeHand
     type: "script",
     async handle(node, ctx): Promise<NodeResult> {
       const resolution = opts.sandbox?.resolve(node.sandbox, sandboxContextFor(ctx));
-      return tagSandboxResult(
-        await runScript(node, ctx, factoryTimeoutMs, opts.sandbox, resolution),
-        resolution,
-      );
+      const launchDir =
+        opts.sandbox !== undefined && resolution?.profile ? createSandboxLaunchDir() : undefined;
+      try {
+        return tagSandboxResult(
+          await runScript(node, ctx, factoryTimeoutMs, opts.sandbox, resolution, launchDir),
+          resolution,
+        );
+      } finally {
+        if (launchDir !== undefined) disposeSandboxLaunchDir(launchDir);
+      }
     },
   };
 }
@@ -106,6 +114,7 @@ async function runScript(
   factoryTimeoutMs: number,
   policy: SandboxPolicy | undefined,
   resolution: SandboxResolution | undefined,
+  launchDir: string | undefined,
 ): Promise<NodeResult> {
   if (resolution?.fail !== undefined) return failed(resolution.fail);
   const sn = node as unknown as ScriptNodeLike & { id: string };
@@ -132,11 +141,11 @@ async function runScript(
   let spec: SpawnSpec;
   if (isInlineScript(scriptBody)) {
     spec =
-      scratch !== undefined
+      launchDir !== undefined
         ? buildSpawnSpec(
             runtime,
             scriptBody,
-            writeSandboxBody(scratch, runtime === "bun" ? "body.ts" : "body.py", scriptBody),
+            writeSandboxBody(launchDir, runtime === "bun" ? "body.ts" : "body.py", scriptBody),
             sn.deps ?? [],
             true,
           )
@@ -157,12 +166,18 @@ async function runScript(
       runId: ctx.runId,
       ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
     });
-    const sandboxed = policy !== undefined && profile && scratch !== undefined;
+    const sandboxed =
+      policy !== undefined && profile && scratch !== undefined && launchDir !== undefined;
     const childEnv = sandboxed ? policy.envFor(env, profile, scratch) : env;
     if (sandboxed) emitSandboxWarnings(ctx, resolution);
     const args =
       sandboxed && runtime === "bun"
-        ? ["--no-env-file", "--preload", writeBunEnvShim(scratch, childEnv), ...spec.args.slice(1)]
+        ? [
+            "--no-env-file",
+            "--preload",
+            writeBunEnvShim(launchDir, childEnv),
+            ...spec.args.slice(1),
+          ]
         : spec.args;
     outcome = await runSubprocess({
       cmd: spec.cmd,
@@ -173,7 +188,7 @@ async function runScript(
       abortSignal: ctx.abortSignal,
       emit: ctx.emit,
       trimTrailingNewline: true,
-      ...(sandboxed ? { launcher: policy.launcherFor(profile, scratch) } : {}),
+      ...(sandboxed ? { launcher: policy.launcherFor(profile, scratch, launchDir) } : {}),
     });
   } catch (err) {
     if (err instanceof SubprocessSpawnError) {

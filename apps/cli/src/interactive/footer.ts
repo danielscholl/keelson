@@ -14,6 +14,8 @@ export interface FooterState {
   branch: string | null;
   meter: string;
   activity: FooterActivity;
+  // Absent when the sandbox is off; "required" when the operator floor holds it on.
+  sandbox?: "on" | "required";
 }
 
 const SEP = " ⟩ ";
@@ -44,6 +46,9 @@ export class StatusFooter implements Component {
     parts.push(brass(`◆ ${s.providerId}`) + (s.model !== undefined ? dim(` · ${s.model}`) : ""));
     parts.push(cyan(s.projectName) + (s.branch !== null ? dim(` · ${s.branch}`) : ""));
     parts.push(green(s.meter));
+    if (s.sandbox !== undefined) {
+      parts.push(green(s.sandbox === "required" ? "⛨ sandbox (required)" : "⛨ sandbox"));
+    }
     if (s.activity === "working") parts.push(navy("⋯ working"));
     if (s.activity === "workflow") parts.push(navy("▶ workflow"));
     const line = ` ${parts.join(dim(SEP))}`;

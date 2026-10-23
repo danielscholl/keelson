@@ -6,7 +6,7 @@ import type { CommandRef } from "@keelson/shared";
 
 // "rib" covers every rib-contributed command (e.g. chamber's /mind, /genesis);
 // the specific owner is carried on `ribId`. Base families stay first-class.
-export type SlashCommandFamily = "project" | "workflow" | "rib";
+export type SlashCommandFamily = "project" | "workflow" | "session" | "rib";
 
 export interface SlashCommand {
   name: string;
@@ -32,6 +32,12 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     family: "workflow",
     description: "List workflows and start a run",
     usage: "run <name> [arguments]  ·  (no args: list)",
+  },
+  {
+    name: "sandbox",
+    family: "session",
+    description: "Turn the sandbox on or off for this conversation, or show its status",
+    usage: "on  ·  off  ·  status  ·  (no args: status)",
   },
 ];
 
@@ -88,6 +94,20 @@ export function parseWorkflowCommand(rest: string): WorkflowCommand {
     if (!match) return { kind: "usage" };
     return { kind: "run", name: match[1]!, args: (match[2] ?? "").trim() };
   }
+  return { kind: "usage" };
+}
+
+export type SandboxCommand =
+  | { kind: "on" }
+  | { kind: "off" }
+  | { kind: "status" }
+  | { kind: "usage" };
+
+// The text after `/sandbox`; bare reads as status, as in the CLI.
+export function parseSandboxCommand(rest: string): SandboxCommand {
+  const word = rest.trim().toLowerCase();
+  if (word === "" || word === "status") return { kind: "status" };
+  if (word === "on" || word === "off") return { kind: word };
   return { kind: "usage" };
 }
 

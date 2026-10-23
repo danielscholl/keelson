@@ -16,6 +16,7 @@ import {
 import { listProjects } from "../http/projects-client.ts";
 import { HttpError, isServerDownError } from "../http/workflow-client.ts";
 import { chatHeadless } from "../in-process/chat.ts";
+import { SandboxUnavailableError } from "../in-process/sandbox.ts";
 import { emit } from "../output.ts";
 import { gateSchemaSkew } from "../schema-gate.ts";
 import { probeServer } from "../server-probe.ts";
@@ -31,6 +32,8 @@ export interface ChatOptions {
   project?: string;
   thinking?: boolean;
   reasoningEffort?: ReasoningEffortLevel;
+  // `--sandbox` / `--no-sandbox`; absent leaves the conversation's choice or the default.
+  sandbox?: boolean;
   baseUrl?: string;
 }
 
@@ -143,6 +146,7 @@ async function runChatViaHttp(baseUrl: string, message: string, opts: ChatOption
       providerId,
       ...(effectiveModel ? { model: effectiveModel } : {}),
       ...(projectId ? { projectId } : {}),
+      ...(opts.sandbox !== undefined ? { sandbox: opts.sandbox ? "on" : "off" } : {}),
     });
     conversationId = conv.id;
   }
@@ -157,6 +161,7 @@ async function runChatViaHttp(baseUrl: string, message: string, opts: ChatOption
     ...(effectiveModel ? { model: effectiveModel } : {}),
     ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
     ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
+    ...(opts.sandbox !== undefined ? { sandbox: opts.sandbox } : {}),
     onChunk: (chunk) => {
       chunks.push(chunk);
       if (live) writeChunkLive(chunk);
@@ -167,7 +172,7 @@ async function runChatViaHttp(baseUrl: string, message: string, opts: ChatOption
     emit(
       {
         error: result.errorMessage ?? "chat stream errored",
-        code: "PROVIDER_ERROR",
+        code: result.errorCode === "SANDBOX_UNAVAILABLE" ? "SANDBOX_UNAVAILABLE" : "PROVIDER_ERROR",
       },
       { json: opts.json },
     );
@@ -212,6 +217,7 @@ async function runChatInProcess(message: string, opts: ChatOptions): Promise<nev
       ...(opts.model ? { model: opts.model } : {}),
       ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
       ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
+      ...(opts.sandbox !== undefined ? { sandbox: opts.sandbox } : {}),
       onChunk: (chunk) => {
         chunks.push(chunk);
         if (live) writeChunkLive(chunk);
@@ -243,6 +249,10 @@ async function runChatInProcess(message: string, opts: ChatOptions): Promise<nev
   } catch (err) {
     if (err instanceof UnknownProviderError) {
       emit({ error: err.message, code: "UNKNOWN_PROVIDER" }, { json: opts.json });
+      process.exit(EXIT_FAIL);
+    }
+    if (err instanceof SandboxUnavailableError) {
+      emit({ error: err.message, code: "SANDBOX_UNAVAILABLE" }, { json: opts.json });
       process.exit(EXIT_FAIL);
     }
     const message = err instanceof Error ? err.message : String(err);
@@ -311,6 +321,7 @@ export async function runChatEntry(message: string | undefined, opts: ChatOption
     ...(opts.conversationId !== undefined ? { conversationId: opts.conversationId } : {}),
     ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
     ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
+    ...(opts.sandbox !== undefined ? { sandbox: opts.sandbox } : {}),
   });
 }
 
