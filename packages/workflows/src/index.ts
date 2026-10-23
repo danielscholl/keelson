@@ -124,8 +124,10 @@ export {
 export {
   type CreateSandboxPolicyOptions,
   createOperatorSandboxPolicy,
+  createSandboxLaunchDir,
   createSandboxPolicy,
   defaultSandboxProfile,
+  disposeSandboxLaunchDir,
   mergeSandboxProfiles,
   type OperatorSandboxConfig,
   pickSandboxEnv,

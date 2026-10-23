@@ -9,7 +9,15 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
@@ -17,8 +25,10 @@ import { hostLauncher } from "./launcher.ts";
 import {
   type CreateSandboxPolicyOptions,
   createOperatorSandboxPolicy,
+  createSandboxLaunchDir,
   createSandboxPolicy,
   defaultSandboxProfile,
+  disposeSandboxLaunchDir,
   mergeSandboxProfiles,
   pickSandboxEnv,
   prepareSandboxScratch,
@@ -26,7 +36,9 @@ import {
   type SandboxProfile,
   type SandboxRuntime,
   sandboxUnavailableMessage,
+  writeSandboxBody,
 } from "./sandbox.ts";
+import { SubprocessSpawnError } from "./subprocess.ts";
 
 // Every path is built from these roots with the platform path module, so the
 // expectations hold on Windows too.
@@ -345,16 +357,45 @@ describe("launcherFor and envFor", () => {
     const profile = policy.resolve({ enabled: true }, { cwd: CWD }).profile;
     if (!profile) throw new Error("expected a profile");
     const outside = join(ROOT, "scratch-outside");
-    policy.launcherFor(profile, outside);
+    const launch = join(ROOT, "launch-1");
+    policy.launcherFor(profile, outside, launch);
     expect(seen[0]?.filesystem.readwrite).toContain(outside);
+    expect(seen[0]?.filesystem.readonly).toContain(launch);
+    expect(seen[0]?.filesystem.readwrite).not.toContain(launch);
     expect(policy.envFor({ GH_TOKEN: "x" }, profile, outside).GH_TOKEN).toBeUndefined();
+  });
+
+  test("refuses a launch dir a sandboxed process could write", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const profile = policy.resolve({ enabled: true }, { cwd: CWD }).profile;
+    if (!profile) throw new Error("expected a profile");
+    expect(() => policy.launcherFor(profile, join(ROOT, "s"), join(CWD, "launch"))).toThrow(
+      SubprocessSpawnError,
+    );
+    expect(() => policy.launcherFor(profile, join(ROOT, "s"), join(ROOT, "s", "launch"))).toThrow(
+      "inside a writable grant",
+    );
+  });
+
+  test("a runtime's refusal fails the node closed", () => {
+    const policy = createSandboxPolicy(
+      policyOptions({
+        runtime: { ...fakeRuntime, refusal: () => "no host allowlists here" },
+      }),
+    );
+    expect(policy.resolve({ enabled: true }, { cwd: CWD })).toMatchObject({
+      outcome: "off",
+      fail: "sandbox cannot be enforced: no host allowlists here",
+    });
   });
 
   test("refuses to build a launcher without a runtime", () => {
     const policy = createSandboxPolicy(policyOptions());
     const profile = policy.resolve({ enabled: true }, ctx).profile;
     if (!profile) throw new Error("expected a profile");
-    expect(() => policy.launcherFor(profile, ROOT)).toThrow("without a sandbox runtime");
+    expect(() => policy.launcherFor(profile, ROOT, join(ROOT, "launch"))).toThrow(
+      "without a sandbox runtime",
+    );
   });
 });
 
@@ -446,4 +487,30 @@ describe("prompt-node default", () => {
     expect(bash.profile?.filesystem.denied).toContain(join(HOST_HOME, ".ssh"));
     expect(bash.profile?.filesystem.denied).toContain(denied);
   });
+});
+
+describe("launch files", () => {
+  test("a launch dir is private, and disposing it removes everything in it", () => {
+    const dir = createSandboxLaunchDir();
+    writeSandboxBody(dir, "body.sh", "echo hi");
+    if (process.platform !== "win32") expect(statSync(dir).mode & 0o777).toBe(0o700);
+    disposeSandboxLaunchDir(dir);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "writeSandboxBody never follows or reuses a path that already exists",
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "keelson-launch-test-"));
+      try {
+        const victim = join(dir, "victim.txt");
+        writeFileSync(victim, "untouched");
+        symlinkSync(victim, join(dir, "body.sh"));
+        expect(() => writeSandboxBody(dir, "body.sh", "rm -rf ~")).toThrow();
+        expect(readFileSync(victim, "utf8")).toBe("untouched");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });

@@ -8,6 +8,8 @@
 
 import type { ToolContext, ToolDefinition } from "@keelson/shared";
 import {
+  createSandboxLaunchDir,
+  disposeSandboxLaunchDir,
   prependPath,
   resolveBash,
   runSubprocess,
@@ -39,8 +41,6 @@ export interface SandboxedBashToolOptions {
   baseEnv?: Readonly<Record<string, string>>;
   defaultTimeoutSec: number;
 }
-
-let callCounter = 0;
 
 function definedEnv(): Record<string, string> {
   return Object.fromEntries(
@@ -88,12 +88,9 @@ export function createSandboxedBashTool(opts: SandboxedBashToolOptions): ToolDef
       }
       const profile = resolution.profile;
       const bash = resolveBash();
+      const launchDir = createSandboxLaunchDir();
       // stderr is folded into stdout so the result reads like pi's own bash.
-      const script = writeSandboxBody(
-        opts.scratchDir,
-        `bash-${process.pid}-${++callCounter}.sh`,
-        `exec 2>&1\n${command}\n`,
-      );
+      const script = writeSandboxBody(launchDir, "command.sh", `exec 2>&1\n${command}\n`);
       const timeoutSec = timeout ?? opts.defaultTimeoutSec;
       try {
         const outcome = await runSubprocess({
@@ -109,9 +106,13 @@ export function createSandboxedBashTool(opts: SandboxedBashToolOptions): ToolDef
           abortSignal: ctx.abortSignal,
           emit: () => undefined,
           trimTrailingNewline: true,
-          launcher: opts.policy.launcherFor(profile, opts.scratchDir),
+          stdoutCapture: "tail",
+          launcher: opts.policy.launcherFor(profile, opts.scratchDir, launchDir),
         });
-        const text = truncateTail(outcome.stdoutText) || "(no output)";
+        // The child's stderr is in stdout; what reaches stderr is the runtime's
+        // own launch failure, which the model needs to see.
+        const combined = [outcome.stdoutText, outcome.stderrTail].filter((t) => t.length > 0);
+        const text = truncateTail(combined.join("\n")) || "(no output)";
         const shown = text === "(no output)" ? "" : `${text}\n\n`;
         if (outcome.killReason === "abort") {
           emitResult(ctx, `${shown}Command aborted`, true);
@@ -125,6 +126,8 @@ export function createSandboxedBashTool(opts: SandboxedBashToolOptions): ToolDef
       } catch (err) {
         if (!(err instanceof SubprocessSpawnError)) throw err;
         emitResult(ctx, `sandbox launch failed: ${err.message}`, true);
+      } finally {
+        disposeSandboxLaunchDir(launchDir);
       }
     },
   };

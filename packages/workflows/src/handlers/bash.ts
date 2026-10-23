@@ -28,6 +28,8 @@ import {
 import type { DagNode } from "../schema/index.ts";
 import { bundledBinDir, forgeShimPath } from "../seed.ts";
 import {
+  createSandboxLaunchDir,
+  disposeSandboxLaunchDir,
   emitSandboxWarnings,
   prepareSandboxScratch,
   type SandboxPolicy,
@@ -103,16 +105,21 @@ async function runBash(
       emitSandboxWarnings(ctx, resolution);
       if (BARE_BUN.test(shellBody)) ctx.emit({ type: "node_warning", message: NESTED_BUN_WARNING });
       const scratch = prepareSandboxScratch(ctx.artifactsDir, ctx.nodeId);
-      outcome = await runSubprocess({
-        cmd: bash.cmd,
-        args: [writeSandboxBody(scratch, "body.sh", shellBody)],
-        cwd: ctx.cwd,
-        env: policy.envFor(env, profile, scratch),
-        timeoutMs,
-        abortSignal: ctx.abortSignal,
-        emit: ctx.emit,
-        launcher: policy.launcherFor(profile, scratch),
-      });
+      const launchDir = createSandboxLaunchDir();
+      try {
+        outcome = await runSubprocess({
+          cmd: bash.cmd,
+          args: [writeSandboxBody(launchDir, "body.sh", shellBody)],
+          cwd: ctx.cwd,
+          env: policy.envFor(env, profile, scratch),
+          timeoutMs,
+          abortSignal: ctx.abortSignal,
+          emit: ctx.emit,
+          launcher: policy.launcherFor(profile, scratch, launchDir),
+        });
+      } finally {
+        disposeSandboxLaunchDir(launchDir);
+      }
     } else {
       outcome = await runSubprocess({
         cmd: bash.cmd,

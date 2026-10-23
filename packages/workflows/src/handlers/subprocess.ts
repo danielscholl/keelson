@@ -48,6 +48,9 @@ export interface SubprocessOptions {
   /** Trim a single trailing newline from captured stdout before returning. */
   trimTrailingNewline?: boolean;
   launcher?: ProcessLauncher;
+  // Which end of stdout to keep past the capture cap; "tail" for callers that
+  // report a command's last lines.
+  stdoutCapture?: "head" | "tail";
 }
 
 export interface SubprocessOutcome {
@@ -160,7 +163,22 @@ export async function runSubprocess(opts: SubprocessOptions): Promise<Subprocess
     proc.stdout,
     (line) => opts.emit({ type: "node_log", line }),
     (chunk) => {
-      if (stdoutBytes < STDOUT_CAPTURE_MAX_BYTES) {
+      if (opts.stdoutCapture === "tail") {
+        stdoutCapture.push(chunk);
+        stdoutBytes += chunk.length;
+        while (stdoutBytes > STDOUT_CAPTURE_MAX_BYTES && stdoutCapture.length > 1) {
+          stdoutBytes -= stdoutCapture.shift()?.length ?? 0;
+        }
+        const only = stdoutCapture[0];
+        if (
+          stdoutCapture.length === 1 &&
+          only !== undefined &&
+          only.length > STDOUT_CAPTURE_MAX_BYTES
+        ) {
+          stdoutCapture[0] = only.slice(-STDOUT_CAPTURE_MAX_BYTES);
+          stdoutBytes = STDOUT_CAPTURE_MAX_BYTES;
+        }
+      } else if (stdoutBytes < STDOUT_CAPTURE_MAX_BYTES) {
         stdoutCapture.push(chunk);
         stdoutBytes += chunk.length;
       }

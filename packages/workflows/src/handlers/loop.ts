@@ -37,7 +37,13 @@ import {
   stripCompletionTags,
   synthesizePromptNode,
 } from "./helpers.ts";
-import { prepareSandboxScratch, type SandboxPolicy, writeSandboxBody } from "./sandbox.ts";
+import {
+  createSandboxLaunchDir,
+  disposeSandboxLaunchDir,
+  prepareSandboxScratch,
+  type SandboxPolicy,
+  writeSandboxBody,
+} from "./sandbox.ts";
 import { prependPath, resolveBash } from "./shell.ts";
 import { buildSubprocessEnv, runSubprocess, SubprocessSpawnError } from "./subprocess.ts";
 
@@ -129,6 +135,7 @@ export function makeRunUntilBashProbe(
     }
     env.KEELSON_FORGE_BIN = forgeShimPath();
     if (process.env.KEELSON_FORGE?.trim()) env.KEELSON_FORGE = process.env.KEELSON_FORGE;
+    let launchDir: string | undefined;
     try {
       const bash = resolveBash();
       prependPath(env, [bundledBinDir(), ...bash.pathDirs]);
@@ -137,10 +144,13 @@ export function makeRunUntilBashProbe(
         policy !== undefined && profile
           ? prepareSandboxScratch(opts.artifactsDir, `${opts.nodeId ?? "loop"}-until`)
           : undefined;
+      launchDir = scratch !== undefined ? createSandboxLaunchDir() : undefined;
       const outcome = await runSubprocess({
         cmd: bash.cmd,
         args:
-          scratch !== undefined ? [writeSandboxBody(scratch, "until.sh", script)] : ["-c", script],
+          launchDir !== undefined
+            ? [writeSandboxBody(launchDir, "until.sh", script)]
+            : ["-c", script],
         cwd: opts.cwd,
         // The loop's own overlay (LOOP_PREV_OUTPUT, LOOP_USER_INPUT) is
         // harness-provided, so it passes the sandbox env filter like KEELSON_*.
@@ -158,8 +168,8 @@ export function makeRunUntilBashProbe(
         // code. A noop emit drops everything on the floor without paying
         // the chunk-coalescing cost.
         emit: () => undefined,
-        ...(policy !== undefined && profile && scratch !== undefined
-          ? { launcher: policy.launcherFor(profile, scratch) }
+        ...(policy !== undefined && profile && scratch !== undefined && launchDir !== undefined
+          ? { launcher: policy.launcherFor(profile, scratch, launchDir) }
           : {}),
       });
       return {
@@ -174,6 +184,8 @@ export function makeRunUntilBashProbe(
         return { exitCode: 127, stdout: "", stderr: err.message };
       }
       throw err;
+    } finally {
+      if (launchDir !== undefined) disposeSandboxLaunchDir(launchDir);
     }
   };
 }

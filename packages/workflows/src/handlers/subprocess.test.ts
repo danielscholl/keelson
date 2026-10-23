@@ -558,3 +558,31 @@ describe("buildSubprocessEnv — sandbox provenance", () => {
     expect(env.KEELSON_NODE_plain_SANDBOX).toBeUndefined();
   });
 });
+
+describe.skipIf(process.platform === "win32")("runSubprocess stdout capture", () => {
+  // ~1.5 MB of numbered lines, past the 1 MB capture cap.
+  const script =
+    'i=0; while [ $i -lt 150000 ]; do echo "line-$i"; i=$((i+1)); done; echo final-line';
+  const run = (stdoutCapture?: "head" | "tail") =>
+    runSubprocess({
+      cmd: "/bin/sh",
+      args: ["-c", script],
+      cwd: tmpdir(),
+      env: { PATH: "/usr/bin:/bin" },
+      timeoutMs: 60_000,
+      abortSignal: new AbortController().signal,
+      emit: () => undefined,
+      trimTrailingNewline: true,
+      ...(stdoutCapture !== undefined ? { stdoutCapture } : {}),
+    });
+
+  test("keeps the head by default and the tail when asked, both within the cap", async () => {
+    const head = await run();
+    expect(head.stdoutText.startsWith("line-0\n")).toBe(true);
+    expect(head.stdoutText.endsWith("final-line")).toBe(false);
+    const tail = await run("tail");
+    expect(tail.stdoutText.endsWith("line-149999\nfinal-line")).toBe(true);
+    expect(tail.stdoutText.startsWith("line-0\n")).toBe(false);
+    expect(tail.stdoutText.length).toBeLessThanOrEqual(1_000_000);
+  });
+});
