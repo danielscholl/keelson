@@ -60,8 +60,20 @@ describe("GET /api/config", () => {
   test("reports the sandbox policy, off by default with no floor", async () => {
     const res = await fetch(new URL("/api/config", handle.url));
     const body = (await res.json()) as {
-      sandbox: { default: boolean; floor: boolean; summary: string };
+      sandbox: {
+        default: boolean;
+        floor: boolean;
+        summary: string;
+        runtime: string;
+        platform: string;
+      };
     };
-    expect(body.sandbox).toEqual({ default: false, floor: false, summary: "sandbox off" });
+    expect(body.sandbox).toMatchObject({
+      default: false,
+      floor: false,
+      summary: "sandbox off",
+      platform: process.platform,
+    });
+    expect(body.sandbox.runtime).toMatch(/^(seatbelt via |unavailable: )/);
   });
 });

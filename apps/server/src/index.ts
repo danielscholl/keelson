@@ -56,8 +56,10 @@ import {
   bootstrapSandboxPolicy,
   bootstrapWorkflows,
   describeSandboxPolicy,
+  describeSandboxRuntime,
   prepareRibWorkflows,
   registerRibTools,
+  resolveSandboxRuntime,
 } from "./bootstrap.ts";
 import { createCanvasTools } from "./canvas-tools.ts";
 import { chatRoutes, chatWebSocketHandlers, handleChatUpgrade } from "./chat-handler.ts";
@@ -544,7 +546,12 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // the placeholder handler in that case. Rib tools are passed as default-off so
   // a workflow prompt node only sees a rib tool it explicitly `allowed_tools`.
   const sandbox = bootstrapSandbox();
-  const sandboxPolicy = bootstrapSandboxPolicy(sandbox, { home: KEELSON_HOME, dbPath: DB_PATH });
+  const sandboxRuntime = resolveSandboxRuntime();
+  const sandboxPolicy = bootstrapSandboxPolicy(sandbox, {
+    home: KEELSON_HOME,
+    dbPath: DB_PATH,
+    runtime: sandboxRuntime,
+  });
   const sandboxBashTool = (turn: { cwd: string; conversationId: string }) =>
     createSandboxedBashTool({
       policy: sandboxPolicy,
@@ -833,6 +840,8 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
         default: sandbox.default,
         floor: sandbox.floor,
         summary: describeSandboxPolicy(sandbox),
+        runtime: describeSandboxRuntime(sandboxRuntime),
+        platform: process.platform,
       },
     }),
   );

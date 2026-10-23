@@ -845,6 +845,11 @@ export function buildProgram(): Command {
       "--reasoning-effort <level>",
       `Copilot reasoning tier (${reasoningEffortLevelSchema.options.join("|")})`,
     )
+    .option("--sandbox", "sandbox this chat's tools (overrides the conversation and the default)")
+    .option(
+      "--no-sandbox",
+      "run this chat's tools unsandboxed (refused under KEELSON_SANDBOX=required)",
+    )
     .option("--base-url <url>", "explicit server base URL (skips the probe)")
     .action(async function chatAction(
       this: Command,
@@ -856,6 +861,7 @@ export function buildProgram(): Command {
         project?: string;
         thinking?: boolean;
         reasoningEffort?: string;
+        sandbox?: boolean;
         baseUrl?: string;
       },
     ) {
@@ -899,6 +905,7 @@ export function buildProgram(): Command {
         ...(project ? { project } : {}),
         ...(chatOpts.thinking !== undefined ? { thinking: chatOpts.thinking } : {}),
         ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+        ...(chatOpts.sandbox !== undefined ? { sandbox: chatOpts.sandbox } : {}),
         ...(baseUrl ? { baseUrl } : {}),
       });
     });

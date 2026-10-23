@@ -19,16 +19,11 @@ import { createSandboxedBashTool } from "@keelson/server/sandboxed-bash-tool";
 import {
   loadKeelsonConfig,
   readModelClassOverride,
-  resolveSandboxConfig,
   resolveWorkflowPreflight,
 } from "@keelson/shared/config";
-import { createMxcRuntime, resolveMxcExecutor } from "@keelson/shared/launcher";
-import { keelsonPaths, resolveKeelsonHome } from "@keelson/shared/paths";
 import { getRegisteredTools } from "@keelson/skills";
 import {
-  bundledBinDir,
   checkWorkflowCatalog,
-  createOperatorSandboxPolicy,
   createWorktree,
   DEFAULT_TOOL_DENYLIST,
   type DiscoveryRoot,
@@ -63,9 +58,9 @@ import {
   workflowDefinitionHash,
   worktreePathForRepoLocal,
 } from "@keelson/workflows";
-
 import { workflowDiscoveryRoots } from "../paths.ts";
 import { bootstrapCliProviders } from "./providers.ts";
+import { cliSandbox } from "./sandbox.ts";
 
 export interface RunHeadlessOptions {
   name: string;
@@ -275,23 +270,10 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   // a pause callout and no second client to resume the run, so an approval
   // node fails immediately with a clear message. Operators who need
   // approval should route through `keelson start` + the SPA.
-  // Same policy and runtime resolution the server uses, so a headless run
-  // sandboxes (or fails closed) exactly as a server-routed one would.
-  const sandboxConfig = resolveSandboxConfig(config);
-  for (const warning of sandboxConfig.warnings) console.warn(`[sandbox] ${warning}`);
-  const home = resolveKeelsonHome();
-  const executor = resolveMxcExecutor();
-  const sandbox = createOperatorSandboxPolicy(sandboxConfig, {
-    home,
-    dbPath: keelsonPaths(home).dbPath,
-    bundledBinDir: bundledBinDir(),
-    ...(executor.ok
-      ? { runtime: createMxcRuntime({ executorPath: executor.path }) }
-      : { unavailableReason: executor.reason }),
-  });
+  const { policy: sandbox, runtimeAvailable } = cliSandbox(config);
   const promptHandler = makePromptHandler({
     sandbox,
-    ...(executor.ok
+    ...(runtimeAvailable
       ? {
           sandboxBashTool: ({ scratchDir }: { scratchDir: string }) =>
             createSandboxedBashTool({

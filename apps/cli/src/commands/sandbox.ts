@@ -63,6 +63,17 @@ export function sandboxInstallSpec(home: string): string {
   return `${MXC_SDK_PACKAGE}@${MXC_SDK_VERSION}`;
 }
 
+// One line for `/sandbox status`: the executor and its dry run, or why there is none.
+export function sandboxRuntimeLine(status: SandboxStatus): string {
+  if (!status.executor.ok) {
+    return `unavailable — ${status.executor.reason}; ${status.executor.installHint}`;
+  }
+  const version = status.executor.version ? ` ${status.executor.version}` : "";
+  const probe =
+    status.probe?.ok === false ? `dry run failed — ${status.probe.detail}` : "dry run passed";
+  return `seatbelt via ${status.executor.path}${version}; ${probe}`;
+}
+
 function statusLines(status: SandboxStatus): string[] {
   const mode = status.floor
     ? "required (KEELSON_SANDBOX=required)"

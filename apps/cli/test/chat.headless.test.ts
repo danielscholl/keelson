@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { MessageChunk } from "@keelson/shared";
 
 import { chatHeadless } from "../src/in-process/chat.ts";
+import { SandboxUnavailableError } from "../src/in-process/sandbox.ts";
 
 describe("chatHeadless (in-process chat)", () => {
   const originalUseStubs = process.env.KEELSON_USE_STUBS;
@@ -70,5 +71,48 @@ describe("chatHeadless (in-process chat)", () => {
         provider: "does-not-exist",
       }),
     ).rejects.toThrow(/does-not-exist/);
+  });
+
+  describe("sandbox", () => {
+    const originalSandbox = process.env.KEELSON_SANDBOX;
+    afterAll(() => {
+      if (originalSandbox === undefined) delete process.env.KEELSON_SANDBOX;
+      else process.env.KEELSON_SANDBOX = originalSandbox;
+    });
+
+    test("--sandbox on a provider that cannot sandbox fails closed before the turn", async () => {
+      delete process.env.KEELSON_SANDBOX;
+      const chunks: MessageChunk[] = [];
+      const turn = chatHeadless({
+        message: "hi",
+        cwd: process.cwd(),
+        provider: "stub",
+        sandbox: true,
+        onChunk: (chunk) => chunks.push(chunk),
+      });
+      await expect(turn).rejects.toBeInstanceOf(SandboxUnavailableError);
+      await expect(turn).rejects.toThrow(
+        "sandbox is on, but stub cannot sandbox its tools: switch to a provider that can sandbox, or pass --no-sandbox",
+      );
+      expect(chunks).toEqual([]);
+    });
+
+    test("KEELSON_SANDBOX=required holds it on over --no-sandbox", async () => {
+      process.env.KEELSON_SANDBOX = "required";
+      await expect(
+        chatHeadless({ message: "hi", cwd: process.cwd(), provider: "stub", sandbox: false }),
+      ).rejects.toThrow("KEELSON_SANDBOX=required holds the sandbox on");
+    });
+
+    test("--no-sandbox runs the turn", async () => {
+      process.env.KEELSON_SANDBOX = "on";
+      const result = await chatHeadless({
+        message: "hi",
+        cwd: process.cwd(),
+        provider: "stub",
+        sandbox: false,
+      });
+      expect(result.text.trim()).toBe("hi");
+    });
   });
 });

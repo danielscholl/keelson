@@ -219,3 +219,77 @@ export function describeSandboxProfile(p: SandboxProfile): string {
   ];
   return `sandbox on · ${parts.join(" · ")}`;
 }
+
+const NATIVE_BACKENDS: Record<string, Partial<Record<string, string>>> = {
+  copilot: { darwin: "Seatbelt", linux: "bubblewrap", win32: "ProcessContainer" },
+  claude: { darwin: "Seatbelt", linux: "bubblewrap" },
+  codex: { darwin: "Seatbelt", linux: "Landlock", win32: "Windows sandbox" },
+};
+
+const NATIVE_NAMES: Record<string, string> = {
+  copilot: "Copilot CLI sandbox",
+  claude: "Claude Code sandbox",
+  codex: "Codex sandbox",
+};
+
+// `platform` is the server host's, which a browser client learns from /api/config.
+export function describeSandboxBackend(
+  providerId: string,
+  support: SandboxSupport,
+  platform: string,
+): string {
+  if (support === "none") return `${providerId} cannot sandbox its tools`;
+  if (support === "tool") return `${providerId} shell runs in the Keelson sandbox`;
+  const name = NATIVE_NAMES[providerId] ?? `${providerId} native sandbox`;
+  const backend = NATIVE_BACKENDS[providerId]?.[platform];
+  return backend !== undefined ? `${name} (${backend})` : `${name} (unsupported on ${platform})`;
+}
+
+const SOURCE_LABELS: Record<SandboxSource, string> = {
+  floor: "required by KEELSON_SANDBOX=required",
+  frame: "set for this session",
+  conversation: "saved on this conversation",
+  env: "KEELSON_SANDBOX default",
+  config: "config default",
+};
+
+export interface SandboxStatusInput {
+  resolution: SandboxResolution;
+  providerId: string;
+  support: SandboxSupport;
+  platform: string;
+  // The operator policy line /api/config serves.
+  policy: string;
+  // The host runtime line, when the caller can see it.
+  runtime?: string;
+}
+
+// The `/sandbox status` text, identical on the CLI and the SPA.
+export function describeSandboxStatus(input: SandboxStatusInput): string[] {
+  const { resolution, providerId, support } = input;
+  const lines = [
+    `sandbox: ${resolution.enabled ? "on" : "off"} (${SOURCE_LABELS[resolution.source]})`,
+  ];
+  const backend =
+    providerId === "stub"
+      ? "stub runs no tools (n/a)"
+      : describeSandboxBackend(providerId, support, input.platform);
+  lines.push(
+    `provider: ${backend}${resolution.enabled && support === "none" ? "; turns fail closed while the sandbox is on" : ""}`,
+  );
+  if (input.runtime !== undefined) lines.push(`runtime: ${input.runtime}`);
+  lines.push(`policy: ${input.policy}`);
+  return lines;
+}
+
+export const SANDBOX_LOCKED_MESSAGE =
+  "KEELSON_SANDBOX=required holds the sandbox on; unset it to turn the sandbox off";
+
+export function sandboxUnsupportedWarning(
+  providerId: string,
+  support: SandboxSupport,
+): string | undefined {
+  return support === "none"
+    ? `${providerId} cannot sandbox its tools, so turns fail closed while the sandbox is on; switch to a provider that can sandbox`
+    : undefined;
+}

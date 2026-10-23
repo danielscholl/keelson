@@ -10,6 +10,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildSandboxProfile,
   describeSandboxProfile,
+  describeSandboxStatus,
   EMPTY_SANDBOX_SETTINGS,
   mergeSandboxProfile,
   parseSandboxEnv,
@@ -17,6 +18,7 @@ import {
   type SandboxProfile,
   sandboxProfileSchema,
   sandboxSupportSchema,
+  sandboxUnsupportedWarning,
 } from "../src/sandbox.ts";
 
 const profile = (overrides: Partial<SandboxProfile> = {}): SandboxProfile => ({
@@ -241,5 +243,69 @@ describe("describeSandboxProfile", () => {
       "sandbox on · writes /repo +1 · 1 read-only · 2 denied · network outbound allowed + loopback · env GH_TOKEN",
     );
     expect(text).not.toContain("\n");
+  });
+});
+
+describe("describeSandboxStatus", () => {
+  const base = {
+    providerId: "claude",
+    support: "native" as const,
+    platform: "darwin",
+    policy: "sandbox on · writes <project>",
+  };
+
+  test("names the source, the provider backend, the runtime, and the policy", () => {
+    expect(
+      describeSandboxStatus({
+        ...base,
+        resolution: { enabled: true, source: "conversation", locked: false },
+        runtime: "seatbelt via /x",
+      }),
+    ).toEqual([
+      "sandbox: on (saved on this conversation)",
+      "provider: Claude Code sandbox (Seatbelt)",
+      "runtime: seatbelt via /x",
+      "policy: sandbox on · writes <project>",
+    ]);
+  });
+
+  test("a provider that cannot sandbox says turns fail closed only while it is on", () => {
+    const pi = { ...base, providerId: "gateway-x", support: "none" as const };
+    expect(
+      describeSandboxStatus({
+        ...pi,
+        resolution: { enabled: true, source: "floor", locked: true },
+      })[1],
+    ).toBe(
+      "provider: gateway-x cannot sandbox its tools; turns fail closed while the sandbox is on",
+    );
+    expect(
+      describeSandboxStatus({
+        ...pi,
+        resolution: { enabled: false, source: "config", locked: false },
+      })[1],
+    ).toBe("provider: gateway-x cannot sandbox its tools");
+  });
+
+  test("the stub reads as n/a", () => {
+    expect(
+      describeSandboxStatus({
+        ...base,
+        providerId: "stub",
+        support: "none",
+        resolution: { enabled: false, source: "config", locked: false },
+      }),
+    ).toEqual([
+      "sandbox: off (config default)",
+      "provider: stub runs no tools (n/a)",
+      "policy: sandbox on · writes <project>",
+    ]);
+  });
+
+  test("sandboxUnsupportedWarning fires only for a provider that cannot sandbox", () => {
+    expect(sandboxUnsupportedWarning("claude", "native")).toBeUndefined();
+    expect(sandboxUnsupportedWarning("stub", "none")).toContain(
+      "switch to a provider that can sandbox",
+    );
   });
 });
