@@ -10236,6 +10236,10 @@ a.cvb-card-title::after {
   border: 1px solid var(--border-soft);
   letter-spacing: 0.02em; white-space: nowrap;
 }
+.trace-head .node-sandbox.on {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 35%, transparent);
+}
 .trace-body { margin-top: 8px; color: var(--muted); }
 .trace-body p { margin: 0 0 6px; }
 .trace-body p:last-child { margin-bottom: 0; }

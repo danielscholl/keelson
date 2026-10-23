@@ -30,7 +30,7 @@ describe("migrations", () => {
         version: number;
       }>
     ).map((r) => r.version);
-    expect(versions).toEqual([12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
+    expect(versions).toEqual([12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]);
 
     expect(tableNames(db)).toContain("conversations");
     expect(tableNames(db)).toContain("memories");
@@ -47,6 +47,8 @@ describe("migrations", () => {
       name: string;
     }>;
     expect(nodeColumns.map((column) => column.name)).toContain("approval_json");
+    expect(nodeColumns.map((column) => column.name)).toContain("sandbox");
+    expect(nodeColumns.map((column) => column.name)).toContain("sandbox_backend");
     expect(tableNames(db)).toContain("usage_events");
     expect(tableNames(db)).toContain("ops");
     expect(tableNames(db)).toContain("catalog_model_prices");
@@ -81,7 +83,7 @@ describe("migrations", () => {
     }>;
     expect(nodeColumns.map((column) => column.name)).toContain("approval_json");
     expect(db.query("SELECT MAX(version) AS v FROM schema_version").get() as { v: number }).toEqual(
-      { v: 22 },
+      { v: 23 },
     );
     expect(db.query("SELECT id, sandbox FROM conversations").get()).toEqual({
       id: "existing-conv",
@@ -112,7 +114,7 @@ describe("migrations", () => {
 
     expect(tableNames(db)).toEqual(before);
     expect(db.query("SELECT count(*) AS c FROM schema_version").get() as { c: number }).toEqual({
-      c: 11,
+      c: 12,
     });
     db.close();
   });

@@ -21,6 +21,7 @@ import {
 import { TERMINAL_RUN_STATUSES, type TokenUsage } from "@keelson/shared";
 
 import {
+  createSandboxPolicy,
   makePromptHandler,
   parseWorkflow,
   type WorkflowDefinition,
@@ -37,6 +38,7 @@ import {
   createActiveRuns,
   createWorkflowController,
   createWorkflowSubscribers,
+  type WorkflowsHandlerOptions,
   workflowRunWebSocketHandlers,
   workflowsRoutes,
 } from "../src/workflows-handler.ts";
@@ -80,7 +82,10 @@ interface Rig {
 // makeRig don't inherit a stale id from the previous test.
 let CURRENT_DEFAULT_PROJECT_ID: string | null = null;
 
-function makeRig(promptHandler?: ReturnType<typeof makePromptHandler>): Rig {
+function makeRig(
+  promptHandler?: ReturnType<typeof makePromptHandler>,
+  extra: Partial<WorkflowsHandlerOptions> = {},
+): Rig {
   const db = openDatabase({ path: dbPath });
   const store = createWorkflowStore(db);
   const conversationStore = createConversationStore(db);
@@ -104,6 +109,7 @@ function makeRig(promptHandler?: ReturnType<typeof makePromptHandler>): Rig {
       conversationStore,
       projectsStore,
       ...(promptHandler !== undefined ? { promptHandler } : {}),
+      ...extra,
     },
     activeRuns,
     subscribers,
@@ -5010,5 +5016,74 @@ nodes:
       if (previous === undefined) delete process.env.KEELSON_APPROVAL_REVIEWER;
       else process.env.KEELSON_APPROVAL_REVIEWER = previous;
     }
+  });
+});
+
+describe("sandbox outcome (routes)", () => {
+  const SANDBOXED = `name: boxed
+description: one opted-out node, one that asks for the sandbox
+nodes:
+  - id: free
+    bash: echo free
+    sandbox: { enabled: false }
+  - id: boxed
+    depends_on: [free]
+    bash: echo boxed
+    sandbox: { enabled: true }
+`;
+
+  function sandboxPolicy() {
+    return createSandboxPolicy({
+      floor: false,
+      defaultEnabled: false,
+      home: tmpDir,
+      dbPath: join(tmpDir, "keelson.db"),
+      bundledBinDir: join(tmpDir, "bin"),
+      resolveGitCommonDir: () => undefined,
+    });
+  }
+
+  test("node_done and the persisted rows carry the outcome; an unrunnable sandbox fails closed", async () => {
+    writeWorkflow("boxed.yaml", SANDBOXED);
+    const rig = makeRig(undefined, { sandboxPolicy: sandboxPolicy() });
+    const startRes = await rig.app.fetch(
+      postRun("http://test/api/workflows/boxed/runs", { inputs: {} }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    const frames: Array<Record<string, unknown>> = [];
+    rig.subscribers.subscribe(runId, {
+      send: (raw: string) => frames.push(JSON.parse(raw)),
+    } as unknown as Parameters<typeof rig.subscribers.subscribe>[1]);
+
+    const terminal = (await pollUntilTerminal(rig.app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; status: string; error: string | null; sandbox: unknown }>;
+    };
+    expect(terminal.status).toBe("failed");
+    const free = terminal.nodes.find((n) => n.nodeId === "free");
+    const boxed = terminal.nodes.find((n) => n.nodeId === "boxed");
+    expect(free).toMatchObject({ status: "succeeded", sandbox: "off" });
+    expect(boxed).toMatchObject({ status: "failed", sandbox: "off" });
+    expect(boxed?.error).toContain("sandbox required but unavailable");
+
+    await new Promise((r) => setTimeout(r, 20));
+    const done = frames.find((f) => f.type === "node_done" && f.nodeId === "boxed");
+    expect(done?.sandbox).toBe("off");
+    expect(done?.sandboxBackend).toBeUndefined();
+  });
+
+  test("without a policy no outcome is recorded", async () => {
+    writeWorkflow("boxed.yaml", SANDBOXED);
+    const rig = makeRig();
+    const startRes = await rig.app.fetch(
+      postRun("http://test/api/workflows/boxed/runs", { inputs: {} }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    const terminal = (await pollUntilTerminal(rig.app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; sandbox: unknown }>;
+    };
+    expect(terminal.status).toBe("succeeded");
+    expect(terminal.nodes.every((n) => n.sandbox === null)).toBe(true);
   });
 });

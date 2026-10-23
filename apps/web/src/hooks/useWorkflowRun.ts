@@ -3,6 +3,7 @@ import type {
   ContentBlock,
   MessageChunk,
   ReasoningEffortLevel,
+  SandboxOutcome,
   TokenUsage,
   WorkflowFrame,
   WorkflowNodeStatus,
@@ -69,6 +70,10 @@ export interface NodeView {
   // ran. Live source: the `approval_awaiting` frame's review (gate still open)
   // or the `node_done` frame; snapshot source: the persisted row.
   approval?: ApprovalRecord;
+  // Where a bash, script, or prompt node ran and the backend that confined it.
+  // Same live/snapshot sourcing as provider/model.
+  sandbox?: SandboxOutcome;
+  sandboxBackend?: string;
 }
 
 export interface RunView {
@@ -250,6 +255,8 @@ export function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
       ...(row.model !== null ? { model: row.model } : {}),
       ...(row.effort !== null ? { effort: row.effort } : {}),
       ...(row.approval !== null ? { approval: row.approval } : {}),
+      ...(row.sandbox !== null ? { sandbox: row.sandbox } : {}),
+      ...(row.sandboxBackend !== null ? { sandboxBackend: row.sandboxBackend } : {}),
     };
   }
   // In-flight nodes have no persisted row yet; the server overlays them onto
@@ -710,6 +717,8 @@ export function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView 
     // live side that never saw node_done has no key and defers to the snapshot.
     effort: Object.hasOwn(liveSide, "effort") ? liveSide.effort : snapshotSide.effort,
     approval: liveSide.approval ?? snapshotSide.approval,
+    sandbox: liveSide.sandbox ?? snapshotSide.sandbox,
+    sandboxBackend: liveSide.sandboxBackend ?? snapshotSide.sandboxBackend,
   };
 }
 
@@ -825,6 +834,8 @@ export function applyFrame(
             provider: frame.provider,
             model: frame.model,
             effort: frame.effort,
+            sandbox: frame.sandbox,
+            sandboxBackend: frame.sandboxBackend,
             ...(frame.approval !== undefined ? { approval: frame.approval } : {}),
             // Approval node resolved — clear its message so the callout
             // doesn't linger after resume.

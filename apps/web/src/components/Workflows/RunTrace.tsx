@@ -14,6 +14,9 @@ import { ToolCallsBlock, toolCallsFromContentParts } from "../Chat/ToolCallsBloc
 import { UsageBreakdown, UsagePopoverPanel } from "../Chat/UsagePopover.tsx";
 import { ApprovalComposer } from "./ApprovalComposer.tsx";
 
+// Node kinds whose work the sandbox decision covers; others run nothing.
+const SANDBOXED_NODE_TYPES = new Set(["bash", "script", "prompt"]);
+
 // The declared reviewer's verdict on a gate: the reason it answered the gate
 // itself, or why the gate reached the operator instead.
 function ReviewerNote({ record }: { record: ApprovalRecord }) {
@@ -193,6 +196,19 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
     ? formatProviderModel(view.provider, view.model, schema.model, view.effort)
     : null;
   const isPromptish = schema.type === "prompt" || schema.type === "approval";
+  const sandboxChip =
+    view.sandbox !== undefined && SANDBOXED_NODE_TYPES.has(schema.type)
+      ? view.sandbox === "off"
+        ? { label: "unsandboxed", title: "Ran without a sandbox", on: false }
+        : {
+            label: `sandboxed · ${view.sandboxBackend ?? view.sandbox}`,
+            title:
+              view.sandbox === "provider"
+                ? `Confined by the provider's own sandbox (${view.sandboxBackend ?? "provider"})`
+                : `Confined by the Keelson sandbox (${view.sandboxBackend ?? "mxc"})`,
+            on: true,
+          }
+      : null;
 
   // contentParts → tool calls; remaining text blocks render via markdown.
   const toolCalls = toolCallsFromContentParts(view.contentParts);
@@ -304,6 +320,14 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
               {schema.model}
             </span>
           )
+        )}
+        {sandboxChip && (
+          <span
+            className={`node-model node-sandbox${sandboxChip.on ? " on" : ""}`}
+            title={sandboxChip.title}
+          >
+            {sandboxChip.label}
+          </span>
         )}
         {status === "running" && (
           <span className="typing-dots" role="img" aria-label="streaming">

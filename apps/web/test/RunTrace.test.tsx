@@ -280,3 +280,35 @@ describe("RunTrace — published canvas artifact", () => {
     expect(container.querySelectorAll(".trace-artifact-btn")).toHaveLength(0);
   });
 });
+
+describe("RunTrace — sandbox chip", () => {
+  beforeAll(async () => {
+    await import("../src/components/Workflows/RunTrace.tsx");
+  }, 30000);
+
+  test("labels sandboxed and unsandboxed bash/script/prompt rows and skips the others", () => {
+    const schemaNodes: WorkflowNodeSummary[] = [
+      { id: "build", type: "bash" },
+      { id: "ask", type: "prompt" },
+      { id: "free", type: "script" },
+      { id: "gate", type: "approval" },
+      { id: "pending", type: "bash" },
+    ];
+    const nodes: Record<string, NodeView> = {
+      build: node({ nodeId: "build", type: "bash", sandbox: "mxc", sandboxBackend: "seatbelt" }),
+      ask: node({ nodeId: "ask", type: "prompt", sandbox: "provider", sandboxBackend: "claude" }),
+      free: node({ nodeId: "free", type: "script", sandbox: "off" }),
+      gate: node({ nodeId: "gate", type: "approval", sandbox: "off" }),
+      pending: node({ nodeId: "pending", type: "bash", status: "running" }),
+    };
+    const { container } = render(
+      <RunTrace schemaNodes={schemaNodes} nodes={nodes} runId="r1" streaming={false} />,
+    );
+    expect(screen.getByText("sandboxed · seatbelt")).toBeDefined();
+    expect(screen.getByTitle("Confined by the Keelson sandbox (seatbelt)")).toBeDefined();
+    expect(screen.getByText("sandboxed · claude")).toBeDefined();
+    expect(screen.getByText("unsandboxed")).toBeDefined();
+    expect(container.querySelectorAll(".node-sandbox")).toHaveLength(3);
+    expect(container.querySelectorAll(".node-sandbox.on")).toHaveLength(2);
+  });
+});
