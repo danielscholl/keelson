@@ -79,15 +79,25 @@ export const PI_CAPABILITIES: ProviderCapabilities = {
 // Capabilities with config `pi.model` as the default: it becomes every tier's
 // class unless `pi.modelClasses` overrides one, so a node that names no model
 // runs on it instead of pi's own settings default.
-export function piCapabilities(defaultModel?: string): ProviderCapabilities {
-  if (!defaultModel) return PI_CAPABILITIES;
+// `sandbox: "tool"` means the host supplies a sandboxed `bash` that replaces
+// pi's own on a sandboxed turn; pi's file tools stay in-process.
+export function piCapabilities(
+  defaultModel?: string,
+  sandbox?: "tool" | "none",
+): ProviderCapabilities {
+  const withSandbox: ProviderCapabilities =
+    sandbox === "tool" ? { ...PI_CAPABILITIES, sandbox } : PI_CAPABILITIES;
+  if (!defaultModel) return withSandbox;
   return {
-    ...PI_CAPABILITIES,
+    ...withSandbox,
     models: [defaultModel, ...PI_CAPABILITIES.models.filter((m) => m !== defaultModel)],
     defaultModel,
     modelClasses: { fast: defaultModel, balanced: defaultModel, deep: defaultModel },
   };
 }
+
+// The name pi's built-in shell tool and its sandboxed replacement share.
+export const PI_SANDBOXED_BASH_TOOL = "bash";
 
 // Deep copy of the static baseline, returned when the dynamic catalog can't run.
 function curatedModels(): ModelInfo[] {
@@ -123,6 +133,8 @@ export interface PiProviderOptions {
   // Identical call + identical result repeats allowed before the call is
   // blocked (config `pi.repeatCallLimit`); defaults to 3, 0 disables.
   repeatCallLimit?: number;
+  // "tool" when the host can supply a sandboxed `bash` (a sandbox runtime exists).
+  sandboxSupport?: "tool" | "none";
 }
 
 export class PiProvider implements IAgentProvider {
@@ -142,7 +154,7 @@ export class PiProvider implements IAgentProvider {
     this.catalogSource = options.catalogSource ?? realPiCatalogSource;
     this.builtinTools = options.builtinTools ?? true;
     this.slots = options.slots ?? new PiVendorSlots();
-    this.capabilities = piCapabilities(options.defaultModel);
+    this.capabilities = piCapabilities(options.defaultModel, options.sandboxSupport);
     this.extensionPaths = options.extensionPaths ?? [];
     this.extensionTools = options.extensionTools ?? [];
     this.bashTimeoutSec = options.bashTimeoutSec ?? 300;
@@ -188,6 +200,25 @@ export class PiProvider implements IAgentProvider {
     options?: SendQueryOptions,
   ): AsyncGenerator<MessageChunk> {
     if (options?.abortSignal?.aborted) return;
+    // A sandboxed turn runs shell only through the host's sandboxed `bash`; with
+    // no such tool pi would fall back to its own, unconfined one.
+    const sandboxed = options?.sandbox?.enabled === true;
+    if (sandboxed) {
+      if (this.capabilities.sandbox !== "tool") {
+        yield {
+          type: "error",
+          message: "sandbox unavailable: pi has no sandbox runtime on this host",
+        };
+        return;
+      }
+      if (!options?.tools?.some((t) => t.name === PI_SANDBOXED_BASH_TOOL)) {
+        yield {
+          type: "error",
+          message: "sandbox unavailable: no sandboxed bash tool was supplied for this pi turn",
+        };
+        return;
+      }
+    }
 
     const queue = new ChunkQueue();
     // The workflow handler's allow-list branch doesn't subtract the node's own
@@ -244,6 +275,7 @@ export class PiProvider implements IAgentProvider {
             : {}),
         },
         builtinTools: this.builtinTools,
+        ...(sandboxed ? { excludeBuiltinTools: [PI_SANDBOXED_BASH_TOOL] } : {}),
         bashTimeoutSec: this.bashTimeoutSec,
         repeatCallLimit: this.repeatCallLimit,
         generation,

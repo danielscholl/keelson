@@ -55,6 +55,8 @@ export interface PiCreateSessionParams {
   gates?: PiToolGates;
   // Enable pi's built-in coding tools (behind `gates`).
   builtinTools?: boolean;
+  // Built-ins left out even when builtinTools is on (a sandboxed turn's bash).
+  excludeBuiltinTools?: readonly string[];
   // Absolute pi extension paths to load (config `pi.extensions`). The
   // operator's own ~/.pi extensions, skills, and prompt templates never load.
   extensionPaths?: readonly string[];
@@ -164,7 +166,12 @@ export class PiAgentSessionFactory implements PiSessionFactory {
     const toolNames = [
       ...new Set([
         ...filterPiTools(
-          [...(params.builtinTools ? PI_BUILTIN_TOOL_NAMES : []), ...(params.extensionTools ?? [])],
+          [
+            ...(params.builtinTools
+              ? PI_BUILTIN_TOOL_NAMES.filter((t) => !params.excludeBuiltinTools?.includes(t))
+              : []),
+            ...(params.extensionTools ?? []),
+          ],
           params.allowedTools,
           params.disallowedTools,
         ),
