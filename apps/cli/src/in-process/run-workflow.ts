@@ -53,6 +53,7 @@ import {
   resolveDefaultBranch,
   resolveWorkflowResolutionReady,
   runWorkflow,
+  type SandboxBashTurn,
   type WorkflowDefinition,
   withoutApprovalReviewers,
   workflowDefinitionHash,
@@ -275,10 +276,18 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
     sandbox,
     ...(runtimeAvailable
       ? {
-          sandboxBashTool: ({ scratchDir }: { scratchDir: string }) =>
+          sandboxBashTool: ({
+            scratchDir,
+            nodeSandbox,
+            workflowSandbox,
+            artifactsDir,
+          }: SandboxBashTurn) =>
             createSandboxedBashTool({
               policy: sandbox,
               scratchDir,
+              ...(nodeSandbox !== undefined ? { nodeSandbox } : {}),
+              ...(workflowSandbox !== undefined ? { workflowSandbox } : {}),
+              ...(artifactsDir !== undefined ? { artifactsDir } : {}),
               defaultTimeoutSec: config.pi?.bashTimeoutSec ?? 300,
             }) as unknown as { name: string; [k: string]: unknown },
         }

@@ -119,6 +119,7 @@ export {
   type PromptToolGate,
   type PromptToolResultGate,
   parseToolDenylist,
+  type SandboxBashTurn,
   type WorkflowNodeMeta,
 } from "./handlers/prompt.ts";
 export {

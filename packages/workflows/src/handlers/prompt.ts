@@ -27,7 +27,7 @@
  */
 
 import type { NodeContext, NodeHandler, NodeResult, NodeTokenUsage } from "../executor.ts";
-import type { DagNode } from "../schema/index.ts";
+import type { DagNode, NodeSandbox } from "../schema/index.ts";
 import { buildOutputFormatSuffix, extractJsonValue } from "./output-format.ts";
 import {
   prepareSandboxScratch,
@@ -211,6 +211,14 @@ export type PromptRequestGate = (
   provider?: string,
 ) => Promise<{ outcome: "allow" } | { outcome: "deny"; reason: string }>;
 
+export interface SandboxBashTurn {
+  cwd: string;
+  scratchDir: string;
+  artifactsDir?: string;
+  nodeSandbox?: NodeSandbox;
+  workflowSandbox?: NodeSandbox;
+}
+
 export interface MakePromptHandlerOptions {
   /**
    * Resolves the provider to use for this node from its registered effective id.
@@ -280,7 +288,8 @@ export interface MakePromptHandlerOptions {
   sandbox?: SandboxPolicy;
   // The host's sandboxed `bash`, added to a sandboxed node whose provider
   // confines shell only through a supplied tool (support "tool").
-  sandboxBashTool?: (turn: { cwd: string; scratchDir: string }) => {
+  // The node's and workflow's `sandbox` blocks shape that shell's profile.
+  sandboxBashTool?: (turn: SandboxBashTurn) => {
     name: string;
     [k: string]: unknown;
   };
@@ -585,8 +594,9 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       opts.sandboxBashTool !== undefined &&
       !denySet.has(SANDBOXED_BASH_TOOL)
         ? opts.sandboxBashTool({
-            cwd: ctx.cwd,
+            ...sandboxContextFor(ctx),
             scratchDir: prepareSandboxScratch(ctx.artifactsDir, ctx.nodeId),
+            ...(node.sandbox !== undefined ? { nodeSandbox: node.sandbox } : {}),
           })
         : undefined;
     if (sandboxBash !== undefined) {

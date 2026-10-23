@@ -10,6 +10,7 @@ import type { ToolContext, ToolDefinition } from "@keelson/shared";
 import {
   createSandboxLaunchDir,
   disposeSandboxLaunchDir,
+  type NodeSandbox,
   prependPath,
   resolveBash,
   runSubprocess,
@@ -40,6 +41,11 @@ export interface SandboxedBashToolOptions {
   // to this process's env.
   baseEnv?: Readonly<Record<string, string>>;
   defaultTimeoutSec: number;
+  // A workflow node's own and its workflow's `sandbox` blocks, layered on the
+  // bash default profile as they are for a bash node; chat passes neither.
+  nodeSandbox?: NodeSandbox;
+  workflowSandbox?: NodeSandbox;
+  artifactsDir?: string;
 }
 
 function definedEnv(): Record<string, string> {
@@ -81,7 +87,15 @@ export function createSandboxedBashTool(opts: SandboxedBashToolOptions): ToolDef
     state_changing: true,
     async execute(input, ctx) {
       const { command, timeout } = bashInputSchema.parse(input);
-      const resolution = opts.policy.resolve({ enabled: true }, { cwd: ctx.cwd });
+      // Only built for a turn already sandboxed, so it stays on whatever the blocks say.
+      const resolution = opts.policy.resolve(
+        { ...opts.nodeSandbox, enabled: true },
+        {
+          cwd: ctx.cwd,
+          ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
+          ...(opts.workflowSandbox !== undefined ? { workflowSandbox: opts.workflowSandbox } : {}),
+        },
+      );
       if (resolution.fail !== undefined || resolution.profile === null) {
         emitResult(ctx, resolution.fail ?? "sandbox unavailable", true);
         return;

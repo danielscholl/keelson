@@ -562,10 +562,13 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const promptHandler = bootstrapPromptHandler({
     defaultOffTools: ribs.tools.map((t) => t.name),
     sandbox: sandboxPolicy,
-    sandboxBashTool: ({ scratchDir }) =>
+    sandboxBashTool: ({ scratchDir, nodeSandbox, workflowSandbox, artifactsDir }) =>
       createSandboxedBashTool({
         policy: sandboxPolicy,
         scratchDir,
+        ...(nodeSandbox !== undefined ? { nodeSandbox } : {}),
+        ...(workflowSandbox !== undefined ? { workflowSandbox } : {}),
+        ...(artifactsDir !== undefined ? { artifactsDir } : {}),
         defaultTimeoutSec: loadKeelsonConfig().pi?.bashTimeoutSec ?? 300,
       }) as unknown as { name: string; [k: string]: unknown },
     // Final global gate for workflow prompt nodes — the engine owns the operator

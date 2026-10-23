@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NodeContext, NodeStreamEvent, NotebookAdapter } from "../executor.ts";
 import type { DagNode, NodeOutput, WorkflowDefinition } from "../schema/index.ts";
+import type { SandboxBashTurn } from "./prompt.ts";
 import {
   DEFAULT_TOOL_DENYLIST,
   makePromptHandler,
@@ -3200,16 +3201,14 @@ describe("makePromptHandler — sandbox", () => {
         capabilities: { sandbox: "tool" },
         chunks: [{ type: "text", content: "ok" }],
       });
-    const bashTool =
-      (turns: { cwd: string; scratchDir: string }[]) =>
-      (turn: { cwd: string; scratchDir: string }) => {
-        turns.push(turn);
-        return { name: "bash", description: "sandboxed" };
-      };
+    const bashTool = (turns: SandboxBashTurn[]) => (turn: SandboxBashTurn) => {
+      turns.push(turn);
+      return { name: "bash", description: "sandboxed" };
+    };
 
     test("gets the host's sandboxed bash, built over a scratch under the run's artifacts", async () => {
       const { provider, calls } = toolProvider();
-      const turns: { cwd: string; scratchDir: string }[] = [];
+      const turns: SandboxBashTurn[] = [];
       const artifactsDir = mkdtempSync(join(tmpdir(), "keelson-prompt-bash-"));
       const handler = makePromptHandler({
         getProvider: () => provider,
@@ -3225,9 +3224,33 @@ describe("makePromptHandler — sandbox", () => {
       });
       expect(calls[0]?.options?.tools?.map((t) => t.name)).toEqual(["workflow_run", "bash"]);
       expect(turns).toEqual([
-        { cwd: process.cwd(), scratchDir: join(artifactsDir, "sandbox", "n1") },
+        { cwd: process.cwd(), artifactsDir, scratchDir: join(artifactsDir, "sandbox", "n1") },
       ]);
       rmSync(artifactsDir, { recursive: true, force: true });
+    });
+
+    test("the factory gets the node's and the workflow's sandbox blocks for the shell's profile", async () => {
+      const { provider } = toolProvider();
+      const turns: SandboxBashTurn[] = [];
+      const node = {
+        id: "n1",
+        prompt: "",
+        sandbox: { network: { outbound: "allow" } },
+      } as unknown as DagNode;
+      const ctx = buildCtx();
+      await makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+        sandbox: policy(true),
+        sandboxBashTool: bashTool(turns),
+      }).handle(node, {
+        ...ctx,
+        workflow: { ...ctx.workflow, sandbox: { env: ["GH_TOKEN"] } } as WorkflowDefinition,
+      });
+      expect(turns[0]).toMatchObject({
+        nodeSandbox: { network: { outbound: "allow" } },
+        workflowSandbox: { env: ["GH_TOKEN"] },
+      });
     });
 
     test("a node that denies bash still gets the tool, with the denial forwarded for the provider's rails", async () => {
@@ -3246,7 +3269,7 @@ describe("makePromptHandler — sandbox", () => {
 
     test("an operator denylist entry withholds the tool and denies the shell outright", async () => {
       const { provider, calls } = toolProvider();
-      const turns: { cwd: string; scratchDir: string }[] = [];
+      const turns: SandboxBashTurn[] = [];
       const handler = makePromptHandler({
         getProvider: () => provider,
         getRegisteredTools: () => [],
@@ -3262,7 +3285,7 @@ describe("makePromptHandler — sandbox", () => {
     });
 
     test("an unsandboxed node or a native-support provider gets no host bash", async () => {
-      const turns: { cwd: string; scratchDir: string }[] = [];
+      const turns: SandboxBashTurn[] = [];
       const off = toolProvider();
       await makePromptHandler({
         getProvider: () => off.provider,
