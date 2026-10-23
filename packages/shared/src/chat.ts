@@ -8,6 +8,7 @@
 
 import { z } from "zod";
 import { modelPriceSchema } from "./model-prices.ts";
+import { sandboxModeSchema, sandboxSupportSchema } from "./sandbox.ts";
 
 export const WIRE_PROTOCOL_VERSION = "1.0" as const;
 
@@ -43,7 +44,9 @@ export const WIRE_PROTOCOL_VERSION = "1.0" as const;
 // `mainModelCostShare` on jobs rows.
 // 0.14: price cards — new `priceCards` on usage summary totals and group rows,
 // `priceCard` on event rows.
-export const SCHEMA_VERSION = "0.14" as const;
+// 0.15: sandbox — `sandbox` on the chat request frame, conversations, and
+// provider capabilities; PATCH /api/conversations/:id accepts `sandbox`.
+export const SCHEMA_VERSION = "0.15" as const;
 
 // A peer (the server on /api/health + /api/config, or a client's bundle)
 // reports its SCHEMA_VERSION. Any difference from this build's value signals
@@ -257,6 +260,8 @@ export const conversationSchema = z
     updatedAt: z.string().datetime().optional(),
     workflow: conversationWorkflowProjectionSchema.optional(),
     projectId: z.string().optional(),
+    // Absent inherits the configured default.
+    sandbox: sandboxModeSchema.optional(),
   })
   .strict();
 export type Conversation = z.infer<typeof conversationSchema>;
@@ -285,6 +290,9 @@ export const providerCapabilitiesSchema = z
     // Empty string means "let the SDK decide" (no model sent on the wire).
     defaultModel: z.string().default(""),
     modelClasses: modelClassMapSchema.optional(),
+    // How the provider can confine its own tools. Absent reads as "none", which
+    // fails a sandboxed turn closed; optional so a provider predating it still compiles.
+    sandbox: sandboxSupportSchema.optional(),
   })
   .strict();
 export type ProviderCapabilities = z.infer<typeof providerCapabilitiesSchema>;
@@ -346,6 +354,8 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
       thinking: z.boolean().optional(),
       // Per-turn Copilot reasoning tier; undefined = per-model SDK default.
       reasoningEffort: reasoningEffortLevelSchema.optional(),
+      // Per-turn sandbox choice; persisted onto the conversation like `model`.
+      sandbox: z.boolean().optional(),
     })
     .strict(),
 ]);
@@ -429,8 +439,18 @@ export const claudeCliStatusSchema = z
   .strict();
 export type ClaudeCliStatus = z.infer<typeof claudeCliStatusSchema>;
 
-// Max matches the auto-name truncation budget plus headroom.
-export const renameConversationBodySchema = z
-  .object({ name: z.string().trim().min(1).max(120) })
-  .strict();
-export type RenameConversationBody = z.infer<typeof renameConversationBodySchema>;
+// Max matches the auto-name truncation budget plus headroom. A null `sandbox`
+// clears the conversation's choice back to the configured default.
+export const updateConversationBodySchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    sandbox: sandboxModeSchema.nullable().optional(),
+  })
+  .strict()
+  .refine((body) => body.name !== undefined || body.sandbox !== undefined, {
+    message: "provide name or sandbox",
+  });
+export type UpdateConversationBody = z.infer<typeof updateConversationBodySchema>;
+
+export const renameConversationBodySchema = updateConversationBodySchema;
+export type RenameConversationBody = UpdateConversationBody;

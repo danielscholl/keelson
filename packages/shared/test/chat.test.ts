@@ -15,11 +15,14 @@ import {
   modelInfoSchema,
   parsePersistedTokenUsage,
   providerCapabilitiesSchema,
+  renameConversationBodySchema,
   SCHEMA_VERSION,
   tokenUsageHasSpend,
   tokenUsageSchema,
+  updateConversationBodySchema,
   WIRE_PROTOCOL_VERSION,
 } from "../src/chat.ts";
+import { RESERVED_COMMAND_NAMES } from "../src/commands.ts";
 
 describe("WIRE_PROTOCOL_VERSION", () => {
   it("is 1.0", () => {
@@ -744,5 +747,57 @@ describe("parsePersistedTokenUsage", () => {
     expect(parsePersistedTokenUsage(null)).toBeUndefined();
     expect(parsePersistedTokenUsage("not json")).toBeUndefined();
     expect(parsePersistedTokenUsage('{"inputTokens":"ten"}')).toBeUndefined();
+  });
+});
+
+describe("sandbox wire fields", () => {
+  it("bumps SCHEMA_VERSION to 0.15", () => {
+    expect(SCHEMA_VERSION).toBe("0.15");
+  });
+
+  it("accepts a per-turn sandbox boolean on the request frame", () => {
+    const base = { type: "request", providerId: "copilot", prompt: "hi" };
+    expect(clientMessageSchema.parse({ ...base, sandbox: true })).toMatchObject({ sandbox: true });
+    expect(clientMessageSchema.safeParse({ ...base, sandbox: "on" }).success).toBe(false);
+  });
+
+  it("carries an optional on|off sandbox mode on a conversation", () => {
+    const conv = {
+      id: "c1",
+      providerId: "copilot",
+      messages: [],
+      createdAt: "2026-10-23T00:00:00.000Z",
+    };
+    expect(conversationSchema.parse({ ...conv, sandbox: "off" }).sandbox).toBe("off");
+    expect(conversationSchema.parse(conv).sandbox).toBeUndefined();
+    expect(conversationSchema.safeParse({ ...conv, sandbox: true }).success).toBe(false);
+  });
+
+  it("leaves a provider's sandbox support absent unless declared", () => {
+    const caps = providerCapabilitiesSchema.parse({
+      sessionResume: false,
+      streaming: true,
+      tools: false,
+    });
+    expect(caps.sandbox).toBeUndefined();
+    expect(providerCapabilitiesSchema.parse({ ...caps, sandbox: "native" }).sandbox).toBe("native");
+    expect(providerCapabilitiesSchema.safeParse({ ...caps, sandbox: "mxc" }).success).toBe(false);
+  });
+
+  it("updateConversationBodySchema takes name, sandbox, or a null clear, never neither", () => {
+    expect(updateConversationBodySchema.parse({ name: " Renamed " })).toEqual({ name: "Renamed" });
+    expect(updateConversationBodySchema.parse({ sandbox: "on" })).toEqual({ sandbox: "on" });
+    expect(updateConversationBodySchema.parse({ sandbox: null })).toEqual({ sandbox: null });
+    expect(updateConversationBodySchema.safeParse({}).success).toBe(false);
+    expect(updateConversationBodySchema.safeParse({ sandbox: "maybe" }).success).toBe(false);
+    expect(updateConversationBodySchema.safeParse({ name: "x", other: 1 }).success).toBe(false);
+  });
+
+  it("keeps renameConversationBodySchema as an alias", () => {
+    expect(renameConversationBodySchema).toBe(updateConversationBodySchema);
+  });
+
+  it("reserves the /sandbox command name", () => {
+    expect(RESERVED_COMMAND_NAMES.has("sandbox")).toBe(true);
   });
 });

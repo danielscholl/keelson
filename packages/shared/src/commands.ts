@@ -55,6 +55,7 @@ export const RESERVED_COMMAND_NAMES: ReadonlySet<string> = new Set([
   "workflow",
   "workflows",
   "run",
+  "sandbox",
   "exit",
 ]);
 

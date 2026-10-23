@@ -7,6 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { z } from "zod";
+import type { SandboxSupport } from "./sandbox.ts";
 
 /**
  * Policy — Keelson's unified governance contract.
@@ -140,6 +141,9 @@ export interface PolicyContext {
   // an absent name should fail open or closed for its rule.
   readonly workflowName?: string;
   readonly nodeId?: string;
+  // The turn's effective sandbox decision and how the provider can enforce it,
+  // so a policy can, for example, deny shell tools on an unsandboxed turn.
+  readonly sandbox?: { readonly enabled: boolean; readonly support: SandboxSupport };
 }
 
 export interface Policy {
