@@ -1198,6 +1198,41 @@ nodes:
     expect(result.warnings.some((w) => w.kind === "invalid_field_value")).toBe(true);
   });
 
+  test("parses a workflow-level model_by_provider map", () => {
+    const result = parseWorkflow(
+      `
+name: portable
+description: portable pins
+model: balanced
+model_by_provider:
+  copilot: gpt-5.6-terra
+nodes:
+  - id: a
+    prompt: x
+`,
+      "portable.yaml",
+    );
+    expect(result.error).toBeNull();
+    expect(result.workflow?.model_by_provider).toEqual({ copilot: "gpt-5.6-terra" });
+  });
+
+  test("invalid workflow-level model_by_provider warns and is dropped", () => {
+    const result = parseWorkflow(
+      `
+name: bad-mbp
+description: bad map
+model_by_provider: gpt-5.6-terra
+nodes:
+  - id: a
+    prompt: x
+`,
+      "bad-mbp.yaml",
+    );
+    expect(result.error).toBeNull();
+    expect(result.workflow?.model_by_provider).toBeUndefined();
+    expect(result.warnings.some((w) => w.kind === "invalid_field_value")).toBe(true);
+  });
+
   test("invalid locking warns and is dropped", () => {
     const result = parseWorkflow(
       `

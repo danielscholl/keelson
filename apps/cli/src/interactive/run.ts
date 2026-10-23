@@ -12,7 +12,7 @@ import {
   type SlashCommand,
   Spacer,
   Text,
-  TUI,
+  TuiMainScreen,
 } from "@earendil-works/pi-tui";
 import type {
   CommandCompletion,
@@ -95,7 +95,7 @@ function defaultModelFor(providers: readonly ProviderInfoRow[], id: string): str
 }
 
 async function prepareSession(opts: InteractiveChatOptions): Promise<SessionSetup> {
-  const providers = await listProviders(opts.baseUrl);
+  const { providers, defaultProvider } = await listProviders(opts.baseUrl);
   let providerId: string;
   let model = opts.model;
   if (opts.conversationId) {
@@ -103,7 +103,7 @@ async function prepareSession(opts: InteractiveChatOptions): Promise<SessionSetu
     providerId = conv.providerId;
     model = model ?? conv.model;
   } else {
-    providerId = opts.provider ?? pickDefaultHttpProvider(providers);
+    providerId = opts.provider ?? pickDefaultHttpProvider(providers, defaultProvider);
   }
   model = model ?? defaultModelFor(providers, providerId);
   // A resumed conversation keeps its server-side project binding; only fresh
@@ -176,7 +176,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
   }
 
   const terminal = new ProcessTerminal();
-  const tui = new TUI(terminal);
+  const tui = new TuiMainScreen(terminal);
   const session = {
     providerId: setup.providerId,
     model: setup.model,

@@ -100,8 +100,12 @@ A few rows need their footnote:
   it. Its activity surfaces in chat as command-execution and file-change rows.
 - **Pi** projects the harness tool registry into its session as pi custom tools,
   so rib and workflow tools reach a pi turn. Its own built-in file and shell
-  tools stay off (they would run outside the harness rails), and session resume
-  is not wired yet, so each turn is a fresh session.
+  tools, and any extension tools named in `pi.extensionTools`, run behind the
+  same per-call and per-result policy gates (`pi.builtinTools: false` turns the
+  built-ins off). Session resume is not wired yet, so each turn is a fresh
+  session. `pi.concurrency` caps concurrent turns per pi vendor for
+  single-slot local engines, and `pi.vendors` restricts which vendors a turn
+  may reach.
 - **Stub** is the offline echo provider: no credentials, no tool calls,
   deterministic output. It exists so every loop can be verified without keys.
 

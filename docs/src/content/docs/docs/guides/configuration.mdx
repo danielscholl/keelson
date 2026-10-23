@@ -196,17 +196,17 @@ it beside `auth`, not inside the boolean `providers` enablement map.
 ## Pi (community provider)
 
 `pi` wraps the [pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent),
-a multi-vendor agent that can reach Anthropic, Google, OpenAI, and more behind one
-interface. It is opt-in:
+a multi-vendor agent that can reach Anthropic, Google, OpenAI, local
+OpenAI-compatible servers, and more behind one interface. It is opt-in:
 
 ```json
 {
   "providers": { "pi": true },
   "pi": {
     "modelClasses": {
-      "fast": "anthropic/claude-haiku-4.5",
-      "balanced": "anthropic/claude-sonnet-4.6",
-      "deep": "anthropic/claude-opus-4.5"
+      "fast": "anthropic/claude-haiku-5-5",
+      "balanced": "anthropic/claude-sonnet-5-5",
+      "deep": "anthropic/claude-opus-5-5"
     }
   }
 }
@@ -215,18 +215,92 @@ interface. It is opt-in:
 Pi manages its own credentials, so there is no keelson sign-in for it. Pi reads
 `~/.pi/agent/auth.json` (set up with pi's own login) and per-vendor API-key
 environment variables such as `ANTHROPIC_API_KEY` or `GEMINI_API_KEY`. Because pi
-is multi-vendor, models are named `vendor/model` (for example
-`anthropic/claude-opus-4.5` or `google/gemini-2.5-pro`); pick one your credentials
-cover in the model picker, or leave the default and let pi choose from its own
-settings. Use `pi.modelClasses` to pin any portable workflow tier to a model your
-configured vendor credentials can reach.
+is multi-vendor, models are named `vendor/model` in pi's own spelling (for
+example `anthropic/claude-opus-5-5` or `google/gemini-3.1-pro-preview`); pick
+one your credentials cover in the model picker, or leave the default and let pi
+choose from its own settings. Use `pi.modelClasses` to pin any portable workflow
+tier to a model your configured vendor credentials can reach. When a requested
+model does not resolve, pi runs its settings default instead and the turn says
+so in a system message.
+
+### Local models through pi
+
+Any OpenAI-compatible server declared in `~/.pi/agent/models.json` shows up in
+the picker as `<provider>/<model>`. For example, Recursive's
+[rec](https://docs.recursive.com/edge/rec) serves Flint on `127.0.0.1:11500`:
+
+```json
+{
+  "providers": {
+    "rec": {
+      "baseUrl": "http://127.0.0.1:11500/v1",
+      "api": "openai-completions",
+      "apiKey": "!rec auth token",
+      "models": [{ "id": "flint", "contextWindow": 262144, "maxTokens": 32768 }]
+    }
+  }
+}
+```
+
+Make it the default and keep turns on it:
+
+```json
+{
+  "providers": { "copilot": false, "pi": true },
+  "defaultProvider": "pi",
+  "pi": {
+    "model": "rec/flint",
+    "vendors": ["rec"],
+    "concurrency": { "rec": 1 }
+  }
+}
+```
+
+- `pi.model` is the model a turn runs on when it names none, every workflow
+  tier unless `pi.modelClasses` says otherwise, and the fallback when a
+  requested model does not resolve (a workflow that pins a Copilot-only id, for
+  example).
+- `pi.vendors` restricts the picker to the listed pi vendors and refuses a turn,
+  before any request is sent, that would resolve anywhere else.
+- `pi.concurrency` queues turns per pi vendor. A local engine that serves one
+  generation at a time answers an overlapping request with HTTP 429, and
+  parallel workflow nodes overlap constantly.
+- `pi.repeatCallLimit` (default 3) blocks a tool call once the identical call
+  has returned the identical result that many times in one turn, and tells the
+  model to use the result it already has. Local models can otherwise cycle
+  through the same few lookups for the rest of the turn. `0` turns it off.
+
+### Pi extensions
+
+Keelson loads no pi extensions, skills, or prompt templates from your own
+`~/.pi` setup, so a pi session in keelson behaves the same on every machine.
+Name the extensions it should load in `pi.extensions` (a package installed in
+the keelson home's `node_modules`, or an absolute path), and the tools they
+register that a turn may call in `pi.extensionTools`. Any other extension tool
+stays off.
+
+```json
+{
+  "pi": {
+    "extensions": ["pi-web-access"],
+    "extensionTools": ["web_search", "fetch_content", "get_search_content"]
+  }
+}
+```
+
+Install the package next to your ribs with `bun add pi-web-access` in the
+keelson home. Extensions read their own settings; pi-web-access reads
+`~/.pi/agent/web-search.json`, where `"provider": "duckduckgo"` and
+`"workflow": "none"` keep search keyless and free of summary-model calls.
 
 <Aside type="caution" title="Scope and limits">
-Pi's own built-in file and shell tools stay off (they would run outside keelson's
-permission and redaction rails), and there is no session resume yet, so each turn
-starts fresh. The harness does project its own tool registry into the pi session
-as custom tools, so rib and workflow tools reach a pi turn. Run `keelson doctor`
-to confirm pi found a credential.
+Every tool a pi turn can call, including pi's built-in `read`, `bash`, `edit`,
+`write`, `grep`, `find`, and `ls` and any allowed extension tool, runs behind the
+same per-call and per-result policy gates as keelson's own tools. Set
+`pi.builtinTools: false` to turn the built-ins off. An extension runs inside the
+keelson server process with the same trust as a rib, so install only ones you
+would install as a rib. There is no session resume yet, so each turn starts
+fresh. Run `keelson doctor` to confirm pi found a credential.
 </Aside>
 
 ## Codex (community provider)

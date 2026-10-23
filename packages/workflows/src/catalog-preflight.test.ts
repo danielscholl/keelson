@@ -60,6 +60,55 @@ const PROVIDERS_WITH_CLAUDE = new Map([
   ],
 ]);
 
+describe("checkWorkflowCatalog workflow-level model_by_provider", () => {
+  const PROVIDERS_WITH_PI = new Map([
+    ...PROVIDERS,
+    [
+      "pi",
+      {
+        defaultModel: "rec/flint",
+        models: ["rec/flint"],
+        modelClasses: { fast: "rec/flint", balanced: "rec/flint", deep: "rec/flint" },
+      },
+    ],
+  ]);
+  const portable = (node: Record<string, unknown> = {}) =>
+    workflowDefinitionSchema.parse({
+      name: "portable",
+      description: "Copilot keeps its pin; other providers use the class.",
+      model: "balanced",
+      model_by_provider: { copilot: "gpt-5.6-terra" },
+      nodes: [{ id: "research", prompt: "Research.", ...node }],
+    });
+
+  test("checks the workflow-level pin on the provider it names", () => {
+    const result = checkWorkflowCatalog(portable(), {
+      providers: PROVIDERS_WITH_PI,
+      defaultProviderId: "copilot",
+      liveCatalog: new Map([["copilot", [{ id: "gpt-5.6-luna" }]]]),
+    });
+    expect(result.violations.map((v) => v.value)).toEqual(["gpt-5.6-terra"]);
+  });
+
+  test("another provider resolves the class instead of the copilot pin", () => {
+    const result = checkWorkflowCatalog(portable(), {
+      providers: PROVIDERS_WITH_PI,
+      defaultProviderId: "pi",
+      liveCatalog: new Map([["pi", [{ id: "rec/flint" }]]]),
+    });
+    expect(result.violations).toEqual([]);
+  });
+
+  test("a node's own model outranks the workflow-level per-provider pin", () => {
+    const result = checkWorkflowCatalog(portable({ model: "gpt-5.6-luna" }), {
+      providers: PROVIDERS_WITH_PI,
+      defaultProviderId: "copilot",
+      liveCatalog: new Map([["copilot", [{ id: "gpt-5.6-luna" }]]]),
+    });
+    expect(result.violations).toEqual([]);
+  });
+});
+
 describe("checkWorkflowCatalog", () => {
   test("flags a retired provider-specific model on its pinned provider", () => {
     const result = check(

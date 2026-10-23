@@ -110,6 +110,7 @@ function makeRun(
     ...(deps.getUsageStore !== undefined ? { getUsageStore: deps.getUsageStore } : {}),
     ...(deps.abortDrainGraceMs !== undefined ? { abortDrainGraceMs: deps.abortDrainGraceMs } : {}),
     ...(deps.resolveModelClass !== undefined ? { resolveModelClass: deps.resolveModelClass } : {}),
+    ...(deps.defaultProviderId !== undefined ? { defaultProviderId: deps.defaultProviderId } : {}),
   });
 }
 
@@ -230,6 +231,20 @@ describe("makeRibAgentTurn — provider routing", () => {
     const run = makeRun(fakeProvider(), { ids: ["stub", "claude"] });
     const result = await run("chamber", { prompt: "hi" }).result;
     expect(result.providerId).toBe("claude");
+  });
+
+  it("honors config.defaultProvider below KEELSON_WORKFLOW_PROVIDER", async () => {
+    delete process.env.KEELSON_WORKFLOW_PROVIDER;
+    const run = makeRun(fakeProvider(), { ids: ["copilot", "pi"], defaultProviderId: "pi" });
+    expect((await run("chamber", { prompt: "hi" }).result).providerId).toBe("pi");
+    process.env.KEELSON_WORKFLOW_PROVIDER = "copilot";
+    expect((await run("chamber", { prompt: "hi" }).result).providerId).toBe("copilot");
+  });
+
+  it("skips an unregistered config.defaultProvider", async () => {
+    delete process.env.KEELSON_WORKFLOW_PROVIDER;
+    const run = makeRun(fakeProvider(), { ids: ["stub", "claude"], defaultProviderId: "pi" });
+    expect((await run("chamber", { prompt: "hi" }).result).providerId).toBe("claude");
   });
 
   it("fails loudly when a named provider is not registered", async () => {

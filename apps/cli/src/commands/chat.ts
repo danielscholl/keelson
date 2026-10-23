@@ -10,7 +10,7 @@ import {
   createConversation,
   getConversation,
   listProviders,
-  type ProviderInfoRow,
+  type ProviderList,
   pickDefaultHttpProvider,
 } from "../http/chat-client.ts";
 import { listProjects } from "../http/projects-client.ts";
@@ -71,8 +71,8 @@ async function runChatViaHttp(baseUrl: string, message: string, opts: ChatOption
   let modelFromConv: string | undefined;
   // Cache the providers list so we only round-trip /api/providers once even
   // when we need it for both provider-fallback and default-model resolution.
-  let providersCache: ProviderInfoRow[] | undefined;
-  const loadProviders = async (): Promise<ProviderInfoRow[]> => {
+  let providersCache: ProviderList | undefined;
+  const loadProviders = async (): Promise<ProviderList> => {
     if (!providersCache) providersCache = await listProviders(baseUrl);
     return providersCache;
   };
@@ -102,7 +102,8 @@ async function runChatViaHttp(baseUrl: string, message: string, opts: ChatOption
   } else {
     // Mirror the SPA's fallback chain instead of hard-coding copilot, which
     // would 400 against KEELSON_PROVIDERS=stub/claude servers.
-    providerId = pickDefaultHttpProvider(await loadProviders());
+    const { providers, defaultProvider } = await loadProviders();
+    providerId = pickDefaultHttpProvider(providers, defaultProvider);
   }
 
   // Resolve the wire `model` precedence: explicit --model > conv-stored
@@ -110,7 +111,7 @@ async function runChatViaHttp(baseUrl: string, message: string, opts: ChatOption
   // Matches the SPA's pickInitialRef (apps/web/src/views/Chat.tsx:126-129).
   let effectiveModel = opts.model ?? modelFromConv;
   if (effectiveModel === undefined) {
-    const providers = await loadProviders();
+    const { providers } = await loadProviders();
     const provider = providers.find((p) => p.id === providerId);
     const def = provider?.capabilities.defaultModel;
     if (def && def.length > 0) effectiveModel = def;

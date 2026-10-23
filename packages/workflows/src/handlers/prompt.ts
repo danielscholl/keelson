@@ -450,8 +450,11 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
               });
             }
           } else {
-            if (nodeAllowed !== undefined) usedFields.push("allowed_tools");
-            if (nodeDenied !== undefined) usedFields.push("denied_tools");
+            // pi narrows its session tools to allowed_tools / denied_tools.
+            if (providerType !== "pi") {
+              if (nodeAllowed !== undefined) usedFields.push("allowed_tools");
+              if (nodeDenied !== undefined) usedFields.push("denied_tools");
+            }
             if (nodeHooks !== undefined) usedFields.push("hooks");
             if (usedFields.length > 0) {
               ctx.emit({
@@ -619,7 +622,10 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           const perProviderModel =
             effectiveProviderId === undefined
               ? undefined
-              : readModelByProvider(node)?.[effectiveProviderId];
+              : (readModelByProvider(node)?.[effectiveProviderId] ??
+                (nodeModelRaw === undefined
+                  ? readModelByProvider(ctx.workflow)?.[effectiveProviderId]
+                  : undefined));
           if (
             effectiveProviderId === "copilot" &&
             provider.getType?.() === "copilot" &&
@@ -746,7 +752,23 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
               // the "auto"-style hint. Rides NodeResult, not the node_chunk channel.
               // Ignore a blank report so it can't null out a real requested model.
               const reported = (chunk as { model?: unknown }).model;
-              if (typeof reported === "string" && reported.trim().length > 0) model = reported;
+              if (typeof reported === "string" && reported.trim().length > 0) {
+                // The run trace labels a live node with its configured model, so
+                // a concrete pin the provider swapped out would read as running.
+                if (
+                  typeof model === "string" &&
+                  model.length > 0 &&
+                  model !== "auto" &&
+                  !isModelClassName(model) &&
+                  reported !== model
+                ) {
+                  ctx.emit({
+                    type: "node_warning",
+                    message: `provider '${effectiveProviderId}' is running '${reported}' (requested '${model}')`,
+                  });
+                }
+                model = reported;
+              }
               continue;
             }
             if (t === "text") {

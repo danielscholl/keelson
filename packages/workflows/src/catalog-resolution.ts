@@ -59,7 +59,10 @@ export function resolvePrompt(
 
   // Keep this order aligned with the prompt handler's provider/model resolution path.
   const perProviderModel =
-    effectiveProvider === undefined ? undefined : node.model_by_provider?.[effectiveProvider];
+    effectiveProvider === undefined
+      ? undefined
+      : (node.model_by_provider?.[effectiveProvider] ??
+        (node.model === undefined ? workflow.model_by_provider?.[effectiveProvider] : undefined));
   if (perProviderModel !== undefined && perProviderModel.length > 0) {
     model = perProviderModel;
   } else if (model !== undefined && isModelClass(model)) {
@@ -173,6 +176,7 @@ export async function resolveWorkflowResolutionReady(
         model !== undefined &&
         isModelClass(model) &&
         !candidate.model_by_provider?.copilot &&
+        !(candidate.model === undefined && workflow.model_by_provider?.copilot) &&
         !options.modelClassOverride?.("copilot", model)
       );
     });

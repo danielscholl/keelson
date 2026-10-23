@@ -200,7 +200,22 @@ export function bootstrapProviders(options: BootstrapProvidersOptions): Bootstra
       case "pi":
         // Self-managed auth (pi's own ~/.pi/agent/auth.json + vendor env keys),
         // so nothing to thread through getCredential.
-        registerPiProvider();
+        registerPiProvider({
+          builtinTools: config.pi?.builtinTools !== false,
+          ...(config.pi?.concurrency !== undefined ? { concurrency: config.pi.concurrency } : {}),
+          ...(config.pi?.vendors !== undefined ? { vendors: config.pi.vendors } : {}),
+          ...(config.pi?.model ? { defaultModel: config.pi.model } : {}),
+          ...(config.pi?.extensions !== undefined ? { extensions: config.pi.extensions } : {}),
+          ...(config.pi?.bashTimeoutSec !== undefined
+            ? { bashTimeoutSec: config.pi.bashTimeoutSec }
+            : {}),
+          ...(config.pi?.repeatCallLimit !== undefined
+            ? { repeatCallLimit: config.pi.repeatCallLimit }
+            : {}),
+          ...(config.pi?.extensionTools !== undefined
+            ? { extensionTools: config.pi.extensionTools }
+            : {}),
+        });
         break;
       case "codex":
         // Self-managed auth (codex's own ~/.codex/auth.json + OPENAI_API_KEY),
@@ -417,6 +432,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   const config = loadKeelsonConfig();
   const turnDeps: MakeRibAgentTurnDeps = {
     resolveModelClass: (id, modelClass) => readModelClassOverride(config, id)?.[modelClass],
+    ...(config.defaultProvider ? { defaultProviderId: config.defaultProvider } : {}),
     getToolOwner: (name) => toolIndex.get(name)?.ribId,
     isTurnToolGranted: (caller, target, name) =>
       isCrossRibGrantAllowed(crossRibGrants, caller, target, name),
@@ -1688,6 +1704,10 @@ export function bootstrapPromptHandler(
   if (providerId === "copilot") {
     console.warn(
       `[workflows] default workflow provider is 'copilot'; per-node 'allowed_tools' / 'denied_tools' are enforced by capability and PreToolUse / PostToolUse hooks are honored — other hook events are claude-only.`,
+    );
+  } else if (providerId === "pi") {
+    console.warn(
+      `[workflows] default workflow provider is 'pi'; per-node 'allowed_tools' / 'denied_tools' are enforced by capability; 'hooks' are claude/copilot-only.`,
     );
   } else if (providerId !== "claude") {
     console.warn(

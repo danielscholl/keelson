@@ -6,7 +6,20 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { PiRawEvent } from "./event-bridge.ts";
+import { createPiGateExtension, type PiToolGates } from "./gate-extension.ts";
+import { filterPiTools } from "./tool-filter.ts";
 import type { PiProjectedTool } from "./tool-projection.ts";
+
+// pi's built-in coding tools, enabled together by `builtinTools`.
+export const PI_BUILTIN_TOOL_NAMES = [
+  "read",
+  "bash",
+  "edit",
+  "write",
+  "grep",
+  "find",
+  "ls",
+] as const;
 
 // The slice of a pi AgentSession the provider drives. The real factory adapts
 // pi's session; tests supply a fake that emits scripted events.
@@ -18,17 +31,40 @@ export interface PiSession {
   // "vendor/model" the session resolved (pi picks from its own settings when
   // no model was requested). Undefined when pi found no usable model.
   modelRef?: string;
+  // Stop the active generation; resolves once the session is idle.
+  abort?(): Promise<void>;
+  // Release the session's listeners and extension runtime once the turn is over.
+  dispose?(): void;
 }
 
 export interface PiCreateSessionParams {
   cwd: string;
-  // "vendor/model" (e.g. "anthropic/claude-opus-4.5"). Omitted → pi picks from
+  // "vendor/model" (e.g. "anthropic/claude-opus-5-5"). Omitted → pi picks from
   // its own settings/auth.
   model?: string;
-  // Keelson tools projected to pi's custom-tool shape. When present they also
-  // become the session's tool allowlist, so pi's built-ins and any installed
-  // pi extension tools stay disabled (see createSession).
+  // Tried when `model` does not resolve (config `pi.model`), before pi's own
+  // settings default.
+  fallbackModel?: string;
+  // Keelson tools projected to pi's custom-tool shape; they gate themselves.
   customTools?: readonly PiProjectedTool[];
+  // Policy gates applied, through a pi extension, to every other tool.
+  gates?: PiToolGates;
+  // Enable pi's built-in coding tools (behind `gates`).
+  builtinTools?: boolean;
+  // Absolute pi extension paths to load (config `pi.extensions`). The
+  // operator's own ~/.pi extensions, skills, and prompt templates never load.
+  extensionPaths?: readonly string[];
+  // Tools those extensions register that the session may call
+  // (config `pi.extensionTools`); every other extension tool stays off.
+  extensionTools?: readonly string[];
+  // Default timeout for bash calls that set none (config `pi.bashTimeoutSec`).
+  bashTimeoutSec?: number;
+  // config `pi.repeatCallLimit`; see PiGateOptions.
+  repeatCallLimit?: number;
+  // A workflow node's allowed_tools / denied_tools, applied to the built-in and
+  // extension tools (keelson tools arrive already filtered).
+  allowedTools?: readonly string[];
+  disallowedTools?: readonly string[];
 }
 
 export interface PiSessionFactory {
@@ -77,24 +113,68 @@ export function checkPiAuth(opts: CheckPiAuthOptions = {}): PiAuthStatus {
 // Default factory: drives the real pi SDK. The SDK is lazy-imported inside
 // createSession so a missing or broken pi install never crashes unrelated
 // commands, and so pi's own package.json self-read happens only when a turn
-// actually runs. This adapter is the one seam with no unit coverage: it is
-// written against pi 0.79.1 but the SDK-call path is not yet exercised live
-// (that needs real pi credentials).
+// actually runs. This adapter is the one seam with no unit coverage; it is
+// written against pi 1.2.
 export class PiAgentSessionFactory implements PiSessionFactory {
   async createSession(params: PiCreateSessionParams): Promise<PiSession> {
     const sdk = await import("@earendil-works/pi-coding-agent");
-    const model = params.model ? await resolveModel(params.model) : undefined;
-    const customTools = params.customTools ?? [];
+    // One runtime per turn so auth.json / models.json edits apply without a
+    // server restart; the session resolves its default model from it too.
+    const modelRuntime = await sdk.ModelRuntime.create();
+    const model =
+      (params.model ? await resolveModel(modelRuntime, params.model) : undefined) ??
+      (params.fallbackModel ? await resolveModel(modelRuntime, params.fallbackModel) : undefined);
+    const keelsonTools = params.customTools ?? [];
+    const keelsonNames = new Set(keelsonTools.map((t) => t.name));
+    const resourceLoader = new sdk.DefaultResourceLoader({
+      cwd: params.cwd,
+      agentDir: sdk.getAgentDir(),
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      additionalExtensionPaths: [...(params.extensionPaths ?? [])],
+      extensionFactories: [
+        {
+          name: "keelson-gate",
+          hidden: true,
+          // `as never`: the gate is typed against a structural slice of pi's
+          // ExtensionAPI.
+          factory: createPiGateExtension(params.gates ?? {}, keelsonNames, {
+            ...(params.bashTimeoutSec !== undefined
+              ? { bashTimeoutSec: params.bashTimeoutSec }
+              : {}),
+            ...(params.repeatCallLimit !== undefined
+              ? { repeatCallLimit: params.repeatCallLimit }
+              : {}),
+          }) as never,
+        },
+      ],
+    });
+    await resourceLoader.reload();
+    // The explicit allowlist is the whole tool surface: anything an extension
+    // registers stays off unless config names it.
+    const toolNames = [
+      ...new Set([
+        ...filterPiTools(
+          [...(params.builtinTools ? PI_BUILTIN_TOOL_NAMES : []), ...(params.extensionTools ?? [])],
+          params.allowedTools,
+          params.disallowedTools,
+        ),
+        ...keelsonNames,
+      ]),
+    ];
     const { session } = await sdk.createAgentSession({
       cwd: params.cwd,
-      // pi's built-in read/bash/edit/write would run without keelson's
-      // permission + redaction rails, so they stay off either way: keelson
-      // tools become the explicit allowlist (`tools:`), and with none to
-      // project the session starts with no tools at all.
-      ...(customTools.length > 0
+      modelRuntime,
+      resourceLoader,
+      // keelson owns the transcript; every pi turn is fresh (sessionResume is
+      // off), so pi's own session files would only pile up in ~/.pi.
+      sessionManager: sdk.SessionManager.inMemory(),
+      ...(toolNames.length > 0
         ? // `as never` is the same cast boundary as `model` below: the
           // projection is a structural slice of the SDK's ToolDefinition.
-          { tools: customTools.map((t) => t.name), customTools: customTools as never }
+          { tools: toolNames, customTools: keelsonTools as never }
         : { noTools: "all" as const }),
       // `as never` is the cast boundary: resolveModel returns the SDK's Model
       // resolved from a string ref, which the strict generic signature can't see.
@@ -105,31 +185,31 @@ export class PiAgentSessionFactory implements PiSessionFactory {
       subscribe: (listener) =>
         session.subscribe((event) => listener(event as unknown as PiRawEvent)),
       prompt: (text) => session.prompt(text),
+      abort: () => session.abort(),
+      dispose: () => session.dispose(),
       ...(resolved !== undefined ? { modelRef: `${resolved.provider}/${resolved.id}` } : {}),
     };
   }
 }
 
-// Resolve via pi's model registry: it applies github-copilot's modifyModels
-// hook, which rewrites the model baseUrl to the account's own token endpoint
-// (individual/business/enterprise). An unresolvable ref returns undefined so
-// the session falls back to pi's default model rather than throwing.
-async function resolveModel(ref: string): Promise<unknown | undefined> {
+// Resolve against pi's model runtime, which applies provider model hooks such
+// as github-copilot's per-account baseUrl rewrite. An unresolvable ref
+// returns undefined so the session falls back to pi's default model; the
+// provider reports that swap to the user.
+async function resolveModel(
+  runtime: { getAvailable(): Promise<readonly { provider: string; id: string }[]> },
+  ref: string,
+): Promise<unknown | undefined> {
   const slash = ref.indexOf("/");
   if (slash <= 0) return undefined;
   const provider = ref.slice(0, slash);
   const modelId = ref.slice(slash + 1);
   if (!modelId) return undefined;
   try {
-    const sdk = await import("@earendil-works/pi-coding-agent");
-    const registry = sdk.ModelRegistry.create(
-      sdk.AuthStorage.create(),
-      join(sdk.getAgentDir(), "models.json"),
-    );
-    const match = registry.getAvailable().find((m) => m.provider === provider && m.id === modelId);
-    if (match) return match;
+    const available = await runtime.getAvailable();
+    return available.find((m) => m.provider === provider && m.id === modelId);
   } catch {
-    // registry unavailable (missing pi install / unreadable config)
+    // runtime unavailable (unreadable config)
+    return undefined;
   }
-  return undefined;
 }

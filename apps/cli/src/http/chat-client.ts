@@ -58,12 +58,19 @@ export interface CreateConversationOpts {
   name?: string;
 }
 
-// Mirror the SPA's pickInitialRef (apps/web/src/views/Chat.tsx:131):
+// The server's resolved default (config.defaultProvider) wins; otherwise
+// mirror the SPA's pickInitialRef (apps/web/src/views/Chat.tsx:131):
 // copilot → stub → first registered non-workflow. The synthetic `workflow`
 // provider is registered for run-as-conversation rows but rejects chat
 // turns, so we skip it in the fallback.
-export function pickDefaultHttpProvider(providers: readonly ProviderInfoRow[]): string {
+export function pickDefaultHttpProvider(
+  providers: readonly ProviderInfoRow[],
+  serverDefault?: string,
+): string {
   const ids = new Set(providers.map((p) => p.id));
+  if (serverDefault && serverDefault !== "workflow" && ids.has(serverDefault)) {
+    return serverDefault;
+  }
   if (ids.has("copilot")) return "copilot";
   if (ids.has("stub")) return "stub";
   const first = providers.find((p) => p.id !== "workflow");
@@ -160,19 +167,28 @@ export async function getConversation(baseUrl: string, id: string): Promise<Conv
   return (await res.json()) as ConversationRow;
 }
 
+export interface ProviderList {
+  providers: ProviderInfoRow[];
+  // The server's resolveDefaultProvider pick, honoring config.defaultProvider.
+  defaultProvider?: string;
+}
+
 // List providers the server has registered so the CLI can mirror the SPA's
-// fallback chain (copilot → stub → first registered non-workflow). The
-// synthetic `workflow` provider sits in this list but rejects chat turns;
-// callers must skip it.
-export async function listProviders(baseUrl: string): Promise<ProviderInfoRow[]> {
+// fallback chain (server default → copilot → stub → first registered
+// non-workflow). The synthetic `workflow` provider sits in this list but
+// rejects chat turns; callers must skip it.
+export async function listProviders(baseUrl: string): Promise<ProviderList> {
   const res = await fetch(`${normalizeBase(baseUrl)}/api/providers`, {
     headers: { accept: "application/json", origin: originHeader(baseUrl) },
   });
   if (!res.ok) {
     throw new HttpError(res.status, `GET /api/providers failed: ${res.status}`);
   }
-  const payload = (await res.json()) as { providers?: ProviderInfoRow[] };
-  return payload.providers ?? [];
+  const payload = (await res.json()) as { providers?: ProviderInfoRow[]; defaultProvider?: string };
+  return {
+    providers: payload.providers ?? [],
+    ...(payload.defaultProvider ? { defaultProvider: payload.defaultProvider } : {}),
+  };
 }
 
 // Live model list for one provider — GET /api/providers/:id/models. The server

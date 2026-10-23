@@ -40,8 +40,7 @@ export interface PiToolProjectionContext {
   abortSignal?: AbortSignal;
   // Per-call policy gate (server-wired). When present, each tool call is
   // evaluated WITH its validated args before execute and a deny throws (pi
-  // converts that into an error tool result). pi's own built-ins are disabled,
-  // so the projected keelson tools are the whole surface this gate governs.
+  // converts that into an error tool result).
   evaluateToolCall?: ToolCallGate;
   // Per-result policy gate (server-wired). When present, the captured output is
   // evaluated AFTER execute and before it returns to pi — a deny throws (an
