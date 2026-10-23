@@ -169,9 +169,10 @@ A provider's catalog can list many models, including older generations. Set
 
 The list only changes what the web picker and the CLI's model choices show while
 the server is running. A workflow node or a turn that names another model still
-runs it. Ids must match the provider's catalog exactly; the
-`/api/providers/<id>/models` endpoint lists them. An id the catalog doesn't
-offer is ignored. Restart the server after editing the list.
+runs it. Ids must match the provider's catalog exactly. Look them up at the
+`/api/providers/<id>/models` endpoint before you set `models`, since afterward it
+returns only the filtered list. An id the catalog doesn't offer is ignored.
+Restart the server after editing the list.
 
 ## Claude credentials
 
