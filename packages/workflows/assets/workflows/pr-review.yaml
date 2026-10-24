@@ -75,6 +75,8 @@ nodes:
       printf '%s\n' "${NUM:-CURRENT}"
 
   - id: scope
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [extract-pr]
     bash: |
       set -euo pipefail
@@ -824,6 +826,8 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: post-review
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [build-review]
     bash: |
       set -euo pipefail

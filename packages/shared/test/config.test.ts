@@ -465,9 +465,9 @@ describe("resolveRibApprovalGrants", () => {
 });
 
 describe("resolveSandboxConfig", () => {
-  test("defaults: off, no floor, deny outbound, nothing granted beyond cwd", () => {
+  test("defaults: on, no floor, deny outbound, nothing granted beyond cwd", () => {
     expect(resolveSandboxConfig({}, {})).toEqual({
-      default: false,
+      default: true,
       floor: false,
       settings: {
         filesystem: { readwrite: [], readonly: [], denied: [] },
@@ -517,8 +517,10 @@ describe("resolveSandboxConfig", () => {
   test("KEELSON_SANDBOX=required sets the floor; on|off replace the config default", () => {
     expect(resolveSandboxConfig({}, { KEELSON_SANDBOX: "required" })).toMatchObject({
       floor: true,
-      default: false,
+      default: true,
     });
+    expect(resolveSandboxConfig({ sandbox: { default: false } }, {}).default).toBe(false);
+    expect(resolveSandboxConfig({}, { KEELSON_SANDBOX: "off" }).default).toBe(false);
     expect(resolveSandboxConfig({}, { KEELSON_SANDBOX: "on" }).default).toBe(true);
     expect(
       resolveSandboxConfig({ sandbox: { default: true } }, { KEELSON_SANDBOX: "off" }).default,

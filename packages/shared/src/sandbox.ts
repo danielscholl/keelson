@@ -70,7 +70,9 @@ export const EMPTY_SANDBOX_SETTINGS: SandboxSettings = {
 export const sandboxModeSchema = z.enum(["on", "off"]);
 export type SandboxMode = z.infer<typeof sandboxModeSchema>;
 
-export const sandboxSupportSchema = z.enum(["native", "tool", "none"]);
+// "unneeded": the provider runs no tools of its own, so a sandboxed turn has
+// nothing to confine and runs as is.
+export const sandboxSupportSchema = z.enum(["native", "tool", "none", "unneeded"]);
 export type SandboxSupport = z.infer<typeof sandboxSupportSchema>;
 
 // How a workflow node actually ran: in the Keelson sandbox runtime, inside the
@@ -274,6 +276,7 @@ export function describeSandboxBackend(
   platform: string,
 ): string {
   if (support === "none") return `${providerId} cannot sandbox its tools`;
+  if (support === "unneeded") return `${providerId} runs no tools (no tools to confine)`;
   if (support === "tool") return `${providerId} shell runs in the Keelson sandbox`;
   const name = NATIVE_NAMES[providerId] ?? `${providerId} native sandbox`;
   const backend = NATIVE_BACKENDS[providerId]?.[platform];
@@ -310,10 +313,7 @@ export function describeSandboxStatus(input: SandboxStatusInput): string[] {
         ? "sandbox: off requested; server policy unknown"
         : `sandbox: ${resolution.enabled ? "on" : "off"} (${SOURCE_LABELS[resolution.source]})`,
   ];
-  const backend =
-    providerId === "stub"
-      ? "stub runs no tools (n/a)"
-      : describeSandboxBackend(providerId, support, input.platform);
+  const backend = describeSandboxBackend(providerId, support, input.platform);
   lines.push(
     `provider: ${backend}${(resolution?.enabled !== false || resolution.unconfirmed) && support === "none" ? "; turns fail closed while the sandbox is on" : ""}`,
   );

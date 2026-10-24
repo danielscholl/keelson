@@ -170,6 +170,9 @@ export class GatewayProvider implements IAgentProvider {
       // so the picker doesn't advertise tool support we don't wire.
       tools: false,
       reasoningEffort: false,
+      // With no tools there is nothing for a sandbox to confine; wiring tools
+      // must revisit this.
+      sandbox: "unneeded",
       models: opts.model ? [opts.model] : [],
       defaultModel: opts.model ?? "",
       ...(opts.model

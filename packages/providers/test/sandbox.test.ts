@@ -119,6 +119,19 @@ describe("applyCopilotSandbox", () => {
     expect(await applyCopilotSandbox(supported, {}, profile())).toBe(
       "this Copilot SDK cannot apply a sandbox to a session",
     );
+    const noRpc = {
+      rpc: {
+        sandbox: {
+          getHostSupport: async () => {
+            throw new Error("Unhandled method sandbox.getHostSupport");
+          },
+        },
+      },
+    };
+    const refusal = await applyCopilotSandbox(noRpc, accept, profile());
+    expect(refusal).toContain("the Copilot CLI in use does not support sandboxing");
+    expect(refusal).toContain("unset COPILOT_CLI_PATH");
+    expect(refusal).toContain("/sandbox off");
     expect(
       await applyCopilotSandbox(
         supported,
@@ -269,8 +282,10 @@ describe("codexSandboxGaps", () => {
 });
 
 describe("sandboxSupportFor / describeSandboxBackend", () => {
-  test("a provider that declares nothing reads as none", () => {
-    expect(sandboxSupportFor(new StubProvider())).toBe("none");
+  test("a provider that declares nothing reads as none; the stub has nothing to confine", () => {
+    const { sandbox: _, ...bare } = new StubProvider().getCapabilities();
+    expect(sandboxSupportFor({ getCapabilities: () => bare })).toBe("none");
+    expect(sandboxSupportFor(new StubProvider())).toBe("unneeded");
     expect(
       sandboxSupportFor({
         getCapabilities: () => ({ ...new StubProvider().getCapabilities(), sandbox: "native" }),

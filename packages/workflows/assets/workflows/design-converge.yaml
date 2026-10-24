@@ -22,6 +22,8 @@ description: |
 
 nodes:
   - id: intake
+    # reads or writes caller-supplied paths outside the project
+    sandbox: { enabled: false }
     timeout: 30000
     bash: |
       set -euo pipefail
@@ -426,6 +428,8 @@ nodes:
       $verify.output
 
   - id: persist
+    # reads or writes caller-supplied paths outside the project
+    sandbox: { enabled: false }
     depends_on:
       [propose-a, propose-b, propose-c, critic-a, critic-b, critic-c, verify, synthesize]
     trigger_rule: all_done
@@ -548,6 +552,8 @@ nodes:
       printf 'ARTIFACT_DIR=%s\n' "$TARGET"
 
   - id: complete
+    # reads or writes caller-supplied paths outside the project
+    sandbox: { enabled: false }
     depends_on: [persist]
     always_run: true
     timeout: 30000

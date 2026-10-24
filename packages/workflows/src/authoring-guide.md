@@ -78,8 +78,11 @@ Optional:
 - `thinking` (`adaptive`|`enabled`|`disabled` or `{type, budgetTokens}`) —
   claude-only reasoning control.
 
-Accepted but ignored at runtime (the loader warns and drops them): `sandbox`,
-`betas`, `fallbackModel`, `additionalDirectories`.
+- `sandbox` — the workflow's sandbox block, merged under each node's (see the
+  node field below). `{ enabled: false }` opts the whole workflow out.
+
+Accepted but ignored at runtime (the loader warns and drops them): `betas`,
+`fallbackModel`, `additionalDirectories`.
 
 ## Choosing a model
 
@@ -290,9 +293,20 @@ must already exist on disk; from chat, use an inline `prompt` node instead.
 - `memory` / `notebook` — recall/writeback blocks wired to the memory store
   and project notebook.
 - `hooks` — prompt/command hooks, fully honored only by the claude provider.
+- `sandbox` — bash/script/prompt/command/loop. The sandbox is on by default, so a
+  node that omits this runs confined: `bash` and `script` under Keelson's runtime,
+  agent nodes under the provider's own sandbox. Keys are all optional:
+  `enabled`, `filesystem: { readwrite, readonly, denied }` (relative paths
+  resolve against the node's cwd, `..` is rejected), `network: { outbound:
+  allow|deny, loopback, allowedHosts }`, `env: [NAME]`, and `backend` passthrough
+  per provider. Opt out as narrowly as the work allows: `network: { outbound:
+  allow }` when only the network is missing, `enabled: false` (with a one-line
+  comment saying why) for a node that calls `forge`, pushes, runs `bun` inside a
+  bash body, or writes outside the project. A sandboxed node the host cannot
+  confine fails rather than running unconfined.
 
-Ignored with a warning on any node: `agents`, `sandbox`, `betas`,
-`fallbackModel`, `maxBudgetUsd`, `mcp`, `skills`. AI-only fields on
+Ignored with a warning on any node: `agents`, `betas`, `fallbackModel`,
+`maxBudgetUsd`, `mcp`, `skills`. AI-only fields on
 bash/script/approval/cancel nodes are also ignored with a warning. On loop
 nodes, `model` and `provider` are the supported exceptions; other AI-only fields
 are ignored with a warning.

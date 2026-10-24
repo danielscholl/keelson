@@ -39,6 +39,9 @@ async function runCli(
       KEELSON_HOME: isolatedHome,
       KEELSON_WORKSPACE: join(isolatedHome, "workspace"),
       KEELSON_SERVER_URL: deadServerUrl,
+      // Workflow runs here exercise the CLI, not the sandbox, and must not
+      // depend on whether this host has the sandbox runtime installed.
+      KEELSON_SANDBOX: "off",
       ...envOverrides,
     }),
   });

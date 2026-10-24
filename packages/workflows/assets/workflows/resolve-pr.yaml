@@ -63,6 +63,8 @@ nodes:
       console.log([...targets][0]);
 
   - id: fetch-state
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [extract-pr]
     bash: |
       set -euo pipefail
@@ -203,6 +205,8 @@ nodes:
       with explicit fork-remote credentials.
 
   - id: triage
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [fetch-state]
     when: "$fetch-state.output.has_new == 'true'"
     context: fresh
@@ -396,6 +400,8 @@ nodes:
       capture_response: true
 
   - id: fix
+    # forge needs the keychain-held token and the network; the sandbox clears both; also runs the tests
+    sandbox: { enabled: false }
     depends_on: [triage-gate, approve]
     trigger_rule: none_failed_min_one_success
     when: "$triage-gate.output.has_new == 'true'"
@@ -524,6 +530,8 @@ nodes:
       Print a summary when done.
 
   - id: validate
+    # runs the project's tests, and nested bun sees an empty env under the sandbox
+    sandbox: { enabled: false }
     depends_on: [fix]
     timeout: 1200000
     bash: |
@@ -564,6 +572,8 @@ nodes:
       exit 0
 
   - id: fix-validation
+    # runs the project's tests, and nested bun sees an empty env under the sandbox
+    sandbox: { enabled: false }
     depends_on: [validate]
     context: fresh
     model: deep
@@ -704,6 +714,8 @@ nodes:
       saying why.
 
   - id: apply-review-fix
+    # runs the project's tests, and nested bun sees an empty env under the sandbox
+    sandbox: { enabled: false }
     depends_on: [review-fix]
     context: fresh
     model: deep
@@ -742,6 +754,8 @@ nodes:
       fixed / refuted(reason) / below-bar. Print the same lines.
 
   - id: revalidate
+    # runs the project's tests, and nested bun sees an empty env under the sandbox
+    sandbox: { enabled: false }
     depends_on: [fix-validation, apply-review-fix]
     trigger_rule: none_failed_min_one_success
     timeout: 1200000
@@ -780,6 +794,8 @@ nodes:
       echo "VALIDATION_STATUS: PASS"
 
   - id: push
+    # git fetch and push need the network and keychain credentials
+    sandbox: { enabled: false }
     depends_on: [revalidate]
     when: "$triage-gate.output.has_new == 'true'"
     bash: |
@@ -931,6 +947,8 @@ nodes:
   # reply-gate has already validated every result against triage, so replying,
   # resolving, and recording are fully determined by results.json.
   - id: reply-resolve
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [reply-gate]
     timeout: 1800000
     bash: |
@@ -1075,6 +1093,8 @@ nodes:
   # another reply (no duplicate comments), and flips the ledger entry to
   # resolved on success so a resolved thread stops being retried.
   - id: resolve-retry
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [fetch-state]
     bash: |
       set -euo pipefail
@@ -1107,6 +1127,8 @@ nodes:
       echo "resolve-retry: $(jq 'length' "$OK") of $COUNT resolved on retry."
 
   - id: await-ci
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     # refuse-fork is a dependency so it sits in the gate's converge subgraph and
     # cancels a fork run BEFORE await-ci reruns any CI jobs; a non-fork skips it,
     # tolerated by none_failed_min_one_success. The reply audit and its approval
@@ -1312,6 +1334,8 @@ nodes:
   # converge-check a fresh count so it never declares convergence over a thread
   # that landed mid-watch. Mirrors fetch-state's fork short-circuit.
   - id: post-ci-state
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [await-ci]
     bash: |
       set -euo pipefail

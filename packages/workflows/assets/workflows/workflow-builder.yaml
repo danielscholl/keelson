@@ -250,6 +250,8 @@ nodes:
   #    skips install) on a malformed file. bash runs raw: $KEELSON_ARTIFACTS_DIR.
   # ─────────────────────────────────────────────────────────────────────────
   - id: validate-yaml
+    # nested bun sees an empty env under the sandbox
+    sandbox: { enabled: false }
     depends_on: [generate-yaml]
     bash: |
       set -uo pipefail

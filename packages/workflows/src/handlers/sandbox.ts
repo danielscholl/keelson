@@ -70,7 +70,7 @@ export interface SandboxResolveContext {
   workflowSandbox?: NodeSandbox;
   // Prompt nodes are confined by their provider, not the runtime; this carries
   // the provider's capability mirror and id.
-  provider?: { id: string; support: "native" | "tool" | "none" };
+  provider?: { id: string; support: "native" | "tool" | "none" | "unneeded" };
 }
 
 export interface SandboxPolicy {
@@ -131,6 +131,8 @@ const HOST_DENIED = [
   "~/.kube",
   "~/.netrc",
   "~/.npmrc",
+  "~/.git-credentials",
+  "~/.config/git/credentials",
   "~/Library/Keychains",
   "~/.claude",
   "~/.codex",
@@ -253,7 +255,7 @@ export function defaultSandboxProfile(opts: DefaultSandboxProfileOptions): Sandb
     .filter((dir) => !toolchains.some((prefix) => isInside(dir, prefix)));
   const readonly = union(
     [opts.bundledBinDir, join(opts.home, "scripts"), join(opts.home, "node_modules")],
-    [join(opts.hostHome, ".gitconfig"), join(opts.hostHome, ".config", "git")],
+    hostGitConfigPaths(opts.hostHome),
     toolchains,
     pathDirs,
   );
@@ -269,14 +271,39 @@ export function defaultSandboxProfile(opts: DefaultSandboxProfileOptions): Sandb
   };
 }
 
-// A prompt node's starting profile: its working dirs writable, nothing else
-// granted or denied, network off.
-export function providerSandboxProfile(cwd: string, artifactsDir?: string): SandboxProfile {
+// The user's git config, which every git command reads; without it a sandboxed
+// shell cannot run git at all. Files, not ~/.config/git, which can also hold
+// git's plaintext credential store.
+export function hostGitConfigPaths(hostHome: string): string[] {
+  const xdg = join(hostHome, ".config", "git");
+  return [
+    join(hostHome, ".gitconfig"),
+    join(xdg, "config"),
+    join(xdg, "ignore"),
+    join(xdg, "attributes"),
+  ];
+}
+
+// A prompt node's starting profile: its working dirs writable (and a worktree's
+// shared git dir, so the agent can commit), the git config readable, network off.
+export function providerSandboxProfile(
+  cwd: string,
+  artifactsDir?: string,
+  git: { hostHome?: string; gitCommonDir?: string; exists?: (path: string) => boolean } = {},
+): SandboxProfile {
+  const exists = git.exists ?? existsSync;
   return {
     enabled: false,
     filesystem: {
-      readwrite: union([cwd], artifactsDir !== undefined ? [artifactsDir] : []),
-      readonly: [],
+      readwrite: union(
+        [cwd],
+        artifactsDir !== undefined ? [artifactsDir] : [],
+        git.gitCommonDir !== undefined && !isInside(git.gitCommonDir, cwd)
+          ? [git.gitCommonDir]
+          : [],
+      ),
+      readonly:
+        git.hostHome !== undefined ? hostGitConfigPaths(git.hostHome).filter((p) => exists(p)) : [],
       denied: [],
     },
     network: { outbound: "deny" },
@@ -338,7 +365,11 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
       try {
         profile =
           ctx.provider !== undefined
-            ? providerSandboxProfile(ctx.cwd, ctx.artifactsDir)
+            ? providerSandboxProfile(ctx.cwd, ctx.artifactsDir, {
+                hostHome,
+                exists,
+                ...gitCommonDirFor(ctx.cwd),
+              })
             : defaultSandboxProfile({
                 cwd: ctx.cwd,
                 ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
@@ -367,6 +398,10 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
       profile = canonicalize(profile);
 
       if (ctx.provider !== undefined) {
+        // Nothing to confine, so the node runs as is and says why.
+        if (ctx.provider.support === "unneeded") {
+          return { profile: null, outcome: "off", backend: "unneeded" };
+        }
         if (ctx.provider.support === "none") {
           return {
             profile,

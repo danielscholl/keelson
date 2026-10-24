@@ -311,4 +311,19 @@ describe("RunTrace — sandbox chip", () => {
     expect(container.querySelectorAll(".node-sandbox")).toHaveLength(3);
     expect(container.querySelectorAll(".node-sandbox.on")).toHaveLength(2);
   });
+
+  test("a prompt node whose provider has no tools reads as nothing to confine", () => {
+    const { container } = render(
+      <RunTrace
+        schemaNodes={[{ id: "ask", type: "prompt" }]}
+        nodes={{
+          ask: node({ nodeId: "ask", type: "prompt", sandbox: "off", sandboxBackend: "unneeded" }),
+        }}
+        runId="r1"
+        streaming={false}
+      />,
+    );
+    expect(screen.getByText("no tools to confine")).toBeDefined();
+    expect(container.querySelectorAll(".node-sandbox.on")).toHaveLength(0);
+  });
 });

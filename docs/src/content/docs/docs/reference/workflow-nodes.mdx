@@ -45,6 +45,7 @@ immediately, with no server restart.
 | `mutates_checkout` | no | `false` marks a read-only workflow; a non-isolated run against a project's live checkout then skips the per-project mutation lock (it can't clash with a mutating run). Defaults to mutating. |
 | `locking` | no | `exclusive` (default) or `shared`. Shared runs can coexist on one project but remain mutually exclusive with a mutating run. This field takes precedence over `mutates_checkout`; use `mutates_checkout: false` to take no lock. |
 | `converge` | no | `{ gate, max_rounds, on_exhaust }` re-runs a subgraph until a gate node passes. See [converge](#converge). |
+| `sandbox` | no | The workflow's sandbox block, merged under each node's. `{ enabled: false }` opts the whole workflow out; a node can turn it back on. See [sandbox](#sandbox). |
 
 The run-start API's `isolation: "worktree"` and the CLI's `--worktree` force
 isolation on. `isolation: "none"` and `--no-worktree` explicitly override even a
@@ -54,8 +55,8 @@ fall back to that directory when required setup fails. See
 for status, resume, and caller-owned lease behavior.
 
 The loader **accepts but ignores** these workflow-level fields, dropping them
-with a warning so a cross-runtime file still loads: `sandbox`, `betas`,
-`fallbackModel`, `additionalDirectories`.
+with a warning so a cross-runtime file still loads: `betas`, `fallbackModel`,
+`additionalDirectories`.
 
 ### Description format
 
@@ -333,6 +334,45 @@ These apply across kinds (some only to agent nodes, as noted).
 | `systemPrompt`, `thinking` | `prompt`, `command` | Claude-only per-node controls. `thinking` is `adaptive` / `enabled` / `disabled`. |
 | `memory`, `notebook` | all | Recall/writeback blocks wired to the memory store and the project notebook. |
 | `hooks` | `prompt`, `command` | Fully honored only by Claude; Copilot covers `PreToolUse` / `PostToolUse`. |
+| `sandbox` | `bash`, `script`, `prompt`, `command`, `loop` | Whether the node runs sandboxed and what it may reach. See [sandbox](#sandbox). |
+
+### Sandbox
+
+The sandbox is on by default, so a node that says nothing runs confined. A
+`sandbox` block, on the workflow or on a node, adjusts that:
+
+```yaml
+sandbox:
+  enabled: true            # false opts out; ignored under KEELSON_SANDBOX=required
+  filesystem:
+    readwrite: [out]       # relative paths resolve against the node's cwd
+    readonly: ["~/data"]
+    denied: [secrets]
+  network:
+    outbound: allow        # or deny (the default)
+    loopback: false
+    allowedHosts: [api.github.com]
+  env: [GH_TOKEN]          # names passed into the sandbox
+  backend:
+    claude: {}             # per-provider passthrough: claude, copilot, codex, pi
+```
+
+Every key is optional. The node's block merges over the workflow's, which merges
+over the operator's `sandbox` config and the built-in profile; path lists and
+`env` union, and scalars take the most specific value. A path containing `..`
+fails the node with a readable reason. A block in the older Claude
+`SandboxSettings` shape (keys such as `autoAllowBashIfSandboxed` or
+`filesystem.allowWrite`) still loads, with a `sandbox_legacy_shape` warning, and
+is kept as `backend.claude`.
+
+Each `bash`, `script`, and `prompt` node reports how it ran: `sandbox` and
+`sandboxBackend` on its `node_done` event and in the run trace, and
+`KEELSON_NODE_<id>_SANDBOX` for nodes downstream. The outcome is `mxc` (Keelson's
+runtime), `provider` (the provider's own sandbox), or `off`; `off` with backend
+`unneeded` means the provider runs no tools to confine. A node that should be
+sandboxed but cannot be fails rather than running unconfined. See
+[Sandboxed execution](../../guides/governance/#sandboxed-execution) for the
+default profiles and the opt-out recipes.
 
 ### Model resolution
 
@@ -381,8 +421,8 @@ Use `--no-preflight` for one run, set `"workflowPreflight": false` in
 `config.json`, or set `KEELSON_WORKFLOW_PREFLIGHT=0` to disable the run-start
 check.
 
-Ignored with a warning on any node: `agents`, `sandbox`, `betas`,
-`fallbackModel`, `maxBudgetUsd`, `mcp`, `skills`. AI-specific fields are also
+Ignored with a warning on any node: `agents`, `betas`, `fallbackModel`,
+`maxBudgetUsd`, `mcp`, `skills`. AI-specific fields are also
 ignored, with a warning, on `bash`, `script`, `approval`, and `cancel`. A `loop`
 accepts node-level `model` and `provider`; its other AI-specific fields are
 ignored with a warning.

@@ -86,19 +86,39 @@ describe("chatHeadless (in-process chat)", () => {
       else process.env.KEELSON_SANDBOX = originalSandbox;
     });
 
+    // A provider that declares no sandbox support, so a sandboxed turn fails closed.
+    class NoSandboxProvider extends StubProvider {
+      override getCapabilities() {
+        const { sandbox: _, ...caps } = super.getCapabilities();
+        return caps;
+      }
+    }
+    beforeAll(() => {
+      registerProvider({
+        id: "no-sandbox",
+        displayName: "No sandbox",
+        factory: () => new NoSandboxProvider(),
+        capabilities: new NoSandboxProvider().getCapabilities(),
+        builtIn: false,
+      });
+    });
+    afterAll(() => {
+      unregisterProvider("no-sandbox");
+    });
+
     test("--sandbox on a provider that cannot sandbox fails closed before the turn", async () => {
       delete process.env.KEELSON_SANDBOX;
       const chunks: MessageChunk[] = [];
       const turn = chatHeadless({
         message: "hi",
         cwd: process.cwd(),
-        provider: "stub",
+        provider: "no-sandbox",
         sandbox: true,
         onChunk: (chunk) => chunks.push(chunk),
       });
       await expect(turn).rejects.toBeInstanceOf(SandboxUnavailableError);
       await expect(turn).rejects.toThrow(
-        "sandbox is on, but stub cannot sandbox its tools: switch to a provider that can sandbox, or pass --no-sandbox",
+        "sandbox is on, but no-sandbox cannot sandbox its tools: switch to a provider that can sandbox, or pass --no-sandbox",
       );
       expect(chunks).toEqual([]);
     });
@@ -106,8 +126,14 @@ describe("chatHeadless (in-process chat)", () => {
     test("KEELSON_SANDBOX=required holds it on over --no-sandbox", async () => {
       process.env.KEELSON_SANDBOX = "required";
       await expect(
-        chatHeadless({ message: "hi", cwd: process.cwd(), provider: "stub", sandbox: false }),
+        chatHeadless({ message: "hi", cwd: process.cwd(), provider: "no-sandbox", sandbox: false }),
       ).rejects.toThrow("KEELSON_SANDBOX=required holds the sandbox on");
+    });
+
+    test("the stub has nothing to confine, so the default-on sandbox lets it answer", async () => {
+      delete process.env.KEELSON_SANDBOX;
+      const result = await chatHeadless({ message: "hi", cwd: process.cwd(), provider: "stub" });
+      expect(result.text.trim()).toBe("hi");
     });
 
     test("KEELSON_WORKFLOW_TOOL_DENYLIST=Bash withholds the sandboxed shell and denies it", async () => {

@@ -28,6 +28,6 @@ describe("SandboxProfile mirror", () => {
     const resolved: ResolvedSandboxConfig = resolveSandboxConfig({}, {});
     const operator: OperatorSandboxConfig = resolved;
     expect(backToShared).toEqual(shared);
-    expect(operator.default).toBe(false);
+    expect(operator.default).toBe(true);
   });
 });

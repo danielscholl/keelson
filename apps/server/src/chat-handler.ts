@@ -2,7 +2,8 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import {
   describeSandboxBackend,
   getAgentProvider,
@@ -23,6 +24,7 @@ import {
   EMPTY_SANDBOX_SETTINGS,
   inferToolFamily,
   type MessageChunk,
+  mergeSandboxProfile,
   modelInfoSchema,
   RECALL_REQUEST_SCHEMA_VERSION,
   type RecallRequest,
@@ -40,6 +42,7 @@ import {
 } from "@keelson/shared";
 import type { ResolvedSandboxConfig } from "@keelson/shared/config";
 import { getRegisteredTools } from "@keelson/skills";
+import { hostGitConfigPaths } from "@keelson/workflows";
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { Hono } from "hono";
 import { z } from "zod";
@@ -590,26 +593,34 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     deps.send(doneFrame(conversationId));
     return;
   }
-  const sandboxProfile: SandboxProfile | undefined = sandboxDecision.enabled
-    ? buildSandboxProfile(
-        deps.sandbox?.settings ?? EMPTY_SANDBOX_SETTINGS,
-        cwd,
-        true,
-        realpathOrSelf,
-      )
-    : undefined;
+  const operatorProfile: SandboxProfile | undefined =
+    sandboxDecision.enabled && sandboxSupport !== "unneeded"
+      ? buildSandboxProfile(
+          deps.sandbox?.settings ?? EMPTY_SANDBOX_SETTINGS,
+          cwd,
+          true,
+          realpathOrSelf,
+        )
+      : undefined;
+  const sandboxProfile: SandboxProfile | undefined =
+    operatorProfile !== undefined
+      ? mergeSandboxProfile(operatorProfile, {
+          filesystem: { readonly: hostGitConfigPaths(homedir()).filter((p) => existsSync(p)) },
+        })
+      : undefined;
   // Every policy evaluation this turn sees the sandbox decision; a sandboxed
   // turn also confines tool path arguments to its granted roots. The gate is
   // not access-aware, so read-only roots are included and the provider's own
-  // sandbox is what keeps them unwritable.
+  // sandbox is what keeps them unwritable. The git config grant is for the
+  // provider's sandbox only: host tools run outside it and could write there.
   const sandboxScope = {
     sandbox: { enabled: sandboxDecision.enabled, support: sandboxSupport },
-    ...(sandboxProfile !== undefined
+    ...(operatorProfile !== undefined
       ? {
           cwd,
           allowedDirectories: [
-            ...sandboxProfile.filesystem.readwrite,
-            ...sandboxProfile.filesystem.readonly,
+            ...operatorProfile.filesystem.readwrite,
+            ...operatorProfile.filesystem.readonly,
           ],
         }
       : {}),

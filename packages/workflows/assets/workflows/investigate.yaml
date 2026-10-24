@@ -21,6 +21,8 @@ description: |
 
 nodes:
   - id: intake
+    # nested bun sees an empty env under the sandbox
+    sandbox: { enabled: false }
     timeout: 30000
     bash: |
       set -euo pipefail
@@ -190,6 +192,8 @@ nodes:
       cat -- "$JSON_OUT"
 
   - id: investigate
+    # reads or writes caller-supplied paths outside the project
+    sandbox: { enabled: false }
     depends_on: [intake]
     context: fresh
     model: deep
@@ -283,6 +287,8 @@ nodes:
       $intake.output.bundle
 
   - id: verify
+    # reads or writes caller-supplied paths outside the project
+    sandbox: { enabled: false }
     depends_on: [investigate]
     different_vendor_from: investigate
     context: fresh
@@ -365,6 +371,8 @@ nodes:
       $intake.output.bundle
 
   - id: publish
+    # reads or writes caller-supplied paths outside the project
+    sandbox: { enabled: false }
     depends_on: [verify]
     model: balanced
     allowed_tools: [Read, Edit]
@@ -385,6 +393,8 @@ nodes:
       Reply with a short summary of the rows updated.
 
   - id: finalize
+    # writes the caller's evidence file, which may sit outside the project
+    sandbox: { enabled: false }
     depends_on: [publish]
     runtime: bun
     timeout: 60000

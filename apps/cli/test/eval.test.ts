@@ -62,13 +62,20 @@ function execution(overrides: Partial<CaseExecution>): CaseExecution {
 
 let tmp: string;
 const savedEnv: Record<string, string | undefined> = {};
-const ENV_KEYS = ["KEELSON_PROVIDERS", "KEELSON_WORKFLOW_PROVIDER", "KEELSON_HOME"] as const;
+const ENV_KEYS = [
+  "KEELSON_PROVIDERS",
+  "KEELSON_WORKFLOW_PROVIDER",
+  "KEELSON_HOME",
+  "KEELSON_SANDBOX",
+] as const;
 
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "keelson-eval-cli-"));
   for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
   process.env.KEELSON_PROVIDERS = "stub";
   delete process.env.KEELSON_WORKFLOW_PROVIDER;
+  // Eval runs bash nodes; whether this host has the sandbox runtime must not matter.
+  process.env.KEELSON_SANDBOX = "off";
 });
 
 afterEach(() => {

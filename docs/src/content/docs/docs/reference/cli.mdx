@@ -168,9 +168,11 @@ unregistered rather than offered and broken; `keelson doctor` reports it. See
 | `keelson sandbox install` | Install the sandbox runtime (the `@microsoft/mxc-sdk` executor, about 100 MB) into the home and confirm it runs with a dry run. macOS 15 or later on Apple silicon. |
 | `keelson sandbox status` | Show whether the sandbox is on by default or required by `KEELSON_SANDBOX`, which executor would run, and whether a dry run passes. |
 
-The runtime is what confines sandboxed workflow `bash` and `script` nodes and
-pi's shell; Copilot, Claude, and Codex use their own sandboxes. Restart the
-server after installing it. See [Sandbox](../../guides/configuration/#sandbox).
+The sandbox is on by default. The runtime is what confines sandboxed workflow
+`bash` and `script` nodes and pi's shell; Copilot, Claude, and Codex use their
+own sandboxes. Without it, those nodes and pi turns fail closed, so install it,
+or run with `KEELSON_SANDBOX=off` on a host it does not support. Restart the
+server after installing it. See [Sandboxed execution](../../guides/governance/#sandboxed-execution).
 
 ## Ribs
 
@@ -249,9 +251,11 @@ command). The options below apply to the one-shot form.
 | `--sandbox`, `--no-sandbox` | Sandbox this chat's tools, or run them unsandboxed, over the conversation's saved choice and the default. Also applies to interactive chat. `KEELSON_SANDBOX=required` keeps the sandbox on regardless. |
 | `--base-url <url>` | An explicit server URL. |
 
-In interactive chat, `/sandbox` controls the same choice for the open
-conversation. The SPA has the same command and a Sandbox chip, and both
-surfaces read the choice saved on the conversation.
+The sandbox is on by default, so a chat that chooses nothing runs sandboxed. In
+interactive chat, `/sandbox` controls the same choice for the open conversation.
+The SPA has the same command and a Sandbox chip, and both surfaces read the
+choice saved on the conversation. A conversation with no saved choice follows
+the server's default.
 
 | Command | Does |
 | --- | --- |

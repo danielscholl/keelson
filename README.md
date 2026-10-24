@@ -22,6 +22,7 @@ Most agent tools are centered on a single chat, model, or editor session. Keelso
 | Persistent state | Conversations, workflow runs, outputs, projects, and memory live in SQLite. |
 | Keychain-backed secrets | Provider keys and rib credentials stay in your OS keychain, not in the home directory. |
 | Governance | Optional policies can pause, deny, or redact tool calls around every agent turn. |
+| Sandboxed execution | On by default: workflow shell steps and agent tools run confined to the project, and fail closed when the host cannot confine them. The runtime is macOS on Apple silicon for now. |
 | Ribs | Install `@keelson/rib-*` packages that add tools, workflows, snapshots, and UI surfaces. |
 | MCP endpoint | External agents can call registered Keelson tools through the local MCP endpoint. |
 
