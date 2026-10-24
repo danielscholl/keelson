@@ -12,7 +12,7 @@
 
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { delimiter, isAbsolute, join, normalize, relative, resolve } from "node:path";
 
 import type { NodeContext, NodeResult, SandboxOutcome } from "../executor.ts";
 import type { NodeSandbox } from "../schema/index.ts";
@@ -111,6 +111,7 @@ export interface CreateSandboxPolicyOptions {
   dbPath: string;
   bundledBinDir: string;
   resolveGitCommonDir?: (cwd: string) => string | undefined;
+  resolveRepoRoot?: (cwd: string) => string | undefined;
   hostHome?: string;
   hostPath?: string;
   exists?: (path: string) => boolean;
@@ -183,8 +184,9 @@ function isInside(child: string, parent: string): boolean {
 export interface SandboxPathOptions {
   cwd: string;
   hostHome: string;
-  // The primary checkout, which `$REPO_ROOT` names; absent outside a repository.
-  repoRoot?: string;
+  // The main checkout `$REPO_ROOT` names, looked up only when a path uses the
+  // token; undefined outside a repository.
+  repoRoot?: () => string | undefined;
 }
 
 const REPO_ROOT_TOKEN = "$REPO_ROOT";
@@ -200,12 +202,13 @@ export function resolveSandboxPath(raw: string, opts: SandboxPathOptions): strin
   if (raw === "~") return opts.hostHome;
   if (raw.startsWith("~/")) return join(opts.hostHome, raw.slice(2));
   if (raw === REPO_ROOT_TOKEN || raw.startsWith(`${REPO_ROOT_TOKEN}/`)) {
-    if (opts.repoRoot === undefined) {
+    const repoRoot = opts.repoRoot?.();
+    if (repoRoot === undefined) {
       throw new SandboxPathError(
-        `sandbox path '${raw}' uses ${REPO_ROOT_TOKEN}, but the working directory is not inside a git repository`,
+        `sandbox path '${raw}' uses ${REPO_ROOT_TOKEN}, but the working directory is not inside a git checkout`,
       );
     }
-    return normalize(join(opts.repoRoot, raw.slice(REPO_ROOT_TOKEN.length)));
+    return normalize(join(repoRoot, raw.slice(REPO_ROOT_TOKEN.length)));
   }
   return normalize(isAbsolute(raw) ? raw : resolve(opts.cwd, raw));
 }
@@ -396,7 +399,7 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
       const pathOpts: SandboxPathOptions = {
         cwd: ctx.cwd,
         hostHome,
-        ...(git.gitCommonDir !== undefined ? { repoRoot: dirname(git.gitCommonDir) } : {}),
+        repoRoot: memo(() => (opts.resolveRepoRoot ?? resolveRepoRoot)(ctx.cwd)),
       };
       let profile: SandboxProfile;
       try {
@@ -534,6 +537,43 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
   };
 }
 
+function memo<T>(fn: () => T): () => T {
+  let done = false;
+  let value: T;
+  return () => {
+    if (!done) {
+      value = fn();
+      done = true;
+    }
+    return value;
+  };
+}
+
+// The main worktree is the first entry of `git worktree list --porcelain`. It is
+// the checkout itself for a submodule or a separate git dir, where the common
+// dir's parent is git metadata, not a checkout; a bare repository has none.
+export function parseMainWorktree(porcelain: string): string | undefined {
+  const [first = ""] = porcelain.split(/\r?\n\r?\n/);
+  const lines = first.split(/\r?\n/).map((line) => line.trim());
+  const root = lines.find((line) => line.startsWith("worktree "))?.slice("worktree ".length);
+  if (root === undefined || root.length === 0 || lines.includes("bare")) return undefined;
+  return root;
+}
+
+export function resolveRepoRoot(cwd: string): string | undefined {
+  try {
+    const result = Bun.spawnSync(["git", "-C", cwd, "worktree", "list", "--porcelain"], {
+      stdout: "pipe",
+      stderr: "ignore",
+      windowsHide: true,
+    });
+    if (result.exitCode !== 0) return undefined;
+    return parseMainWorktree(result.stdout.toString());
+  } catch {
+    return undefined;
+  }
+}
+
 // `git rev-parse --git-common-dir` as an absolute path: a worktree commits into
 // the main repository's .git. Undefined outside a repository or without git.
 export function resolveGitCommonDir(cwd: string): string | undefined {
@@ -565,7 +605,13 @@ export function createOperatorSandboxPolicy(
   config: OperatorSandboxConfig,
   deps: Pick<
     CreateSandboxPolicyOptions,
-    "home" | "dbPath" | "bundledBinDir" | "runtime" | "unavailableReason" | "resolveGitCommonDir"
+    | "home"
+    | "dbPath"
+    | "bundledBinDir"
+    | "runtime"
+    | "unavailableReason"
+    | "resolveGitCommonDir"
+    | "resolveRepoRoot"
   >,
 ): SandboxPolicy {
   const { filesystem, network, env, backend } = config.settings;

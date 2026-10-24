@@ -489,7 +489,11 @@ export function resolveSandboxConfig(
     for (const raw of list ?? []) {
       const expanded = raw === "~" ? home : /^~[\\/]/.test(raw) ? join(home, raw.slice(2)) : raw;
       if (!isAbsolute(expanded)) {
-        warnings.push(`sandbox.filesystem.${field}: '${raw}' is not absolute; ignored`);
+        warnings.push(
+          raw.startsWith("$REPO_ROOT")
+            ? `sandbox.filesystem.${field}: '${raw}' uses $REPO_ROOT, which only a workflow's sandbox block expands; ignored`
+            : `sandbox.filesystem.${field}: '${raw}' is not absolute; ignored`,
+        );
         continue;
       }
       const path = normalize(expanded);

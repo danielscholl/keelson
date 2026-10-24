@@ -238,9 +238,12 @@ The workflow's own `sandbox` block layers on top. Sandboxed shells always see `K
 
 A run with a worktree gets the worktree and the shared git directory, not the
 main checkout, so a tracker kept beside `.git` (such as `.beads`) is out of
-reach. A path that starts with `$REPO_ROOT` resolves against the main checkout,
-in a worktree or not, so a node can grant exactly that directory without naming
-the host path or widening to the whole checkout.
+reach. A path that starts with `$REPO_ROOT` in a workflow's `sandbox` block
+resolves against the main checkout (git's main worktree, which is also right
+for a submodule or a separate git dir), so a node can grant exactly that
+directory without naming the host path or widening to the whole checkout.
+Outside a checkout the node fails closed; the operator's config does not take
+the token.
 
 ### Opting out
 

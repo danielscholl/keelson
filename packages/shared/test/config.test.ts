@@ -514,6 +514,17 @@ describe("resolveSandboxConfig", () => {
     ]);
   });
 
+  test("$REPO_ROOT is refused in operator config with a warning that names its scope", () => {
+    const resolved = resolveSandboxConfig(
+      { sandbox: { filesystem: { readwrite: ["$REPO_ROOT/.beads"] } } } as never,
+      {},
+    );
+    expect(resolved.settings.filesystem.readwrite).toEqual([]);
+    expect(resolved.warnings).toEqual([
+      "sandbox.filesystem.readwrite: '$REPO_ROOT/.beads' uses $REPO_ROOT, which only a workflow's sandbox block expands; ignored",
+    ]);
+  });
+
   test("KEELSON_SANDBOX=required sets the floor; on|off replace the config default", () => {
     expect(resolveSandboxConfig({}, { KEELSON_SANDBOX: "required" })).toMatchObject({
       floor: true,
