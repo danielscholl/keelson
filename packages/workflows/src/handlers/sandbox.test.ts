@@ -142,6 +142,32 @@ describe("resolve: precedence and floor", () => {
     expect(res.fail).not.toContain("keelson sandbox install");
   });
 
+  test("a prompt node can run git: its config reads, and a worktree's shared git dir writes", () => {
+    const gitDir = join(ROOT, "main-repo", ".git");
+    const gitconfig = join(HOST_HOME, ".gitconfig");
+    const policy = createSandboxPolicy(
+      policyOptions({
+        floor: true,
+        resolveGitCommonDir: () => gitDir,
+        exists: (p) => p === gitconfig,
+      }),
+    );
+    const res = policy.resolve(undefined, {
+      ...ctx,
+      provider: { id: "copilot", support: "native" },
+    });
+    expect(res.profile?.filesystem.readwrite).toEqual([CWD, ARTIFACTS, gitDir]);
+    expect(res.profile?.filesystem.readonly).toEqual([gitconfig]);
+    expect(res.profile?.network.outbound).toBe("deny");
+  });
+
+  test("a provider with no tools of its own runs as is, even under the floor", () => {
+    const policy = createSandboxPolicy(policyOptions({ floor: true }));
+    expect(
+      policy.resolve(undefined, { ...ctx, provider: { id: "stub", support: "unneeded" } }),
+    ).toEqual({ profile: null, outcome: "off", backend: "unneeded" });
+  });
+
   test("a provider failure without the floor names the node opt-out, not the install", () => {
     const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
     const res = policy.resolve(
@@ -459,14 +485,14 @@ describe("prepareSandboxScratch", () => {
 });
 
 describe("prompt-node default", () => {
-  test("defers to the provider: working dirs writable, nothing else granted or denied", () => {
+  test("defers to the provider: working dirs and git writable, nothing else granted or denied", () => {
     const policy = createSandboxPolicy(
       policyOptions({ floor: true, resolveGitCommonDir: () => join(ROOT, "main", ".git") }),
     );
     const res = policy.resolve(undefined, { ...ctx, provider: { id: "codex", support: "native" } });
     expect(res.outcome).toBe("provider");
     expect(res.profile?.filesystem).toEqual({
-      readwrite: [CWD, ARTIFACTS],
+      readwrite: [CWD, ARTIFACTS, join(ROOT, "main", ".git")],
       readonly: [],
       denied: [],
     });

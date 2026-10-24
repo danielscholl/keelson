@@ -40,6 +40,7 @@ const ENV_KEYS = [
   "KEELSON_WORKFLOW_PREFLIGHT",
   "KEELSON_WORKFLOW_TOOL_DENYLIST",
   "KEELSON_HOME",
+  "KEELSON_SANDBOX",
 ] as const;
 const savedEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
 
@@ -77,6 +78,9 @@ beforeAll(() => {
 beforeEach(() => {
   process.env.KEELSON_PROVIDERS = "stub";
   delete process.env.KEELSON_WORKFLOW_PROVIDER;
+  // These cases exercise the executor, not the sandbox, and must not depend on
+  // whether this host has the sandbox runtime installed.
+  process.env.KEELSON_SANDBOX = "off";
 });
 afterEach(() => {
   for (const k of ENV_KEYS) {

@@ -201,8 +201,8 @@ export function isLegacySandboxShape(value: unknown): boolean {
   );
 }
 
-// A legacy block becomes Claude passthrough with no `enabled`, so the workflow
-// keeps the default it ran under before the field was honored.
+// A legacy block becomes Claude passthrough with no `enabled`, so the node
+// follows the configured default like any node that does not choose.
 export function liftLegacySandbox(value: Record<string, unknown>): {
   backend: { claude: unknown };
 } {

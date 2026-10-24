@@ -129,6 +129,7 @@ export {
   createSandboxPolicy,
   defaultSandboxProfile,
   disposeSandboxLaunchDir,
+  hostGitConfigPaths,
   mergeSandboxProfiles,
   type OperatorSandboxConfig,
   pickSandboxEnv,

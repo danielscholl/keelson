@@ -36,6 +36,8 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: extract-issue
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     model: balanced
     model_by_provider:
       copilot: mai-code-1.1-flash
@@ -54,6 +56,8 @@ nodes:
       no markdown, and no explanation. Example correct output: 709
 
   - id: fetch-issue
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [extract-issue]
     bash: |
       set -euo pipefail
@@ -67,6 +71,8 @@ nodes:
       forge issue view "$ISSUE_NUM" --json number,title,body,labels,comments,state,url,author
 
   - id: detect-base
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     bash: |
       set -euo pipefail
       # Default branch — never assume "main". PR base + diff base.
@@ -578,6 +584,8 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: implement
+    # runs the project's tests, and nested bun sees an empty env under the sandbox
+    sandbox: { enabled: false }
     depends_on: [approve-plan, detect-base]
     context: fresh
     model: deep
@@ -653,6 +661,8 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: validate
+    # runs the project's tests, and nested bun sees an empty env under the sandbox
+    sandbox: { enabled: false }
     depends_on: [implement]
     timeout: 1200000
     bash: |
@@ -698,6 +708,8 @@ nodes:
       fi
 
   - id: fix-validation
+    # runs the project's tests, and nested bun sees an empty env under the sandbox
+    sandbox: { enabled: false }
     depends_on: [validate]
     context: fresh
     model: deep
@@ -733,6 +745,8 @@ nodes:
         create-pr later pushes HEAD: `git add <files>; git commit -m "fix: address validation failures"`.
 
   - id: revalidate
+    # runs the project's tests, and nested bun sees an empty env under the sandbox
+    sandbox: { enabled: false }
     depends_on: [fix-validation]
     timeout: 1200000
     bash: |
@@ -780,6 +794,8 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: create-pr
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [revalidate]
     context: fresh
     prompt: |
@@ -842,6 +858,8 @@ nodes:
          `forge pr edit <num> --base "$(cat $ARTIFACTS_DIR/.default-branch)"`.
 
   - id: enforce-draft
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [create-pr]
     bash: |
       set -uo pipefail
@@ -1253,6 +1271,8 @@ nodes:
       sentence on the branch's health.
 
   - id: apply-fixes
+    # git fetch and push need the network and keychain credentials
+    sandbox: { enabled: false }
     depends_on: [triage]
     context: fresh
     model: deep
@@ -1287,6 +1307,8 @@ nodes:
       - After committing, `git push`.
 
   - id: re-review
+    # git fetch and push need the network and keychain credentials
+    sandbox: { enabled: false }
     depends_on: [apply-fixes]
     context: fresh
     model: deep
@@ -1327,6 +1349,8 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: post-fix-validate
+    # runs the project's tests, and nested bun sees an empty env under the sandbox
+    sandbox: { enabled: false }
     depends_on: [re-review]
     timeout: 1200000
     bash: |
@@ -1373,6 +1397,8 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: await-ci
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [post-fix-validate]
     timeout: 1500000
     bash: |
@@ -1521,6 +1547,8 @@ nodes:
       exit 0
 
   - id: triage-ci
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [await-ci, brief-ready, criteria-count]
     context: fresh
     model: deep
@@ -1614,6 +1642,8 @@ nodes:
         After the required criteria-count prefix, summarize what failed in one sentence.
 
   - id: fix-ci
+    # git fetch and push need the network and keychain credentials; also runs the tests
+    sandbox: { enabled: false }
     depends_on: [triage-ci]
     context: fresh
     model: deep
@@ -1657,6 +1687,8 @@ nodes:
         and then `git push` — staging alone is dropped.
 
   - id: finalize-pr
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [fix-ci]
     timeout: 1500000
     bash: |

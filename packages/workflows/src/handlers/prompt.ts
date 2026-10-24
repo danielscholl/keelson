@@ -82,7 +82,7 @@ export interface PromptHandlerProvider {
     models?: readonly string[];
     modelClasses?: Partial<Record<ModelClassName, string>>;
     // Absent reads as "none": a sandboxed node on this provider fails closed.
-    sandbox?: "native" | "tool" | "none";
+    sandbox?: "native" | "tool" | "none" | "unneeded";
   };
 }
 
@@ -340,10 +340,12 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
   const resolveSandbox = (
     node: DagNode,
     ctx: NodeContext,
-  ): { resolution: SandboxResolution; support: "native" | "tool" | "none" } | undefined => {
+  ):
+    | { resolution: SandboxResolution; support: "native" | "tool" | "none" | "unneeded" }
+    | undefined => {
     if (opts.sandbox === undefined) return undefined;
     const providerId = effectiveProviderFor(node, ctx);
-    let support: "native" | "tool" | "none" = "none";
+    let support: "native" | "tool" | "none" | "unneeded" = "none";
     let label = providerId;
     try {
       const provider = opts.getProvider(providerId);
@@ -365,7 +367,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
     node: DagNode,
     ctx: NodeContext,
     sandboxProfile: SandboxProfile | undefined,
-    sandboxSupport: "native" | "tool" | "none" | undefined,
+    sandboxSupport: "native" | "tool" | "none" | "unneeded" | undefined,
   ): Promise<NodeResult> => {
     // Lifecycle: beforeNode (memory recall plugs in here). Errors here
     // MUST NOT take the node down — the seam is a hook, not an oracle.

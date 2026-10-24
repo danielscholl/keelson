@@ -1,11 +1,11 @@
 ---
 title: Governance
-description: Gate tool calls with approvals, cap a session's spend with budgets, and scrub secrets with redaction, all through one opt-in policy engine.
+description: Gate tool calls with approvals, cap a session's spend with budgets, scrub secrets with redaction, and confine agents and workflow commands with the sandbox.
 sidebar:
   order: 4
 ---
 
-import { Aside } from "@astrojs/starlight/components";
+import { Aside, Steps } from "@astrojs/starlight/components";
 
 Every tool call in keelson, whether a rib tool, a workflow `prompt` node, or the
 agent's own built-in shell and file edits, passes through one **policy engine**.
@@ -149,10 +149,169 @@ realpath-canonicalizes both the roots and each candidate path before comparing,
 so a symlink inside an allowed root that points elsewhere cannot be traversed to
 escape confinement.
 
-This is a rib-agent-turn capability, not a global operator toggle. Chat, workflow
-`prompt` nodes, and MCP calls declare no roots, so the builtin allows everything
-there; a rib that runs an agent turn against a scoped directory gets confinement
-for free.
+A rib that runs an agent turn against a scoped directory gets confinement for
+free. A [sandboxed](#sandboxed-execution) chat turn declares its granted roots
+too, so keelson and rib tools there stay inside them. Workflow `prompt` nodes and
+MCP calls declare no roots, so the builtin allows everything there.
+
+## Sandboxed execution
+
+The sandbox confines what an agent's own tools and a workflow's commands can
+touch at the operating-system level: which paths they read and write, whether
+they reach the network, and which environment variables they see. It is **on by
+default** and **fails closed**: when a turn or node is sandboxed but nothing on
+the host can enforce it, it fails with a message that names the fix, rather than
+running unconfined.
+
+### What confines what
+
+| Runs | Confined by |
+|---|---|
+| Workflow `bash` and `script` nodes | Keelson's sandbox runtime: macOS Seatbelt through the MXC executor. Outcome `mxc`. |
+| Copilot, Claude, and Codex turns (chat and `prompt` nodes) | The provider's own sandbox, given the same policy. Outcome `provider`. |
+| Pi turns | Pi's shell runs through Keelson's sandbox runtime; its file tools are path-gated in process. Outcome `provider`. |
+| The stub and gateway providers | Nothing to confine: they run no tools of their own, so a sandboxed turn runs as is. Outcome `off`, backend `unneeded`. |
+
+Every `bash`, `script`, and `prompt` node records its outcome and backend on
+`node_done` and in the run trace (`sandboxed · seatbelt`, `sandboxed · copilot`,
+`unsandboxed`, `no tools to confine`), and downstream nodes read it as
+`KEELSON_NODE_<id>_SANDBOX`. In chat, `/sandbox status` prints the same answer
+for the open conversation.
+
+### How a turn or node decides
+
+The first rule that speaks wins:
+
+<Steps>
+
+1. `KEELSON_SANDBOX=required`, the operator floor. It holds the sandbox on;
+   `/sandbox off`, `--no-sandbox`, and `sandbox: { enabled: false }` cannot undo it.
+2. The most specific choice: a chat turn's own `sandbox` (from `--sandbox`,
+   `--no-sandbox`, or a pending `/sandbox`), or a node's `sandbox.enabled`.
+3. The saved choice: the conversation's (`/sandbox on|off`), or the workflow's
+   top-level `sandbox.enabled`.
+4. `KEELSON_SANDBOX=on` or `off`, which replaces the config default.
+5. `sandbox.default` in `config.json`, `true` when unset.
+
+</Steps>
+
+A client sends a choice only when the user made one, so an unset conversation
+follows the server's default rather than whatever the client last assumed.
+
+### The default profiles
+
+A sandboxed `bash` or `script` node starts from this profile, then the
+operator's `sandbox` config, the workflow's `sandbox` block, and the node's
+`sandbox` block merge over it. Path lists and `env` union; `network.outbound`
+takes the most specific value. The operator's `filesystem.denied` lands last, so
+no author grant can shadow it.
+
+| Grant | Default for `bash` and `script` nodes |
+|---|---|
+| Read-write | The working directory, the run's artifacts directory, and a worktree's shared git directory. |
+| Read-only | Keelson's bundled `bin`, the home's `scripts` and `node_modules`, `~/.gitconfig` and `~/.config/git`, the toolchain prefixes that exist (`/opt/homebrew`, `/usr/local`, `~/.bun`, `~/.cargo`, `~/.rustup`, `~/.local`, `~/.nvm`, `~/.volta`, `~/.pyenv`, `/nix`), and the absolute directories on `PATH`. System directories stay readable. |
+| Denied | `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.config/gh`, `~/.config/glab-cli`, `~/.docker`, `~/.kube`, `~/.netrc`, `~/.npmrc`, `~/Library/Keychains`, `~/.claude`, `~/.codex`, `~/.copilot`, keelson's database files, `server.json`, and `config.json`. |
+| Network | Outbound denied, loopback denied. |
+| Environment | Only `KEELSON_*`, `PATH`, `LANG`, `LC_ALL`, `TERM`, `ARTIFACTS_DIR`, and names the profile's `env` allows. `HOME`, `TMPDIR`, and the uv and bun caches move into a per-node scratch directory. Tokens and keys in the server's environment are dropped. |
+
+A sandboxed `prompt` node, and a sandboxed chat turn, hand the provider a lighter
+profile: the working directory (for a node, also its artifacts directory and a
+worktree's shared git directory) writable, `~/.gitconfig` and `~/.config/git`
+readable so the agent can run git, outbound network denied, plus the operator's
+`sandbox` config. The provider's own sandbox decides what else stays readable.
+
+### Opting out
+
+Opt out as narrowly as the work allows. A node that only needs the network can
+keep the rest of its confinement:
+
+```yaml
+nodes:
+  - id: fetch-docs
+    sandbox: { network: { outbound: allow } }
+    bash: curl -fsSL https://example.com/spec.json > "$ARTIFACTS_DIR/spec.json"
+
+  - id: open-pr
+    # forge needs the keychain-held token and the network
+    sandbox: { enabled: false }
+    bash: forge pr create --fill
+```
+
+| Scope | How |
+|---|---|
+| One node | `sandbox: { enabled: false }` on the node. |
+| One workflow | `sandbox: { enabled: false }` at the workflow's top level; a node can still turn it back on. |
+| One conversation | `/sandbox off` in chat (CLI or app), or `keelson chat --no-sandbox`. |
+| Everything, from config | `"sandbox": { "default": false }` in `config.json`. |
+| Everything, from the environment | `KEELSON_SANDBOX=off`. |
+
+The bundled workflows opt out only the nodes that cannot run confined: those
+that call `forge` (it reads its token from the keychain and needs the network),
+push or fetch with git, run the project's tests or the `keelson` CLI through a
+nested `bun`, or read and write caller-supplied paths outside the project. Each opt-out carries a
+one-line comment saying why. `smoke-test` stays fully sandboxed.
+
+### When the sandbox cannot run
+
+A sandboxed node on a host without the runtime fails like this:
+
+```text
+sandbox required but unavailable: @microsoft/mxc-sdk is not installed; run `keelson sandbox install` or set `sandbox: { enabled: false }` on the node
+```
+
+The two fixes are to install the runtime, or to opt the node out. When the
+reason is a provider that cannot sandbox, the message says to switch providers
+instead, because installing the runtime would not help. Under
+`KEELSON_SANDBOX=required` the message says the floor ignores `enabled: false`.
+A chat turn fails the same way with `SANDBOX_UNAVAILABLE`.
+
+The runtime exists for macOS 15 or later on Apple silicon only. On Linux,
+Windows, an Intel Mac, or older macOS, every sandboxed `bash` and `script` node
+and every pi turn fails closed until that platform's runtime ships, so run those
+hosts with `KEELSON_SANDBOX=off` or `sandbox.default: false`.
+
+### What the sandbox does not cover
+
+<Aside type="caution" title="Know the edges">
+The sandbox confines processes the OS can see. Several things run outside it.
+</Aside>
+
+- **Keelson and rib tools** run in the server process. A sandboxed chat turn
+  path-gates their arguments to the turn's roots (see
+  [Filesystem confinement](#filesystem-confinement)); in a workflow `prompt` node
+  they are not confined.
+- **Pi's file tools** (`read`, `write`, `edit`, `grep`, `find`, `ls`) run in
+  process and are path-gated, not OS-isolated. The gate checks a path and then pi
+  opens it, so a path swapped between the two (a check-then-use window) is not
+  caught. When an asked-for file is missing, pi's `read` retries similar names
+  (a screenshot's AM/PM spelling, Unicode-normalized forms, curly quotes) that
+  the gate did not check. A denied path that does not exist yet is matched by
+  spelling only.
+- **Hard links** that alias denied content are readable through their allowed
+  path on every backend, the OS sandbox included, which filters by path. The pi
+  gate refuses a hard link only when the denied path is that very file.
+- **Copilot's built-in file tools** run inside the Copilot CLI process and are
+  policy-checked, not OS-isolated.
+- **`env` is not mapped for Copilot**, Claude, or Codex. Only Keelson's runtime
+  passes the profile's variables in.
+- **`network.allowedHosts`** fails closed on macOS: Seatbelt filters egress all
+  or nothing, so a profile that allows outbound traffic to listed hosts is
+  refused rather than widened to every host. Codex refuses it too. Copilot and
+  Claude enforce it in their own sandboxes.
+- **`network.loopback`** on macOS also opens inbound connections, so a listener
+  bound to `0.0.0.0` inside the sandbox is reachable from the network. Keep it
+  off unless a node must reach the keelson server.
+- **A nested `bun`** inside a sandboxed `bash` node, or inside a sandboxed agent's
+  shell, sees an empty environment: Bun drops its environment when it cannot read
+  a parent directory. A `script` node with `runtime: bun` works; for a shell that
+  runs `bun test`, opt the node out.
+- **Rib agent turns**, where a rib runs its own agent, do not take the sandbox;
+  they get [filesystem confinement](#filesystem-confinement) when the rib
+  declares roots.
+- **Worktree setup** (`git fetch`, `bun install`) runs on the host before any
+  node starts, unsandboxed.
+- **The runtime is Apple-silicon only** for now; other hosts fail closed, as
+  above.
 
 ## Policies from ribs
 

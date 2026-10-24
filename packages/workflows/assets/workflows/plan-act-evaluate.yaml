@@ -93,6 +93,8 @@ nodes:
   # ═══════════════════════════════════════════════════════════════════════════
 
   - id: intake
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     bash: |
       set -euo pipefail
       ART="$KEELSON_ARTIFACTS_DIR"
@@ -232,6 +234,8 @@ nodes:
   # ═══════════════════════════════════════════════════════════════════════════
 
   - id: publish-plan
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [plan]
     bash: |
       set -euo pipefail
@@ -336,6 +340,8 @@ nodes:
   # ═══════════════════════════════════════════════════════════════════════════
 
   - id: detect-forge
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [approve-plan]
     bash: |
       set -euo pipefail
@@ -375,6 +381,8 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: act-local
+    # forge needs the keychain-held token and the network; the sandbox clears both; also runs the tests
+    sandbox: { enabled: false }
     depends_on: [select-mode]
     when: "$select-mode.output.mode == 'local'"
     context: fresh
@@ -418,6 +426,8 @@ nodes:
   # is satisfied; its `EVALUATION_COMPLETE` signal ends the loop. The PR's remote
   # CI is the authoritative gate (see ci-signals); a human gates the merge.
   - id: evaluate
+    # forge needs the keychain-held token and the network; the sandbox clears both; also runs the tests
+    sandbox: { enabled: false }
     depends_on: [act-local]
     when: "$select-mode.output.mode == 'local'"
     idle_timeout: 600000
@@ -466,6 +476,8 @@ nodes:
         Never commit anything under `$ARTIFACTS_DIR`.
 
   - id: open-pr
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [evaluate]
     when: "$select-mode.output.mode == 'local'"
     context: fresh
@@ -509,6 +521,8 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: act-delegate
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [select-mode]
     when: "$select-mode.output.mode == 'delegate'"
     bash: |
@@ -551,6 +565,8 @@ nodes:
       echo "DELEGATED: issue #$N assigned to copilot-swe-agent. Copilot will open a PR."
 
   - id: await-copilot
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [act-delegate]
     when: "$select-mode.output.mode == 'delegate'"
     timeout: 1800000
@@ -607,6 +623,8 @@ nodes:
   # ═══════════════════════════════════════════════════════════════════════════
 
   - id: ci-signals
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [open-pr, await-copilot]
     trigger_rule: one_success
     timeout: 600000
@@ -651,6 +669,8 @@ nodes:
   # ═══════════════════════════════════════════════════════════════════════════
 
   - id: capture-diff
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [ci-signals]
     when: "$select-mode.output.mode == 'delegate'"
     bash: |
@@ -733,6 +753,8 @@ nodes:
   # hands a clean PR to the human. GH-600: "code review feedback (requested
   # changes, approvals)" is an evaluation signal.
   - id: pr-review
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [self-review]
     when: "$select-mode.output.mode == 'delegate'"
     context: fresh
@@ -770,6 +792,8 @@ nodes:
   # can hallucinate the goal/domain or hang on the final node and fail an
   # otherwise-green run. Every field below comes from disk, git, or gh.
   - id: report
+    # forge needs the keychain-held token and the network; the sandbox clears both
+    sandbox: { enabled: false }
     depends_on: [ci-signals, pr-review]
     trigger_rule: one_success
     bash: |

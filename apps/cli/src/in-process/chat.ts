@@ -2,8 +2,8 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   describeSandboxBackend,
@@ -18,6 +18,7 @@ import {
   buildSandboxProfile,
   coerceTokenUsage,
   type MessageChunk,
+  mergeSandboxProfile,
   type ReasoningEffortLevel,
   resolveSandboxEnabled,
   type SandboxProfile,
@@ -28,6 +29,7 @@ import { loadKeelsonConfig } from "@keelson/shared/config";
 import { getRegisteredTools } from "@keelson/skills";
 import {
   DEFAULT_TOOL_DENYLIST,
+  hostGitConfigPaths,
   parseToolDenylist,
   prepareSandboxScratch,
 } from "@keelson/workflows";
@@ -113,9 +115,13 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
       `sandbox is on, but ${describeSandboxBackend(providerId, support)}: ${fix}`,
     );
   }
-  const sandboxProfile: SandboxProfile | undefined = decision.enabled
-    ? buildSandboxProfile(sandbox.resolved.settings, opts.cwd, true, realpathSync)
-    : undefined;
+  const sandboxProfile: SandboxProfile | undefined =
+    decision.enabled && support !== "unneeded"
+      ? mergeSandboxProfile(
+          buildSandboxProfile(sandbox.resolved.settings, opts.cwd, true, realpathSync),
+          { filesystem: { readonly: hostGitConfigPaths(homedir()).filter((p) => existsSync(p)) } },
+        )
+      : undefined;
   // No policy engine runs headless, so the operator floor the server folds into
   // its engine applies here, as on the offline workflow path.
   const denied = new Set([

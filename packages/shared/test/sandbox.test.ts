@@ -65,8 +65,8 @@ describe("sandboxProfileSchema", () => {
     );
   });
 
-  test("support levels are native, tool, none", () => {
-    expect(sandboxSupportSchema.options).toEqual(["native", "tool", "none"]);
+  test("support levels are native, tool, none, unneeded", () => {
+    expect(sandboxSupportSchema.options).toEqual(["native", "tool", "none", "unneeded"]);
   });
 });
 
@@ -288,17 +288,17 @@ describe("describeSandboxStatus", () => {
     ).toBe("provider: gateway-x cannot sandbox its tools");
   });
 
-  test("the stub reads as n/a", () => {
+  test("a provider with no tools of its own has nothing to confine, and no fail-closed note", () => {
     expect(
       describeSandboxStatus({
         ...base,
         providerId: "stub",
-        support: "none",
-        resolution: { enabled: false, source: "config", locked: false },
+        support: "unneeded",
+        resolution: { enabled: true, source: "config", locked: false },
       }),
     ).toEqual([
-      "sandbox: off (config default)",
-      "provider: stub runs no tools (n/a)",
+      "sandbox: on (config default)",
+      "provider: stub runs no tools (no tools to confine)",
       "profile: writes <project> · network outbound denied",
     ]);
   });

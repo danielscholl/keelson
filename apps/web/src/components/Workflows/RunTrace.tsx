@@ -198,16 +198,22 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
   const isPromptish = schema.type === "prompt" || schema.type === "approval";
   const sandboxChip =
     view.sandbox !== undefined && SANDBOXED_NODE_TYPES.has(schema.type)
-      ? view.sandbox === "off"
-        ? { label: "unsandboxed", title: "Ran without a sandbox", on: false }
-        : {
-            label: `sandboxed · ${view.sandboxBackend ?? view.sandbox}`,
-            title:
-              view.sandbox === "provider"
-                ? `Confined by the provider's own sandbox (${view.sandboxBackend ?? "provider"})`
-                : `Confined by the Keelson sandbox (${view.sandboxBackend ?? "mxc"})`,
-            on: true,
+      ? view.sandbox === "off" && view.sandboxBackend === "unneeded"
+        ? {
+            label: "no tools to confine",
+            title: "The provider runs no tools of its own, so the sandbox had nothing to confine",
+            on: false,
           }
+        : view.sandbox === "off"
+          ? { label: "unsandboxed", title: "Ran without a sandbox", on: false }
+          : {
+              label: `sandboxed · ${view.sandboxBackend ?? view.sandbox}`,
+              title:
+                view.sandbox === "provider"
+                  ? `Confined by the provider's own sandbox (${view.sandboxBackend ?? "provider"})`
+                  : `Confined by the Keelson sandbox (${view.sandboxBackend ?? "mxc"})`,
+              on: true,
+            }
       : null;
 
   // contentParts → tool calls; remaining text blocks render via markdown.

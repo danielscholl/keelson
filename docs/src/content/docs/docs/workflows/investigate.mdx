@@ -83,12 +83,16 @@ provider-reported model switch. Re-running it replaces its prior generated
 section instead of adding another.
 
 <Aside type="caution" title="Read-only is guidance, not enforcement">
-The prompt limits Bash to read-only probes, but the workflow does not provide an
-OS sandbox or command gate. A project that requires enforcement must supply its
-own policy or gated command. The requested `out` file is an intentional write:
-`investigate` creates it, `publish` updates verdict cells, and `finalize` writes
-the deterministic summary. With `fixtures` set, the files the investigator saves
-under that directory are intentional writes too.
+The prompt limits Bash to read-only probes. With the
+[sandbox](../../guides/governance/#sandboxed-execution) on, the default, the
+investigator's shell is confined to the project and the run's artifacts with no
+network, but inside the project the read-only limit is still guidance, not a
+command gate. A project that requires enforcement must supply its own policy or
+gated command. The requested `out` file is an intentional write: `investigate`
+creates it, `publish` updates verdict cells, and `finalize` writes the
+deterministic summary. `finalize` runs unsandboxed so it can write `out`
+wherever it is. With `fixtures` set, the files the investigator saves under that
+directory are intentional writes too.
 </Aside>
 
 ## Patterns it demonstrates

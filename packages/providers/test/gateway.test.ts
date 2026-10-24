@@ -56,6 +56,7 @@ describe("GatewayProvider.getCapabilities", () => {
       streaming: true,
       tools: false,
       reasoningEffort: false,
+      sandbox: "unneeded",
       models: ["m1"],
       defaultModel: "m1",
       modelClasses: { fast: "m1", balanced: "m1", deep: "m1" },

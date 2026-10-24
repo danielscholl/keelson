@@ -21,6 +21,8 @@ description: |
 
 nodes:
   - id: intake
+    # nested bun sees an empty env under the sandbox
+    sandbox: { enabled: false }
     timeout: 30000
     bash: |
       set -euo pipefail
@@ -385,6 +387,8 @@ nodes:
       Reply with a short summary of the rows updated.
 
   - id: finalize
+    # writes the caller's evidence file, which may sit outside the project
+    sandbox: { enabled: false }
     depends_on: [publish]
     runtime: bun
     timeout: 60000

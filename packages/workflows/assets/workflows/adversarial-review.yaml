@@ -50,6 +50,8 @@ description: |
 
 nodes:
   - id: intake
+    # git fetch and push need the network and keychain credentials; reads a caller-supplied path
+    sandbox: { enabled: false }
     timeout: 30000
     bash: |
       set -euo pipefail
@@ -606,6 +608,8 @@ nodes:
       without parsing prose.
 
   - id: save
+    # nested bun sees an empty env under the sandbox; writes the caller's out dir
+    sandbox: { enabled: false }
     depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk, verify, synthesize]
     trigger_rule: all_done
     always_run: true

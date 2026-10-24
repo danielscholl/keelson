@@ -4,8 +4,8 @@
 
 import "./test-setup.ts";
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, normalize } from "node:path";
 import {
   type ProviderCapabilities,
@@ -20,6 +20,7 @@ import {
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
 import { resolveSandboxConfig } from "@keelson/shared/config";
+import { hostGitConfigPaths } from "@keelson/workflows";
 import { z } from "zod";
 import { handleChatRequest } from "../src/chat-handler.ts";
 import { type ConversationStore, createConversationStore } from "../src/conversation-store.ts";
@@ -90,7 +91,8 @@ async function run(
     store,
     send: (out) => sent.push(out),
     abortSignal: new AbortController().signal,
-    sandbox: resolveSandboxConfig({}, {}),
+    // Off unless a test says otherwise, so each case states what it turns on.
+    sandbox: resolveSandboxConfig({ sandbox: { default: false } }, {}),
     ...extra,
   });
   return sent;
@@ -127,7 +129,16 @@ describe("chat sandbox resolution", () => {
     }
   });
 
-  test("off by default: no frame and no conversation choice passes no profile", async () => {
+  test("on by default: with no frame and no conversation choice the config default applies", async () => {
+    const store = makeStore();
+    const provider = recordingProvider("native");
+    const conv = store.create({ providerId: provider.id });
+    await run(store, frame(conv.id, provider.id), { sandbox: resolveSandboxConfig({}, {}) });
+    expect(provider.calls[0]?.sandbox?.enabled).toBe(true);
+    expect(store.get(conv.id)?.sandbox).toBeUndefined();
+  });
+
+  test("sandbox.default: false passes no profile when nothing else speaks", async () => {
     const store = makeStore();
     const provider = recordingProvider("native");
     const conv = store.create({ providerId: provider.id });
@@ -135,6 +146,16 @@ describe("chat sandbox resolution", () => {
     expect(provider.calls).toHaveLength(1);
     expect(provider.calls[0]?.sandbox).toBeUndefined();
     expect(store.get(conv.id)?.sandbox).toBeUndefined();
+  });
+
+  test("a provider with nothing to confine runs a sandboxed turn without a profile", async () => {
+    const store = makeStore();
+    const provider = recordingProvider("unneeded");
+    const conv = store.create({ providerId: provider.id });
+    const sent = await run(store, frame(conv.id, provider.id, true));
+    expect(provider.calls).toHaveLength(1);
+    expect(provider.calls[0]?.sandbox).toBeUndefined();
+    expect(sent.some((f) => f.event.type === "error")).toBe(false);
   });
 
   test("the conversation's choice applies when the frame is silent", async () => {
@@ -252,8 +273,10 @@ describe("chat sandbox resolution", () => {
     await run(store, frame(conv.id, provider.id, true), { policyEngine: engine });
     await run(store, frame(conv.id, provider.id, false), { policyEngine: engine });
 
+    // The user's git config is readable on any sandboxed turn that has one.
+    const git = hostGitConfigPaths(homedir()).filter((p) => existsSync(p));
     expect(seen[0]?.sandbox).toEqual({ enabled: true, support: "native" });
-    expect(seen[0]?.allowedDirectories).toEqual([realpathSync(process.cwd())]);
+    expect(seen[0]?.allowedDirectories).toEqual([realpathSync(process.cwd()), ...git]);
     expect(seen[1]?.sandbox).toEqual({ enabled: false, support: "native" });
     expect(seen[1]?.allowedDirectories).toBeUndefined();
 
@@ -263,6 +286,10 @@ describe("chat sandbox resolution", () => {
       policyEngine: engine,
       sandbox: resolveSandboxConfig({ sandbox: { filesystem: { readonly: [tools] } } }, {}),
     });
-    expect(seen[2]?.allowedDirectories).toEqual([realpathSync(process.cwd()), normalize(tools)]);
+    expect(seen[2]?.allowedDirectories).toEqual([
+      realpathSync(process.cwd()),
+      normalize(tools),
+      ...git,
+    ]);
   });
 });

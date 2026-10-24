@@ -26,6 +26,8 @@ description: |
 
 nodes:
   - id: preflight
+    # runs the keelson CLI, which is bun, against the eval runs
+    sandbox: { enabled: false }
     timeout: 120000
     output_schema:
       type: object
@@ -326,6 +328,8 @@ nodes:
         | tee "$A/state.json"
 
   - id: baseline
+    # runs the keelson CLI, which is bun, against the eval runs
+    sandbox: { enabled: false }
     depends_on: [preflight]
     timeout: 10800000
     output_schema:
@@ -429,6 +433,8 @@ nodes:
       (it becomes the commit subject if the round is kept).
 
   - id: round-1
+    # runs the keelson CLI, which is bun, against the eval runs
+    sandbox: { enabled: false }
     depends_on: [propose-1]
     trigger_rule: all_done
     timeout: 10800000
@@ -604,6 +610,8 @@ nodes:
     prompt: *propose-prompt
 
   - id: round-2
+    # runs the keelson CLI, which is bun, against the eval runs
+    sandbox: { enabled: false }
     depends_on: [propose-2]
     trigger_rule: all_done
     timeout: 10800000
@@ -621,6 +629,8 @@ nodes:
     prompt: *propose-prompt
 
   - id: round-3
+    # runs the keelson CLI, which is bun, against the eval runs
+    sandbox: { enabled: false }
     depends_on: [propose-3]
     trigger_rule: all_done
     timeout: 10800000
@@ -628,6 +638,8 @@ nodes:
     bash: *round-body
 
   - id: collect
+    # writes the target workflow and keeps results in the keelson home
+    sandbox: { enabled: false }
     depends_on: [round-1, round-2, round-3]
     trigger_rule: all_done
     timeout: 300000

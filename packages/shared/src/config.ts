@@ -86,8 +86,8 @@ const codexSettingsSchema = providerSettingsSchema.extend({
 // drops the whole config, which is worse than ignoring an unknown key.
 const sandboxPathsConfigSchema = z.array(z.string().min(1));
 const sandboxConfigSchema = z.object({
-  // Whether chat turns run sandboxed when neither the conversation nor the
-  // turn says otherwise. Default false.
+  // Whether turns and workflow nodes run sandboxed when nothing more specific
+  // says otherwise. Default true.
   default: z.boolean().optional(),
   filesystem: z
     .object({
@@ -503,7 +503,7 @@ export function resolveSandboxConfig(
   }
   const backend = s.backend;
   return {
-    default: envSetting.kind === "default" ? envSetting.enabled : s.default === true,
+    default: envSetting.kind === "default" ? envSetting.enabled : s.default !== false,
     floor: envSetting.kind === "required",
     settings: {
       filesystem: {

@@ -57,7 +57,7 @@ describe("GET /api/config", () => {
     expect(body.wireProtocolVersion).toBe(WIRE_PROTOCOL_VERSION);
   });
 
-  test("reports the sandbox policy, off by default with no floor", async () => {
+  test("reports the sandbox policy, on by default with no floor", async () => {
     const res = await fetch(new URL("/api/config", handle.url));
     const body = (await res.json()) as {
       sandbox: {
@@ -70,9 +70,9 @@ describe("GET /api/config", () => {
       };
     };
     expect(body.sandbox).toMatchObject({
-      default: false,
+      default: true,
       floor: false,
-      summary: "sandbox off",
+      summary: "sandbox on · writes <project> · network outbound denied · no extra env",
       profile: "writes <project> · network outbound denied · no extra env",
       platform: process.platform,
     });
