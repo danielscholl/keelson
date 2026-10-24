@@ -402,29 +402,28 @@ describe("resolveSandboxPath", () => {
 });
 
 describe("parseMainWorktree", () => {
-  test("takes the first entry, which is the main worktree", () => {
-    const out = [
-      "worktree /super/lib",
-      "HEAD 0123456789abcdef0123456789abcdef01234567",
-      "branch refs/heads/main",
-      "",
-      "worktree /super/lib/.worktrees/run-1",
-      "HEAD 0123456789abcdef0123456789abcdef01234567",
-      "branch refs/heads/run-1",
-      "",
-    ].join("\n");
+  const record = (...fields: string[]) => `${fields.join("\0")}\0\0`;
+
+  test("takes the first record, which is the main worktree", () => {
+    const out =
+      record("worktree /super/lib", "HEAD 0123456789abcdef", "branch refs/heads/main") +
+      record(
+        "worktree /super/lib/.worktrees/run-1",
+        "HEAD 0123456789abcdef",
+        "branch refs/heads/run-1",
+      );
     expect(parseMainWorktree(out)).toBe("/super/lib");
   });
 
   test("a bare repository names no checkout", () => {
-    expect(parseMainWorktree("worktree /srv/bare.git\nbare\n\n")).toBeUndefined();
+    expect(parseMainWorktree(record("worktree /srv/bare.git", "bare"))).toBeUndefined();
     expect(parseMainWorktree("")).toBeUndefined();
   });
 
-  test("CRLF output parses", () => {
-    expect(
-      parseMainWorktree("worktree C:/src/repo\r\nHEAD abc\r\nbranch refs/heads/main\r\n\r\n"),
-    ).toBe("C:/src/repo");
+  test("paths keep every byte: trailing spaces, quotes, newlines, Windows drives", () => {
+    expect(parseMainWorktree(record("worktree /x/odd name ", "HEAD a"))).toBe("/x/odd name ");
+    expect(parseMainWorktree(record('worktree /x/"q"\nb', "HEAD a"))).toBe('/x/"q"\nb');
+    expect(parseMainWorktree(record("worktree C:/src/repo", "HEAD a"))).toBe("C:/src/repo");
   });
 });
 

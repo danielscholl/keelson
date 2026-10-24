@@ -549,20 +549,25 @@ function memo<T>(fn: () => T): () => T {
   };
 }
 
-// The main worktree is the first entry of `git worktree list --porcelain`. It is
-// the checkout itself for a submodule or a separate git dir, where the common
-// dir's parent is git metadata, not a checkout; a bare repository has none.
-export function parseMainWorktree(porcelain: string): string | undefined {
-  const [first = ""] = porcelain.split(/\r?\n\r?\n/);
-  const lines = first.split(/\r?\n/).map((line) => line.trim());
-  const root = lines.find((line) => line.startsWith("worktree "))?.slice("worktree ".length);
-  if (root === undefined || root.length === 0 || lines.includes("bare")) return undefined;
+// The main worktree is the first record of `git worktree list --porcelain -z`:
+// NUL-separated fields, an empty field ending each record, paths verbatim (the
+// newline form quotes unusual names). It is the checkout itself for a submodule
+// or a separate git dir, where the common dir's parent is git metadata, not a
+// checkout; a bare repository has none.
+export function parseMainWorktree(porcelainZ: string): string | undefined {
+  const fields: string[] = [];
+  for (const field of porcelainZ.split("\0")) {
+    if (field.length === 0) break;
+    fields.push(field);
+  }
+  const root = fields.find((field) => field.startsWith("worktree "))?.slice("worktree ".length);
+  if (root === undefined || root.length === 0 || fields.includes("bare")) return undefined;
   return root;
 }
 
 export function resolveRepoRoot(cwd: string): string | undefined {
   try {
-    const result = Bun.spawnSync(["git", "-C", cwd, "worktree", "list", "--porcelain"], {
+    const result = Bun.spawnSync(["git", "-C", cwd, "worktree", "list", "--porcelain", "-z"], {
       stdout: "pipe",
       stderr: "ignore",
       windowsHide: true,
