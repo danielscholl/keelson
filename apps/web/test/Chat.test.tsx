@@ -105,7 +105,7 @@ mock.module("../src/api.ts", () => ({
         id: "stub",
         displayName: "Stub",
         authenticated: true,
-        capabilities: { chat: true, models: ["stub-model"] },
+        capabilities: { chat: true, models: ["stub-model"], sandbox: "unneeded" },
       },
     ],
     defaultProvider: "stub",
@@ -525,7 +525,7 @@ describe("Chat sandbox", () => {
     fireEvent.change(box, { target: { value: "/sandbox status" } });
     fireEvent.keyDown(box, { key: "Enter" });
     expect(await screen.findByText(/sandbox: on \(saved on this conversation\)/)).toBeDefined();
-    expect(screen.getByText(/stub cannot sandbox its tools; turns fail closed/)).toBeDefined();
+    expect(screen.getByText(/stub runs no tools \(no tools to confine\)/)).toBeDefined();
   });
 
   test("a saved off with /api/config unread is only requested, so the chip is mixed", async () => {

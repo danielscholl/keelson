@@ -145,11 +145,13 @@ describe("resolve: precedence and floor", () => {
   test("a prompt node can run git: its config reads, and a worktree's shared git dir writes", () => {
     const gitDir = join(ROOT, "main-repo", ".git");
     const gitconfig = join(HOST_HOME, ".gitconfig");
+    const xdg = join(HOST_HOME, ".config", "git");
+    const present = new Set([gitconfig, xdg, join(xdg, "credentials")]);
     const policy = createSandboxPolicy(
       policyOptions({
         floor: true,
         resolveGitCommonDir: () => gitDir,
-        exists: (p) => p === gitconfig,
+        exists: (p) => present.has(p),
       }),
     );
     const res = policy.resolve(undefined, {
@@ -240,7 +242,9 @@ describe("the built-in profile", () => {
       join(HOME, "scripts"),
       join(HOME, "node_modules"),
       join(HOST_HOME, ".gitconfig"),
-      join(HOST_HOME, ".config", "git"),
+      join(HOST_HOME, ".config", "git", "config"),
+      join(HOST_HOME, ".config", "git", "ignore"),
+      join(HOST_HOME, ".config", "git", "attributes"),
       join(HOST_HOME, ".bun"),
       TOOL_DIR,
     ]);
@@ -252,6 +256,8 @@ describe("the built-in profile", () => {
       join(HOST_HOME, ".ssh"),
       join(HOST_HOME, ".aws"),
       join(HOST_HOME, ".config", "gh"),
+      join(HOST_HOME, ".git-credentials"),
+      join(HOST_HOME, ".config", "git", "credentials"),
       join(HOST_HOME, ".claude"),
       DB,
       `${DB}-wal`,

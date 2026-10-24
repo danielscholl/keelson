@@ -131,6 +131,8 @@ const HOST_DENIED = [
   "~/.kube",
   "~/.netrc",
   "~/.npmrc",
+  "~/.git-credentials",
+  "~/.config/git/credentials",
   "~/Library/Keychains",
   "~/.claude",
   "~/.codex",
@@ -270,9 +272,16 @@ export function defaultSandboxProfile(opts: DefaultSandboxProfileOptions): Sandb
 }
 
 // The user's git config, which every git command reads; without it a sandboxed
-// shell cannot run git at all.
+// shell cannot run git at all. Files, not ~/.config/git, which can also hold
+// git's plaintext credential store.
 export function hostGitConfigPaths(hostHome: string): string[] {
-  return [join(hostHome, ".gitconfig"), join(hostHome, ".config", "git")];
+  const xdg = join(hostHome, ".config", "git");
+  return [
+    join(hostHome, ".gitconfig"),
+    join(xdg, "config"),
+    join(xdg, "ignore"),
+    join(xdg, "attributes"),
+  ];
 }
 
 // A prompt node's starting profile: its working dirs writable (and a worktree's

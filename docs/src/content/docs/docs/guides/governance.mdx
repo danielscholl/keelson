@@ -209,15 +209,15 @@ no author grant can shadow it.
 | Grant | Default for `bash` and `script` nodes |
 |---|---|
 | Read-write | The working directory, the run's artifacts directory, and a worktree's shared git directory. |
-| Read-only | Keelson's bundled `bin`, the home's `scripts` and `node_modules`, `~/.gitconfig` and `~/.config/git`, the toolchain prefixes that exist (`/opt/homebrew`, `/usr/local`, `~/.bun`, `~/.cargo`, `~/.rustup`, `~/.local`, `~/.nvm`, `~/.volta`, `~/.pyenv`, `/nix`), and the absolute directories on `PATH`. System directories stay readable. |
-| Denied | `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.config/gh`, `~/.config/glab-cli`, `~/.docker`, `~/.kube`, `~/.netrc`, `~/.npmrc`, `~/Library/Keychains`, `~/.claude`, `~/.codex`, `~/.copilot`, keelson's database files, `server.json`, and `config.json`. |
+| Read-only | Keelson's bundled `bin`, the home's `scripts` and `node_modules`, git's config files (`~/.gitconfig`, `~/.config/git/config`, `ignore`, `attributes`), the toolchain prefixes that exist (`/opt/homebrew`, `/usr/local`, `~/.bun`, `~/.cargo`, `~/.rustup`, `~/.local`, `~/.nvm`, `~/.volta`, `~/.pyenv`, `/nix`), and the absolute directories on `PATH`. System directories stay readable. |
+| Denied | `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.config/gh`, `~/.config/glab-cli`, `~/.docker`, `~/.kube`, `~/.netrc`, `~/.npmrc`, `~/.git-credentials`, `~/.config/git/credentials`, `~/Library/Keychains`, `~/.claude`, `~/.codex`, `~/.copilot`, keelson's database files, `server.json`, and `config.json`. |
 | Network | Outbound denied, loopback denied. |
 | Environment | Only `KEELSON_*`, `PATH`, `LANG`, `LC_ALL`, `TERM`, `ARTIFACTS_DIR`, and names the profile's `env` allows. `HOME`, `TMPDIR`, and the uv and bun caches move into a per-node scratch directory. Tokens and keys in the server's environment are dropped. |
 
 A sandboxed `prompt` node, and a sandboxed chat turn, hand the provider a lighter
 profile: the working directory (for a node, also its artifacts directory and a
-worktree's shared git directory) writable, `~/.gitconfig` and `~/.config/git`
-readable so the agent can run git, outbound network denied, plus the operator's
+worktree's shared git directory) writable, git's config files readable so the
+agent can run git, outbound network denied, plus the operator's
 `sandbox` config. The provider's own sandbox decides what else stays readable.
 
 ### Opting out
@@ -282,6 +282,9 @@ The sandbox confines processes the OS can see. Several things run outside it.
   path-gates their arguments to the turn's roots (see
   [Filesystem confinement](#filesystem-confinement)); in a workflow `prompt` node
   they are not confined.
+- **Git's config files** (`~/.gitconfig` and `~/.config/git/config`, `ignore`,
+  and `attributes`) are readable to a sandboxed agent so it can run git. The
+  credential stores (`~/.git-credentials`, `~/.config/git/credentials`) are not.
 - **Pi's file tools** (`read`, `write`, `edit`, `grep`, `find`, `ls`) run in
   process and are path-gated, not OS-isolated. The gate checks a path and then pi
   opens it, so a path swapped between the two (a check-then-use window) is not
@@ -310,6 +313,9 @@ The sandbox confines processes the OS can see. Several things run outside it.
 - **Rib agent turns**, where a rib runs its own agent, do not take the sandbox;
   they get [filesystem confinement](#filesystem-confinement) when the rib
   declares roots.
+- **The repository's own `.git`**, hooks and config included, stays writable to
+  a sandboxed node or agent, as it is unsandboxed: it is the project's, and a
+  worktree's shared git directory is granted so commits work.
 - **Worktree setup** (`git fetch`, `bun install`) runs on the host before any
   node starts, unsandboxed.
 - **The runtime is Apple-silicon only** for now; other hosts fail closed, as

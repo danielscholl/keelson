@@ -593,30 +593,34 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     deps.send(doneFrame(conversationId));
     return;
   }
-  const sandboxProfile: SandboxProfile | undefined =
+  const operatorProfile: SandboxProfile | undefined =
     sandboxDecision.enabled && sandboxSupport !== "unneeded"
-      ? mergeSandboxProfile(
-          buildSandboxProfile(
-            deps.sandbox?.settings ?? EMPTY_SANDBOX_SETTINGS,
-            cwd,
-            true,
-            realpathOrSelf,
-          ),
-          { filesystem: { readonly: hostGitConfigPaths(homedir()).filter((p) => existsSync(p)) } },
+      ? buildSandboxProfile(
+          deps.sandbox?.settings ?? EMPTY_SANDBOX_SETTINGS,
+          cwd,
+          true,
+          realpathOrSelf,
         )
+      : undefined;
+  const sandboxProfile: SandboxProfile | undefined =
+    operatorProfile !== undefined
+      ? mergeSandboxProfile(operatorProfile, {
+          filesystem: { readonly: hostGitConfigPaths(homedir()).filter((p) => existsSync(p)) },
+        })
       : undefined;
   // Every policy evaluation this turn sees the sandbox decision; a sandboxed
   // turn also confines tool path arguments to its granted roots. The gate is
   // not access-aware, so read-only roots are included and the provider's own
-  // sandbox is what keeps them unwritable.
+  // sandbox is what keeps them unwritable. The git config grant is for the
+  // provider's sandbox only: host tools run outside it and could write there.
   const sandboxScope = {
     sandbox: { enabled: sandboxDecision.enabled, support: sandboxSupport },
-    ...(sandboxProfile !== undefined
+    ...(operatorProfile !== undefined
       ? {
           cwd,
           allowedDirectories: [
-            ...sandboxProfile.filesystem.readwrite,
-            ...sandboxProfile.filesystem.readonly,
+            ...operatorProfile.filesystem.readwrite,
+            ...operatorProfile.filesystem.readonly,
           ],
         }
       : {}),

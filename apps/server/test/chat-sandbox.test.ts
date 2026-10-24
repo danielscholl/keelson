@@ -273,10 +273,8 @@ describe("chat sandbox resolution", () => {
     await run(store, frame(conv.id, provider.id, true), { policyEngine: engine });
     await run(store, frame(conv.id, provider.id, false), { policyEngine: engine });
 
-    // The user's git config is readable on any sandboxed turn that has one.
-    const git = hostGitConfigPaths(homedir()).filter((p) => existsSync(p));
     expect(seen[0]?.sandbox).toEqual({ enabled: true, support: "native" });
-    expect(seen[0]?.allowedDirectories).toEqual([realpathSync(process.cwd()), ...git]);
+    expect(seen[0]?.allowedDirectories).toEqual([realpathSync(process.cwd())]);
     expect(seen[1]?.sandbox).toEqual({ enabled: false, support: "native" });
     expect(seen[1]?.allowedDirectories).toBeUndefined();
 
@@ -286,10 +284,15 @@ describe("chat sandbox resolution", () => {
       policyEngine: engine,
       sandbox: resolveSandboxConfig({ sandbox: { filesystem: { readonly: [tools] } } }, {}),
     });
-    expect(seen[2]?.allowedDirectories).toEqual([
-      realpathSync(process.cwd()),
-      normalize(tools),
-      ...git,
-    ]);
+    expect(seen[2]?.allowedDirectories).toEqual([realpathSync(process.cwd()), normalize(tools)]);
+    // The git config grant reaches the provider's sandbox, never the host-tool gate.
+    const git = hostGitConfigPaths(homedir()).map((p) => normalize(p));
+    expect(seen.flatMap((ctx) => ctx.allowedDirectories ?? []).some((p) => git.includes(p))).toBe(
+      false,
+    );
+    const present = git.filter((p) => existsSync(p));
+    expect(provider.calls[0]?.sandbox?.filesystem.readonly).toEqual(
+      expect.arrayContaining(present),
+    );
   });
 });
