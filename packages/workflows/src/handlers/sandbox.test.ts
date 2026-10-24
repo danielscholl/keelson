@@ -30,6 +30,7 @@ import {
   defaultSandboxProfile,
   disposeSandboxLaunchDir,
   mergeSandboxProfiles,
+  parseMainWorktree,
   pickSandboxEnv,
   prepareSandboxScratch,
   resolveSandboxPath,
@@ -66,6 +67,7 @@ function policyOptions(
     dbPath: DB,
     bundledBinDir: BIN,
     resolveGitCommonDir: () => undefined,
+    resolveRepoRoot: () => undefined,
     hostHome: HOST_HOME,
     hostPath: [TOOL_DIR, "relative/dir"].join(delimiter),
     exists: () => false,
@@ -357,6 +359,72 @@ describe("resolveSandboxPath", () => {
       expect(() => resolveSandboxPath(raw, opts)).toThrow("contains '..'");
     }
   });
+
+  test("$REPO_ROOT names the repository root when one is known", () => {
+    const repo = join(ROOT, "repo");
+    const inWorktree = {
+      cwd: join(repo, ".worktrees", "run-1"),
+      hostHome: HOST_HOME,
+      repoRoot: () => repo,
+    };
+    expect(resolveSandboxPath("$REPO_ROOT", inWorktree)).toBe(repo);
+    expect(resolveSandboxPath("$REPO_ROOT/.beads", inWorktree)).toBe(join(repo, ".beads"));
+    expect(() => resolveSandboxPath("$REPO_ROOT/../x", inWorktree)).toThrow("contains '..'");
+  });
+
+  test("$REPO_ROOT outside a checkout fails with the reason", () => {
+    expect(() => resolveSandboxPath("$REPO_ROOT/.beads", opts)).toThrow(
+      "not inside a git checkout",
+    );
+    expect(() => resolveSandboxPath("$REPO_ROOT", { ...opts, repoRoot: () => undefined })).toThrow(
+      "not inside a git checkout",
+    );
+    expect(resolveSandboxPath("$REPO_ROOTS", { ...opts, repoRoot: () => ROOT })).toBe(
+      join(CWD, "$REPO_ROOTS"),
+    );
+  });
+
+  test("the root is looked up only when a path uses the token", () => {
+    let calls = 0;
+    const lazy = {
+      ...opts,
+      repoRoot: () => {
+        calls += 1;
+        return ROOT;
+      },
+    };
+    resolveSandboxPath("~/x", lazy);
+    resolveSandboxPath("plain", lazy);
+    expect(calls).toBe(0);
+    resolveSandboxPath("$REPO_ROOT/a", lazy);
+    expect(calls).toBe(1);
+  });
+});
+
+describe("parseMainWorktree", () => {
+  const record = (...fields: string[]) => `${fields.join("\0")}\0\0`;
+
+  test("takes the first record, which is the main worktree", () => {
+    const out =
+      record("worktree /super/lib", "HEAD 0123456789abcdef", "branch refs/heads/main") +
+      record(
+        "worktree /super/lib/.worktrees/run-1",
+        "HEAD 0123456789abcdef",
+        "branch refs/heads/run-1",
+      );
+    expect(parseMainWorktree(out)).toBe("/super/lib");
+  });
+
+  test("a bare repository names no checkout", () => {
+    expect(parseMainWorktree(record("worktree /srv/bare.git", "bare"))).toBeUndefined();
+    expect(parseMainWorktree("")).toBeUndefined();
+  });
+
+  test("paths keep every byte: trailing spaces, quotes, newlines, Windows drives", () => {
+    expect(parseMainWorktree(record("worktree /x/odd name ", "HEAD a"))).toBe("/x/odd name ");
+    expect(parseMainWorktree(record('worktree /x/"q"\nb', "HEAD a"))).toBe('/x/"q"\nb');
+    expect(parseMainWorktree(record("worktree C:/src/repo", "HEAD a"))).toBe("C:/src/repo");
+  });
 });
 
 describe("pickSandboxEnv", () => {
@@ -554,6 +622,59 @@ describe("prompt-node default", () => {
     const bash = policy.resolve(undefined, ctx);
     expect(bash.profile?.filesystem.denied).toContain(join(HOST_HOME, ".ssh"));
     expect(bash.profile?.filesystem.denied).toContain(denied);
+  });
+});
+
+describe("$REPO_ROOT grants", () => {
+  const repo = join(ROOT, "repo");
+  const worktree = join(repo, ".worktrees", "run-1");
+  const gitCommonDir = join(repo, ".git");
+
+  test("a worktree node can grant a path under the main checkout", () => {
+    const policy = createSandboxPolicy(
+      policyOptions({
+        runtime: fakeRuntime,
+        resolveGitCommonDir: () => gitCommonDir,
+        resolveRepoRoot: () => repo,
+      }),
+    );
+    const profile = policy.resolve(
+      { enabled: true, filesystem: { readwrite: ["$REPO_ROOT/.beads"] } },
+      { cwd: worktree },
+    ).profile;
+    expect(profile?.filesystem.readwrite).toContain(join(repo, ".beads"));
+    expect(profile?.filesystem.readwrite).toContain(worktree);
+    expect(profile?.filesystem.readwrite).toContain(gitCommonDir);
+    expect(profile?.filesystem.readwrite).not.toContain(repo);
+  });
+
+  test("a submodule or separate git dir still names its own checkout", () => {
+    const sub = join(ROOT, "super", "lib");
+    const policy = createSandboxPolicy(
+      policyOptions({
+        runtime: fakeRuntime,
+        resolveGitCommonDir: () => join(ROOT, "super", ".git", "modules", "lib"),
+        resolveRepoRoot: () => sub,
+      }),
+    );
+    const profile = policy.resolve(
+      { enabled: true, filesystem: { readonly: ["$REPO_ROOT/.beads"] } },
+      { cwd: join(sub, ".worktrees", "run-1") },
+    ).profile;
+    expect(profile?.filesystem.readonly).toContain(join(sub, ".beads"));
+    expect(profile?.filesystem.readonly).not.toContain(
+      join(ROOT, "super", ".git", "modules", ".beads"),
+    );
+  });
+
+  test("outside a checkout the node fails closed with the reason", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const res = policy.resolve(
+      { enabled: true, filesystem: { readonly: ["$REPO_ROOT/.beads"] } },
+      { cwd: CWD },
+    );
+    expect(res.profile).toBeNull();
+    expect(res.fail).toContain("not inside a git checkout");
   });
 });
 

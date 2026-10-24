@@ -111,6 +111,7 @@ export interface CreateSandboxPolicyOptions {
   dbPath: string;
   bundledBinDir: string;
   resolveGitCommonDir?: (cwd: string) => string | undefined;
+  resolveRepoRoot?: (cwd: string) => string | undefined;
   hostHome?: string;
   hostPath?: string;
   exists?: (path: string) => boolean;
@@ -180,14 +181,35 @@ function isInside(child: string, parent: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
-// `~` expands against the host home, a relative path against cwd; any `..`
-// segment is refused so a grant cannot climb out of what the author wrote.
-export function resolveSandboxPath(raw: string, opts: { cwd: string; hostHome: string }): string {
+export interface SandboxPathOptions {
+  cwd: string;
+  hostHome: string;
+  // The main checkout `$REPO_ROOT` names, looked up only when a path uses the
+  // token; undefined outside a repository.
+  repoRoot?: () => string | undefined;
+}
+
+const REPO_ROOT_TOKEN = "$REPO_ROOT";
+
+// `~` expands against the host home, `$REPO_ROOT` against the repository the
+// cwd belongs to (its main checkout when the cwd is a worktree), a relative
+// path against cwd; any `..` segment is refused so a grant cannot climb out of
+// what the author wrote.
+export function resolveSandboxPath(raw: string, opts: SandboxPathOptions): string {
   if (raw.split(/[\\/]/).includes("..")) {
     throw new SandboxPathError(`sandbox path '${raw}' contains '..'; write the path it means`);
   }
   if (raw === "~") return opts.hostHome;
   if (raw.startsWith("~/")) return join(opts.hostHome, raw.slice(2));
+  if (raw === REPO_ROOT_TOKEN || raw.startsWith(`${REPO_ROOT_TOKEN}/`)) {
+    const repoRoot = opts.repoRoot?.();
+    if (repoRoot === undefined) {
+      throw new SandboxPathError(
+        `sandbox path '${raw}' uses ${REPO_ROOT_TOKEN}, but the working directory is not inside a git checkout`,
+      );
+    }
+    return normalize(join(repoRoot, raw.slice(REPO_ROOT_TOKEN.length)));
+  }
   return normalize(isAbsolute(raw) ? raw : resolve(opts.cwd, raw));
 }
 
@@ -196,7 +218,7 @@ export function resolveSandboxPath(raw: string, opts: { cwd: string; hostHome: s
 export function mergeSandboxProfiles(
   base: SandboxProfile,
   override: NodeSandbox | Omit<NodeSandbox, "enabled"> | undefined,
-  opts: { cwd: string; hostHome: string },
+  opts: SandboxPathOptions,
 ): SandboxProfile {
   if (override === undefined) return base;
   const paths = (list: readonly string[] | undefined) =>
@@ -373,7 +395,12 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
       const enabled =
         opts.floor || (nodeSandbox?.enabled ?? ctx.workflowSandbox?.enabled ?? opts.defaultEnabled);
       if (!enabled) return { profile: null, outcome: "off" };
-      const pathOpts = { cwd: ctx.cwd, hostHome };
+      const git = gitCommonDirFor(ctx.cwd);
+      const pathOpts: SandboxPathOptions = {
+        cwd: ctx.cwd,
+        hostHome,
+        repoRoot: memo(() => (opts.resolveRepoRoot ?? resolveRepoRoot)(ctx.cwd)),
+      };
       let profile: SandboxProfile;
       try {
         profile =
@@ -381,7 +408,7 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
             ? providerSandboxProfile(ctx.cwd, ctx.artifactsDir, {
                 hostHome,
                 exists,
-                ...gitCommonDirFor(ctx.cwd),
+                ...git,
               })
             : defaultSandboxProfile({
                 cwd: ctx.cwd,
@@ -391,7 +418,7 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
                 bundledBinDir: opts.bundledBinDir,
                 hostHome,
                 hostPath,
-                ...gitCommonDirFor(ctx.cwd),
+                ...git,
                 exists,
               });
         profile = mergeSandboxProfiles(profile, opts.configProfile, pathOpts);
@@ -510,6 +537,48 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
   };
 }
 
+function memo<T>(fn: () => T): () => T {
+  let done = false;
+  let value: T;
+  return () => {
+    if (!done) {
+      value = fn();
+      done = true;
+    }
+    return value;
+  };
+}
+
+// The main worktree is the first record of `git worktree list --porcelain -z`:
+// NUL-separated fields, an empty field ending each record, paths verbatim (the
+// newline form quotes unusual names). It is the checkout itself for a submodule
+// or a separate git dir, where the common dir's parent is git metadata, not a
+// checkout; a bare repository has none.
+export function parseMainWorktree(porcelainZ: string): string | undefined {
+  const fields: string[] = [];
+  for (const field of porcelainZ.split("\0")) {
+    if (field.length === 0) break;
+    fields.push(field);
+  }
+  const root = fields.find((field) => field.startsWith("worktree "))?.slice("worktree ".length);
+  if (root === undefined || root.length === 0 || fields.includes("bare")) return undefined;
+  return root;
+}
+
+export function resolveRepoRoot(cwd: string): string | undefined {
+  try {
+    const result = Bun.spawnSync(["git", "-C", cwd, "worktree", "list", "--porcelain", "-z"], {
+      stdout: "pipe",
+      stderr: "ignore",
+      windowsHide: true,
+    });
+    if (result.exitCode !== 0) return undefined;
+    return parseMainWorktree(result.stdout.toString());
+  } catch {
+    return undefined;
+  }
+}
+
 // `git rev-parse --git-common-dir` as an absolute path: a worktree commits into
 // the main repository's .git. Undefined outside a repository or without git.
 export function resolveGitCommonDir(cwd: string): string | undefined {
@@ -541,7 +610,13 @@ export function createOperatorSandboxPolicy(
   config: OperatorSandboxConfig,
   deps: Pick<
     CreateSandboxPolicyOptions,
-    "home" | "dbPath" | "bundledBinDir" | "runtime" | "unavailableReason" | "resolveGitCommonDir"
+    | "home"
+    | "dbPath"
+    | "bundledBinDir"
+    | "runtime"
+    | "unavailableReason"
+    | "resolveGitCommonDir"
+    | "resolveRepoRoot"
   >,
 ): SandboxPolicy {
   const { filesystem, network, env, backend } = config.settings;
