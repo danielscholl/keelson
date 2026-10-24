@@ -110,7 +110,10 @@ export interface CreateSandboxPolicyOptions {
   canonical?: (path: string) => string;
 }
 
+// Tool installs a sandboxed shell may read: package-manager prefixes and, on
+// macOS, the app bundles (a headless browser renders PDFs from one).
 const TOOLCHAIN_PREFIXES = [
+  "/Applications",
   "/opt/homebrew",
   "/usr/local",
   "~/.bun",

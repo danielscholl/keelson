@@ -209,7 +209,7 @@ no author grant can shadow it.
 | Grant | Default for `bash` and `script` nodes |
 |---|---|
 | Read-write | The working directory, the run's artifacts directory, and a worktree's shared git directory. |
-| Read-only | Keelson's bundled `bin`, the home's `scripts` and `node_modules`, git's config files (`~/.gitconfig`, `~/.config/git/config`, `ignore`, `attributes`), the toolchain prefixes that exist (`/opt/homebrew`, `/usr/local`, `~/.bun`, `~/.cargo`, `~/.rustup`, `~/.local`, `~/.nvm`, `~/.volta`, `~/.pyenv`, `/nix`), and the absolute directories on `PATH`. System directories stay readable. |
+| Read-only | Keelson's bundled `bin`, the home's `scripts` and `node_modules`, git's config files (`~/.gitconfig`, `~/.config/git/config`, `ignore`, `attributes`), the toolchain prefixes that exist (`/Applications`, `/opt/homebrew`, `/usr/local`, `~/.bun`, `~/.cargo`, `~/.rustup`, `~/.local`, `~/.nvm`, `~/.volta`, `~/.pyenv`, `/nix`), and the absolute directories on `PATH`. System directories stay readable. |
 | Denied | `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.config/gh`, `~/.config/glab-cli`, `~/.docker`, `~/.kube`, `~/.netrc`, `~/.npmrc`, `~/.git-credentials`, `~/.config/git/credentials`, `~/Library/Keychains`, `~/.claude`, `~/.codex`, `~/.copilot`, keelson's database files, `server.json`, and `config.json`. |
 | Network | Outbound denied, loopback denied. |
 | Environment | Only `KEELSON_*`, `PATH`, `LANG`, `LC_ALL`, `TERM`, `ARTIFACTS_DIR`, and names the profile's `env` allows. `HOME`, `TMPDIR`, and the uv and bun caches move into a per-node scratch directory. Tokens and keys in the server's environment are dropped. |

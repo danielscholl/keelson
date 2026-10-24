@@ -270,6 +270,31 @@ describe("the built-in profile", () => {
   });
 });
 
+describe("toolchain prefixes", () => {
+  test("app bundles are readable when the host has them", () => {
+    const withApps = defaultSandboxProfile({
+      cwd: CWD,
+      home: HOME,
+      dbPath: DB,
+      bundledBinDir: BIN,
+      hostHome: HOST_HOME,
+      hostPath: "",
+      exists: (p) => p === "/Applications",
+    });
+    expect(withApps.filesystem.readonly).toContain("/Applications");
+    const without = defaultSandboxProfile({
+      cwd: CWD,
+      home: HOME,
+      dbPath: DB,
+      bundledBinDir: BIN,
+      hostHome: HOST_HOME,
+      hostPath: "",
+      exists: () => false,
+    });
+    expect(without.filesystem.readonly).not.toContain("/Applications");
+  });
+});
+
 describe("mergeSandboxProfiles", () => {
   const base: SandboxProfile = {
     enabled: false,
