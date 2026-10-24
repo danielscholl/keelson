@@ -96,6 +96,9 @@ export interface RibWorkflowContribution {
   // Absolute path of the YAML file a folder-discovered contribution was loaded
   // from; absent for contributeWorkflows entries. Diagnostics only.
   readonly sourcePath?: string;
+  // Paths a sandboxed node of this workflow may read because the rib owns
+  // them: the rib's package and its data directory. Stamped by bootstrapRibs.
+  readonly sandboxReadonly?: readonly string[];
 }
 
 // A docs source a rib contributed (Rib.contributeDocs), tagged with the owning

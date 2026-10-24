@@ -358,6 +358,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       resolution: opts.sandbox.resolve(node.sandbox, {
         ...sandboxContextFor(ctx),
         provider: { id: label ?? "default", support },
+        ...(ctx.workflow.webSearchMode === "live" ? { webSearchLive: true } : {}),
       }),
       support,
     };

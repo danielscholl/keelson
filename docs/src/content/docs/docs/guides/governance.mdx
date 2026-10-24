@@ -220,6 +220,20 @@ worktree's shared git directory) writable, git's config files readable so the
 agent can run git, outbound network denied, plus the operator's
 `sandbox` config. The provider's own sandbox decides what else stays readable.
 
+A workflow that declares `webSearchMode: live` researches on the open web, so
+its sandboxed `prompt` nodes get outbound network unless the workflow or the
+node sets `network.outbound` itself. Its `bash` and `script` nodes keep the
+default denial; grant them network per node when they need it. Without this,
+an agent told to fetch sources under a network-denied sandbox can report every
+finding as unverifiable and the run still succeeds.
+
+A workflow a rib contributes, from its `workflows/` folder or its code, also
+gets the rib's package directory and its data directory (`<home>/rib-<id>`)
+read-only on every node, so the rib's scripts, prompts, pipelines, and config
+are reachable without the author spelling out install paths. The workflow's own
+`sandbox` block layers on top. Sandboxed shells always see `KEELSON_HOME`, since
+`HOME` points into scratch.
+
 ### Opting out
 
 Opt out as narrowly as the work allows. A node that only needs the network can

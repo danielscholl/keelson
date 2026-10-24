@@ -71,6 +71,9 @@ export interface SandboxResolveContext {
   // Prompt nodes are confined by their provider, not the runtime; this carries
   // the provider's capability mirror and id.
   provider?: { id: string; support: "native" | "tool" | "none" | "unneeded" };
+  // The workflow declares `webSearchMode: live`: its agent turns research on
+  // the open web, so a prompt node that does not choose gets outbound network.
+  webSearchLive?: boolean;
 }
 
 export interface SandboxPolicy {
@@ -382,6 +385,14 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
                 exists,
               });
         profile = mergeSandboxProfiles(profile, opts.configProfile, pathOpts);
+        if (
+          ctx.provider !== undefined &&
+          ctx.webSearchLive === true &&
+          ctx.workflowSandbox?.network?.outbound === undefined &&
+          nodeSandbox?.network?.outbound === undefined
+        ) {
+          profile = { ...profile, network: { ...profile.network, outbound: "allow" } };
+        }
         profile = mergeSandboxProfiles(profile, ctx.workflowSandbox, pathOpts);
         profile = mergeSandboxProfiles(profile, nodeSandbox, pathOpts);
         profile = { ...profile, enabled: true };
@@ -466,7 +477,11 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
       );
     },
     envFor(env, profile, scratch) {
-      return pickSandboxEnv(env, { scratch, hostHome, allow: profile.env });
+      const out = pickSandboxEnv(env, { scratch, hostHome, allow: profile.env });
+      // HOME moves into scratch, so a script's `${KEELSON_HOME:-$HOME/.keelson}`
+      // fallback would miss the real home.
+      out.KEELSON_HOME ??= opts.home;
+      return out;
     },
   };
 }

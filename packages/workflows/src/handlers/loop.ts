@@ -265,12 +265,18 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
       let loopProvider: string | undefined;
       let loopModel: string | undefined;
       let loopEffort: string | undefined;
+      // The loop reports how its iterations ran; every iteration resolves the
+      // same sandbox, so the last one speaks for all.
+      let loopSandbox: NodeResult["sandbox"];
+      let loopSandboxBackend: string | undefined;
       const finalize = (result: NodeResult): NodeResult => ({
         ...result,
         ...(loopUsage !== undefined ? { usage: loopUsage } : {}),
         ...(loopProvider !== undefined ? { provider: loopProvider } : {}),
         ...(loopModel !== undefined ? { model: loopModel } : {}),
         ...(loopEffort !== undefined ? { effort: loopEffort } : {}),
+        ...(loopSandbox !== undefined ? { sandbox: loopSandbox } : {}),
+        ...(loopSandboxBackend !== undefined ? { sandboxBackend: loopSandboxBackend } : {}),
       });
 
       for (let i = 1; i <= loop.max_iterations; i++) {
@@ -315,6 +321,8 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
 
         const result = await promptHandler.handle(synthesized, iterCtx);
         loopUsage = addNodeUsage(loopUsage, result.usage);
+        if (result.sandbox !== undefined) loopSandbox = result.sandbox;
+        if (result.sandboxBackend !== undefined) loopSandboxBackend = result.sandboxBackend;
         if (result.provider !== undefined) loopProvider = result.provider;
         if (result.model !== undefined) loopModel = result.model;
         if (result.effort !== undefined) loopEffort = result.effort;

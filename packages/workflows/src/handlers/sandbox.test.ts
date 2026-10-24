@@ -397,6 +397,17 @@ describe("launcherFor and envFor", () => {
     expect(policy.envFor({ GH_TOKEN: "x" }, profile, outside).GH_TOKEN).toBeUndefined();
   });
 
+  test("envFor names the keelson home, since HOME moves into scratch", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const profile = policy.resolve({ enabled: true }, { cwd: CWD }).profile;
+    if (!profile) throw new Error("expected a profile");
+    const scratch = join(ROOT, "scratch-home");
+    expect(policy.envFor({}, profile, scratch).KEELSON_HOME).toBe(HOME);
+    expect(policy.envFor({ KEELSON_HOME: "/elsewhere" }, profile, scratch).KEELSON_HOME).toBe(
+      "/elsewhere",
+    );
+  });
+
   test("refuses a launch dir a sandboxed process could write", () => {
     const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
     const profile = policy.resolve({ enabled: true }, { cwd: CWD }).profile;
@@ -518,6 +529,39 @@ describe("prompt-node default", () => {
     const bash = policy.resolve(undefined, ctx);
     expect(bash.profile?.filesystem.denied).toContain(join(HOST_HOME, ".ssh"));
     expect(bash.profile?.filesystem.denied).toContain(denied);
+  });
+});
+
+describe("webSearchMode: live", () => {
+  const provider = { id: "copilot", support: "native" as const };
+
+  test("a prompt node that does not choose gets outbound network", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const live = policy.resolve({ enabled: true }, { cwd: CWD, provider, webSearchLive: true });
+    expect(live.profile?.network.outbound).toBe("allow");
+    const quiet = policy.resolve({ enabled: true }, { cwd: CWD, provider });
+    expect(quiet.profile?.network.outbound).toBe("deny");
+  });
+
+  test("an explicit node or workflow choice wins, and bash nodes are unaffected", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const nodeDeny = policy.resolve(
+      { enabled: true, network: { outbound: "deny" } },
+      { cwd: CWD, provider, webSearchLive: true },
+    );
+    expect(nodeDeny.profile?.network.outbound).toBe("deny");
+    const workflowDeny = policy.resolve(
+      { enabled: true },
+      {
+        cwd: CWD,
+        provider,
+        webSearchLive: true,
+        workflowSandbox: { network: { outbound: "deny" } },
+      },
+    );
+    expect(workflowDeny.profile?.network.outbound).toBe("deny");
+    const bash = policy.resolve({ enabled: true }, { cwd: CWD, webSearchLive: true });
+    expect(bash.profile?.network.outbound).toBe("deny");
   });
 });
 
