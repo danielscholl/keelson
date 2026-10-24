@@ -500,10 +500,13 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
         throw new Error(`boot-bound rib workflow '${name}' is missing its catalog metadata`);
       }
       // The boot object stays (its binding identity), but the rib's grants are
-      // whatever this collection resolved.
+      // whatever this collection resolved, when the same rib still contributes
+      // the workflow; another rib's same-named entry must not lend its paths.
       const refreshed = fresh.definitions.find((d) => d.name === name);
-      if (refreshed?.ribReadable !== undefined) definition.ribReadable = refreshed.ribReadable;
-      else delete definition.ribReadable;
+      if (refreshed !== undefined && fresh.provenance.get(name)?.ribId === source.ribId) {
+        if (refreshed.ribReadable !== undefined) definition.ribReadable = refreshed.ribReadable;
+        else delete definition.ribReadable;
+      }
       definitions.push(definition);
       provenance.set(name, source);
       retainedBoundNames.add(name);
