@@ -46,6 +46,8 @@ export interface SandboxedBashToolOptions {
   nodeSandbox?: NodeSandbox;
   workflowSandbox?: NodeSandbox;
   artifactsDir?: string;
+  // The node's workflow declares webSearchMode: live; see SandboxResolveContext.
+  webSearchLive?: boolean;
 }
 
 function definedEnv(): Record<string, string> {
@@ -94,6 +96,7 @@ export function createSandboxedBashTool(opts: SandboxedBashToolOptions): ToolDef
           cwd: ctx.cwd,
           ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
           ...(opts.workflowSandbox !== undefined ? { workflowSandbox: opts.workflowSandbox } : {}),
+          ...(opts.webSearchLive === true ? { webSearchLive: true } : {}),
         },
       );
       if (resolution.fail !== undefined || resolution.profile === null) {

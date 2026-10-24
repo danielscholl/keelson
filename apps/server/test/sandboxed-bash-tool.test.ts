@@ -149,6 +149,14 @@ describe.skipIf(!POSIX)("createSandboxedBashTool", () => {
     expect(profiles[0]?.filesystem.denied).toContain(join(root, "home", "keelson.db"));
   });
 
+  test("a live-web workflow's shell may reach the network while staying confined", async () => {
+    const { bash, profiles } = tool(true, hostLauncher, { webSearchLive: true });
+    const result = await run(bash, { command: 'echo "gh=${GH_TOKEN:-none}"' });
+    expect(result?.content).toBe("gh=none");
+    expect(profiles[0]?.network.outbound).toBe("allow");
+    expect(profiles[0]?.filesystem.denied).toContain(join(root, "home", "keelson.db"));
+  });
+
   test("chat passes no blocks and keeps network off and extra env out", async () => {
     const { bash, profiles } = tool();
     const result = await run(bash, { command: 'echo "gh=${GH_TOKEN:-none}"' });

@@ -568,7 +568,14 @@ describe("webSearchMode: live", () => {
     expect(quiet.profile?.network.outbound).toBe("deny");
   });
 
-  test("an explicit node or workflow choice wins, and bash nodes are unaffected", () => {
+  test("the host's shell for a live-web prompt turn gets outbound network too", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const shell = policy.resolve({ enabled: true }, { cwd: CWD, webSearchLive: true });
+    expect(shell.profile?.network.outbound).toBe("allow");
+    expect(shell.profile?.filesystem.denied.length).toBeGreaterThan(0);
+  });
+
+  test("an explicit node or workflow choice wins, and a node without the flag is unaffected", () => {
     const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
     const nodeDeny = policy.resolve(
       { enabled: true, network: { outbound: "deny" } },
@@ -585,7 +592,7 @@ describe("webSearchMode: live", () => {
       },
     );
     expect(workflowDeny.profile?.network.outbound).toBe("deny");
-    const bash = policy.resolve({ enabled: true }, { cwd: CWD, webSearchLive: true });
+    const bash = policy.resolve({ enabled: true }, { cwd: CWD });
     expect(bash.profile?.network.outbound).toBe("deny");
   });
 });

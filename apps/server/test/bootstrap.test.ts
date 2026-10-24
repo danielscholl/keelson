@@ -3,7 +3,8 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -1439,7 +1440,7 @@ describe("bootstrapRibs", () => {
           getRibDataDir: (id) => join(tempDir, id === "wf" ? "data" : "missing"),
         });
         const prepared = prepareRibWorkflows(boot.workflowContributions);
-        const expected = [await realpath(packageDir), await realpath(dataDir)];
+        const expected = [realpathSync(packageDir), realpathSync(dataDir)];
         const readonlyOf = (name: string) =>
           prepared.definitions.find((d) => d.name === name)?.sandbox?.filesystem?.readonly;
         expect(readonlyOf("folder-plain")).toEqual(expected);
@@ -1469,8 +1470,8 @@ describe("bootstrapRibs", () => {
         const boot = await bootstrapRibs({ available: { wf: rib }, ribDirs: { wf: installed } });
         const prepared = prepareRibWorkflows(boot.workflowContributions);
         expect(prepared.definitions[0]?.sandbox?.filesystem?.readonly).toEqual([
-          await realpath(installed),
-          await realpath(checkout),
+          realpathSync(installed),
+          realpathSync(checkout),
         ]);
       } finally {
         await rm(tempDir, { recursive: true, force: true });
@@ -1491,7 +1492,7 @@ describe("bootstrapRibs", () => {
         });
         const prepared = prepareRibWorkflows(boot.workflowContributions);
         expect(prepared.definitions[0]?.sandbox?.filesystem?.readonly).toEqual([
-          await realpath(tempDir),
+          realpathSync(tempDir),
         ]);
       } finally {
         await rm(tempDir, { recursive: true, force: true });

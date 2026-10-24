@@ -72,7 +72,9 @@ export interface SandboxResolveContext {
   // the provider's capability mirror and id.
   provider?: { id: string; support: "native" | "tool" | "none" | "unneeded" };
   // The workflow declares `webSearchMode: live`: its agent turns research on
-  // the open web, so a prompt node that does not choose gets outbound network.
+  // the open web, so a prompt turn (and the shell the host supplies to it)
+  // that does not choose gets outbound network. Bash and script nodes never
+  // set this.
   webSearchLive?: boolean;
 }
 
@@ -389,7 +391,6 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
               });
         profile = mergeSandboxProfiles(profile, opts.configProfile, pathOpts);
         if (
-          ctx.provider !== undefined &&
           ctx.webSearchLive === true &&
           ctx.workflowSandbox?.network?.outbound === undefined &&
           nodeSandbox?.network?.outbound === undefined

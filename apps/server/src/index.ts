@@ -562,10 +562,11 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const promptHandler = bootstrapPromptHandler({
     defaultOffTools: ribs.tools.map((t) => t.name),
     sandbox: sandboxPolicy,
-    sandboxBashTool: ({ scratchDir, nodeSandbox, workflowSandbox, artifactsDir }) =>
+    sandboxBashTool: ({ scratchDir, nodeSandbox, workflowSandbox, artifactsDir, webSearchLive }) =>
       createSandboxedBashTool({
         policy: sandboxPolicy,
         scratchDir,
+        ...(webSearchLive === true ? { webSearchLive } : {}),
         ...(nodeSandbox !== undefined ? { nodeSandbox } : {}),
         ...(workflowSandbox !== undefined ? { workflowSandbox } : {}),
         ...(artifactsDir !== undefined ? { artifactsDir } : {}),

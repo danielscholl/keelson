@@ -1038,12 +1038,13 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   // within one rib.
   const orderedContributions: RibWorkflowContribution[] = [];
   const workflowNotices: WorkflowDiscoveryNotice[] = [];
-  const readonlyFor = new Map(
-    manifests.map((m) => [m.id, ribSandboxReadonly(m.id, ribDirs, options.getRibDataDir)]),
-  );
+  // Resolved on every collection, not cached: a rib data directory that did
+  // not exist at boot is granted once a workflow reload sees it.
+  const readonlyFor = (ribId: string): string[] =>
+    ribSandboxReadonly(ribId, ribDirs, options.getRibDataDir);
   const withGrants = (contribution: RibWorkflowContribution): RibWorkflowContribution => ({
     ...contribution,
-    sandboxReadonly: readonlyFor.get(contribution.ribId) ?? [],
+    sandboxReadonly: readonlyFor(contribution.ribId),
   });
   for (const manifest of manifests) {
     for (const contribution of workflowContributions) {
@@ -1054,7 +1055,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
       ribDirs,
       orderedContributions,
       workflowNotices,
-      readonlyFor.get(manifest.id) ?? [],
+      readonlyFor(manifest.id),
     );
   }
   const recollectWorkflows = (): {
@@ -1076,7 +1077,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
         ribDirs,
         contributions,
         notices,
-        readonlyFor.get(manifest.id) ?? [],
+        readonlyFor(manifest.id),
       );
     }
     return { contributions, notices };
