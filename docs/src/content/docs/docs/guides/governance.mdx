@@ -263,7 +263,9 @@ The two fixes are to install the runtime, or to opt the node out. When the
 reason is a provider that cannot sandbox, the message says to switch providers
 instead, because installing the runtime would not help. Under
 `KEELSON_SANDBOX=required` the message says the floor ignores `enabled: false`.
-A chat turn fails the same way with `SANDBOX_UNAVAILABLE`.
+A chat turn fails the same way with `SANDBOX_UNAVAILABLE`. A Copilot turn that
+fails because the Copilot CLI in use does not support the sandbox names
+`COPILOT_CLI_PATH`; see [Sandbox](../configuration/#sandbox).
 
 The runtime exists for macOS 15 or later on Apple silicon only. On Linux,
 Windows, an Intel Mac, or older macOS, every sandboxed `bash` and `script` node
