@@ -346,7 +346,7 @@ sandbox:
   enabled: true            # false opts out; ignored under KEELSON_SANDBOX=required
   filesystem:
     readwrite: [out]       # relative paths resolve against the node's cwd
-    readonly: ["~/data"]
+    readonly: ["~/data", "$REPO_ROOT/.beads"]  # ~ is the host home; $REPO_ROOT the main checkout
     denied: [secrets]
   network:
     outbound: allow        # or deny (the default)
@@ -359,7 +359,10 @@ sandbox:
 
 Every key is optional. The node's block merges over the workflow's, which merges
 over the operator's `sandbox` config and the built-in profile; path lists and
-`env` union, and scalars take the most specific value. A path containing `..`
+`env` union, and scalars take the most specific value. `$REPO_ROOT` names the
+repository the node runs in, which is the main checkout when the run has a
+worktree, so a node can reach state the project keeps beside `.git`; outside a
+repository it fails the node. A path containing `..`
 fails the node with a readable reason. A block in the older Claude
 `SandboxSettings` shape (keys such as `autoAllowBashIfSandboxed` or
 `filesystem.allowWrite`) still loads, with a `sandbox_legacy_shape` warning, and

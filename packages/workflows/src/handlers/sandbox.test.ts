@@ -357,6 +357,27 @@ describe("resolveSandboxPath", () => {
       expect(() => resolveSandboxPath(raw, opts)).toThrow("contains '..'");
     }
   });
+
+  test("$REPO_ROOT names the repository root when one is known", () => {
+    const repo = join(ROOT, "repo");
+    const inWorktree = {
+      cwd: join(repo, ".worktrees", "run-1"),
+      hostHome: HOST_HOME,
+      repoRoot: repo,
+    };
+    expect(resolveSandboxPath("$REPO_ROOT", inWorktree)).toBe(repo);
+    expect(resolveSandboxPath("$REPO_ROOT/.beads", inWorktree)).toBe(join(repo, ".beads"));
+    expect(() => resolveSandboxPath("$REPO_ROOT/../x", inWorktree)).toThrow("contains '..'");
+  });
+
+  test("$REPO_ROOT outside a repository fails with the reason", () => {
+    expect(() => resolveSandboxPath("$REPO_ROOT/.beads", opts)).toThrow(
+      "not inside a git repository",
+    );
+    expect(resolveSandboxPath("$REPO_ROOTS", { ...opts, repoRoot: ROOT })).toBe(
+      join(CWD, "$REPO_ROOTS"),
+    );
+  });
 });
 
 describe("pickSandboxEnv", () => {
@@ -554,6 +575,36 @@ describe("prompt-node default", () => {
     const bash = policy.resolve(undefined, ctx);
     expect(bash.profile?.filesystem.denied).toContain(join(HOST_HOME, ".ssh"));
     expect(bash.profile?.filesystem.denied).toContain(denied);
+  });
+});
+
+describe("$REPO_ROOT grants", () => {
+  const repo = join(ROOT, "repo");
+  const worktree = join(repo, ".worktrees", "run-1");
+  const gitCommonDir = join(repo, ".git");
+
+  test("a worktree node can grant a path under the main checkout", () => {
+    const policy = createSandboxPolicy(
+      policyOptions({ runtime: fakeRuntime, resolveGitCommonDir: () => gitCommonDir }),
+    );
+    const profile = policy.resolve(
+      { enabled: true, filesystem: { readwrite: ["$REPO_ROOT/.beads"] } },
+      { cwd: worktree },
+    ).profile;
+    expect(profile?.filesystem.readwrite).toContain(join(repo, ".beads"));
+    expect(profile?.filesystem.readwrite).toContain(worktree);
+    expect(profile?.filesystem.readwrite).toContain(gitCommonDir);
+    expect(profile?.filesystem.readwrite).not.toContain(repo);
+  });
+
+  test("outside a repository the node fails closed with the reason", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const res = policy.resolve(
+      { enabled: true, filesystem: { readonly: ["$REPO_ROOT/.beads"] } },
+      { cwd: CWD },
+    );
+    expect(res.profile).toBeNull();
+    expect(res.fail).toContain("not inside a git repository");
   });
 });
 

@@ -12,7 +12,7 @@
 
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 
 import type { NodeContext, NodeResult, SandboxOutcome } from "../executor.ts";
 import type { NodeSandbox } from "../schema/index.ts";
@@ -180,14 +180,33 @@ function isInside(child: string, parent: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
-// `~` expands against the host home, a relative path against cwd; any `..`
-// segment is refused so a grant cannot climb out of what the author wrote.
-export function resolveSandboxPath(raw: string, opts: { cwd: string; hostHome: string }): string {
+export interface SandboxPathOptions {
+  cwd: string;
+  hostHome: string;
+  // The primary checkout, which `$REPO_ROOT` names; absent outside a repository.
+  repoRoot?: string;
+}
+
+const REPO_ROOT_TOKEN = "$REPO_ROOT";
+
+// `~` expands against the host home, `$REPO_ROOT` against the repository the
+// cwd belongs to (its main checkout when the cwd is a worktree), a relative
+// path against cwd; any `..` segment is refused so a grant cannot climb out of
+// what the author wrote.
+export function resolveSandboxPath(raw: string, opts: SandboxPathOptions): string {
   if (raw.split(/[\\/]/).includes("..")) {
     throw new SandboxPathError(`sandbox path '${raw}' contains '..'; write the path it means`);
   }
   if (raw === "~") return opts.hostHome;
   if (raw.startsWith("~/")) return join(opts.hostHome, raw.slice(2));
+  if (raw === REPO_ROOT_TOKEN || raw.startsWith(`${REPO_ROOT_TOKEN}/`)) {
+    if (opts.repoRoot === undefined) {
+      throw new SandboxPathError(
+        `sandbox path '${raw}' uses ${REPO_ROOT_TOKEN}, but the working directory is not inside a git repository`,
+      );
+    }
+    return normalize(join(opts.repoRoot, raw.slice(REPO_ROOT_TOKEN.length)));
+  }
   return normalize(isAbsolute(raw) ? raw : resolve(opts.cwd, raw));
 }
 
@@ -196,7 +215,7 @@ export function resolveSandboxPath(raw: string, opts: { cwd: string; hostHome: s
 export function mergeSandboxProfiles(
   base: SandboxProfile,
   override: NodeSandbox | Omit<NodeSandbox, "enabled"> | undefined,
-  opts: { cwd: string; hostHome: string },
+  opts: SandboxPathOptions,
 ): SandboxProfile {
   if (override === undefined) return base;
   const paths = (list: readonly string[] | undefined) =>
@@ -373,7 +392,12 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
       const enabled =
         opts.floor || (nodeSandbox?.enabled ?? ctx.workflowSandbox?.enabled ?? opts.defaultEnabled);
       if (!enabled) return { profile: null, outcome: "off" };
-      const pathOpts = { cwd: ctx.cwd, hostHome };
+      const git = gitCommonDirFor(ctx.cwd);
+      const pathOpts: SandboxPathOptions = {
+        cwd: ctx.cwd,
+        hostHome,
+        ...(git.gitCommonDir !== undefined ? { repoRoot: dirname(git.gitCommonDir) } : {}),
+      };
       let profile: SandboxProfile;
       try {
         profile =
@@ -381,7 +405,7 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
             ? providerSandboxProfile(ctx.cwd, ctx.artifactsDir, {
                 hostHome,
                 exists,
-                ...gitCommonDirFor(ctx.cwd),
+                ...git,
               })
             : defaultSandboxProfile({
                 cwd: ctx.cwd,
@@ -391,7 +415,7 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
                 bundledBinDir: opts.bundledBinDir,
                 hostHome,
                 hostPath,
-                ...gitCommonDirFor(ctx.cwd),
+                ...git,
                 exists,
               });
         profile = mergeSandboxProfiles(profile, opts.configProfile, pathOpts);

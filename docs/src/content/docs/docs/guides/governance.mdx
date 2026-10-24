@@ -236,6 +236,12 @@ run from its own checkout), the grant is skipped and the writable root stands.
 The workflow's own `sandbox` block layers on top. Sandboxed shells always see `KEELSON_HOME`, since
 `HOME` points into scratch.
 
+A run with a worktree gets the worktree and the shared git directory, not the
+main checkout, so a tracker kept beside `.git` (such as `.beads`) is out of
+reach. A path that starts with `$REPO_ROOT` resolves against the main checkout,
+in a worktree or not, so a node can grant exactly that directory without naming
+the host path or widening to the whole checkout.
+
 ### Opting out
 
 Opt out as narrowly as the work allows. A node that only needs the network can
