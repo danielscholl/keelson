@@ -84,6 +84,10 @@ export async function applyCopilotSandbox(
   try {
     host = await client.rpc?.sandbox?.getHostSupport?.();
   } catch (err) {
+    // A Copilot CLI build without the sandbox RPC answers "Unhandled method".
+    if (/unhandled method/i.test(errorMessage(err))) {
+      return "the Copilot CLI in use does not support sandboxing; unset COPILOT_CLI_PATH or point it at a Copilot CLI that does, or turn the sandbox off (/sandbox off, or `sandbox: { enabled: false }` on the node)";
+    }
     return `could not check Copilot sandbox support: ${errorMessage(err)}`;
   }
   if (host === undefined) return "this Copilot SDK cannot report sandbox support";

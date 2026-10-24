@@ -119,6 +119,19 @@ describe("applyCopilotSandbox", () => {
     expect(await applyCopilotSandbox(supported, {}, profile())).toBe(
       "this Copilot SDK cannot apply a sandbox to a session",
     );
+    const noRpc = {
+      rpc: {
+        sandbox: {
+          getHostSupport: async () => {
+            throw new Error("Unhandled method sandbox.getHostSupport");
+          },
+        },
+      },
+    };
+    const refusal = await applyCopilotSandbox(noRpc, accept, profile());
+    expect(refusal).toContain("the Copilot CLI in use does not support sandboxing");
+    expect(refusal).toContain("unset COPILOT_CLI_PATH");
+    expect(refusal).toContain("/sandbox off");
     expect(
       await applyCopilotSandbox(
         supported,
