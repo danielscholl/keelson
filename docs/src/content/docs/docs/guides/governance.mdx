@@ -283,8 +283,11 @@ The sandbox confines processes the OS can see. Several things run outside it.
   [Filesystem confinement](#filesystem-confinement)); in a workflow `prompt` node
   they are not confined.
 - **Git's config files** (`~/.gitconfig` and `~/.config/git/config`, `ignore`,
-  and `attributes`) are readable to a sandboxed agent so it can run git. The
-  credential stores (`~/.git-credentials`, `~/.config/git/credentials`) are not.
+  and `attributes`) are readable to a sandboxed agent so it can run git. Git's
+  credential stores (`~/.git-credentials`, `~/.config/git/credentials`) are
+  denied to `bash` and `script` nodes. For `prompt` nodes and chat turns they are
+  only not granted, and whether a path outside the grants is readable depends on
+  the provider's sandbox: Codex reads outside the working directory.
 - **Pi's file tools** (`read`, `write`, `edit`, `grep`, `find`, `ls`) run in
   process and are path-gated, not OS-isolated. The gate checks a path and then pi
   opens it, so a path swapped between the two (a check-then-use window) is not
