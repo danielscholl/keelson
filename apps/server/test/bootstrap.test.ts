@@ -3,6 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1405,6 +1406,96 @@ describe("bootstrapRibs", () => {
       const prepared = prepareRibWorkflows(boot.workflowContributions);
       expect(prepared.definitions.map((d) => d.name)).toContain("rib-hello");
       expect(prepared.provenance.get("rib-hello")).toEqual({ ribId: "test", background: false });
+    });
+
+    test("a rib's workflows may read the rib's package and data directories when sandboxed", async () => {
+      process.env.KEELSON_RIBS = "wf";
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-grant-"));
+      try {
+        const packageDir = join(tempDir, "pkg");
+        const dataDir = join(tempDir, "data");
+        await mkdir(join(packageDir, "workflows"), { recursive: true });
+        await mkdir(dataDir);
+        await writeFile(join(packageDir, "workflows", "plain.yaml"), workflowYaml("folder-plain"));
+        await writeFile(
+          join(packageDir, "workflows", "own.yaml"),
+          `${workflowYaml("folder-own")}sandbox:\n  filesystem:\n    readonly: ["/opt/extra"]\n`,
+        );
+        const rib: Rib = {
+          id: "wf",
+          displayName: "wf",
+          contributeWorkflows: () => [
+            {
+              definition: {
+                name: "code-plain",
+                description: "from-code",
+                nodes: [{ id: "step", bash: "echo code" }],
+              },
+            },
+          ],
+        };
+        const boot = await bootstrapRibs({
+          available: { wf: rib },
+          ribDirs: { wf: packageDir },
+          getRibDataDir: (id) => join(tempDir, id === "wf" ? "data" : "missing"),
+        });
+        const prepared = prepareRibWorkflows(boot.workflowContributions);
+        const expected = [realpathSync(packageDir), realpathSync(dataDir)];
+        const definitionOf = (name: string) => prepared.definitions.find((d) => d.name === name);
+        expect(definitionOf("folder-plain")?.ribReadable).toEqual(expected);
+        expect(definitionOf("code-plain")?.ribReadable).toEqual(expected);
+        // The author's own read-only grant is untouched; rib paths ride separately.
+        expect(definitionOf("folder-own")?.ribReadable).toEqual(expected);
+        expect(definitionOf("folder-own")?.sandbox?.filesystem?.readonly).toEqual(["/opt/extra"]);
+        const fresh = prepareRibWorkflows(boot.recollectWorkflows().contributions);
+        expect(fresh.definitions.find((d) => d.name === "code-plain")?.ribReadable).toEqual(
+          expected,
+        );
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    test("a path dependency's linked package.json grants the checkout it points at", async () => {
+      process.env.KEELSON_RIBS = "wf";
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-grant-"));
+      try {
+        const checkout = join(tempDir, "checkout");
+        const installed = join(tempDir, "node_modules", "rib-wf");
+        await mkdir(checkout);
+        await mkdir(join(installed, "workflows"), { recursive: true });
+        await writeFile(join(checkout, "package.json"), "{}");
+        await symlink(join(checkout, "package.json"), join(installed, "package.json"));
+        await writeFile(join(installed, "workflows", "plain.yaml"), workflowYaml("folder-plain"));
+        const rib: Rib = { id: "wf", displayName: "wf" };
+        const boot = await bootstrapRibs({ available: { wf: rib }, ribDirs: { wf: installed } });
+        const prepared = prepareRibWorkflows(boot.workflowContributions);
+        expect(prepared.definitions[0]?.ribReadable).toEqual([
+          realpathSync(installed),
+          realpathSync(checkout),
+        ]);
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    test("a missing data directory grants only the package", async () => {
+      process.env.KEELSON_RIBS = "wf";
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-grant-"));
+      try {
+        await mkdir(join(tempDir, "workflows"));
+        await writeFile(join(tempDir, "workflows", "plain.yaml"), workflowYaml("folder-plain"));
+        const rib: Rib = { id: "wf", displayName: "wf" };
+        const boot = await bootstrapRibs({
+          available: { wf: rib },
+          ribDirs: { wf: tempDir },
+          getRibDataDir: () => join(tempDir, "absent"),
+        });
+        const prepared = prepareRibWorkflows(boot.workflowContributions);
+        expect(prepared.definitions[0]?.ribReadable).toEqual([realpathSync(tempDir)]);
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
     });
 
     test("recollects current code contributions and rescans folder workflows", async () => {

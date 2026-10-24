@@ -86,6 +86,7 @@ export interface RunUntilBashProbeOptions {
   nodeId?: string;
   sandbox?: NodeSandbox;
   workflowSandbox?: NodeSandbox;
+  readable?: readonly string[];
 }
 
 // Thrown by a sandboxed probe that cannot be confined; the loop fails rather
@@ -124,6 +125,7 @@ export function makeRunUntilBashProbe(
       cwd: opts.cwd,
       ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
       ...(opts.workflowSandbox !== undefined ? { workflowSandbox: opts.workflowSandbox } : {}),
+      ...(opts.readable !== undefined ? { readable: opts.readable } : {}),
     });
     if (resolution?.fail !== undefined) throw new SandboxUnavailableError(resolution.fail);
     const env = buildSubprocessEnv(opts.inputs, opts.upstreamOutputs, {
@@ -265,12 +267,18 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
       let loopProvider: string | undefined;
       let loopModel: string | undefined;
       let loopEffort: string | undefined;
+      // The loop reports how its iterations ran; every iteration resolves the
+      // same sandbox, so the last one speaks for all.
+      let loopSandbox: NodeResult["sandbox"];
+      let loopSandboxBackend: string | undefined;
       const finalize = (result: NodeResult): NodeResult => ({
         ...result,
         ...(loopUsage !== undefined ? { usage: loopUsage } : {}),
         ...(loopProvider !== undefined ? { provider: loopProvider } : {}),
         ...(loopModel !== undefined ? { model: loopModel } : {}),
         ...(loopEffort !== undefined ? { effort: loopEffort } : {}),
+        ...(loopSandbox !== undefined ? { sandbox: loopSandbox } : {}),
+        ...(loopSandboxBackend !== undefined ? { sandboxBackend: loopSandboxBackend } : {}),
       });
 
       for (let i = 1; i <= loop.max_iterations; i++) {
@@ -315,6 +323,8 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
 
         const result = await promptHandler.handle(synthesized, iterCtx);
         loopUsage = addNodeUsage(loopUsage, result.usage);
+        if (result.sandbox !== undefined) loopSandbox = result.sandbox;
+        if (result.sandboxBackend !== undefined) loopSandboxBackend = result.sandboxBackend;
         if (result.provider !== undefined) loopProvider = result.provider;
         if (result.model !== undefined) loopModel = result.model;
         if (result.effort !== undefined) loopEffort = result.effort;
@@ -361,6 +371,9 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
               ...(node.sandbox !== undefined ? { sandbox: node.sandbox } : {}),
               ...(ctx.workflow.sandbox !== undefined
                 ? { workflowSandbox: ctx.workflow.sandbox }
+                : {}),
+              ...(ctx.workflow.ribReadable !== undefined
+                ? { readable: ctx.workflow.ribReadable }
                 : {}),
             });
             // Order matters: abort > timeout > exit 0. A probe that traps

@@ -80,6 +80,10 @@ export const workflowBaseSchema = z.object({
   fallbackModel: z.string().min(1).optional(),
   betas: z.array(z.string().min(1)).nonempty("'betas' must be a non-empty array").optional(),
   sandbox: sandboxProfileSchema.optional(),
+  // Paths a sandboxed node may read without any write being restricted: the
+  // owning rib's package and data directories. Stamped by the server on rib
+  // contributions; the YAML loader does not read it.
+  ribReadable: z.array(z.string()).optional(),
   worktree: workflowWorktreePolicySchema.optional(),
   converge: convergeConfigSchema.optional(),
   /**

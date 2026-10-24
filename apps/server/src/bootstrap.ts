@@ -1038,11 +1038,25 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   // within one rib.
   const orderedContributions: RibWorkflowContribution[] = [];
   const workflowNotices: WorkflowDiscoveryNotice[] = [];
+  // Resolved on every collection, not cached: a rib data directory that did
+  // not exist at boot is granted once a workflow reload sees it.
+  const readonlyFor = (ribId: string): string[] =>
+    ribSandboxReadonly(ribId, ribDirs, options.getRibDataDir);
+  const withGrants = (contribution: RibWorkflowContribution): RibWorkflowContribution => ({
+    ...contribution,
+    sandboxReadonly: readonlyFor(contribution.ribId),
+  });
   for (const manifest of manifests) {
     for (const contribution of workflowContributions) {
-      if (contribution.ribId === manifest.id) orderedContributions.push(contribution);
+      if (contribution.ribId === manifest.id) orderedContributions.push(withGrants(contribution));
     }
-    collectRibFolderWorkflows(manifest, ribDirs, orderedContributions, workflowNotices);
+    collectRibFolderWorkflows(
+      manifest,
+      ribDirs,
+      orderedContributions,
+      workflowNotices,
+      readonlyFor(manifest.id),
+    );
   }
   const recollectWorkflows = (): {
     contributions: RibWorkflowContribution[];
@@ -1056,9 +1070,15 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     const notices: WorkflowDiscoveryNotice[] = [...fresh.notices];
     for (const manifest of manifests) {
       for (const contribution of fresh.contributions) {
-        if (contribution.ribId === manifest.id) contributions.push(contribution);
+        if (contribution.ribId === manifest.id) contributions.push(withGrants(contribution));
       }
-      collectRibFolderWorkflows(manifest, ribDirs, contributions, notices);
+      collectRibFolderWorkflows(
+        manifest,
+        ribDirs,
+        contributions,
+        notices,
+        readonlyFor(manifest.id),
+      );
     }
     return { contributions, notices };
   };
@@ -1093,6 +1113,33 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
 }
 
 // Parse per file rather than through discoverWorkflows, whose by-name map would
+// What a rib's own workflows may read when sandboxed: the rib's package (its
+// scripts, prompts, pipelines) and its data directory (its config). Resolved
+// through symlinks because the sandbox grants real paths; a local path
+// dependency is a directory tree whose files bun links one by one, so the
+// checkout holding the package's real package.json is granted as well.
+export function ribSandboxReadonly(
+  ribId: string,
+  ribDirs: Readonly<Record<string, string>>,
+  getRibDataDir: ((ribId: string) => string) | undefined,
+): string[] {
+  const out: string[] = [];
+  const grant = (candidate: string | undefined, resolve: (p: string) => string): void => {
+    if (!candidate) return;
+    try {
+      const real = resolve(candidate);
+      if (!out.includes(real)) out.push(real);
+    } catch {
+      // absent: nothing to grant
+    }
+  };
+  const packageDir = ribDirs[ribId];
+  grant(packageDir, (p) => fs.realpathSync(p));
+  grant(packageDir, (p) => path.dirname(fs.realpathSync(path.join(p, "package.json"))));
+  grant(getRibDataDir?.(ribId), (p) => fs.realpathSync(p));
+  return out;
+}
+
 // silently keep the last of two same-named files; every file must reach
 // prepareRibWorkflows so its first-wins dedupe can warn on the collision.
 function collectRibFolderWorkflows(
@@ -1100,6 +1147,7 @@ function collectRibFolderWorkflows(
   ribDirs: Readonly<Record<string, string>>,
   contributions: RibWorkflowContribution[],
   notices: WorkflowDiscoveryNotice[],
+  sandboxReadonly: readonly string[],
 ): void {
   const packageDir = ribDirs[manifest.id];
   if (!packageDir) return;
@@ -1151,6 +1199,7 @@ function collectRibFolderWorkflows(
       ribId: manifest.id,
       definition: result.workflow,
       sourcePath: filePath,
+      sandboxReadonly,
     });
   }
 }
@@ -1257,6 +1306,10 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
       continue;
     }
     claimed.set(definition.name, contribution.ribId);
+    const granted = contribution.sandboxReadonly ?? [];
+    if (granted.length > 0) {
+      definition.ribReadable = [...new Set([...(definition.ribReadable ?? []), ...granted])];
+    }
     definitions.push(definition);
     const background = Boolean(contribution.publish);
     provenance.set(definition.name, { ribId: contribution.ribId, background });

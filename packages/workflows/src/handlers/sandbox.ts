@@ -71,6 +71,16 @@ export interface SandboxResolveContext {
   // Prompt nodes are confined by their provider, not the runtime; this carries
   // the provider's capability mirror and id.
   provider?: { id: string; support: "native" | "tool" | "none" | "unneeded" };
+  // Readable without restricting writes (a rib's own package and data
+  // directories): added read-only unless a writable root already covers or
+  // sits inside the path, since a read-only parent blocks writes on some
+  // backends.
+  readable?: readonly string[];
+  // The workflow declares `webSearchMode: live`: its agent turns research on
+  // the open web, so a prompt turn (and the shell the host supplies to it)
+  // that does not choose gets outbound network. Bash and script nodes never
+  // set this.
+  webSearchLive?: boolean;
 }
 
 export interface SandboxPolicy {
@@ -107,7 +117,10 @@ export interface CreateSandboxPolicyOptions {
   canonical?: (path: string) => string;
 }
 
+// Tool installs a sandboxed shell may read: package-manager prefixes and, on
+// macOS, the app bundles (a headless browser renders PDFs from one).
 const TOOLCHAIN_PREFIXES = [
+  "/Applications",
   "/opt/homebrew",
   "/usr/local",
   "~/.bun",
@@ -382,6 +395,13 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
                 exists,
               });
         profile = mergeSandboxProfiles(profile, opts.configProfile, pathOpts);
+        if (
+          ctx.webSearchLive === true &&
+          ctx.workflowSandbox?.network?.outbound === undefined &&
+          nodeSandbox?.network?.outbound === undefined
+        ) {
+          profile = { ...profile, network: { ...profile.network, outbound: "allow" } };
+        }
         profile = mergeSandboxProfiles(profile, ctx.workflowSandbox, pathOpts);
         profile = mergeSandboxProfiles(profile, nodeSandbox, pathOpts);
         profile = { ...profile, enabled: true };
@@ -396,6 +416,21 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
         return { profile: null, outcome: "off", fail: err.message };
       }
       profile = canonicalize(profile);
+      if (ctx.readable !== undefined && ctx.readable.length > 0) {
+        const { readwrite, readonly } = profile.filesystem;
+        const extra = ctx.readable
+          .map(canonical)
+          .filter(
+            (p) =>
+              !readonly.includes(p) && !readwrite.some((rw) => isInside(rw, p) || isInside(p, rw)),
+          );
+        if (extra.length > 0) {
+          profile = {
+            ...profile,
+            filesystem: { ...profile.filesystem, readonly: [...readonly, ...extra] },
+          };
+        }
+      }
 
       if (ctx.provider !== undefined) {
         // Nothing to confine, so the node runs as is and says why.
@@ -466,7 +501,11 @@ export function createSandboxPolicy(opts: CreateSandboxPolicyOptions): SandboxPo
       );
     },
     envFor(env, profile, scratch) {
-      return pickSandboxEnv(env, { scratch, hostHome, allow: profile.env });
+      const out = pickSandboxEnv(env, { scratch, hostHome, allow: profile.env });
+      // HOME moves into scratch, so a script's `${KEELSON_HOME:-$HOME/.keelson}`
+      // fallback would miss the real home.
+      out.KEELSON_HOME ??= opts.home;
+      return out;
     },
   };
 }
@@ -529,6 +568,7 @@ export function sandboxContextFor(ctx: NodeContext): SandboxResolveContext {
     cwd: ctx.cwd,
     ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
     ...(ctx.workflow.sandbox !== undefined ? { workflowSandbox: ctx.workflow.sandbox } : {}),
+    ...(ctx.workflow.ribReadable !== undefined ? { readable: ctx.workflow.ribReadable } : {}),
   };
 }
 

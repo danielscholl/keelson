@@ -270,6 +270,31 @@ describe("the built-in profile", () => {
   });
 });
 
+describe("toolchain prefixes", () => {
+  test("app bundles are readable when the host has them", () => {
+    const withApps = defaultSandboxProfile({
+      cwd: CWD,
+      home: HOME,
+      dbPath: DB,
+      bundledBinDir: BIN,
+      hostHome: HOST_HOME,
+      hostPath: "",
+      exists: (p) => p === "/Applications",
+    });
+    expect(withApps.filesystem.readonly).toContain("/Applications");
+    const without = defaultSandboxProfile({
+      cwd: CWD,
+      home: HOME,
+      dbPath: DB,
+      bundledBinDir: BIN,
+      hostHome: HOST_HOME,
+      hostPath: "",
+      exists: () => false,
+    });
+    expect(without.filesystem.readonly).not.toContain("/Applications");
+  });
+});
+
 describe("mergeSandboxProfiles", () => {
   const base: SandboxProfile = {
     enabled: false,
@@ -397,6 +422,17 @@ describe("launcherFor and envFor", () => {
     expect(policy.envFor({ GH_TOKEN: "x" }, profile, outside).GH_TOKEN).toBeUndefined();
   });
 
+  test("envFor names the keelson home, since HOME moves into scratch", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const profile = policy.resolve({ enabled: true }, { cwd: CWD }).profile;
+    if (!profile) throw new Error("expected a profile");
+    const scratch = join(ROOT, "scratch-home");
+    expect(policy.envFor({}, profile, scratch).KEELSON_HOME).toBe(HOME);
+    expect(policy.envFor({ KEELSON_HOME: "/elsewhere" }, profile, scratch).KEELSON_HOME).toBe(
+      "/elsewhere",
+    );
+  });
+
   test("refuses a launch dir a sandboxed process could write", () => {
     const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
     const profile = policy.resolve({ enabled: true }, { cwd: CWD }).profile;
@@ -518,6 +554,69 @@ describe("prompt-node default", () => {
     const bash = policy.resolve(undefined, ctx);
     expect(bash.profile?.filesystem.denied).toContain(join(HOST_HOME, ".ssh"));
     expect(bash.profile?.filesystem.denied).toContain(denied);
+  });
+});
+
+describe("readable paths", () => {
+  test("a disjoint rib path is granted read-only", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const rib = join(ROOT, "ribs", "touchline");
+    const profile = policy.resolve({ enabled: true }, { cwd: CWD, readable: [rib] }).profile;
+    expect(profile?.filesystem.readonly).toContain(rib);
+  });
+
+  test("a rib path that covers or sits inside a writable root never restricts it", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const parent = resolve(CWD, "..");
+    const child = join(CWD, "pipeline");
+    const profile = policy.resolve(
+      { enabled: true },
+      { cwd: CWD, readable: [parent, CWD, child] },
+    ).profile;
+    expect(profile?.filesystem.readonly).not.toContain(parent);
+    expect(profile?.filesystem.readonly).not.toContain(CWD);
+    expect(profile?.filesystem.readonly).not.toContain(child);
+    expect(profile?.filesystem.readwrite).toContain(CWD);
+  });
+});
+
+describe("webSearchMode: live", () => {
+  const provider = { id: "copilot", support: "native" as const };
+
+  test("a prompt node that does not choose gets outbound network", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const live = policy.resolve({ enabled: true }, { cwd: CWD, provider, webSearchLive: true });
+    expect(live.profile?.network.outbound).toBe("allow");
+    const quiet = policy.resolve({ enabled: true }, { cwd: CWD, provider });
+    expect(quiet.profile?.network.outbound).toBe("deny");
+  });
+
+  test("the host's shell for a live-web prompt turn gets outbound network too", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const shell = policy.resolve({ enabled: true }, { cwd: CWD, webSearchLive: true });
+    expect(shell.profile?.network.outbound).toBe("allow");
+    expect(shell.profile?.filesystem.denied.length).toBeGreaterThan(0);
+  });
+
+  test("an explicit node or workflow choice wins, and a node without the flag is unaffected", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const nodeDeny = policy.resolve(
+      { enabled: true, network: { outbound: "deny" } },
+      { cwd: CWD, provider, webSearchLive: true },
+    );
+    expect(nodeDeny.profile?.network.outbound).toBe("deny");
+    const workflowDeny = policy.resolve(
+      { enabled: true },
+      {
+        cwd: CWD,
+        provider,
+        webSearchLive: true,
+        workflowSandbox: { network: { outbound: "deny" } },
+      },
+    );
+    expect(workflowDeny.profile?.network.outbound).toBe("deny");
+    const bash = policy.resolve({ enabled: true }, { cwd: CWD });
+    expect(bash.profile?.network.outbound).toBe("deny");
   });
 });
 

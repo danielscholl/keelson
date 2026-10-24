@@ -209,7 +209,7 @@ no author grant can shadow it.
 | Grant | Default for `bash` and `script` nodes |
 |---|---|
 | Read-write | The working directory, the run's artifacts directory, and a worktree's shared git directory. |
-| Read-only | Keelson's bundled `bin`, the home's `scripts` and `node_modules`, git's config files (`~/.gitconfig`, `~/.config/git/config`, `ignore`, `attributes`), the toolchain prefixes that exist (`/opt/homebrew`, `/usr/local`, `~/.bun`, `~/.cargo`, `~/.rustup`, `~/.local`, `~/.nvm`, `~/.volta`, `~/.pyenv`, `/nix`), and the absolute directories on `PATH`. System directories stay readable. |
+| Read-only | Keelson's bundled `bin`, the home's `scripts` and `node_modules`, git's config files (`~/.gitconfig`, `~/.config/git/config`, `ignore`, `attributes`), the toolchain prefixes that exist (`/Applications`, `/opt/homebrew`, `/usr/local`, `~/.bun`, `~/.cargo`, `~/.rustup`, `~/.local`, `~/.nvm`, `~/.volta`, `~/.pyenv`, `/nix`), and the absolute directories on `PATH`. System directories stay readable. |
 | Denied | `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.config/gh`, `~/.config/glab-cli`, `~/.docker`, `~/.kube`, `~/.netrc`, `~/.npmrc`, `~/.git-credentials`, `~/.config/git/credentials`, `~/Library/Keychains`, `~/.claude`, `~/.codex`, `~/.copilot`, keelson's database files, `server.json`, and `config.json`. |
 | Network | Outbound denied, loopback denied. |
 | Environment | Only `KEELSON_*`, `PATH`, `LANG`, `LC_ALL`, `TERM`, `ARTIFACTS_DIR`, and names the profile's `env` allows. `HOME`, `TMPDIR`, and the uv and bun caches move into a per-node scratch directory. Tokens and keys in the server's environment are dropped. |
@@ -219,6 +219,22 @@ profile: the working directory (for a node, also its artifacts directory and a
 worktree's shared git directory) writable, git's config files readable so the
 agent can run git, outbound network denied, plus the operator's
 `sandbox` config. The provider's own sandbox decides what else stays readable.
+
+A workflow that declares `webSearchMode: live` researches on the open web, so
+its sandboxed `prompt` nodes get outbound network unless the workflow or the
+node sets `network.outbound` itself. Its `bash` and `script` nodes keep the
+default denial; grant them network per node when they need it. Without this,
+an agent told to fetch sources under a network-denied sandbox can report every
+finding as unverifiable and the run still succeeds.
+
+A workflow a rib contributes, from its `workflows/` folder or its code, also
+gets the rib's package directory and its data directory (`<home>/rib-<id>`)
+read-only on every node, so the rib's scripts, prompts, pipelines, and config
+are reachable without the author spelling out install paths. These grants never
+restrict a write: when a writable root covers or sits inside one of them (a rib
+run from its own checkout), the grant is skipped and the writable root stands.
+The workflow's own `sandbox` block layers on top. Sandboxed shells always see `KEELSON_HOME`, since
+`HOME` points into scratch.
 
 ### Opting out
 

@@ -758,6 +758,8 @@ describe("makeLoopHandler — provider/model provenance", () => {
             output: { kind: "text", text: "<promise>DONE</promise>" },
             provider: "copilot",
             model: "gpt-5",
+            sandbox: "provider",
+            sandboxBackend: "copilot",
           },
     );
     const handler = makeLoopHandler({ promptHandler });
@@ -765,6 +767,8 @@ describe("makeLoopHandler — provider/model provenance", () => {
     expect(result.status).toBe("succeeded");
     expect(result.provider).toBe("copilot");
     expect(result.model).toBe("gpt-5");
+    expect(result.sandbox).toBe("provider");
+    expect(result.sandboxBackend).toBe("copilot");
   });
 
   test("a later iteration's resolved model wins (last-seen) on the max_iterations success path", async () => {

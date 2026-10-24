@@ -3253,6 +3253,31 @@ describe("makePromptHandler — sandbox", () => {
       });
     });
 
+    test("a live-web workflow tells the shell factory so pi's shell can fetch sources", async () => {
+      const { provider } = toolProvider();
+      const turns: SandboxBashTurn[] = [];
+      const node = { id: "n", prompt: "go" } as unknown as DagNode;
+      const ctx = buildCtx();
+      await makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+        sandbox: policy(true),
+        sandboxBashTool: bashTool(turns),
+      }).handle(node, {
+        ...ctx,
+        workflow: { ...ctx.workflow, webSearchMode: "live" } as WorkflowDefinition,
+      });
+      expect(turns[0]?.webSearchLive).toBe(true);
+      const quiet: SandboxBashTurn[] = [];
+      await makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+        sandbox: policy(true),
+        sandboxBashTool: bashTool(quiet),
+      }).handle(node, ctx);
+      expect(quiet[0]?.webSearchLive).toBeUndefined();
+    });
+
     test("a node that denies bash still gets the tool, with the denial forwarded for the provider's rails", async () => {
       const { provider, calls } = toolProvider();
       const handler = makePromptHandler({

@@ -217,6 +217,10 @@ export interface SandboxBashTurn {
   artifactsDir?: string;
   nodeSandbox?: NodeSandbox;
   workflowSandbox?: NodeSandbox;
+  // See SandboxResolveContext.readable.
+  readable?: readonly string[];
+  // The workflow declares webSearchMode: live, so the shell may reach the web.
+  webSearchLive?: boolean;
 }
 
 export interface MakePromptHandlerOptions {
@@ -358,6 +362,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       resolution: opts.sandbox.resolve(node.sandbox, {
         ...sandboxContextFor(ctx),
         provider: { id: label ?? "default", support },
+        ...(ctx.workflow.webSearchMode === "live" ? { webSearchLive: true } : {}),
       }),
       support,
     };
@@ -602,6 +607,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             ...sandboxContextFor(ctx),
             scratchDir: prepareSandboxScratch(ctx.artifactsDir, ctx.nodeId),
             ...(node.sandbox !== undefined ? { nodeSandbox: node.sandbox } : {}),
+            ...(ctx.workflow.webSearchMode === "live" ? { webSearchLive: true } : {}),
           })
         : undefined;
     if (sandboxBash !== undefined) {

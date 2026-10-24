@@ -46,6 +46,10 @@ export interface SandboxedBashToolOptions {
   nodeSandbox?: NodeSandbox;
   workflowSandbox?: NodeSandbox;
   artifactsDir?: string;
+  // The rib's own paths a node may read; see SandboxResolveContext.readable.
+  readable?: readonly string[];
+  // The node's workflow declares webSearchMode: live; see SandboxResolveContext.
+  webSearchLive?: boolean;
 }
 
 function definedEnv(): Record<string, string> {
@@ -94,6 +98,8 @@ export function createSandboxedBashTool(opts: SandboxedBashToolOptions): ToolDef
           cwd: ctx.cwd,
           ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
           ...(opts.workflowSandbox !== undefined ? { workflowSandbox: opts.workflowSandbox } : {}),
+          ...(opts.readable !== undefined ? { readable: opts.readable } : {}),
+          ...(opts.webSearchLive === true ? { webSearchLive: true } : {}),
         },
       );
       if (resolution.fail !== undefined || resolution.profile === null) {
