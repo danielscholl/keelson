@@ -217,6 +217,8 @@ export interface SandboxBashTurn {
   artifactsDir?: string;
   nodeSandbox?: NodeSandbox;
   workflowSandbox?: NodeSandbox;
+  // See SandboxResolveContext.readable.
+  readable?: readonly string[];
   // The workflow declares webSearchMode: live, so the shell may reach the web.
   webSearchLive?: boolean;
 }

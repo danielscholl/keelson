@@ -281,11 +281,13 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
             nodeSandbox,
             workflowSandbox,
             artifactsDir,
+            readable,
             webSearchLive,
           }: SandboxBashTurn) =>
             createSandboxedBashTool({
               policy: sandbox,
               scratchDir,
+              ...(readable !== undefined ? { readable } : {}),
               ...(webSearchLive === true ? { webSearchLive } : {}),
               ...(nodeSandbox !== undefined ? { nodeSandbox } : {}),
               ...(workflowSandbox !== undefined ? { workflowSandbox } : {}),

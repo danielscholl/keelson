@@ -499,6 +499,11 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
       if (!definition || !source) {
         throw new Error(`boot-bound rib workflow '${name}' is missing its catalog metadata`);
       }
+      // The boot object stays (its binding identity), but the rib's grants are
+      // whatever this collection resolved.
+      const refreshed = fresh.definitions.find((d) => d.name === name);
+      if (refreshed?.ribReadable !== undefined) definition.ribReadable = refreshed.ribReadable;
+      else delete definition.ribReadable;
       definitions.push(definition);
       provenance.set(name, source);
       retainedBoundNames.add(name);
@@ -562,10 +567,18 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const promptHandler = bootstrapPromptHandler({
     defaultOffTools: ribs.tools.map((t) => t.name),
     sandbox: sandboxPolicy,
-    sandboxBashTool: ({ scratchDir, nodeSandbox, workflowSandbox, artifactsDir, webSearchLive }) =>
+    sandboxBashTool: ({
+      scratchDir,
+      nodeSandbox,
+      workflowSandbox,
+      artifactsDir,
+      readable,
+      webSearchLive,
+    }) =>
       createSandboxedBashTool({
         policy: sandboxPolicy,
         scratchDir,
+        ...(readable !== undefined ? { readable } : {}),
         ...(webSearchLive === true ? { webSearchLive } : {}),
         ...(nodeSandbox !== undefined ? { nodeSandbox } : {}),
         ...(workflowSandbox !== undefined ? { workflowSandbox } : {}),

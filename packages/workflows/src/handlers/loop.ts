@@ -86,6 +86,7 @@ export interface RunUntilBashProbeOptions {
   nodeId?: string;
   sandbox?: NodeSandbox;
   workflowSandbox?: NodeSandbox;
+  readable?: readonly string[];
 }
 
 // Thrown by a sandboxed probe that cannot be confined; the loop fails rather
@@ -124,6 +125,7 @@ export function makeRunUntilBashProbe(
       cwd: opts.cwd,
       ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
       ...(opts.workflowSandbox !== undefined ? { workflowSandbox: opts.workflowSandbox } : {}),
+      ...(opts.readable !== undefined ? { readable: opts.readable } : {}),
     });
     if (resolution?.fail !== undefined) throw new SandboxUnavailableError(resolution.fail);
     const env = buildSubprocessEnv(opts.inputs, opts.upstreamOutputs, {
@@ -369,6 +371,9 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
               ...(node.sandbox !== undefined ? { sandbox: node.sandbox } : {}),
               ...(ctx.workflow.sandbox !== undefined
                 ? { workflowSandbox: ctx.workflow.sandbox }
+                : {}),
+              ...(ctx.workflow.ribReadable !== undefined
+                ? { readable: ctx.workflow.ribReadable }
                 : {}),
             });
             // Order matters: abort > timeout > exit 0. A probe that traps

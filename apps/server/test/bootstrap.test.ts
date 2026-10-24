@@ -1441,15 +1441,16 @@ describe("bootstrapRibs", () => {
         });
         const prepared = prepareRibWorkflows(boot.workflowContributions);
         const expected = [realpathSync(packageDir), realpathSync(dataDir)];
-        const readonlyOf = (name: string) =>
-          prepared.definitions.find((d) => d.name === name)?.sandbox?.filesystem?.readonly;
-        expect(readonlyOf("folder-plain")).toEqual(expected);
-        expect(readonlyOf("code-plain")).toEqual(expected);
-        expect(readonlyOf("folder-own")).toEqual(["/opt/extra", ...expected]);
+        const definitionOf = (name: string) => prepared.definitions.find((d) => d.name === name);
+        expect(definitionOf("folder-plain")?.ribReadable).toEqual(expected);
+        expect(definitionOf("code-plain")?.ribReadable).toEqual(expected);
+        // The author's own read-only grant is untouched; rib paths ride separately.
+        expect(definitionOf("folder-own")?.ribReadable).toEqual(expected);
+        expect(definitionOf("folder-own")?.sandbox?.filesystem?.readonly).toEqual(["/opt/extra"]);
         const fresh = prepareRibWorkflows(boot.recollectWorkflows().contributions);
-        expect(
-          fresh.definitions.find((d) => d.name === "code-plain")?.sandbox?.filesystem?.readonly,
-        ).toEqual(expected);
+        expect(fresh.definitions.find((d) => d.name === "code-plain")?.ribReadable).toEqual(
+          expected,
+        );
       } finally {
         await rm(tempDir, { recursive: true, force: true });
       }
@@ -1469,7 +1470,7 @@ describe("bootstrapRibs", () => {
         const rib: Rib = { id: "wf", displayName: "wf" };
         const boot = await bootstrapRibs({ available: { wf: rib }, ribDirs: { wf: installed } });
         const prepared = prepareRibWorkflows(boot.workflowContributions);
-        expect(prepared.definitions[0]?.sandbox?.filesystem?.readonly).toEqual([
+        expect(prepared.definitions[0]?.ribReadable).toEqual([
           realpathSync(installed),
           realpathSync(checkout),
         ]);
@@ -1491,9 +1492,7 @@ describe("bootstrapRibs", () => {
           getRibDataDir: () => join(tempDir, "absent"),
         });
         const prepared = prepareRibWorkflows(boot.workflowContributions);
-        expect(prepared.definitions[0]?.sandbox?.filesystem?.readonly).toEqual([
-          realpathSync(tempDir),
-        ]);
+        expect(prepared.definitions[0]?.ribReadable).toEqual([realpathSync(tempDir)]);
       } finally {
         await rm(tempDir, { recursive: true, force: true });
       }

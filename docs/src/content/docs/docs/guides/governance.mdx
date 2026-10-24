@@ -230,8 +230,10 @@ finding as unverifiable and the run still succeeds.
 A workflow a rib contributes, from its `workflows/` folder or its code, also
 gets the rib's package directory and its data directory (`<home>/rib-<id>`)
 read-only on every node, so the rib's scripts, prompts, pipelines, and config
-are reachable without the author spelling out install paths. The workflow's own
-`sandbox` block layers on top. Sandboxed shells always see `KEELSON_HOME`, since
+are reachable without the author spelling out install paths. These grants never
+restrict a write: when a writable root covers or sits inside one of them (a rib
+run from its own checkout), the grant is skipped and the writable root stands.
+The workflow's own `sandbox` block layers on top. Sandboxed shells always see `KEELSON_HOME`, since
 `HOME` points into scratch.
 
 ### Opting out

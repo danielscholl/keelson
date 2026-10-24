@@ -557,6 +557,29 @@ describe("prompt-node default", () => {
   });
 });
 
+describe("readable paths", () => {
+  test("a disjoint rib path is granted read-only", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const rib = join(ROOT, "ribs", "touchline");
+    const profile = policy.resolve({ enabled: true }, { cwd: CWD, readable: [rib] }).profile;
+    expect(profile?.filesystem.readonly).toContain(rib);
+  });
+
+  test("a rib path that covers or sits inside a writable root never restricts it", () => {
+    const policy = createSandboxPolicy(policyOptions({ runtime: fakeRuntime }));
+    const parent = resolve(CWD, "..");
+    const child = join(CWD, "pipeline");
+    const profile = policy.resolve(
+      { enabled: true },
+      { cwd: CWD, readable: [parent, CWD, child] },
+    ).profile;
+    expect(profile?.filesystem.readonly).not.toContain(parent);
+    expect(profile?.filesystem.readonly).not.toContain(CWD);
+    expect(profile?.filesystem.readonly).not.toContain(child);
+    expect(profile?.filesystem.readwrite).toContain(CWD);
+  });
+});
+
 describe("webSearchMode: live", () => {
   const provider = { id: "copilot", support: "native" as const };
 

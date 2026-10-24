@@ -1308,13 +1308,7 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
     claimed.set(definition.name, contribution.ribId);
     const granted = contribution.sandboxReadonly ?? [];
     if (granted.length > 0) {
-      definition.sandbox = {
-        ...definition.sandbox,
-        filesystem: {
-          ...definition.sandbox?.filesystem,
-          readonly: [...new Set([...(definition.sandbox?.filesystem?.readonly ?? []), ...granted])],
-        },
-      };
+      definition.ribReadable = [...new Set([...(definition.ribReadable ?? []), ...granted])];
     }
     definitions.push(definition);
     const background = Boolean(contribution.publish);
