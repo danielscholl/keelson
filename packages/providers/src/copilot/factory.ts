@@ -10,7 +10,7 @@
 // for tests. Lazy SDK import keeps providers/ importable without spawning a
 // native binary (docs/architecture.md §4 provider rules).
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -317,6 +317,15 @@ function readPackageBinPaths(packageJsonPath: string): string[] {
   }
 }
 
+// The SDK rejects a runtime whose wrapper or runtime.node is missing or empty.
+function isNonEmptyFile(path: string): boolean {
+  try {
+    return statSync(path).size > 0;
+  } catch {
+    return false;
+  }
+}
+
 export interface ResolveBundledCopilotCliOptions {
   /** Module path to anchor resolution at; defaults to the installed @github/copilot-sdk entry. */
   sdkEntry?: string;
@@ -341,7 +350,8 @@ function inspectBundledCopilotCli(
     if (!packageJsonPath) continue;
     const platform = packageName.slice("@github/copilot-sdk-".length);
     const wrapper = platform.startsWith("win32") ? "copilot-runtime.exe" : "copilot-runtime";
-    if (!existsSync(join(dirname(packageJsonPath), "prebuilds", platform, wrapper))) continue;
+    const prebuilds = join(dirname(packageJsonPath), "prebuilds", platform);
+    if (![wrapper, "runtime.node"].every((file) => isNonEmptyFile(join(prebuilds, file)))) continue;
     const version = readPackageVersion(packageJsonPath);
     return { sdkRuntime: true, ...(version ? { version } : {}) };
   }

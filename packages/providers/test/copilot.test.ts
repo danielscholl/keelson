@@ -535,7 +535,7 @@ describe("Copilot CLI resolution", () => {
     expect(diagnostics.version).toBeDefined();
   });
 
-  it("prefers the SDK's runtime over a stray @github/copilot platform package", () => {
+  it("prefers a complete SDK runtime over a stray @github/copilot platform package", () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "copilot-layout-")));
     try {
       const [platformPackage] = copilotCliPlatformPackageNames();
@@ -558,12 +558,14 @@ describe("Copilot CLI resolution", () => {
         join(runtimeDir, "package.json"),
         JSON.stringify({ name: runtimePackage, version: "1.0.22" }),
       );
-      writeFileSync(
-        join(prebuildDir, platform.startsWith("win32") ? "copilot-runtime.exe" : "copilot-runtime"),
-        "",
-      );
+      const sdkEntry = join(sdkDir, "client.js");
+      const wrapper = platform.startsWith("win32") ? "copilot-runtime.exe" : "copilot-runtime";
+      writeFileSync(join(prebuildDir, wrapper), "#!");
+      writeFileSync(join(prebuildDir, "runtime.node"), "");
+      expect(resolveBundledCopilotCliPath({ sdkEntry })).toBe(join(platformDir, "index.js"));
 
-      expect(resolveBundledCopilotCliPath({ sdkEntry: join(sdkDir, "client.js") })).toBeUndefined();
+      writeFileSync(join(prebuildDir, "runtime.node"), "\0");
+      expect(resolveBundledCopilotCliPath({ sdkEntry })).toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
