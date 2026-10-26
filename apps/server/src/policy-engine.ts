@@ -217,6 +217,12 @@ const CONTENT_KEYS = new Set([
   "body",
   "description",
   "prompt",
+  "title",
+  "reason",
+  "notes",
+  "message",
+  "summary",
+  "task",
 ]);
 
 function expandConfinedPath(input: string, cwd: string): string {
