@@ -24,7 +24,7 @@ import { displayRegistry, effectiveRegistry } from "../npm-registry.ts";
 import { emit } from "../output.ts";
 import { isProblem, type RibPlanEntry } from "../rib-plan.ts";
 import { probeServer } from "../server-probe.ts";
-import { installSpecs } from "./provider.ts";
+import { installSpecs, outdatedProviderPackages } from "./provider.ts";
 import { describeEntry, incompatibleWarning, runRibUpdatePass } from "./rib-update.ts";
 
 // The repo whose GitHub Releases this CLI updates from. Overridable for forks
@@ -368,6 +368,9 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
         opts.json,
       );
     }
+    const providers = await restoreOnDemandProviders(home, opts.json);
+    const providersMoved = providers.restored.length + providers.upgraded.length > 0;
+    const moved = (ribsOnly !== null && ribsOnly.moved.length > 0) || providersMoved;
     const server = await probeServer({});
     emitResult(opts, {
       current,
@@ -380,17 +383,20 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
       ...(ribsOnly && ribsOnly.incompatible.length > 0
         ? { ribsIncompatible: ribsOnly.incompatible }
         : {}),
-      restartRequired: ribsOnly !== null && ribsOnly.moved.length > 0 && server !== null,
+      ...providerReport(providers),
+      restartRequired: moved && server !== null,
     });
     if (!opts.json) {
       for (const entry of ribsOnly?.entries ?? [])
         process.stdout.write(`${describeEntry(entry)}\n`);
       for (const rib of ribsOnly?.incompatible ?? [])
         process.stdout.write(`${incompatibleWarning(rib)}\n`);
-      if (ribsOnly !== null && ribsOnly.moved.length > 0 && server !== null)
+      writeProviderLines(providers);
+      if (moved && server !== null)
         process.stdout.write("restart the server (`keelson restart`) to load the update\n");
     }
-    process.exit((ribsOnly?.entries.filter(isProblem).length ?? 0) > 0 ? EXIT_FAIL : EXIT_OK);
+    const ribProblemCount = ribsOnly?.entries.filter(isProblem).length ?? 0;
+    process.exit(ribProblemCount > 0 || providers.failed.length > 0 ? EXIT_FAIL : EXIT_OK);
   }
 
   if (upToDate && !opts.force) {
@@ -463,10 +469,7 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     }`;
   }
 
-  const { restored: providersRestored, failed: providersFailed } = await restoreOnDemandProviders(
-    home,
-    opts.json,
-  );
+  const providers = await restoreOnDemandProviders(home, opts.json);
 
   // Ribs advance release-to-release through the same resolver `keelson rib
   // update` uses, so both surfaces move a home to exactly the same versions.
@@ -497,8 +500,7 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     ...(ribPass && ribPass.incompatible.length > 0
       ? { ribsIncompatible: ribPass.incompatible }
       : {}),
-    ...(providersRestored.length > 0 ? { providersRestored } : {}),
-    ...(providersFailed.length > 0 ? { providersFailed } : {}),
+    ...providerReport(providers),
     refreshedWorkflows: refreshed,
     removedWorkflows: removed,
     restartRequired: server !== null,
@@ -514,14 +516,7 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     for (const entry of ribPass?.entries ?? []) process.stdout.write(`${describeEntry(entry)}\n`);
     for (const rib of ribPass?.incompatible ?? [])
       process.stdout.write(`${incompatibleWarning(rib)}\n`);
-    if (providersRestored.length > 0)
-      process.stdout.write(
-        `kept provider SDKs installed: ${providersRestored.join(", ")} (now managed by \`keelson provider\`)\n`,
-      );
-    if (providersFailed.length > 0)
-      process.stdout.write(
-        `could not reinstall provider SDKs: ${providersFailed.join(", ")} — run \`keelson provider add <id>\`\n`,
-      );
+    writeProviderLines(providers);
     if (refreshed.length > 0)
       process.stdout.write(`refreshed ${refreshed.length} workflow(s): ${refreshed.join(", ")}\n`);
     if (removed.length > 0)
@@ -545,7 +540,7 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
   // The harness update itself is done and reported; a rib whose releases could
   // not be read is still an unfinished job, and exiting 0 would let a scripted
   // update report clean while having silently left that rib behind.
-  process.exit(ribProblems.length > 0 ? EXIT_FAIL : EXIT_OK);
+  process.exit(ribProblems.length > 0 || providers.failed.length > 0 ? EXIT_FAIL : EXIT_OK);
 }
 
 function ribReport(entry: RibPlanEntry): Record<string, unknown> {
@@ -573,9 +568,25 @@ export function providersNeedingRestore(
   home: string,
   exists: (path: string) => boolean = existsSync,
 ): string[] {
-  let enabled: string[];
+  return enabledOnDemandProviders(home).filter((id) =>
+    (ON_DEMAND_PROVIDER_PACKAGES[id] ?? []).some((pkg) => !exists(join(home, "node_modules", pkg))),
+  );
+}
+
+// Enabled on-demand providers whose installed SDK falls outside the updated
+// CLI's peer range, so the update re-pins them to the range it was built against.
+export function providersOutOfRange(
+  home: string,
+  readVersion?: (home: string, pkg: string) => string | null,
+): string[] {
+  return enabledOnDemandProviders(home).filter(
+    (id) => outdatedProviderPackages(id, home, readVersion).length > 0,
+  );
+}
+
+function enabledOnDemandProviders(home: string): string[] {
   try {
-    enabled = resolveEnabledProviders({
+    return resolveEnabledProviders({
       config: loadKeelsonConfig(home),
       envProviders: undefined,
       known: BUILT_IN_PROVIDER_IDS,
@@ -584,27 +595,54 @@ export function providersNeedingRestore(
   } catch {
     return [];
   }
-  return enabled.filter((id) =>
-    (ON_DEMAND_PROVIDER_PACKAGES[id] ?? []).some((pkg) => !exists(join(home, "node_modules", pkg))),
-  );
 }
 
 // The update itself succeeded, so a failed re-install is reported rather than
 // thrown — but it is never silent: in --json mode runBun suppresses the package
 // manager's own output, so an unreported failure would leave a pruned provider
 // and an exit code that claims everything worked.
-async function restoreOnDemandProviders(
-  home: string,
-  quiet: boolean,
-): Promise<{ restored: string[]; failed: string[] }> {
+async function restoreOnDemandProviders(home: string, quiet: boolean): Promise<ProviderPass> {
   const restored: string[] = [];
+  const upgraded: string[] = [];
   const failed: string[] = [];
-  for (const id of providersNeedingRestore(home)) {
+  const missing = providersNeedingRestore(home);
+  const outdated = providersOutOfRange(home).filter((id) => !missing.includes(id));
+  for (const id of [...missing, ...outdated]) {
     const result = await runBun(["add", ...installSpecs(id, home)], home, quiet);
-    if (result.code === 0) restored.push(id);
-    else failed.push(id);
+    if (result.code !== 0) failed.push(id);
+    else if (missing.includes(id)) restored.push(id);
+    else upgraded.push(id);
   }
-  return { restored, failed };
+  return { restored, upgraded, failed };
+}
+
+interface ProviderPass {
+  restored: string[];
+  upgraded: string[];
+  failed: string[];
+}
+
+function providerReport(p: ProviderPass): Record<string, string[]> {
+  return {
+    ...(p.restored.length > 0 ? { providersRestored: p.restored } : {}),
+    ...(p.upgraded.length > 0 ? { providersUpgraded: p.upgraded } : {}),
+    ...(p.failed.length > 0 ? { providersFailed: p.failed } : {}),
+  };
+}
+
+function writeProviderLines(p: ProviderPass): void {
+  if (p.restored.length > 0)
+    process.stdout.write(
+      `kept provider SDKs installed: ${p.restored.join(", ")} (now managed by \`keelson provider\`)\n`,
+    );
+  if (p.upgraded.length > 0)
+    process.stdout.write(
+      `upgraded provider SDKs to this release's ranges: ${p.upgraded.join(", ")}\n`,
+    );
+  if (p.failed.length > 0)
+    process.stdout.write(
+      `could not reinstall provider SDKs: ${p.failed.join(", ")} — run \`keelson provider add <id>\`\n`,
+    );
 }
 
 function emitResult(opts: UpdateOptions, data: Record<string, unknown>): void {

@@ -3,10 +3,10 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { providersNeedingRestore } from "../src/commands/update.ts";
+import { providersNeedingRestore, providersOutOfRange } from "../src/commands/update.ts";
 
 describe("providersNeedingRestore", () => {
   let home: string;
@@ -72,5 +72,54 @@ describe("providersNeedingRestore", () => {
   test("a malformed config.json does not throw", () => {
     writeFileSync(join(home, "config.json"), "{ not json");
     expect(providersNeedingRestore(home, nothingInstalled)).toEqual([]);
+  });
+});
+
+describe("providersOutOfRange", () => {
+  let home: string;
+  const envBefore = process.env.KEELSON_CONFIG;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "keelson-drift-"));
+    delete process.env.KEELSON_CONFIG;
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    if (envBefore === undefined) delete process.env.KEELSON_CONFIG;
+    else process.env.KEELSON_CONFIG = envBefore;
+  });
+
+  const setup = (providers: Record<string, boolean>, peers: Record<string, string>) => {
+    writeFileSync(join(home, "config.json"), JSON.stringify({ providers }));
+    const cli = join(home, "node_modules", "@keelson", "cli");
+    mkdirSync(cli, { recursive: true });
+    writeFileSync(join(cli, "package.json"), JSON.stringify({ peerDependencies: peers }));
+  };
+  const versions =
+    (installed: Record<string, string>) =>
+    (_home: string, pkg: string): string | null =>
+      installed[pkg] ?? null;
+
+  test("an enabled provider left below the CLI's range is flagged", () => {
+    setup({ codex: true }, { "@openai/codex-sdk": "^0.163.0" });
+    expect(providersOutOfRange(home, versions({ "@openai/codex-sdk": "0.144.6" }))).toEqual([
+      "codex",
+    ]);
+  });
+
+  test("an SDK inside the range is left alone", () => {
+    setup({ codex: true }, { "@openai/codex-sdk": "^0.163.0" });
+    expect(providersOutOfRange(home, versions({ "@openai/codex-sdk": "0.163.4" }))).toEqual([]);
+  });
+
+  test("a disabled provider is never upgraded", () => {
+    setup({ codex: false }, { "@openai/codex-sdk": "^0.163.0" });
+    expect(providersOutOfRange(home, versions({ "@openai/codex-sdk": "0.144.6" }))).toEqual([]);
+  });
+
+  // Bun.semver.satisfies matches every version against a malformed range.
+  test("a malformed peer range flags nothing", () => {
+    setup({ codex: true }, { "@openai/codex-sdk": "not a range" });
+    expect(providersOutOfRange(home, versions({ "@openai/codex-sdk": "0.144.6" }))).toEqual([]);
   });
 });
