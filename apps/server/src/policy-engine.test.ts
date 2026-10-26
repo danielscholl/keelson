@@ -1404,6 +1404,19 @@ describe("createPolicyEngine — path confinement reads paths, not contents", ()
     ).toEqual({ outcome: "allow" });
   });
 
+  it("a rib tool's one-line prose that starts like a path is not treated as one", async () => {
+    const engine = createPolicyEngine();
+    for (const args of [
+      { project: "keelson", title: "/sandbox fails in chat" },
+      { id: "kl-1", reason: "~/.keelson/rib-spi is read-only to agents" },
+      { project: "keelson", task: "../keelson-rib-swarm is slow; find out why" },
+    ]) {
+      expect(await engine.evaluateToolCall({ tool: "beads_create", args }, scope)).toEqual({
+        outcome: "allow",
+      });
+    }
+  });
+
   it("a path argument outside the root is still denied", async () => {
     const engine = createPolicyEngine();
     const decision = await engine.evaluateToolCall(
