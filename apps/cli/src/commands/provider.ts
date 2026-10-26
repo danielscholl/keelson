@@ -20,6 +20,7 @@ import { runBunPm } from "../bun-pm.ts";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { ensureHome, resolveKeelsonHome } from "../home.ts";
 import { emit } from "../output.ts";
+import { isValidRange } from "../rib-version.ts";
 import { probeServer } from "../server-probe.ts";
 
 interface BaseOptions {
@@ -41,16 +42,47 @@ function statusOf(id: string): ProviderStatus {
 // fallback there.
 export function installSpecs(id: string, home: string): string[] {
   const packages = ON_DEMAND_PROVIDER_PACKAGES[id] ?? [];
-  let ranges: Record<string, string> = {};
+  const ranges = cliPeerRanges(home);
+  return packages.map((pkg) => (ranges[pkg] ? `${pkg}@${ranges[pkg]}` : pkg));
+}
+
+function cliPeerRanges(home: string): Record<string, string> {
   try {
     const manifest = JSON.parse(
       readFileSync(join(home, "node_modules", "@keelson", "cli", "package.json"), "utf8"),
     ) as { peerDependencies?: Record<string, string> };
-    ranges = manifest.peerDependencies ?? {};
+    return manifest.peerDependencies ?? {};
   } catch {
-    ranges = {};
+    return {};
   }
-  return packages.map((pkg) => (ranges[pkg] ? `${pkg}@${ranges[pkg]}` : pkg));
+}
+
+function installedVersion(home: string, pkg: string): string | null {
+  try {
+    const manifest = JSON.parse(
+      readFileSync(join(home, "node_modules", pkg, "package.json"), "utf8"),
+    ) as { version?: unknown };
+    return typeof manifest.version === "string" ? manifest.version : null;
+  } catch {
+    return null;
+  }
+}
+
+// Installed SDK packages outside the running CLI's peer range. Bun leaves an
+// optional peer wherever the home first pinned it, so without this check a
+// home keeps the SDK it started with across every harness update.
+export function outdatedProviderPackages(
+  id: string,
+  home: string,
+  readVersion: (home: string, pkg: string) => string | null = installedVersion,
+): string[] {
+  const ranges = cliPeerRanges(home);
+  return (ON_DEMAND_PROVIDER_PACKAGES[id] ?? []).filter((pkg) => {
+    const range = ranges[pkg];
+    const version = readVersion(home, pkg);
+    if (range === undefined || version === null || !isValidRange(range)) return false;
+    return !Bun.semver.satisfies(version, range);
+  });
 }
 
 // Mirrors resolveEnabledProviders' own parse of the env override.
@@ -102,7 +134,8 @@ export async function runProviderAdd(id: string, opts: BaseOptions): Promise<nev
   const home = ensureHome();
   const specs = installSpecs(trimmed, home);
   const alreadyInstalled = isProviderSdkInstalled(trimmed);
-  if (!alreadyInstalled) {
+  const outdated = alreadyInstalled ? outdatedProviderPackages(trimmed, home) : [];
+  if (!alreadyInstalled || outdated.length > 0) {
     const code = await runBunPm(["add", ...specs], home, opts.json);
     if (code !== 0) {
       emit(
@@ -120,6 +153,7 @@ export async function runProviderAdd(id: string, opts: BaseOptions): Promise<nev
         provider: trimmed,
         packages: specs,
         alreadyInstalled,
+        ...(outdated.length > 0 ? { upgraded: outdated } : {}),
         enabled: true,
         restartRequired: server !== null,
       },
@@ -128,7 +162,11 @@ export async function runProviderAdd(id: string, opts: BaseOptions): Promise<nev
   );
   if (!opts.json) {
     process.stdout.write(
-      alreadyInstalled ? `${trimmed} already installed; enabled\n` : `added ${trimmed}\n`,
+      outdated.length > 0
+        ? `upgraded ${trimmed} to ${specs.join(" ")}; enabled\n`
+        : alreadyInstalled
+          ? `${trimmed} already installed; enabled\n`
+          : `added ${trimmed}\n`,
     );
     if (server !== null) {
       process.stdout.write("restart the server (`keelson restart`) to activate it\n");

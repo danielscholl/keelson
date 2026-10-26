@@ -24,7 +24,7 @@ import { displayRegistry, effectiveRegistry } from "../npm-registry.ts";
 import { emit } from "../output.ts";
 import { isProblem, type RibPlanEntry } from "../rib-plan.ts";
 import { probeServer } from "../server-probe.ts";
-import { installSpecs } from "./provider.ts";
+import { installSpecs, outdatedProviderPackages } from "./provider.ts";
 import { describeEntry, incompatibleWarning, runRibUpdatePass } from "./rib-update.ts";
 
 // The repo whose GitHub Releases this CLI updates from. Overridable for forks
@@ -463,10 +463,11 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     }`;
   }
 
-  const { restored: providersRestored, failed: providersFailed } = await restoreOnDemandProviders(
-    home,
-    opts.json,
-  );
+  const {
+    restored: providersRestored,
+    upgraded: providersUpgraded,
+    failed: providersFailed,
+  } = await restoreOnDemandProviders(home, opts.json);
 
   // Ribs advance release-to-release through the same resolver `keelson rib
   // update` uses, so both surfaces move a home to exactly the same versions.
@@ -498,6 +499,7 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
       ? { ribsIncompatible: ribPass.incompatible }
       : {}),
     ...(providersRestored.length > 0 ? { providersRestored } : {}),
+    ...(providersUpgraded.length > 0 ? { providersUpgraded } : {}),
     ...(providersFailed.length > 0 ? { providersFailed } : {}),
     refreshedWorkflows: refreshed,
     removedWorkflows: removed,
@@ -517,6 +519,10 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     if (providersRestored.length > 0)
       process.stdout.write(
         `kept provider SDKs installed: ${providersRestored.join(", ")} (now managed by \`keelson provider\`)\n`,
+      );
+    if (providersUpgraded.length > 0)
+      process.stdout.write(
+        `upgraded provider SDKs to this release's ranges: ${providersUpgraded.join(", ")}\n`,
       );
     if (providersFailed.length > 0)
       process.stdout.write(
@@ -573,9 +579,25 @@ export function providersNeedingRestore(
   home: string,
   exists: (path: string) => boolean = existsSync,
 ): string[] {
-  let enabled: string[];
+  return enabledOnDemandProviders(home).filter((id) =>
+    (ON_DEMAND_PROVIDER_PACKAGES[id] ?? []).some((pkg) => !exists(join(home, "node_modules", pkg))),
+  );
+}
+
+// Enabled on-demand providers whose installed SDK falls outside the updated
+// CLI's peer range, so the update re-pins them to the range it was built against.
+export function providersOutOfRange(
+  home: string,
+  readVersion?: (home: string, pkg: string) => string | null,
+): string[] {
+  return enabledOnDemandProviders(home).filter(
+    (id) => outdatedProviderPackages(id, home, readVersion).length > 0,
+  );
+}
+
+function enabledOnDemandProviders(home: string): string[] {
   try {
-    enabled = resolveEnabledProviders({
+    return resolveEnabledProviders({
       config: loadKeelsonConfig(home),
       envProviders: undefined,
       known: BUILT_IN_PROVIDER_IDS,
@@ -584,9 +606,6 @@ export function providersNeedingRestore(
   } catch {
     return [];
   }
-  return enabled.filter((id) =>
-    (ON_DEMAND_PROVIDER_PACKAGES[id] ?? []).some((pkg) => !exists(join(home, "node_modules", pkg))),
-  );
 }
 
 // The update itself succeeded, so a failed re-install is reported rather than
@@ -596,15 +615,19 @@ export function providersNeedingRestore(
 async function restoreOnDemandProviders(
   home: string,
   quiet: boolean,
-): Promise<{ restored: string[]; failed: string[] }> {
+): Promise<{ restored: string[]; upgraded: string[]; failed: string[] }> {
   const restored: string[] = [];
+  const upgraded: string[] = [];
   const failed: string[] = [];
-  for (const id of providersNeedingRestore(home)) {
+  const missing = providersNeedingRestore(home);
+  const outdated = providersOutOfRange(home).filter((id) => !missing.includes(id));
+  for (const id of [...missing, ...outdated]) {
     const result = await runBun(["add", ...installSpecs(id, home)], home, quiet);
-    if (result.code === 0) restored.push(id);
-    else failed.push(id);
+    if (result.code !== 0) failed.push(id);
+    else if (missing.includes(id)) restored.push(id);
+    else upgraded.push(id);
   }
-  return { restored, failed };
+  return { restored, upgraded, failed };
 }
 
 function emitResult(opts: UpdateOptions, data: Record<string, unknown>): void {
