@@ -103,6 +103,18 @@ describe("providers doctor check", () => {
     expect(result.checks[0]?.detail).toBe("copilot CLI resolved (/custom/copilot)");
   });
 
+  test("names the SDK when it launches its own runtime", () => {
+    const result = runProvidersCheck({
+      loadConfig: () => config(),
+      isInstalled: notInstalled,
+      copilotDiagnostics: () => ({ resolved: true, sdkRuntime: true, version: "1.0.22" }),
+      envProviders: "",
+    });
+
+    expect(result.checks[0]?.status).toBe("ok");
+    expect(result.checks[0]?.detail).toBe("copilot CLI bundled with @github/copilot-sdk 1.0.22");
+  });
+
   test("warns when the bundled Copilot CLI cannot be resolved", () => {
     const result = runProvidersCheck({
       loadConfig: () => config(),

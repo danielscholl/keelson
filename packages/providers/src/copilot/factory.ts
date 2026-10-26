@@ -10,7 +10,7 @@
 // for tests. Lazy SDK import keeps providers/ importable without spawning a
 // native binary (docs/architecture.md §4 provider rules).
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -244,12 +244,15 @@ export interface CopilotCliDiagnosticsResult {
   resolved: boolean;
   cliPath?: string;
   version?: string;
+  // The SDK launches the runtime it ships, so there is no path to report.
+  sdkRuntime?: true;
   error?: string;
 }
 
 interface CopilotCliResolution {
   cliPath?: string;
   version?: string;
+  sdkRuntime?: true;
   error?: string;
 }
 
@@ -260,6 +263,11 @@ function inspectConfiguredCopilotCli(
   if (!cliPath) return undefined;
   if (existsSync(cliPath)) return { cliPath };
   return { error: `COPILOT_CLI_PATH does not exist: ${cliPath}` };
+}
+
+export function copilotSdkRuntimePackageNames(): string[] {
+  const variants = process.platform === "linux" ? ["linux", "linuxmusl"] : [process.platform];
+  return variants.map((variant) => `@github/copilot-sdk-${variant}-${process.arch}`);
 }
 
 export function copilotCliPlatformPackageNames(): string[] {
@@ -309,6 +317,15 @@ function readPackageBinPaths(packageJsonPath: string): string[] {
   }
 }
 
+// The SDK rejects a runtime whose wrapper or runtime.node is missing or empty.
+function isNonEmptyFile(path: string): boolean {
+  try {
+    return statSync(path).size > 0;
+  } catch {
+    return false;
+  }
+}
+
 export interface ResolveBundledCopilotCliOptions {
   /** Module path to anchor resolution at; defaults to the installed @github/copilot-sdk entry. */
   sdkEntry?: string;
@@ -324,6 +341,19 @@ function inspectBundledCopilotCli(
   } catch (error) {
     const detail = error instanceof Error ? `: ${error.message}` : "";
     return { error: `Could not resolve @github/copilot-sdk${detail}` };
+  }
+
+  // A stray @github/copilot left in an upgraded home must not shadow the
+  // runtime the SDK was built against.
+  for (const packageName of copilotSdkRuntimePackageNames()) {
+    const packageJsonPath = resolveFromSdk(requireFromSdk, `${packageName}/package.json`);
+    if (!packageJsonPath) continue;
+    const platform = packageName.slice("@github/copilot-sdk-".length);
+    const wrapper = platform.startsWith("win32") ? "copilot-runtime.exe" : "copilot-runtime";
+    const prebuilds = join(dirname(packageJsonPath), "prebuilds", platform);
+    if (![wrapper, "runtime.node"].every((file) => isNonEmptyFile(join(prebuilds, file)))) continue;
+    const version = readPackageVersion(packageJsonPath);
+    return { sdkRuntime: true, ...(version ? { version } : {}) };
   }
 
   const installedVersion = readPackageVersion(
@@ -369,6 +399,13 @@ export function copilotCliDiagnostics(
   }
 
   const resolution = inspectBundledCopilotCli();
+  if (resolution.sdkRuntime) {
+    return {
+      resolved: true,
+      sdkRuntime: true,
+      ...(resolution.version ? { version: resolution.version } : {}),
+    };
+  }
   if (resolution.cliPath) {
     return {
       resolved: true,
