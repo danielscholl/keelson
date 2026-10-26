@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, spyOn } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ToolDefinition } from "@keelson/shared";
@@ -9,6 +9,7 @@ import {
   type CopilotToolProjectionContext,
   copilotCliDiagnostics,
   copilotCliPlatformPackageNames,
+  copilotSdkRuntimePackageNames,
   projectToolsForCopilot,
   resolveBundledCopilotCliPath,
 } from "../src/copilot/factory.ts";
@@ -524,15 +525,48 @@ describe("Copilot CLI resolution", () => {
     });
   });
 
-  it("resolves the installed platform CLI from the SDK module", () => {
-    const cliPath = resolveBundledCopilotCliPath();
-    expect(cliPath).toBeDefined();
-    expect(existsSync(cliPath!)).toBe(true);
+  it("leaves the installed SDK to launch the runtime it ships", () => {
+    expect(resolveBundledCopilotCliPath()).toBeUndefined();
 
     const diagnostics = copilotCliDiagnostics({});
     expect(diagnostics.resolved).toBe(true);
-    expect(diagnostics.cliPath).toBe(cliPath);
+    expect(diagnostics.sdkRuntime).toBe(true);
+    expect(diagnostics.cliPath).toBeUndefined();
     expect(diagnostics.version).toBeDefined();
+  });
+
+  it("prefers the SDK's runtime over a stray @github/copilot platform package", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "copilot-layout-")));
+    try {
+      const [platformPackage] = copilotCliPlatformPackageNames();
+      const [runtimePackage] = copilotSdkRuntimePackageNames();
+      const platform = runtimePackage!.slice("@github/copilot-sdk-".length);
+      const sdkDir = join(root, "node_modules", "@github", "copilot-sdk", "dist");
+      const platformDir = join(root, "node_modules", ...platformPackage!.split("/"));
+      const runtimeDir = join(root, "node_modules", ...runtimePackage!.split("/"));
+      const prebuildDir = join(runtimeDir, "prebuilds", platform);
+      mkdirSync(sdkDir, { recursive: true });
+      mkdirSync(platformDir, { recursive: true });
+      mkdirSync(prebuildDir, { recursive: true });
+      writeFileSync(join(sdkDir, "client.js"), "export {};\n");
+      writeFileSync(
+        join(platformDir, "package.json"),
+        JSON.stringify({ name: platformPackage, version: "1.0.80" }),
+      );
+      writeFileSync(join(platformDir, "index.js"), "");
+      writeFileSync(
+        join(runtimeDir, "package.json"),
+        JSON.stringify({ name: runtimePackage, version: "1.0.22" }),
+      );
+      writeFileSync(
+        join(prebuildDir, platform.startsWith("win32") ? "copilot-runtime.exe" : "copilot-runtime"),
+        "",
+      );
+
+      expect(resolveBundledCopilotCliPath({ sdkEntry: join(sdkDir, "client.js") })).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("resolves a platform package whose exports map exposes only '.' (copilot 1.0.81+)", () => {

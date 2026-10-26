@@ -244,12 +244,15 @@ export interface CopilotCliDiagnosticsResult {
   resolved: boolean;
   cliPath?: string;
   version?: string;
+  // The SDK launches the runtime it ships, so there is no path to report.
+  sdkRuntime?: true;
   error?: string;
 }
 
 interface CopilotCliResolution {
   cliPath?: string;
   version?: string;
+  sdkRuntime?: true;
   error?: string;
 }
 
@@ -260,6 +263,11 @@ function inspectConfiguredCopilotCli(
   if (!cliPath) return undefined;
   if (existsSync(cliPath)) return { cliPath };
   return { error: `COPILOT_CLI_PATH does not exist: ${cliPath}` };
+}
+
+export function copilotSdkRuntimePackageNames(): string[] {
+  const variants = process.platform === "linux" ? ["linux", "linuxmusl"] : [process.platform];
+  return variants.map((variant) => `@github/copilot-sdk-${variant}-${process.arch}`);
 }
 
 export function copilotCliPlatformPackageNames(): string[] {
@@ -326,6 +334,18 @@ function inspectBundledCopilotCli(
     return { error: `Could not resolve @github/copilot-sdk${detail}` };
   }
 
+  // A stray @github/copilot left in an upgraded home must not shadow the
+  // runtime the SDK was built against.
+  for (const packageName of copilotSdkRuntimePackageNames()) {
+    const packageJsonPath = resolveFromSdk(requireFromSdk, `${packageName}/package.json`);
+    if (!packageJsonPath) continue;
+    const platform = packageName.slice("@github/copilot-sdk-".length);
+    const wrapper = platform.startsWith("win32") ? "copilot-runtime.exe" : "copilot-runtime";
+    if (!existsSync(join(dirname(packageJsonPath), "prebuilds", platform, wrapper))) continue;
+    const version = readPackageVersion(packageJsonPath);
+    return { sdkRuntime: true, ...(version ? { version } : {}) };
+  }
+
   const installedVersion = readPackageVersion(
     resolveFromSdk(requireFromSdk, "@github/copilot/package.json"),
   );
@@ -369,6 +389,13 @@ export function copilotCliDiagnostics(
   }
 
   const resolution = inspectBundledCopilotCli();
+  if (resolution.sdkRuntime) {
+    return {
+      resolved: true,
+      sdkRuntime: true,
+      ...(resolution.version ? { version: resolution.version } : {}),
+    };
+  }
   if (resolution.cliPath) {
     return {
       resolved: true,
