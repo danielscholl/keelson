@@ -314,7 +314,9 @@ function InstrumentsPopover({
                 <span className="instruments-check" aria-hidden="true">
                   {shown ? "✓" : ""}
                 </span>
-                <span aria-hidden="true">{item.glyph}</span>
+                <span className="instruments-glyph" aria-hidden="true">
+                  {item.glyph}
+                </span>
                 {item.label}
               </button>
             );

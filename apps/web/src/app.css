@@ -78,6 +78,9 @@
      (not the viewport edge) on wide displays. Below cap+padding, the panel
      fills the body content area and the drawer pins to the body padding. */
   --max-content-width: 1600px;
+  --topbar-h: 46px;
+  /* Body padding (16 + 24) plus the topbar and the gap under it. */
+  --app-chrome-h: calc(40px + var(--topbar-h) + 22px);
 
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
   /* Chrome ignores ui-monospace, so name real faces before the generic fallback. */
@@ -342,6 +345,8 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  height: var(--topbar-h);
+  flex: none;
   padding: 0 0 12px;
   border-bottom: 1px solid var(--border-soft);
   margin-bottom: 22px;
@@ -528,11 +533,18 @@ body {
   font-size: 13px;
   color: var(--fg);
 }
-/* Fixed width so the toggle rows' labels stay aligned whether or not the row is on. */
+/* Fixed widths so the toggle rows' labels stay aligned whether or not the row is on. */
 .instruments-check {
-  width: 10px;
+  width: 12px;
+  flex: none;
   color: var(--accent);
   font-size: 11px;
+}
+.instruments-glyph {
+  width: 16px;
+  flex: none;
+  text-align: center;
+  color: var(--muted);
 }
 .tab {
   padding: 5px 14px;
@@ -1082,7 +1094,7 @@ button.tab:focus-visible {
 .chat-wrap {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 140px);
+  height: calc(100dvh - var(--app-chrome-h));
   min-height: 400px;
   width: min(1220px, 100%);
   margin-inline: auto;
@@ -1731,7 +1743,7 @@ button.tab:focus-visible {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
   gap: 16px;
-  height: calc(100vh - 140px);
+  height: calc(100dvh - var(--app-chrome-h));
   min-height: 400px;
   /* Smooth the collapse — animating grid-template-columns is supported
      in evergreen browsers via the explicit single-track interpolation
@@ -3846,8 +3858,16 @@ button.tab:focus-visible {
 }
 .surface-region-head .cvb-card-overflow-trigger {
   opacity: 1;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
+  border-color: transparent;
+  border-radius: 7px;
+}
+.surface-region-head .cvb-card-overflow-trigger:hover,
+.surface-region-head .cvb-card-overflow.is-open .cvb-card-overflow-trigger {
+  background: var(--hover);
+  border-color: transparent;
+  color: var(--fg);
 }
 .surface-region-head .cvb-card-overflow-menu {
   z-index: 30;
@@ -4054,10 +4074,11 @@ button.tab:focus-visible {
    without the motion. */
 .surface-region-live {
   flex: none;
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
+  margin: 0 4px;
   border-radius: 50%;
-  background: var(--muted);
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
 }
 .surface-region-live[data-streaming] {
   background: var(--cyan);
@@ -9690,6 +9711,9 @@ a.cvb-card-title::after {
      vertical padding so workflow content sits below the TopBar comfortably. */
   padding: 8px 0 60px;
 }
+.page:has(> .run-view) {
+  padding-bottom: 0;
+}
 .page-header {
   display: flex;
   align-items: baseline;
@@ -9849,9 +9873,13 @@ a.cvb-card-title::after {
   border-top: 1px solid var(--border-soft);
   gap: 10px;
 }
-.wc-types { display: flex; gap: 5px; flex-wrap: wrap; min-width: 0; }
+.wc-types {
+  display: flex; gap: 5px; flex-wrap: nowrap; flex: 1 1 auto; min-width: 0; overflow: hidden;
+  mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent);
+}
 .wc-type-pill {
   --c: var(--muted);
+  flex: none; white-space: nowrap;
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 11.5px; padding: 1px 8px 1px 7px;
   border: 0; border-radius: 999px;
@@ -10130,10 +10158,10 @@ a.cvb-card-title::after {
   border-left-width: 3px;
   border-radius: 9px; padding: 9px 12px;
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 4px 12px -6px rgb(0 0 0 / 0.12);
-  min-width: 150px; max-width: 200px;
+  width: 180px;
   font-family: inherit;
 }
-.dag-node .dn-row { display: flex; align-items: center; gap: 7px; }
+.dag-node .dn-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .dag-node .dn-type {
   display: inline-block; padding: 1px 7px;
   font-size: 10px; font-weight: 600;
@@ -10144,7 +10172,7 @@ a.cvb-card-title::after {
 .dag-node .dn-type.prompt   { color: var(--cyan);    background: color-mix(in srgb, var(--cyan) 16%, transparent); }
 .dag-node .dn-type.approval { color: var(--magenta); background: color-mix(in srgb, var(--magenta) 16%, transparent); }
 .dag-node .dn-type.generic  { color: var(--muted);   background: var(--bg-soft); }
-.dag-node .dn-name { font-size: 12px; color: var(--fg-strong); font-weight: 600; }
+.dag-node .dn-name { font-size: 12.5px; color: var(--fg-strong); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dag-node .dn-meta { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .dag-node.pending    { border-left-color: var(--muted); opacity: 0.7; }
@@ -10290,7 +10318,13 @@ a.cvb-card-title::after {
   font-size: 12px;
 }
 .trace-head .caret:hover { color: var(--fg); }
-.trace-head .dur { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; font-weight: 400; }
+.trace-head .dur { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; font-weight: 400; text-align: right; }
+/* Trailing metrics sit in fixed right-aligned columns so durations line up row to row. */
+.trace-head::after { content: ""; order: 1; flex: 1 1 0; }
+.trace-head > .trace-usage { order: 2; min-width: 92px; }
+.trace-head > .dur:not(.trace-usage) { order: 3; min-width: 52px; }
+.trace-head > .trace-artifact-btn { order: 4; }
+.trace-head > .trace-canvas-btn { order: 5; margin-left: 0; }
 .trace-head .node-type {
   font-size: 10.5px; font-weight: 600;
   padding: 1px 7px; border-radius: 999px;
@@ -11224,21 +11258,27 @@ a.cvb-card-title::after {
 }
 .usage-view-nav {
   align-self: flex-start;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
+}
+.usage-page > .surface-region + .surface-region {
+  margin-top: 16px;
 }
 .usage-mono { font-family: var(--font-mono); }
 
 .usage-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 20px 24px;
 }
 .usage-stat {
-  min-width: 120px;
+  min-width: 0;
 }
 .usage-stat-value {
-  font-size: 22px;
-  font-weight: 700;
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
   color: var(--fg-strong);
   overflow-wrap: anywhere;
 }
@@ -11246,39 +11286,45 @@ a.cvb-card-title::after {
 .usage-stat-value[data-tone="hot"] { color: var(--red); }
 .usage-stat-value[data-tone="accent"] { color: var(--accent); }
 .usage-stat-label {
-  font-size: 11px;
+  font-size: 12.5px;
+  font-weight: 500;
   color: var(--muted);
-  margin-top: 2px;
+  margin-top: 4px;
 }
 .usage-stat-sub {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--dim);
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .usage-pulse-strip {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-top: 12px;
-  padding-top: 12px;
+  gap: 16px;
+  margin-top: 18px;
+  padding-top: 14px;
   border-top: 1px solid var(--border-soft);
 }
 .usage-pulse-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 12.5px;
+  font-weight: 500;
   color: var(--muted);
   white-space: nowrap;
 }
 .usage-pulse-svg {
   max-width: 560px;
   flex: 1 1 auto;
+  min-width: 0;
   height: 44px;
 }
 .usage-pulse-now {
+  margin-left: auto;
+  min-width: 96px;
+  text-align: right;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
   color: var(--fg-strong);
   white-space: nowrap;
 }
@@ -11578,6 +11624,7 @@ a.cvb-card-title::after {
    header. Both reuse the muted monospace voice of .dur / .duration. */
 .trace-usage {
   white-space: nowrap;
+  font-family: inherit;
   background: transparent;
   border: 0;
   padding: 0;
@@ -11609,13 +11656,8 @@ a.cvb-card-title::after {
    voice of the trace's per-node .node-model chip, scaled to the header row. */
 .run-provenance,
 .run-definition {
-  font-size: 11.5px;
-  font-weight: 500;
-  padding: 2px 8px;
-  border-radius: 999px;
+  font-size: 12px;
   color: var(--muted);
-  background: var(--hover);
-  border: 0;
   white-space: nowrap;
 }
 
