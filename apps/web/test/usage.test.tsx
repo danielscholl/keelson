@@ -108,6 +108,8 @@ describe("formatTokens", () => {
     expect(formatTokens(42_000)).toBe("42k");
     expect(formatTokens(199_500)).toBe("200k");
     expect(formatTokens(1_250_000)).toBe("1.3M");
+    expect(formatTokens(1_250_000_000)).toBe("1.25B");
+    expect(formatTokens(2_000_000_000)).toBe("2B");
   });
 
   test("degrades garbage to 0", () => {

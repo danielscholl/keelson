@@ -2,6 +2,8 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { ChevronDownIcon } from "./icons.tsx";
+
 interface ProjectChipProps {
   projectName: string;
   popoverId: string;
@@ -24,7 +26,7 @@ export function ProjectChip({ projectName, popoverId, disabled }: ProjectChipPro
       </span>
       <span className="chat-model-chip-name">{projectName}</span>
       <span className="chat-model-chip-caret" aria-hidden="true">
-        ▾
+        <ChevronDownIcon />
       </span>
     </button>
   );

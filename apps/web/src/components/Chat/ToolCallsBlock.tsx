@@ -1,4 +1,5 @@
 import { type ContentBlock, inferToolFamily } from "@keelson/shared";
+import { ChevronDownIcon } from "./icons.tsx";
 import { displayToolName } from "./toolNames.ts";
 
 // Per-row source chip. Family is inferred from the tool name prefix
@@ -82,9 +83,12 @@ export function ToolCallsBlock({ toolCalls, streaming, autoExpand = true }: Tool
     // element uncontrolled so a user expand survives re-renders mid-stream.
     <details className="tool-calls-block" {...(autoExpand ? { open: streaming } : {})}>
       <summary className="tool-calls-summary">
+        <span className="tool-calls-caret" aria-hidden="true">
+          <ChevronDownIcon />
+        </span>
         {pendingCount > 0
-          ? `TOOL CALLS · ${pendingCount} RUNNING`
-          : `TOOL CALLS (${toolCalls.length})`}
+          ? `${pendingCount} tool ${pendingCount === 1 ? "call" : "calls"} running`
+          : `${toolCalls.length} tool ${toolCalls.length === 1 ? "call" : "calls"}`}
       </summary>
       <div className="tool-calls-body">
         {toolCalls.map((tc) => {

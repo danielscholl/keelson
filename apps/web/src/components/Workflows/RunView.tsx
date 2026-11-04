@@ -53,6 +53,11 @@ export interface RunViewProps {
 // the single-pane modes for focused reading.
 type Layout = "split" | "trace" | "graph";
 
+// Sized for a straight chain at 1x zoom (dagre slot height plus rank gap, plus fit padding).
+function dagStageHeight(nodeCount: number): number {
+  return Math.min(640, Math.max(240, Math.round((nodeCount * 124 - 44) * 1.3)));
+}
+
 export function RunView({
   workflow,
   runId,
@@ -278,7 +283,12 @@ export function RunView({
           ) : (
             <>
               <StatusBadge status={statusBadgeStatus(run.status)} />
-              {elapsed != null && <span className="duration">{formatDuration(elapsed)}</span>}
+              {elapsed != null && (
+                <span className="duration">
+                  <span className="run-stat-label">total</span>
+                  {formatDuration(elapsed)}
+                </span>
+              )}
               {timing && (
                 <span
                   className="duration"
@@ -286,8 +296,8 @@ export function RunView({
                     timing.wallClockMs,
                   )} of node time: the longest dependency chain by node duration`}
                 >
-                  critical path {formatDuration(timing.criticalPathMs)} ·{" "}
-                  {Math.round(timing.criticalPathRatio * 100)}%
+                  <span className="run-stat-label">critical path</span>
+                  {formatDuration(timing.criticalPathMs)}
                 </span>
               )}
               {runUsageBreakdown && (
@@ -455,8 +465,10 @@ export function RunView({
       {layout === "split" && (
         <div className="run-body">
           <div className="pane">
-            <div className="pane-header">DAG · {workflow.name}</div>
-            <div className="dag-stage">
+            <div className="pane-header">
+              DAG <span className="pane-header-meta">· {workflow.nodes.length} nodes</span>
+            </div>
+            <div className="dag-stage" style={{ minHeight: dagStageHeight(workflow.nodes.length) }}>
               <DagGraph
                 nodes={workflow.nodes}
                 statusByNode={statusByNode}
@@ -500,7 +512,9 @@ export function RunView({
 
       {layout === "graph" && (
         <div className="pane run-body-single">
-          <div className="pane-header">DAG · {workflow.name}</div>
+          <div className="pane-header">
+            DAG <span className="pane-header-meta">· {workflow.nodes.length} nodes</span>
+          </div>
           <div className="dag-stage">
             <DagGraph
               nodes={workflow.nodes}

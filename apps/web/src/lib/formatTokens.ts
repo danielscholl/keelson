@@ -13,8 +13,12 @@ export function formatTokens(n: number): string {
     const k = n / 1000;
     return k < 10 ? `${k.toFixed(1).replace(/\.0$/, "")}k` : `${Math.round(k)}k`;
   }
-  const m = n / 1_000_000;
-  return m < 10 ? `${m.toFixed(1).replace(/\.0$/, "")}M` : `${Math.round(m)}M`;
+  if (n < 999_500_000) {
+    const m = n / 1_000_000;
+    return m < 10 ? `${m.toFixed(1).replace(/\.0$/, "")}M` : `${Math.round(m)}M`;
+  }
+  const b = n / 1_000_000_000;
+  return b < 100 ? `${b.toFixed(2).replace(/\.?0+$/, "")}B` : `${Math.round(b)}B`;
 }
 
 // Context-fill percentage, clamped to [0, 100]. Returns null when either

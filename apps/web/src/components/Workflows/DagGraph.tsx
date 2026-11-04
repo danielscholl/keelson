@@ -50,14 +50,14 @@ function DagGraphInner({ nodes, statusByNode, durationByNode }: DagGraphProps) {
       edges={decorated}
       nodeTypes={nodeTypes}
       fitView
-      fitViewOptions={{ padding: 0.2, includeHiddenNodes: false }}
+      fitViewOptions={{ padding: 0.15, includeHiddenNodes: false, maxZoom: 1 }}
       nodesDraggable={false}
       nodesConnectable={false}
       elementsSelectable={false}
       panOnScroll
       proOptions={{ hideAttribution: true }}
     >
-      <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--border-soft)" />
+      <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--border)" />
       <Controls showInteractive={false} />
     </ReactFlow>
   );

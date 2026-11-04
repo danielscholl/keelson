@@ -44,17 +44,9 @@ export function WorkflowCard({ workflow, detail, onRun }: WorkflowCardProps) {
   );
   const chips = nodeTypeChips(detail);
 
-  // First letter of slug — same pattern as Archon's iconography but with
-  // a CSS gradient instead of the upstream emoji set. Operator-recognizable
-  // at a glance without copying their icon vocabulary.
-  const initial = workflow.name.slice(0, 2).toUpperCase();
-
   return (
     <article className="workflow-card">
       <div className="wc-head">
-        <div className="wc-icon" aria-hidden="true">
-          {initial}
-        </div>
         <div>
           <div className="wc-title">{humanTitle(workflow.name)}</div>
           <div className="wc-slug">{workflow.name}</div>
@@ -98,7 +90,7 @@ export function WorkflowCard({ workflow, detail, onRun }: WorkflowCardProps) {
         {parsed.triggers && (
           <div className="wc-section">
             <div className="wc-section-label">Triggers</div>
-            <div className="wc-section-body" title={parsed.triggers}>
+            <div className="wc-section-body wc-triggers" title={parsed.triggers}>
               {parsed.triggers}
             </div>
           </div>
@@ -106,7 +98,7 @@ export function WorkflowCard({ workflow, detail, onRun }: WorkflowCardProps) {
         {parsed.notFor && (
           <div className="wc-section">
             <div className="wc-section-label">Not for</div>
-            <div className="wc-section-body" title={parsed.notFor}>
+            <div className="wc-section-body wc-not-for" title={parsed.notFor}>
               {parsed.notFor}
             </div>
           </div>
@@ -138,7 +130,19 @@ export function WorkflowCard({ workflow, detail, onRun }: WorkflowCardProps) {
           )}
         </div>
         <button type="button" className="btn-run" onClick={onRun}>
-          ▷ Run
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.25"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M7 4.5v15l12-7.5z" />
+          </svg>
+          Run
         </button>
       </div>
     </article>

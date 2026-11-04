@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { WrenchIcon } from "./icons.tsx";
+import { ChevronDownIcon, WrenchIcon } from "./icons.tsx";
 
 interface ToolsChipProps {
   // Count of registered tools surfaced by GET /api/tools. Chat.tsx gates the
@@ -32,7 +32,7 @@ export function ToolsChip({ count, popoverId, disabled }: ToolsChipProps) {
       <WrenchIcon />
       <span className="chat-tools-chip-count">{count}</span>
       <span className="chat-tools-chip-caret" aria-hidden="true">
-        ▾
+        <ChevronDownIcon />
       </span>
     </button>
   );

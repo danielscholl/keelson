@@ -24,6 +24,7 @@ import {
   type UsageSeriesBucket,
   type UsageWindow,
 } from "../api.ts";
+import { useMeasuredWidth } from "../hooks/useMeasuredWidth.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { formatProviderModel } from "../lib/formatProvenance.ts";
 import {
@@ -80,6 +81,7 @@ const SERIES_BUCKET: Record<UsageWindow, UsageSeriesBucket> = {
   "7d": "day",
   "30d": "day",
 };
+const SERIES_SLOTS: Record<UsageWindow, number> = { "24h": 24, "7d": 7, "30d": 30 };
 
 // The validated categorical series palette (see app.css --s1..--s6). Slots
 // are never cycled: past six models the long tail folds into one Other series.
@@ -171,10 +173,27 @@ export function Usage() {
   const [range, setRange] = useState<UsageWindow>("7d");
   const [subView, setSubView] = useState<UsageSubView>("overview");
   const pulse = useSnapshot(USAGE_PULSE_SNAPSHOT_KEY);
+  const live = pulse.status === "live";
+  const flowingUntil = useMemo(() => {
+    if (!live) return 0;
+    const parsed = usagePulseSnapshotSchema.safeParse(pulse.data);
+    const latest = parsed.success ? parsed.data.minuteSeries.at(-1) : undefined;
+    return latest && allTokens(latest) > 0 ? Date.parse(latest.minuteIso) + 60_000 : 0;
+  }, [live, pulse.data]);
+  const [now, setNow] = useState(() => Date.now());
+  // The pulse frame only recomposes on the next usage event, so expire its last minute locally.
+  useEffect(() => {
+    setNow(Date.now());
+    const remaining = flowingUntil - Date.now();
+    if (remaining <= 0) return;
+    const timer = setTimeout(() => setNow(Date.now()), remaining);
+    return () => clearTimeout(timer);
+  }, [flowingUntil]);
+  const flowing = flowingUntil > now;
 
   return (
     <div className="page usage-page">
-      <UsageHeader range={range} onRangeChange={setRange} live={pulse.status === "live"} />
+      <UsageHeader range={range} onRangeChange={setRange} live={live} flowing={flowing} />
       <UsageViewNav value={subView} onChange={setSubView} />
       {subView === "overview" ? (
         <>
@@ -250,10 +269,12 @@ function UsageHeader({
   range,
   onRangeChange,
   live,
+  flowing,
 }: {
   range: UsageWindow;
   onRangeChange: (w: UsageWindow) => void;
   live: boolean;
+  flowing: boolean;
 }) {
   return (
     <div className="page-header usage-page-header">
@@ -265,10 +286,17 @@ function UsageHeader({
         <span
           className="surface-region-live"
           role="img"
-          data-streaming={live || undefined}
-          title={live ? "Live — pulse streaming" : "Pulse not yet connected"}
-          aria-label={live ? "Live, pulse streaming" : "Pulse not connected"}
-        />
+          data-streaming={flowing || undefined}
+          title={
+            live ? (flowing ? "Live, tokens flowing" : "Live, idle") : "Pulse not yet connected"
+          }
+          aria-label={
+            live ? (flowing ? "Live, tokens flowing" : "Live, idle") : "Pulse not connected"
+          }
+          data-off={live ? undefined : true}
+        >
+          {live ? "Live" : "Offline"}
+        </span>
         <div className="layout-toggle" role="radiogroup" aria-label="Window">
           {WINDOWS.map((w) => (
             <label key={w} className={`layout-toggle-btn${w === range ? " active" : ""}`}>
@@ -357,7 +385,6 @@ function PulseSection({
           <span className="surface-region-title">Pulse</span>
         </span>
         <span className="surface-region-spacer" />
-        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
         {error ? (
@@ -468,6 +495,7 @@ function PulseSparkline({ pulse }: { pulse: unknown }) {
   const minuteSeries = parsed.success ? parsed.data.minuteSeries : [];
 
   const values = useMemo(() => minuteSeries.map((m) => allTokens(m)), [minuteSeries]);
+  const [svgRef, width] = useMeasuredWidth<SVGSVGElement>(560);
 
   const hasSignal = values.some((v) => v > 0);
   const last = values.at(-1) ?? 0;
@@ -481,7 +509,6 @@ function PulseSparkline({ pulse }: { pulse: unknown }) {
     );
   }
 
-  const width = 560;
   const height = 44;
   const n = values.length;
   const max = Math.max(...values, 1) * 1.15;
@@ -497,6 +524,7 @@ function PulseSparkline({ pulse }: { pulse: unknown }) {
     <div className="usage-pulse-strip">
       <span className="usage-pulse-label">Now · tokens/min</span>
       <svg
+        ref={svgRef}
         className="usage-pulse-svg"
         viewBox={`0 0 ${width} ${height}`}
         role="img"
@@ -591,6 +619,29 @@ export function pivotSeries(
   return { series, buckets };
 }
 
+// Empty buckets never come back from the server, so a quiet week would otherwise vanish from the axis.
+export function fillBucketGaps(
+  buckets: StackBucket[],
+  bucket: UsageSeriesBucket,
+  slots: number,
+  seriesCount: number,
+  now: Date = new Date(),
+): StackBucket[] {
+  const step = bucket === "hour" ? 3_600_000 : 86_400_000;
+  const end = new Date(now);
+  if (bucket === "hour") end.setUTCMinutes(0, 0, 0);
+  else end.setUTCHours(0, 0, 0, 0);
+  const byIso = new Map(buckets.map((b) => [b.iso, b]));
+  // A rolling window also touches the bucket holding its cutoff, so fill slots + 1.
+  for (let i = 0; i <= slots; i++) {
+    const iso = new Date(end.getTime() - i * step).toISOString();
+    if (!byIso.has(iso)) {
+      byIso.set(iso, { iso, values: new Array(seriesCount).fill(0), total: 0, folded: [] });
+    }
+  }
+  return [...byIso.values()].sort((a, b) => a.iso.localeCompare(b.iso));
+}
+
 function formatBucketLabel(iso: string, bucket: UsageSeriesBucket): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -609,7 +660,7 @@ function niceCeiling(max: number): number {
   if (max <= 0) return 1;
   const exp = Math.floor(Math.log10(max));
   const base = 10 ** exp;
-  for (const step of [1, 2, 2.5, 5, 10]) {
+  for (const step of [1, 2, 2.5, 3, 4, 5, 6, 8, 10]) {
     const candidate = step * base;
     if (candidate >= max) return candidate;
   }
@@ -644,7 +695,14 @@ function OverTimeSection({ range }: { range: UsageWindow }) {
     };
   }, [range, bucket]);
 
-  const pivoted = useMemo(() => (series ? pivotSeries(series, metric) : null), [series, metric]);
+  const pivoted = useMemo(() => {
+    if (!series) return null;
+    const p = pivotSeries(series, metric);
+    return {
+      ...p,
+      buckets: fillBucketGaps(p.buckets, bucket, SERIES_SLOTS[range], p.series.length),
+    };
+  }, [series, metric, bucket, range]);
   const hasData = !!pivoted && pivoted.buckets.some((b) => b.total > 0);
   const unpriced = metric === "cost" ? countUnpriced(series) : 0;
 
@@ -659,7 +717,6 @@ function OverTimeSection({ range }: { range: UsageWindow }) {
         </span>
         <span className="surface-region-spacer" />
         <MetricToggle value={metric} onChange={setMetric} />
-        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
         {error ? (
@@ -706,7 +763,7 @@ function StackChart({
 }) {
   const format = formatMetric(metric);
   const measure = metric === "tokens" ? "Tokens" : "Cost";
-  const width = 960;
+  const [chartRef, width] = useMeasuredWidth<HTMLDivElement>(960);
   const height = 300;
   const padL = 46;
   const padR = 8;
@@ -752,7 +809,7 @@ function StackChart({
   }, [open]);
 
   return (
-    <div className="usage-stack-chart">
+    <div className="usage-stack-chart" ref={chartRef}>
       <svg
         className="usage-stack-svg"
         viewBox={`0 0 ${width} ${height}`}
@@ -1215,7 +1272,6 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
           <span className="surface-region-title">Model roster</span>
         </span>
         <span className="surface-region-spacer" />
-        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
         {error ? (
@@ -1365,7 +1421,6 @@ function FlowSection({ range }: { range: UsageWindow }) {
         </span>
         <span className="surface-region-spacer" />
         <MetricToggle value={metric} onChange={setMetric} />
-        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
         {error ? (
@@ -1566,7 +1621,6 @@ function JobsSection({ range }: { range: UsageWindow }) {
           <span className="surface-region-title">Jobs</span>
         </span>
         <span className="surface-region-spacer" />
-        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
         {error ? (
@@ -1770,7 +1824,6 @@ function LedgerSection({ range }: { range: UsageWindow }) {
           <span className="surface-region-title">Ledger</span>
         </span>
         <span className="surface-region-spacer" />
-        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
         <fieldset className="usage-ledger-filters">

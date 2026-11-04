@@ -613,6 +613,21 @@ export function Chat({
   // forward-declaring abortActiveStream (which depends on later state).
   const abortActiveStreamRef = useRef<(() => void) | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  // Edge fades only show where there is more transcript beyond that edge.
+  const updateEdgeFade = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    el.toggleAttribute("data-fade-top", el.scrollTop > 2);
+    el.toggleAttribute("data-fade-bottom", el.scrollTop + el.clientHeight < el.scrollHeight - 24);
+  }, []);
+  useEffect(() => updateEdgeFade(scrollerRef.current));
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => updateEdgeFade(el));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [updateEdgeFade]);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Don't pin a default here; hydration may have already pinned the stored
@@ -2292,7 +2307,11 @@ export function Chat({
           {providerError && <span className="chat-error">{providerError}</span>}
         </div>
 
-        <div className="chat-messages">
+        <div
+          className="chat-messages"
+          ref={scrollerRef}
+          onScroll={(e) => updateEdgeFade(e.currentTarget)}
+        >
           {/* Skeleton + empty state key off VISIBLE message count. A lane-
               seeded chat that lost its assistant turn (auth failure, abort)
               persists only the hidden kickoff; without this, the pane would
@@ -2307,7 +2326,12 @@ export function Chat({
                   </div>
                 )}
                 {!hydrating && visibleMessages.length === 0 && (
-                  <div className="empty-state">Send a message to start a conversation.</div>
+                  <div className="empty-state chat-empty">
+                    <div className="chat-empty-title">Start a conversation</div>
+                    <div className="chat-empty-sub">
+                      Ask about this project, or type / for commands and workflows.
+                    </div>
+                  </div>
                 )}
                 {visibleMessages.map((m) => {
                   const canvasResult =
@@ -2368,8 +2392,7 @@ export function Chat({
                           className="chat-usage-meta"
                           title={`This turn: ${m.usage.inputTokens} tokens in, ${m.usage.outputTokens} out`}
                         >
-                          ↑ {formatTokens(m.usage.inputTokens)} ↓{" "}
-                          {formatTokens(m.usage.outputTokens)}
+                          ↑{formatTokens(m.usage.inputTokens)} ↓{formatTokens(m.usage.outputTokens)}
                         </div>
                       )}
                       {artifact && (

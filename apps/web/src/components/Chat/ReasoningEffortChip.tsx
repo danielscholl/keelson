@@ -4,7 +4,15 @@
 
 import type { ReasoningEffortLevel } from "@keelson/shared";
 
-import { LightbulbIcon } from "./icons.tsx";
+import { ChevronDownIcon, LightbulbIcon } from "./icons.tsx";
+
+const EFFORT_LABEL: Record<ReasoningEffortLevel, string> = {
+  none: "No",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+};
 
 interface ReasoningEffortChipProps {
   // Current per-turn effort tier. Sticky-within-conversation — see Chat.tsx.
@@ -18,20 +26,20 @@ interface ReasoningEffortChipProps {
 }
 
 export function ReasoningEffortChip({ level, popoverId, disabled }: ReasoningEffortChipProps) {
-  const label = level.toUpperCase();
+  const label = `${EFFORT_LABEL[level]} effort`;
   return (
     <button
       type="button"
       className="chat-reasoning-effort-chip"
       popoverTarget={popoverId}
       disabled={disabled}
-      aria-label={`Reasoning effort: ${level}. Click to change.`}
-      title={`Reasoning effort: ${level} (click to change)`}
+      aria-label={`${label}. Click to change reasoning effort.`}
+      title={`${label} (click to change)`}
     >
       <LightbulbIcon />
       <span className="chat-reasoning-effort-chip-label">{label}</span>
       <span className="chat-reasoning-effort-chip-caret" aria-hidden="true">
-        ▾
+        <ChevronDownIcon />
       </span>
     </button>
   );

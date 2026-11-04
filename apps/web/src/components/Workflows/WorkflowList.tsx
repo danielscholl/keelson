@@ -134,21 +134,38 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
     );
   };
 
+  const showSourceToolbar = ribs.list.length > 0 || ribs.hasProject;
+  const searchBox = (
+    <div className="search">
+      <span className="search-icon" aria-hidden="true">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+      </span>
+      <input
+        type="search"
+        placeholder="Search workflows"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+    </div>
+  );
+
   return (
     <>
       <div className="toolbar">
-        <div className="search">
-          <span className="search-icon" aria-hidden="true">
-            ⌕
-          </span>
-          <input
-            type="search"
-            placeholder="Search workflows"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
         <div className="chip-row">
+          <span className="chip-row-label">Type</span>
           {(["all", "bash", "prompt", "mixed"] as const).map((k) => (
             <button
               type="button"
@@ -160,8 +177,9 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
             </button>
           ))}
         </div>
+        {!showSourceToolbar && searchBox}
       </div>
-      {(ribs.list.length > 0 || ribs.hasProject) && (
+      {showSourceToolbar && (
         <div className="toolbar source-toolbar">
           <div className="chip-row">
             <span className="chip-row-label">Source</span>
@@ -188,7 +206,7 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
                       toggleHiddenWorkflowSource(r.id);
                     }}
                   >
-                    {hidden ? "🚫" : "👁"}
+                    <EyeIcon off={hidden} />
                   </button>
                 </span>
               );
@@ -202,6 +220,7 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
             />
             Show background
           </label>
+          {searchBox}
         </div>
       )}
       {filtered.length === 0 ? (
@@ -226,5 +245,24 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
         </div>
       )}
     </>
+  );
+}
+
+function EyeIcon({ off }: { off: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8Z" />
+      <circle cx="8" cy="8" r="2" />
+      {off && <path d="M2.5 13.5l11-11" />}
+    </svg>
   );
 }

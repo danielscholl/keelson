@@ -223,11 +223,13 @@ function NotebookPanel() {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
-          margin: "12px 0",
+          margin: "0 0 12px",
         }}
       >
         <span className="page-sub" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          Project · {activeProject?.name ?? "…"}
+          <span>
+            Project · <span className="memory-project-name">{activeProject?.name ?? "…"}</span>
+          </span>
           {overBudget && (
             <span
               role="status"
@@ -250,7 +252,7 @@ function NotebookPanel() {
           </button>
           <button
             type="button"
-            className="memory-refresh"
+            className="memory-refresh memory-save"
             disabled={loading || !dirty || saving || tidying}
             onClick={handleSave}
           >
@@ -278,16 +280,7 @@ function NotebookPanel() {
           placeholder={
             "## Conventions\n## Gotchas\n## Decisions\n\nNotes about this project the agent should always know…"
           }
-          style={{
-            width: "100%",
-            minHeight: 360,
-            boxSizing: "border-box",
-            padding: 12,
-            fontFamily: "var(--font-mono, ui-monospace, monospace)",
-            fontSize: 13,
-            lineHeight: 1.5,
-            resize: "vertical",
-          }}
+          className="memory-notebook"
         />
       )}
     </div>
@@ -393,7 +386,7 @@ function LedgerPanel() {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
-          margin: "12px 0",
+          margin: "0 0 12px",
         }}
       >
         <div className="memory-subtabs" role="tablist">

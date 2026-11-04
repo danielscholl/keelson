@@ -8,6 +8,7 @@ import { formatProviderModel } from "../../lib/formatProvenance.ts";
 import { formatTokens, hasSpend } from "../../lib/formatTokens.ts";
 import { AnsiText } from "../AnsiText.tsx";
 import { useCanvas } from "../Canvas/CanvasHost.tsx";
+import { ChevronDownIcon, ExpandIcon } from "../Chat/icons.tsx";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
 import { ThinkingBlock } from "../Chat/ThinkingBlock.tsx";
 import { ToolCallsBlock, toolCallsFromContentParts } from "../Chat/ToolCallsBlock.tsx";
@@ -312,7 +313,7 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
           aria-expanded={open}
           aria-label={open ? "Collapse node trace" : "Expand node trace"}
         >
-          {open ? "▾" : "▸"}
+          <ChevronDownIcon />
         </button>
         <span>{schema.id}</span>
         {chip && <span className={`node-type ${chip.className}`}>{chip.label}</span>}
@@ -398,7 +399,7 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
             aria-label={`Open ${schema.id} output in canvas`}
             title="Open in canvas"
           >
-            ⤢
+            <ExpandIcon />
           </button>
         )}
       </div>

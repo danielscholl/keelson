@@ -68,7 +68,19 @@ export function TopBar(props: TopBarProps) {
           aria-label="New chat"
           title="New chat"
         >
-          <span className="brand">Keelson</span>
+          <span className="brand">
+            <svg className="brand-mark" viewBox="0 0 34 34" aria-hidden="true">
+              <rect width="34" height="34" rx="9" fill="currentColor" opacity="0.14" />
+              <path
+                d="M11.5 8v18M22.5 8v18"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+              />
+              <path d="M6.5 20h21" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+            Keelson
+          </span>
         </button>
         <nav className="topbar-nav" aria-label="Primary">
           <button
@@ -156,10 +168,10 @@ const INSTRUMENTS: ReadonlyArray<{ id: "memory" | "usage"; label: string }> = [
 // The host controls a surface region renders in its head strip. Listed here so the
 // menu can switch each off independently; `explore` first because it is the one
 // most viewers keep.
-const REGION_ACTIONS: Array<{ value: RegionAction; label: string; glyph: string }> = [
-  { value: "explore", label: "Explore in chat", glyph: "✦" },
-  { value: "select", label: "Select", glyph: "◻" },
-  { value: "expand", label: "Expand", glyph: "⤢" },
+const REGION_ACTIONS: Array<{ value: RegionAction; label: string }> = [
+  { value: "explore", label: "Explore in chat" },
+  { value: "select", label: "Select" },
+  { value: "expand", label: "Expand" },
 ];
 
 function InstrumentsPopover({
@@ -287,6 +299,7 @@ function InstrumentsPopover({
             <span className="instruments-theme-label">Palette</span>
             <PalettePicker value={palettePreference} onChange={onPaletteChange} />
           </div>
+          <div className="instruments-sep" />
           <div className="instruments-heading">Panel controls</div>
           {REGION_ACTIONS.map((item) => {
             const shown = !isRegionActionHidden(item.value);
@@ -302,7 +315,6 @@ function InstrumentsPopover({
                 <span className="instruments-check" aria-hidden="true">
                   {shown ? "✓" : ""}
                 </span>
-                <span aria-hidden="true">{item.glyph}</span>
                 {item.label}
               </button>
             );
@@ -316,8 +328,8 @@ function InstrumentsPopover({
 function GearIcon(): React.ReactElement {
   return (
     <svg
-      width="14"
-      height="14"
+      width="16"
+      height="16"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
