@@ -283,7 +283,12 @@ export function RunView({
           ) : (
             <>
               <StatusBadge status={statusBadgeStatus(run.status)} />
-              {elapsed != null && <span className="duration">{formatDuration(elapsed)}</span>}
+              {elapsed != null && (
+                <span className="duration">
+                  <span className="run-stat-label">total</span>
+                  {formatDuration(elapsed)}
+                </span>
+              )}
               {timing && (
                 <span
                   className="duration"
@@ -291,7 +296,8 @@ export function RunView({
                     timing.wallClockMs,
                   )} of node time: the longest dependency chain by node duration`}
                 >
-                  critical path {formatDuration(timing.criticalPathMs)}
+                  <span className="run-stat-label">critical path</span>
+                  {formatDuration(timing.criticalPathMs)}
                 </span>
               )}
               {runUsageBreakdown && (

@@ -69,7 +69,7 @@
   --table-bg: rgba(8, 14, 34, 0.34);
   --table-border: rgba(151, 164, 255, 0.11);
   --table-rule: rgba(151, 164, 255, 0.07);
-  --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-popover: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
   --shadow-card:    0 2px 6px rgba(0, 0, 0, 0.4);
 
   /* Single source of truth for the centered Chat column. Right-side
@@ -204,7 +204,7 @@
   --table-bg: rgba(5, 12, 12, 0.34);
   --table-border: rgba(228, 223, 209, 0.1);
   --table-rule: rgba(228, 223, 209, 0.06);
-  --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-popover: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
   --shadow-card:    0 2px 6px rgba(0, 0, 0, 0.35);
 
   color-scheme: dark;
@@ -1321,8 +1321,11 @@ button.tab:focus-visible {
 .chat-reasoning-effort-chip-caret {
   display: inline-flex;
   margin-left: 3px;
-  color: var(--dim);
+  color: var(--muted);
 }
+.chat-model-chip-caret svg,
+.chat-tools-chip-caret svg,
+.chat-reasoning-effort-chip-caret svg { width: 12px; height: 12px; }
 
 .chat-composer-spacer {
   flex: 1 1 auto;
@@ -1601,7 +1604,6 @@ button.tab:focus-visible {
 
 .chat-reasoning-effort-chip-caret {
   font-size: 10px;
-  opacity: 0.85;
   margin-left: 1px;
 }
 
@@ -1672,9 +1674,9 @@ button.tab:focus-visible {
 }
 
 .chat-send:disabled {
-  background: transparent;
-  border-color: var(--border-soft);
-  color: var(--dim);
+  background: var(--card-2);
+  border-color: var(--border);
+  color: var(--muted);
   cursor: not-allowed;
 }
 
@@ -1789,7 +1791,8 @@ button.tab:focus-visible {
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 7px;
-  padding: 5px 9px;
+  height: 28px;
+  padding: 0 10px;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
@@ -2026,7 +2029,8 @@ button.tab:focus-visible {
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 7px 10px 7px 32px;
+  height: 32px;
+  padding: 0 10px 0 32px;
   font: inherit;
   font-size: 13px;
   outline: none;
@@ -2467,15 +2471,9 @@ button.tab:focus-visible {
   color: var(--fg);
 }
 .tool-calls-summary::-webkit-details-marker { display: none; }
-.tool-calls-summary::before {
-  content: "▸";
-  display: inline-block;
-  margin-right: 6px;
-  transition: transform 0.15s ease;
-}
-.tool-calls-block[open] > .tool-calls-summary::before {
-  transform: rotate(90deg);
-}
+.tool-calls-caret { display: inline-flex; margin-right: 6px; transform: rotate(-90deg); transition: transform 0.15s ease; }
+.tool-calls-caret svg { width: 12px; height: 12px; }
+.tool-calls-block[open] > .tool-calls-summary .tool-calls-caret { transform: none; }
 
 .tool-calls-body {
   margin-top: 8px;
@@ -4129,9 +4127,9 @@ button.tab:focus-visible {
   width: 28px;
   height: 28px;
   padding: 0;
-  font-size: 15px;
   line-height: 1;
 }
+.surface-region-icon svg { width: 14px; height: 14px; }
 .surface-region-freshness {
   flex: none;
   font-size: 11px;
@@ -9871,7 +9869,7 @@ a.cvb-card-title::after {
 .search {
   flex: 1;
   display: flex; align-items: center; gap: 8px;
-  padding: 7px 12px;
+  box-sizing: border-box; height: 32px; padding: 0 12px;
   background: var(--card); border: 1px solid var(--border);
   border-radius: 9px;
   max-width: 380px;
@@ -9888,7 +9886,7 @@ a.cvb-card-title::after {
 .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
   padding: 4px 12px; font-size: 12px;
-  background: transparent; border: 1px solid var(--border);
+  background: var(--card); border: 1px solid var(--border);
   color: var(--muted); border-radius: 999px;
   cursor: pointer; font-family: inherit;
   text-transform: capitalize;
@@ -9941,10 +9939,11 @@ a.cvb-card-title::after {
 .wc-section-body {
   color: var(--fg);
   display: -webkit-box;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  hyphens: manual;
 }
 .wc-section-body[title]:hover {
   cursor: help;
@@ -9976,8 +9975,9 @@ a.cvb-card-title::after {
 .wc-type-pill.prompt { --c: var(--cyan); }
 .wc-type-pill.approval { --c: var(--magenta); }
 .btn-run {
-  background: var(--card); color: var(--fg);
-  border: 1px solid var(--border); padding: 5px 13px; border-radius: 8px;
+  background: var(--card-2); color: var(--fg-strong);
+  box-sizing: border-box; height: 28px;
+  border: 1px solid var(--border); padding: 0 13px; border-radius: 8px;
   cursor: pointer; font-size: 12.5px; font-weight: 600;
   display: inline-flex; align-items: center; gap: 5px;
   font-family: inherit; white-space: nowrap; flex: none;
@@ -10144,6 +10144,7 @@ a.cvb-card-title::after {
   min-width: 0;
 }
 .run-meta .duration { font-variant-numeric: tabular-nums; color: var(--fg); font-size: 13px; }
+.run-stat-label { color: var(--muted); margin-right: 4px; }
 .run-meta .run-usage { color: var(--fg); font-size: 13px; font-variant-numeric: tabular-nums; }
 .run-meta .run-provenance {
   padding-left: 14px;
@@ -10266,7 +10267,7 @@ a.cvb-card-title::after {
 .dag-node .dn-type.approval { color: var(--magenta); background: color-mix(in srgb, var(--magenta) 16%, transparent); }
 .dag-node .dn-type.generic  { color: var(--muted);   background: var(--bg-soft); }
 .dag-node .dn-name { font-size: 12.5px; color: var(--fg-strong); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dag-node .dn-meta { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dag-node .dn-meta { display: block; margin-top: 4px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .dag-node.pending    { border-left-color: var(--muted); opacity: 0.7; }
 .dag-node.running    { border-left-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 8%, var(--card)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--cyan) 30%, transparent), var(--shadow-card); }
@@ -10718,8 +10719,8 @@ a.cvb-card-title::after {
   transition: background-color 120ms ease;
 }
 .memory-refresh:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
-.memory-refresh:not(.memory-save) { color: var(--muted); }
 .memory-refresh:disabled { color: var(--dim); cursor: default; }
+.memory-save:disabled { background: transparent; border-color: var(--border-soft); }
 .memory-save:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--card); font-weight: 600; }
 .memory-save:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, var(--fg-strong)); }
 .memory-notebook {

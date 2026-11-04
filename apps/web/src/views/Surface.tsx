@@ -18,7 +18,7 @@ import { BoardActionProvider } from "../components/Canvas/BoardActionContext.tsx
 import { BoardBody, CardOverflowActions, Segments } from "../components/Canvas/BoardView.tsx";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
 import { HtmlStateView, LogStateView, SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
-import { ChevronDownIcon } from "../components/Chat/icons.tsx";
+import { ChevronDownIcon, SparkleIcon } from "../components/Chat/icons.tsx";
 import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../components/Chat/ProjectPickerPopover.tsx";
 import { useCanvasKindForKey } from "../components/RibsProvider.tsx";
@@ -551,7 +551,7 @@ function SurfaceRegion({
             aria-label="Explore in chat"
             title="Explore this in chat"
           >
-            <span aria-hidden="true">✦</span>
+            <SparkleIcon />
           </button>
         )}
         {!hiddenActions.select && (snap.status === "live" || selected) && onToggleSelect && (

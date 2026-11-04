@@ -82,6 +82,23 @@ export function ChevronDownIcon(): ReactElement {
   );
 }
 
+export function SparkleIcon(): ReactElement {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 3c.6 4.6 3.4 7.4 8 8-4.6.6-7.4 3.4-8 8-.6-4.6-3.4-7.4-8-8 4.6-.6 7.4-3.4 8-8Z" />
+    </svg>
+  );
+}
+
 export function ExpandIcon(): ReactElement {
   return (
     <svg

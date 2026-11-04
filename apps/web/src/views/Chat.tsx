@@ -618,7 +618,7 @@ export function Chat({
   const updateEdgeFade = useCallback((el: HTMLDivElement | null) => {
     if (!el) return;
     el.toggleAttribute("data-fade-top", el.scrollTop > 2);
-    el.toggleAttribute("data-fade-bottom", el.scrollTop + el.clientHeight < el.scrollHeight - 2);
+    el.toggleAttribute("data-fade-bottom", el.scrollTop + el.clientHeight < el.scrollHeight - 16);
   }, []);
   useEffect(() => updateEdgeFade(scrollerRef.current));
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
