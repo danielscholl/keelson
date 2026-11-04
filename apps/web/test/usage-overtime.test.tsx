@@ -143,11 +143,11 @@ describe("Usage — token series", () => {
       1,
       new Date("2026-10-05T15:30:00.000Z"),
     );
-    expect(filled).toHaveLength(7);
-    expect(filled[0]?.iso).toBe("2026-09-29T00:00:00.000Z");
+    expect(filled).toHaveLength(8);
+    expect(filled[0]?.iso).toBe("2026-09-28T00:00:00.000Z");
     expect(filled.at(-1)?.iso).toBe("2026-10-05T00:00:00.000Z");
     expect(filled.find((b) => b.iso === "2026-10-03T00:00:00.000Z")?.total).toBe(5);
-    expect(filled.filter((b) => b.total === 0)).toHaveLength(6);
+    expect(filled.filter((b) => b.total === 0)).toHaveLength(7);
   });
 
   test("up to six models each get their own slot in alphabetical order", async () => {

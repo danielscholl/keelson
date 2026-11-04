@@ -174,12 +174,22 @@ export function Usage() {
   const [subView, setSubView] = useState<UsageSubView>("overview");
   const pulse = useSnapshot(USAGE_PULSE_SNAPSHOT_KEY);
   const live = pulse.status === "live";
-  const flowing = useMemo(() => {
-    if (!live) return false;
+  const flowingUntil = useMemo(() => {
+    if (!live) return 0;
     const parsed = usagePulseSnapshotSchema.safeParse(pulse.data);
     const latest = parsed.success ? parsed.data.minuteSeries.at(-1) : undefined;
-    return latest ? allTokens(latest) > 0 : false;
+    return latest && allTokens(latest) > 0 ? Date.parse(latest.minuteIso) + 60_000 : 0;
   }, [live, pulse.data]);
+  const [now, setNow] = useState(() => Date.now());
+  // The pulse frame only recomposes on the next usage event, so expire its last minute locally.
+  useEffect(() => {
+    setNow(Date.now());
+    const remaining = flowingUntil - Date.now();
+    if (remaining <= 0) return;
+    const timer = setTimeout(() => setNow(Date.now()), remaining);
+    return () => clearTimeout(timer);
+  }, [flowingUntil]);
+  const flowing = flowingUntil > now;
 
   return (
     <div className="page usage-page">
@@ -622,7 +632,8 @@ export function fillBucketGaps(
   if (bucket === "hour") end.setUTCMinutes(0, 0, 0);
   else end.setUTCHours(0, 0, 0, 0);
   const byIso = new Map(buckets.map((b) => [b.iso, b]));
-  for (let i = 0; i < slots; i++) {
+  // A rolling window also touches the bucket holding its cutoff, so fill slots + 1.
+  for (let i = 0; i <= slots; i++) {
     const iso = new Date(end.getTime() - i * step).toISOString();
     if (!byIso.has(iso)) {
       byIso.set(iso, { iso, values: new Array(seriesCount).fill(0), total: 0, folded: [] });

@@ -1300,12 +1300,13 @@ button.tab:focus-visible {
 }
 
 .chat-composer:focus-within {
-  border-color: var(--pick-line);
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--pick);
 }
 
 .chat-composer-chips {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -1990,6 +1991,10 @@ button.tab:focus-visible {
   color: var(--red);
 }
 
+@media (hover: none) {
+  .chat-sidebar-delete { opacity: 1; }
+}
+
 /* --- Sidebar polish (F10.5): collapse toggle, search, date grouping --- */
 
 .chat-sidebar-collapse-toggle {
@@ -2048,7 +2053,7 @@ button.tab:focus-visible {
 }
 
 .chat-sidebar-search:focus {
-  border-color: var(--pick-line);
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--pick);
 }
 
@@ -9885,7 +9890,7 @@ a.cvb-card-title::after {
   max-width: 380px;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
-.search:focus-within { border-color: var(--pick-line); box-shadow: 0 0 0 3px var(--pick); }
+.search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--pick); }
 .search input {
   flex: 1;
   background: transparent; border: none; outline: none;
@@ -9913,7 +9918,7 @@ a.cvb-card-title::after {
 /* Workflow card — catalog grid item. */
 .catalog-grid {
   display: grid; gap: 14px;
-  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(400px, 100%), 1fr));
 }
 .workflow-card {
   background: var(--card); border: 1px solid var(--border);
@@ -9945,7 +9950,7 @@ a.cvb-card-title::after {
 .wc-section:has(> .wc-not-for) { margin-top: 4px; }
 .wc-section-body.wc-triggers,
 .wc-section-body.wc-not-for { -webkit-line-clamp: 2; line-clamp: 2; }
-/* The clamp keeps neighbouring cards aligned; the full text is in the `title` attribute set in WorkflowCard.tsx. */
+/* The clamp keeps neighbouring cards aligned; it lifts on touch and while the card holds keyboard focus. */
 .wc-section-body {
   color: var(--fg);
   display: -webkit-box;
@@ -9958,6 +9963,16 @@ a.cvb-card-title::after {
 .wc-section-body[title]:hover {
   cursor: help;
 }
+.workflow-card:focus-within .wc-section-body {
+  -webkit-line-clamp: unset;
+  line-clamp: none;
+}
+@media (hover: none) {
+  .wc-section-body {
+    -webkit-line-clamp: unset;
+    line-clamp: none;
+  }
+}
 .wc-foot {
   display: flex; align-items: center; justify-content: space-between;
   margin-top: auto; padding-top: 10px;
@@ -9965,8 +9980,7 @@ a.cvb-card-title::after {
   gap: 10px;
 }
 .wc-types {
-  display: flex; gap: 5px; flex-wrap: nowrap; flex: 1 1 auto; min-width: 0; overflow: hidden;
-  mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent);
+  display: flex; gap: 5px; flex-wrap: wrap; flex: 1 1 auto; min-width: 0;
 }
 .wc-type-pill {
   --c: var(--muted);
@@ -9994,8 +10008,8 @@ a.cvb-card-title::after {
   transition: background-color 120ms ease, color 120ms ease;
 }
 .workflow-card:hover .btn-run { border-color: var(--pick-line); color: var(--accent); }
-.btn-run:hover,
-.btn-run:focus-visible { background: var(--accent); border-color: var(--accent); color: var(--card); }
+.workflow-card .btn-run:hover,
+.workflow-card .btn-run:focus-visible { background: var(--accent); border-color: var(--accent); color: var(--card); }
 
 /* Empty state — used by catalog and recent-runs panel. Scoped under
    `.page` so it doesn't clobber the global `.empty-state` rule (line
@@ -10733,7 +10747,7 @@ a.cvb-card-title::after {
 .memory-refresh:disabled { color: var(--dim); cursor: default; }
 .memory-save:disabled { background: transparent; border-color: var(--border-soft); }
 .memory-save:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--card); font-weight: 600; }
-.memory-save:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, var(--fg-strong)); }
+.memory-save:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, var(--fg-strong)); color: var(--card); }
 .memory-notebook {
   display: block;
   width: 100%;
@@ -10750,7 +10764,7 @@ a.cvb-card-title::after {
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 .memory-notebook::placeholder { color: var(--dim); opacity: 1; }
-.memory-notebook:focus { border-color: var(--pick-line); box-shadow: 0 0 0 3px var(--pick); }
+.memory-notebook:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--pick); }
 
 .memory-subtabs {
   display: inline-flex; gap: 2px; align-self: flex-start;

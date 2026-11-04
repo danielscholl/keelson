@@ -33,8 +33,8 @@ export function ReasoningEffortChip({ level, popoverId, disabled }: ReasoningEff
       className="chat-reasoning-effort-chip"
       popoverTarget={popoverId}
       disabled={disabled}
-      aria-label={`Reasoning effort: ${level}. Click to change.`}
-      title={`Reasoning effort: ${level} (click to change)`}
+      aria-label={`${label}. Click to change reasoning effort.`}
+      title={`${label} (click to change)`}
     >
       <LightbulbIcon />
       <span className="chat-reasoning-effort-chip-label">{label}</span>

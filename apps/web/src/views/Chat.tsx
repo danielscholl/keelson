@@ -621,6 +621,13 @@ export function Chat({
     el.toggleAttribute("data-fade-bottom", el.scrollTop + el.clientHeight < el.scrollHeight - 24);
   }, []);
   useEffect(() => updateEdgeFade(scrollerRef.current));
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => updateEdgeFade(el));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [updateEdgeFade]);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Don't pin a default here; hydration may have already pinned the stored
