@@ -3,6 +3,7 @@ import type { KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmModal } from "../ConfirmModal.tsx";
 import { SkeletonStack } from "../Skeleton.tsx";
+import { ChevronDownIcon } from "./icons.tsx";
 
 interface SidebarProps {
   conversations: Conversation[];
@@ -174,7 +175,9 @@ export function Sidebar({
           aria-label="Expand sidebar"
           title="Expand sidebar"
         >
-          <span aria-hidden="true">›</span>
+          <span className="chat-sidebar-caret is-expand" aria-hidden="true">
+            <ChevronDownIcon />
+          </span>
         </button>
         <button
           type="button"
@@ -200,7 +203,9 @@ export function Sidebar({
             aria-label="Collapse sidebar"
             title="Collapse sidebar"
           >
-            <span aria-hidden="true">‹</span>
+            <span className="chat-sidebar-caret" aria-hidden="true">
+              <ChevronDownIcon />
+            </span>
           </button>
           <span className="chat-sidebar-title">Conversations</span>
           <button
