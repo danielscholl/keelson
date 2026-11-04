@@ -633,7 +633,7 @@ function niceCeiling(max: number): number {
   if (max <= 0) return 1;
   const exp = Math.floor(Math.log10(max));
   const base = 10 ** exp;
-  for (const step of [1, 2, 2.5, 5, 10]) {
+  for (const step of [1, 2, 2.5, 3, 4, 5, 6, 8, 10]) {
     const candidate = step * base;
     if (candidate >= max) return candidate;
   }

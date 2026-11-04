@@ -18,6 +18,7 @@ import { BoardActionProvider } from "../components/Canvas/BoardActionContext.tsx
 import { BoardBody, CardOverflowActions, Segments } from "../components/Canvas/BoardView.tsx";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
 import { HtmlStateView, LogStateView, SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
+import { ChevronDownIcon } from "../components/Chat/icons.tsx";
 import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../components/Chat/ProjectPickerPopover.tsx";
 import { useCanvasKindForKey } from "../components/RibsProvider.tsx";
@@ -441,7 +442,7 @@ function SurfaceRegion({
     );
   };
 
-  // The gradient lane head: static identity (glyph + title) the rib supplies,
+  // The region head: static identity (glyph + title) the rib supplies,
   // plus the board's live status/scope/pulse, and the region's own controls.
   const head = (
     <div className="surface-region-head">
@@ -457,10 +458,10 @@ function SurfaceRegion({
               setCollapsed((c) => !c);
             }}
           >
-            {collapsed ? "▸" : "▾"}
+            <ChevronDownIcon />
           </button>
         )}
-        {region.glyph && (
+        {region.glyph ? (
           <span
             className="surface-region-glyph-chip"
             data-tone={region.glyph.tone}
@@ -468,6 +469,12 @@ function SurfaceRegion({
           >
             {region.glyph.char}
           </span>
+        ) : (
+          (region.title ?? board?.title) && (
+            <span className="surface-region-glyph-chip" aria-hidden="true">
+              ◇
+            </span>
+          )
         )}
         {(region.title ?? board?.title) && (
           <span className="surface-region-identity">

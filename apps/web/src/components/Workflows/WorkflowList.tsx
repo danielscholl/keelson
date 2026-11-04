@@ -139,7 +139,19 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
       <div className="toolbar">
         <div className="search">
           <span className="search-icon" aria-hidden="true">
-            ⌕
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
           </span>
           <input
             type="search"

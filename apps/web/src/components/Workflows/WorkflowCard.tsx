@@ -90,7 +90,7 @@ export function WorkflowCard({ workflow, detail, onRun }: WorkflowCardProps) {
         {parsed.triggers && (
           <div className="wc-section">
             <div className="wc-section-label">Triggers</div>
-            <div className="wc-section-body" title={parsed.triggers}>
+            <div className="wc-section-body wc-triggers" title={parsed.triggers}>
               {parsed.triggers}
             </div>
           </div>

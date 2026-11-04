@@ -12,8 +12,8 @@
   /* Headings + <strong>. One step brighter than --fg so emphasis lands
      without flipping to accent (which is reserved for chrome). */
   --fg-strong: #f0f3ff;
-  --muted: #8f98b5;
-  --dim: #737c9c;
+  --muted: #9ca4c0;
+  --dim: #7f88a8;
 
   /* Accents pulled ~10% in saturation so the one thing that should grab the eye can. */
   --accent:  #9b8eff;
@@ -463,12 +463,13 @@ body {
 }
 .instruments-dot {
   position: absolute;
-  top: 1px;
-  right: 1px;
+  top: 4px;
+  left: 20px;
   width: 7px;
   height: 7px;
   border-radius: 999px;
   background: var(--pip);
+  box-shadow: 0 0 0 2px var(--bg);
 }
 .instruments-menu {
   position: absolute;
@@ -1661,7 +1662,8 @@ button.tab:focus-visible {
 }
 
 .chat-send:disabled {
-  background: var(--card-2);
+  background: transparent;
+  border-color: var(--border-soft);
   color: var(--dim);
   cursor: not-allowed;
 }
@@ -4065,9 +4067,11 @@ button.tab:focus-visible {
   background: none;
   cursor: pointer;
   color: var(--muted);
-  font-size: 12px;
+  display: inline-flex;
   padding: 0 4px;
 }
+.surface-region-toggle svg { width: 12px; height: 12px; transition: transform 120ms ease; }
+.surface-region-toggle[aria-expanded="false"] svg { transform: rotate(-90deg); }
 .surface-region-action {
   border: 1px solid transparent;
   border-radius: 7px;
@@ -9845,7 +9849,7 @@ a.cvb-card-title::after {
   color: var(--fg); font-family: inherit; font-size: 13px;
 }
 .search input::placeholder { color: var(--dim); }
-.search-icon { color: var(--dim); font-size: 13px; }
+.search-icon { color: var(--dim); display: inline-flex; }
 .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
   padding: 4px 12px; font-size: 12px;
@@ -9892,8 +9896,7 @@ a.cvb-card-title::after {
   color: var(--fg-strong);
   margin-bottom: 3px;
 }
-.wc-section:nth-child(n + 3) .wc-section-label,
-.wc-section:nth-child(n + 3) .wc-section-body { color: var(--muted); }
+.wc-section-body.wc-triggers { color: var(--muted); }
 /* The clamp keeps neighbouring cards aligned; the full text is in the `title` attribute set in WorkflowCard.tsx. */
 .wc-section-body {
   color: var(--fg);
@@ -9933,15 +9936,16 @@ a.cvb-card-title::after {
 .wc-type-pill.prompt { --c: var(--cyan); }
 .wc-type-pill.approval { --c: var(--magenta); }
 .btn-run {
-  background: var(--card); color: var(--accent);
-  border: 1px solid var(--pick-line); padding: 5px 13px; border-radius: 8px;
+  background: var(--card); color: var(--fg);
+  border: 1px solid var(--border); padding: 5px 13px; border-radius: 8px;
   cursor: pointer; font-size: 12.5px; font-weight: 600;
   display: inline-flex; align-items: center; gap: 5px;
   font-family: inherit; white-space: nowrap; flex: none;
   transition: background-color 120ms ease, color 120ms ease;
 }
+.workflow-card:hover .btn-run { border-color: var(--pick-line); color: var(--accent); }
 .btn-run:hover,
-.workflow-card:hover .btn-run { background: var(--accent); border-color: var(--accent); color: var(--card); }
+.btn-run:focus-visible { background: var(--accent); border-color: var(--accent); color: var(--card); }
 
 /* Empty state — used by catalog and recent-runs panel. Scoped under
    `.page` so it doesn't clobber the global `.empty-state` rule (line
