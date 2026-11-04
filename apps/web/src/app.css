@@ -11331,7 +11331,7 @@ a.cvb-card-title::after {
   margin-top: 16px;
 }
 .usage-mono { font-family: var(--font-mono); }
-.usage-stat-sub .usage-mono { font-family: inherit; font-variant-numeric: tabular-nums; }
+.usage-stat-sub.usage-mono, .usage-stat-sub .usage-mono { font-family: inherit; font-variant-numeric: tabular-nums; }
 
 .usage-stats {
   display: grid;
