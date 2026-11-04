@@ -286,8 +286,7 @@ export function RunView({
                     timing.wallClockMs,
                   )} of node time: the longest dependency chain by node duration`}
                 >
-                  critical path {formatDuration(timing.criticalPathMs)} ·{" "}
-                  {Math.round(timing.criticalPathRatio * 100)}%
+                  critical path {formatDuration(timing.criticalPathMs)}
                 </span>
               )}
               {runUsageBreakdown && (

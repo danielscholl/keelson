@@ -168,10 +168,10 @@ const INSTRUMENTS: ReadonlyArray<{ id: "memory" | "usage"; label: string }> = [
 // The host controls a surface region renders in its head strip. Listed here so the
 // menu can switch each off independently; `explore` first because it is the one
 // most viewers keep.
-const REGION_ACTIONS: Array<{ value: RegionAction; label: string; glyph: string }> = [
-  { value: "explore", label: "Explore in chat", glyph: "✦" },
-  { value: "select", label: "Select", glyph: "◻" },
-  { value: "expand", label: "Expand", glyph: "⤢" },
+const REGION_ACTIONS: Array<{ value: RegionAction; label: string }> = [
+  { value: "explore", label: "Explore in chat" },
+  { value: "select", label: "Select" },
+  { value: "expand", label: "Expand" },
 ];
 
 function InstrumentsPopover({
@@ -314,9 +314,6 @@ function InstrumentsPopover({
               >
                 <span className="instruments-check" aria-hidden="true">
                   {shown ? "✓" : ""}
-                </span>
-                <span className="instruments-glyph" aria-hidden="true">
-                  {item.glyph}
                 </span>
                 {item.label}
               </button>

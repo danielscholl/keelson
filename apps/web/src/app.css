@@ -539,7 +539,7 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: 4px;
-  box-shadow: inset 0 0 0 1.5px var(--border);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--muted) 65%, transparent);
   color: var(--card);
   font-size: 10px;
   font-weight: 700;
@@ -547,13 +547,6 @@ body {
 .instruments-item[aria-pressed="true"] .instruments-check {
   background: var(--accent);
   box-shadow: none;
-}
-.instruments-glyph {
-  width: 16px;
-  flex: none;
-  text-align: center;
-  font-size: 14px;
-  color: var(--muted);
 }
 .tab {
   padding: 5px 14px;
@@ -1096,16 +1089,13 @@ button.tab:focus-visible {
   margin-left: 12px;
 }
 
-/* Shared chat column — transcript + composer cap at the same width so
-   the page reads as one intentional reading surface, not a narrow
-   document next to a wide input. min(1220px, 100%) lets the column
-   shrink on narrow viewports and centers within the grid cell on wide. */
+/* Transcript and composer share one column width so they read as one surface. */
 .chat-wrap {
   display: flex;
   flex-direction: column;
   height: calc(100dvh - var(--app-chrome-h));
   min-height: 400px;
-  width: min(920px, 100%);
+  width: min(880px, 100%);
   margin-inline: auto;
 }
 
@@ -1304,7 +1294,15 @@ button.tab:focus-visible {
 .chat-composer-chips {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
+}
+.chat-composer-chips > * { flex-shrink: 0; white-space: nowrap; }
+.chat-composer-chips > button { padding-inline: 10px; }
+.chat-composer-chips > .chat-model-chip:first-child { flex-shrink: 1; min-width: 0; }
+.chat-composer-chips > .chat-model-chip:first-child .chat-model-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-model-chip-caret,
@@ -1345,6 +1343,8 @@ button.tab:focus-visible {
 }
 
 .chat-input:disabled { opacity: 0.5; }
+.chat-input::placeholder,
+.chat-sidebar-search::placeholder { color: var(--muted); opacity: 1; }
 
 /* Phase 4 W4.5 workflow-conversation surface. Mirrors the chat header
    bar (chat-toolbar) but carries the run's name + status + back-link. */
@@ -1498,23 +1498,24 @@ button.tab:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: var(--pick);
-  color: var(--accent);
-  border: 1px solid var(--pick-line);
+  background: var(--bg-soft);
+  color: var(--fg);
+  border: 1px solid var(--border-soft);
   border-radius: 999px;
   height: 30px;
   padding: 0 11px;
   font: inherit;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: border-color 80ms ease, background 80ms ease,
     color 80ms ease, opacity 80ms ease;
 }
 .chat-sandbox-chip:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+  background: rgb(var(--accent-rgb) / 0.06);
 }
+.chat-sandbox-chip[aria-pressed="true"] svg { color: var(--green); }
 .chat-sandbox-chip:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -1532,7 +1533,6 @@ button.tab:focus-visible {
   background: transparent;
   border-color: var(--border);
   color: var(--muted);
-  font-weight: 400;
 }
 .chat-sandbox-chip[aria-pressed="false"]:hover:not(:disabled) {
   border-color: var(--muted);
@@ -1556,23 +1556,22 @@ button.tab:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: var(--pick);
-  color: var(--accent);
-  border: 1px solid var(--pick-line);
+  background: var(--bg-soft);
+  color: var(--fg);
+  border: 1px solid var(--border-soft);
   border-radius: 999px;
   height: 30px;
   padding: 0 11px;
   font: inherit;
   font-size: 12px;
-  font-weight: 600;
   cursor: pointer;
   transition: border-color 80ms ease, background 80ms ease;
-  box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.08);
 }
+.chat-reasoning-effort-chip > svg { color: var(--muted); }
 
 .chat-reasoning-effort-chip:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+  background: rgb(var(--accent-rgb) / 0.06);
 }
 
 .chat-reasoning-effort-chip:focus-visible {
@@ -1865,7 +1864,7 @@ button.tab:focus-visible {
   border: none;
   color: var(--fg);
   text-align: left;
-  padding: 7px 4px 7px 10px;
+  padding: 7px 10px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -1933,14 +1932,20 @@ button.tab:focus-visible {
   margin: 4px;
 }
 
+.chat-sidebar-item { position: relative; }
+.chat-sidebar-item:hover .chat-sidebar-link,
+.chat-sidebar-item:focus-within .chat-sidebar-link { padding-right: 30px; }
 .chat-sidebar-delete {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
   background: transparent;
   border: none;
   color: var(--dim);
   font-size: 16px;
   cursor: pointer;
   padding: 0 10px;
-  align-self: stretch;
   border-radius: 0 8px 8px 0;
   opacity: 0;
   transition: opacity 120ms ease, color 120ms ease;
@@ -2171,15 +2176,6 @@ button.tab:focus-visible {
 }
 .markdown-content p:last-child {
   margin-bottom: 0;
-}
-
-/* Cap prose at a comfortable measure — tables/code blocks still get
-   the full card width since dense data benefits from extra room. */
-.chat-message.assistant .markdown-content p,
-.chat-message.assistant .markdown-content ol,
-.chat-message.assistant .markdown-content ul,
-.chat-message.assistant .markdown-content blockquote {
-  max-width: 72ch;
 }
 
 .markdown-content ul,
@@ -4012,7 +4008,8 @@ button.tab:focus-visible {
   height: 26px;
   border-radius: 8px;
   background: color-mix(in srgb, currentColor 12%, transparent);
-  font-size: 13px;
+  font-size: 15px;
+  line-height: 1;
   flex: none;
   color: var(--muted);
 }
@@ -4121,14 +4118,14 @@ button.tab:focus-visible {
   gap: 6px;
   margin-right: 4px;
   font-size: 12px;
-  color: var(--dim);
+  color: var(--muted);
 }
 .surface-region-live::before {
   content: "";
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  box-shadow: inset 0 0 0 1.5px currentColor;
+  background: var(--green);
 }
 .surface-region-live[data-streaming] {
   color: var(--cyan);
@@ -7015,9 +7012,10 @@ a.cvb-card-title::after {
 /* "open in canvas" affordance in a trace-head; floats to the far right. */
 .trace-canvas-btn {
   margin-left: auto;
+  display: inline-flex;
   background: transparent;
   border: none;
-  color: var(--dim);
+  color: var(--muted);
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
@@ -9881,19 +9879,10 @@ a.cvb-card-title::after {
   border-color: var(--pick-line);
 }
 .wc-head { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; }
-.wc-icon {
-  --c: var(--accent);
-  width: 32px; height: 32px; border-radius: 9px;
-  display: flex; align-items: center; justify-content: center;
-  background: color-mix(in srgb, var(--c) 13%, transparent);
-  color: var(--c);
-  font-size: 12px; font-weight: 650; letter-spacing: 0.02em;
-  flex-shrink: 0;
-}
 .wc-title { font-size: 14.5px; font-weight: 600; letter-spacing: -0.005em; color: var(--fg-strong); line-height: 1.3; }
 .wc-slug { font-size: 11.5px; color: var(--dim); font-family: var(--font-mono); }
 .wc-grid {
-  display: grid; gap: 14px 20px;
+  display: grid; gap: 14px 16px;
   grid-template-columns: 1fr 1fr;
   margin-bottom: 14px;
 }
@@ -9905,15 +9894,12 @@ a.cvb-card-title::after {
 }
 .wc-section:nth-child(n + 3) .wc-section-label,
 .wc-section:nth-child(n + 3) .wc-section-body { color: var(--muted); }
-/* Clamp at 5 lines so a long Does / Not for block doesn't blow the card
-   height out of grid alignment with neighbours; the full text is reachable
-   via the `title` attribute set in WorkflowCard.tsx. `cursor: help` is the
-   discovery cue that hover will surface more. */
+/* The clamp keeps neighbouring cards aligned; the full text is in the `title` attribute set in WorkflowCard.tsx. */
 .wc-section-body {
   color: var(--fg);
   display: -webkit-box;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -10372,9 +10358,11 @@ a.cvb-card-title::after {
 }
 .trace-head .caret {
   background: transparent; border: none; cursor: pointer;
-  color: var(--muted); font-family: inherit; padding: 0;
-  font-size: 12px;
+  color: var(--muted); padding: 0;
+  display: inline-flex; width: 14px; height: 14px; align-items: center; justify-content: center;
 }
+.trace-head .caret svg { width: 12px; height: 12px; transform: rotate(-90deg); transition: transform 120ms ease; }
+.trace-head .caret[aria-expanded="true"] svg { transform: none; }
 .trace-head .caret:hover { color: var(--fg); }
 .trace-head .dur { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; font-weight: 400; text-align: right; }
 /* Trailing metrics sit in fixed right-aligned columns so durations line up row to row. */
@@ -11361,7 +11349,7 @@ a.cvb-card-title::after {
 }
 .usage-stat-sub {
   font-size: 12px;
-  color: var(--dim);
+  color: var(--muted);
   margin-top: 4px;
 }
 
@@ -11705,7 +11693,7 @@ a.cvb-card-title::after {
   border-radius: 3px;
 }
 .run-usage {
-  font-family: var(--font-mono);
+  font-family: inherit;
   font-size: 12px;
   color: var(--muted);
   white-space: nowrap;

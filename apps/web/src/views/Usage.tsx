@@ -81,6 +81,7 @@ const SERIES_BUCKET: Record<UsageWindow, UsageSeriesBucket> = {
   "7d": "day",
   "30d": "day",
 };
+const SERIES_SLOTS: Record<UsageWindow, number> = { "24h": 24, "7d": 7, "30d": 30 };
 
 // The validated categorical series palette (see app.css --s1..--s6). Slots
 // are never cycled: past six models the long tail folds into one Other series.
@@ -592,6 +593,28 @@ export function pivotSeries(
   return { series, buckets };
 }
 
+// Empty buckets never come back from the server, so a quiet week would otherwise vanish from the axis.
+export function fillBucketGaps(
+  buckets: StackBucket[],
+  bucket: UsageSeriesBucket,
+  slots: number,
+  seriesCount: number,
+  now: Date = new Date(),
+): StackBucket[] {
+  const step = bucket === "hour" ? 3_600_000 : 86_400_000;
+  const end = new Date(now);
+  if (bucket === "hour") end.setUTCMinutes(0, 0, 0);
+  else end.setUTCHours(0, 0, 0, 0);
+  const byIso = new Map(buckets.map((b) => [b.iso, b]));
+  for (let i = 0; i < slots; i++) {
+    const iso = new Date(end.getTime() - i * step).toISOString();
+    if (!byIso.has(iso)) {
+      byIso.set(iso, { iso, values: new Array(seriesCount).fill(0), total: 0, folded: [] });
+    }
+  }
+  return [...byIso.values()].sort((a, b) => a.iso.localeCompare(b.iso));
+}
+
 function formatBucketLabel(iso: string, bucket: UsageSeriesBucket): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -645,7 +668,14 @@ function OverTimeSection({ range }: { range: UsageWindow }) {
     };
   }, [range, bucket]);
 
-  const pivoted = useMemo(() => (series ? pivotSeries(series, metric) : null), [series, metric]);
+  const pivoted = useMemo(() => {
+    if (!series) return null;
+    const p = pivotSeries(series, metric);
+    return {
+      ...p,
+      buckets: fillBucketGaps(p.buckets, bucket, SERIES_SLOTS[range], p.series.length),
+    };
+  }, [series, metric, bucket, range]);
   const hasData = !!pivoted && pivoted.buckets.some((b) => b.total > 0);
   const unpriced = metric === "cost" ? countUnpriced(series) : 0;
 

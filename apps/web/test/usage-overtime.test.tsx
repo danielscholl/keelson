@@ -134,6 +134,22 @@ describe("Usage — token series", () => {
     expect(buckets[0]?.total).toBe(8_052_267);
   });
 
+  test("missing days are zero-filled across the whole window", async () => {
+    const { fillBucketGaps } = await import("../src/views/Usage.tsx");
+    const filled = fillBucketGaps(
+      [{ iso: "2026-10-03T00:00:00.000Z", values: [5], total: 5, folded: [] }],
+      "day",
+      7,
+      1,
+      new Date("2026-10-05T15:30:00.000Z"),
+    );
+    expect(filled).toHaveLength(7);
+    expect(filled[0]?.iso).toBe("2026-09-29T00:00:00.000Z");
+    expect(filled.at(-1)?.iso).toBe("2026-10-05T00:00:00.000Z");
+    expect(filled.find((b) => b.iso === "2026-10-03T00:00:00.000Z")?.total).toBe(5);
+    expect(filled.filter((b) => b.total === 0)).toHaveLength(6);
+  });
+
   test("up to six models each get their own slot in alphabetical order", async () => {
     const { assignSeriesColors } = await import("../src/views/Usage.tsx");
     const palette = assignSeriesColors(
@@ -266,7 +282,7 @@ describe("Usage — Over time stacked chart", () => {
     expect(legend.getByText("claude-sonnet-5")).toBeDefined();
     expect(legend.getByText("gpt-5.5")).toBeDefined();
     expect(
-      within(screen.getByLabelText(/Tokens over time by model/)).getByText("Jul 2"),
+      within(screen.getByLabelText(/Tokens over time by model/)).getByLabelText(/^Jul 2: /),
     ).toBeDefined();
 
     const table = within(screen.getByRole("table", { name: "Tokens by model per day" }));
