@@ -173,10 +173,17 @@ export function Usage() {
   const [range, setRange] = useState<UsageWindow>("7d");
   const [subView, setSubView] = useState<UsageSubView>("overview");
   const pulse = useSnapshot(USAGE_PULSE_SNAPSHOT_KEY);
+  const live = pulse.status === "live";
+  const flowing = useMemo(() => {
+    if (!live) return false;
+    const parsed = usagePulseSnapshotSchema.safeParse(pulse.data);
+    const latest = parsed.success ? parsed.data.minuteSeries.at(-1) : undefined;
+    return latest ? allTokens(latest) > 0 : false;
+  }, [live, pulse.data]);
 
   return (
     <div className="page usage-page">
-      <UsageHeader range={range} onRangeChange={setRange} live={pulse.status === "live"} />
+      <UsageHeader range={range} onRangeChange={setRange} live={live} flowing={flowing} />
       <UsageViewNav value={subView} onChange={setSubView} />
       {subView === "overview" ? (
         <>
@@ -252,10 +259,12 @@ function UsageHeader({
   range,
   onRangeChange,
   live,
+  flowing,
 }: {
   range: UsageWindow;
   onRangeChange: (w: UsageWindow) => void;
   live: boolean;
+  flowing: boolean;
 }) {
   return (
     <div className="page-header usage-page-header">
@@ -267,9 +276,13 @@ function UsageHeader({
         <span
           className="surface-region-live"
           role="img"
-          data-streaming={live || undefined}
-          title={live ? "Live — pulse streaming" : "Pulse not yet connected"}
-          aria-label={live ? "Live, pulse streaming" : "Pulse not connected"}
+          data-streaming={flowing || undefined}
+          title={
+            live ? (flowing ? "Live, tokens flowing" : "Live, idle") : "Pulse not yet connected"
+          }
+          aria-label={
+            live ? (flowing ? "Live, tokens flowing" : "Live, idle") : "Pulse not connected"
+          }
           data-off={live ? undefined : true}
         >
           {live ? "Live" : "Offline"}

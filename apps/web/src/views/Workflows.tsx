@@ -282,10 +282,12 @@ export function Workflows({ pendingRun, onPendingRunConsumed }: WorkflowsProps =
   return (
     <div className="page">
       <div className="page-header workflows-page-header">
-        <h1 className="page-title">Workflows</h1>
-        <span className="page-sub">
-          {workflows.length} workflow{workflows.length === 1 ? "" : "s"} discovered
-        </span>
+        <div>
+          <h1 className="page-title">Workflows</h1>
+          <span className="page-sub">
+            {workflows.length} workflow{workflows.length === 1 ? "" : "s"} discovered
+          </span>
+        </div>
         <div className="workflows-header-actions">
           <ProjectChip
             projectName={activeProject?.name ?? "default"}
