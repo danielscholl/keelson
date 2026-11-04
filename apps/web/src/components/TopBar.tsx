@@ -68,7 +68,19 @@ export function TopBar(props: TopBarProps) {
           aria-label="New chat"
           title="New chat"
         >
-          <span className="brand">Keelson</span>
+          <span className="brand">
+            <svg className="brand-mark" viewBox="0 0 34 34" aria-hidden="true">
+              <rect width="34" height="34" rx="9" fill="currentColor" opacity="0.14" />
+              <path
+                d="M11.5 8v18M22.5 8v18"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+              />
+              <path d="M6.5 20h21" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+            Keelson
+          </span>
         </button>
         <nav className="topbar-nav" aria-label="Primary">
           <button

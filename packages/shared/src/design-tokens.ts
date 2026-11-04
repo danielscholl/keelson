@@ -87,12 +87,12 @@ const DARK: DesignThemeTokens = {
 
 // Values mirror apps/web/src/app.css `:root[data-theme="light"]`.
 const LIGHT: DesignThemeTokens = {
-  bg: "#f3f0fa",
-  bgSoft: "#eeeaf7",
+  bg: "#f6f5f9",
+  bgSoft: "#efedf4",
   card: "#ffffff",
-  card2: "#eeeaf7",
-  border: "#c8bfdc",
-  borderSoft: "#d9d1e8",
+  card2: "#f3f1f8",
+  border: "#dad6e4",
+  borderSoft: "#e7e4ee",
   fg: "#161b31",
   fgStrong: "#0b0f1e",
   muted: "#5d5876",

@@ -278,16 +278,7 @@ function NotebookPanel() {
           placeholder={
             "## Conventions\n## Gotchas\n## Decisions\n\nNotes about this project the agent should always know…"
           }
-          style={{
-            width: "100%",
-            minHeight: 360,
-            boxSizing: "border-box",
-            padding: 12,
-            fontFamily: "var(--font-mono, ui-monospace, monospace)",
-            fontSize: 13,
-            lineHeight: 1.5,
-            resize: "vertical",
-          }}
+          className="memory-notebook"
         />
       )}
     </div>

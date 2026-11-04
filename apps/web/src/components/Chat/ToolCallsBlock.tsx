@@ -83,8 +83,8 @@ export function ToolCallsBlock({ toolCalls, streaming, autoExpand = true }: Tool
     <details className="tool-calls-block" {...(autoExpand ? { open: streaming } : {})}>
       <summary className="tool-calls-summary">
         {pendingCount > 0
-          ? `TOOL CALLS · ${pendingCount} RUNNING`
-          : `TOOL CALLS (${toolCalls.length})`}
+          ? `${pendingCount} tool ${pendingCount === 1 ? "call" : "calls"} running`
+          : `${toolCalls.length} tool ${toolCalls.length === 1 ? "call" : "calls"}`}
       </summary>
       <div className="tool-calls-body">
         {toolCalls.map((tc) => {

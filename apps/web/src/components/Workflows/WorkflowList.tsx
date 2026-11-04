@@ -188,7 +188,7 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
                       toggleHiddenWorkflowSource(r.id);
                     }}
                   >
-                    {hidden ? "🚫" : "👁"}
+                    <EyeIcon off={hidden} />
                   </button>
                 </span>
               );
@@ -226,5 +226,24 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
         </div>
       )}
     </>
+  );
+}
+
+function EyeIcon({ off }: { off: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8Z" />
+      <circle cx="8" cy="8" r="2" />
+      {off && <path d="M2.5 13.5l11-11" />}
+    </svg>
   );
 }

@@ -6,6 +6,14 @@ import type { ReasoningEffortLevel } from "@keelson/shared";
 
 import { LightbulbIcon } from "./icons.tsx";
 
+const EFFORT_LABEL: Record<ReasoningEffortLevel, string> = {
+  none: "No",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+};
+
 interface ReasoningEffortChipProps {
   // Current per-turn effort tier. Sticky-within-conversation — see Chat.tsx.
   level: ReasoningEffortLevel;
@@ -18,7 +26,7 @@ interface ReasoningEffortChipProps {
 }
 
 export function ReasoningEffortChip({ level, popoverId, disabled }: ReasoningEffortChipProps) {
-  const label = level.toUpperCase();
+  const label = `${EFFORT_LABEL[level]} effort`;
   return (
     <button
       type="button"
