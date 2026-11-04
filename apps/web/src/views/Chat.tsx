@@ -2373,8 +2373,7 @@ export function Chat({
                           className="chat-usage-meta"
                           title={`This turn: ${m.usage.inputTokens} tokens in, ${m.usage.outputTokens} out`}
                         >
-                          ↑ {formatTokens(m.usage.inputTokens)} ↓{" "}
-                          {formatTokens(m.usage.outputTokens)}
+                          ↑{formatTokens(m.usage.inputTokens)} ↓{formatTokens(m.usage.outputTokens)}
                         </div>
                       )}
                       {artifact && (

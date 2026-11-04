@@ -130,7 +130,19 @@ export function WorkflowCard({ workflow, detail, onRun }: WorkflowCardProps) {
           )}
         </div>
         <button type="button" className="btn-run" onClick={onRun}>
-          ▷ Run
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.25"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M7 4.5v15l12-7.5z" />
+          </svg>
+          Run
         </button>
       </div>
     </article>

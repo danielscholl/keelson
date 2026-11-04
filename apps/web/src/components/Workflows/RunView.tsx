@@ -459,7 +459,9 @@ export function RunView({
       {layout === "split" && (
         <div className="run-body">
           <div className="pane">
-            <div className="pane-header">DAG · {workflow.name}</div>
+            <div className="pane-header">
+              DAG <span className="pane-header-meta">· {workflow.nodes.length} nodes</span>
+            </div>
             <div className="dag-stage" style={{ minHeight: dagStageHeight(workflow.nodes.length) }}>
               <DagGraph
                 nodes={workflow.nodes}
@@ -504,7 +506,9 @@ export function RunView({
 
       {layout === "graph" && (
         <div className="pane run-body-single">
-          <div className="pane-header">DAG · {workflow.name}</div>
+          <div className="pane-header">
+            DAG <span className="pane-header-meta">· {workflow.nodes.length} nodes</span>
+          </div>
           <div className="dag-stage">
             <DagGraph
               nodes={workflow.nodes}

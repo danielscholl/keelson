@@ -227,7 +227,9 @@ function NotebookPanel() {
         }}
       >
         <span className="page-sub" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          Project · {activeProject?.name ?? "…"}
+          <span>
+            Project · <span className="memory-project-name">{activeProject?.name ?? "…"}</span>
+          </span>
           {overBudget && (
             <span
               role="status"

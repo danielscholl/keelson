@@ -444,8 +444,11 @@ body {
   position: relative;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 6px 9px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 6px 8px;
   border-radius: 8px;
   border: 0;
   background: transparent;
@@ -1152,8 +1155,9 @@ button.tab:focus-visible {
 .chat-messages {
   flex: 1 1 0;
   overflow-y: auto;
-  padding: 20px 4px 24px;
-  scroll-padding-bottom: 24px;
+  padding: 20px 17px 28px;
+  scroll-padding-bottom: 28px;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 20px), transparent 100%);
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -1210,7 +1214,7 @@ button.tab:focus-visible {
    + 15.5px body + 1.62 line-height for long-form reading. Sits on the
    dark transcript so it reads as a document, not another dashboard panel. */
 .chat-message.assistant .chat-bubble {
-  padding: 0 4px;
+  padding: 0;
   border-radius: 0;
   background: transparent;
   border: 0;
@@ -10169,7 +10173,8 @@ a.cvb-card-title::after {
 }
 .layout-toggle-btn {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 4px 11px; font-size: 12.5px; color: var(--muted);
+  height: 26px; box-sizing: border-box;
+  padding: 0 11px; font-size: 12.5px; font-weight: 500; color: var(--muted);
   border-radius: 6px; cursor: pointer;
   font-family: inherit; border: none; background: transparent;
   transition: background 120ms ease, color 120ms ease;
@@ -10220,6 +10225,8 @@ a.cvb-card-title::after {
   font-weight: 600;
 }
 .pane-body { padding: 16px; flex: 1; overflow: auto; }
+.pane-header-meta { color: var(--muted); font-weight: 400; }
+.memory-project-name { color: var(--fg); font-weight: 500; }
 
 /* DAG graph host — xyflow lays out, we color via .dag-node classes. */
 .dag-stage {
@@ -10298,6 +10305,7 @@ a.cvb-card-title::after {
 .react-flow__controls-button svg { fill: currentColor; }
 .react-flow__controls-button:last-child { border-bottom: 0 !important; }
 .react-flow__background { background: var(--card); }
+:root:not([data-theme="light"]) .dag-node:not(.running, .failed, .awaiting) { background: var(--card-2); }
 
 /* Inputs form + buttons. */
 .inputs-form { padding: 4px 0; }
@@ -10689,9 +10697,6 @@ a.cvb-card-title::after {
 
 /* === Memory tab (M7) ====================================================== */
 
-.memory-page .page-header {
-  margin-bottom: 14px;
-}
 .memory-refresh {
   background: var(--card); color: var(--fg);
   border: 1px solid var(--border); padding: 6px 13px; border-radius: 8px;
@@ -10729,7 +10734,7 @@ a.cvb-card-title::after {
 }
 .memory-subtab {
   background: transparent; border: none;
-  padding: 4px 11px; border-radius: 6px;
+  height: 26px; padding: 0 11px; border-radius: 6px;
   color: var(--muted); font-size: 12.5px; font-weight: 500;
   font-family: inherit; cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
