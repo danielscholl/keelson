@@ -14,7 +14,7 @@ import {
   usagePulseSnapshotSchema,
 } from "@keelson/shared";
 import type { CSSProperties } from "react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   getUsageBreakdown,
   getUsageEvents,
@@ -706,7 +706,23 @@ function StackChart({
 }) {
   const format = formatMetric(metric);
   const measure = metric === "tokens" ? "Tokens" : "Cost";
-  const width = 960;
+  // The viewBox tracks the rendered width so the plot keeps a fixed height and
+  // its labels stay at their CSS size instead of scaling with the window.
+  const chartRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(960);
+  useEffect(() => {
+    const root = chartRef.current;
+    if (!root) return;
+    const measureWidth = () => {
+      const measured = Math.round(root.getBoundingClientRect().width);
+      if (measured > 0) setWidth(measured);
+    };
+    measureWidth();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measureWidth);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
   const height = 300;
   const padL = 46;
   const padR = 8;
@@ -752,7 +768,7 @@ function StackChart({
   }, [open]);
 
   return (
-    <div className="usage-stack-chart">
+    <div className="usage-stack-chart" ref={chartRef}>
       <svg
         className="usage-stack-svg"
         viewBox={`0 0 ${width} ${height}`}

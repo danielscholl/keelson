@@ -57,16 +57,16 @@ export interface DesignThemeTokens {
 
 // Values mirror apps/web/src/app.css `:root` (dark is the default theme).
 const DARK: DesignThemeTokens = {
-  bg: "#0d1429",
-  bgSoft: "#131a30",
-  card: "#161e3b",
-  card2: "#1f2a4d",
-  border: "#2a3258",
-  borderSoft: "#1f2746",
+  bg: "#0e1220",
+  bgSoft: "#121726",
+  card: "#161b2c",
+  card2: "#1d2336",
+  border: "#2a3046",
+  borderSoft: "#20263a",
   fg: "#d8def0",
   fgStrong: "#f0f3ff",
-  muted: "#8993b2",
-  dim: "#5e6789",
+  muted: "#8f98b5",
+  dim: "#737c9c",
   accent: "#9b8eff",
   green: "#6dd28d",
   yellow: "#f5c352",
@@ -87,16 +87,16 @@ const DARK: DesignThemeTokens = {
 
 // Values mirror apps/web/src/app.css `:root[data-theme="light"]`.
 const LIGHT: DesignThemeTokens = {
-  bg: "#f6f5f9",
-  bgSoft: "#efedf4",
+  bg: "#f7f7f9",
+  bgSoft: "#f0f0f3",
   card: "#ffffff",
-  card2: "#f3f1f8",
-  border: "#dad6e4",
-  borderSoft: "#e7e4ee",
+  card2: "#f4f4f7",
+  border: "#dcdbe3",
+  borderSoft: "#e9e8ee",
   fg: "#161b31",
   fgStrong: "#0b0f1e",
   muted: "#5d5876",
-  dim: "#7e7896",
+  dim: "#6f6a84",
   accent: "#6d4fe0",
   green: "#15834f",
   yellow: "#b57a00",
@@ -250,7 +250,7 @@ export function designTokenAt(
   return undefined;
 }
 
-/** Every mapped token as `{ "--bg": "#0d1429", … }` for one palette and theme. */
+/** Every mapped token as `{ "--bg": "#0e1220", … }` for one palette and theme. */
 export function designTokenCssVars(
   theme: DesignThemeName,
   palette: DesignPaletteName = "keelson",

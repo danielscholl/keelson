@@ -3,7 +3,7 @@ import {
   type WorkflowDetail,
   type WorkflowSummary,
 } from "@keelson/shared";
-import { useMemo } from "react";
+import { type CSSProperties, useMemo } from "react";
 
 import { RibBadge } from "./RibBadge.tsx";
 
@@ -37,6 +37,15 @@ function nodeTypeChips(detail: WorkflowDetail | undefined): Array<{
   return Array.from(counts.entries()).map(([type, count]) => ({ type, count }));
 }
 
+const ICON_TONES = ["--accent", "--id-blue", "--id-teal", "--id-amber", "--id-rose"] as const;
+
+// A stable per-workflow hue so neighbouring tiles don't all read the same.
+function iconTone(slug: string): CSSProperties {
+  let h = 0;
+  for (const ch of slug) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return { "--c": `var(${ICON_TONES[h % ICON_TONES.length]})` } as CSSProperties;
+}
+
 export function WorkflowCard({ workflow, detail, onRun }: WorkflowCardProps) {
   const parsed = useMemo(
     () => parseWorkflowDescription(workflow.description),
@@ -52,7 +61,7 @@ export function WorkflowCard({ workflow, detail, onRun }: WorkflowCardProps) {
   return (
     <article className="workflow-card">
       <div className="wc-head">
-        <div className="wc-icon" aria-hidden="true">
+        <div className="wc-icon" style={iconTone(workflow.name)} aria-hidden="true">
           {initial}
         </div>
         <div>

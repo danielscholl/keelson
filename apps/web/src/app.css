@@ -1,19 +1,19 @@
 :root {
   /* Surfaces lifted toward midnight navy — pure-black vibrates over long sessions. */
-  --bg: #0d1429;
-  --bg-soft: #131a30;
-  --card: #161e3b;
-  --card-2: #1f2a4d;
-  --border: #2a3258;
-  --border-soft: #1f2746;
+  --bg: #0e1220;
+  --bg-soft: #121726;
+  --card: #161b2c;
+  --card-2: #1d2336;
+  --border: #2a3046;
+  --border-soft: #20263a;
 
   /* ~88% white-blue stays crisp over a dark bg without the strain of pure white. */
   --fg: #d8def0;
   /* Headings + <strong>. One step brighter than --fg so emphasis lands
      without flipping to accent (which is reserved for chrome). */
   --fg-strong: #f0f3ff;
-  --muted: #8993b2;
-  --dim: #5e6789;
+  --muted: #8f98b5;
+  --dim: #737c9c;
 
   /* Accents pulled ~10% in saturation so the one thing that should grab the eye can. */
   --accent:  #9b8eff;
@@ -61,7 +61,6 @@
   --magenta-ink: var(--magenta);
   /* Count pips and the menu's attention dot. */
   --pip: var(--magenta);
-  --pip-ink: #fff;
   --scrim-rgb: 8 12 28;
   /* Dark reading surfaces; light mode paints these components from --paper. */
   --reading-top: rgba(24, 32, 70, 0.97);
@@ -99,19 +98,19 @@
   /* Layered lavender: tinted app bg, white cards, saturated tile fills.
      Tokens are tuned so the same vars that drive dark-mode depth produce
      visible separation here instead of collapsing into near-white. */
-  --bg: #f6f5f9;
-  --bg-soft: #efedf4;
+  --bg: #f7f7f9;
+  --bg-soft: #f0f0f3;
   --card: #ffffff;
-  --card-2: #f3f1f8;
-  --border: #dad6e4;
-  --border-soft: #e7e4ee;
+  --card-2: #f4f4f7;
+  --border: #dcdbe3;
+  --border-soft: #e9e8ee;
 
   --fg: #161b31;
   --fg-strong: #0b0f1e;
   /* Darker than the previous #69708d / #9298ae — sidebar metadata and
      secondary labels were close to disappearing on the lavender shell. */
   --muted: #5d5876;
-  --dim: #7e7896;
+  --dim: #6f6a84;
 
   --accent:  #6d4fe0;
   --green:   #15834f;
@@ -198,7 +197,6 @@
   --danger:  #e06a50;
   --accent-rgb: 92 196 178;
   --pip: var(--accent);
-  --pip-ink: var(--bg);
   --scrim-rgb: 4 12 12;
   --reading-top: rgba(25, 40, 41, 0.97);
   --reading-bottom: rgba(19, 32, 33, 0.99);
@@ -259,7 +257,6 @@
   --yellow-ink: #8f6207;
   --magenta-ink: #8152b5;
   --pip: var(--accent);
-  --pip-ink: var(--card);
   --scrim-rgb: 38 32 22;
   --shadow-popover: 0 12px 32px rgba(92, 72, 40, 0.14);
   --shadow-card:    0 10px 28px rgba(92, 72, 40, 0.07);
@@ -421,9 +418,9 @@ body {
   height: 18px;
   padding: 0 6px;
   border-radius: 999px;
-  background: var(--pip);
-  color: var(--pip-ink);
-  font-size: 10.5px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-size: 11px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -491,7 +488,7 @@ body {
 .instruments-heading {
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--dim);
+  color: var(--muted);
   padding: 6px 8px 2px;
 }
 .instruments-item {
@@ -1096,7 +1093,7 @@ button.tab:focus-visible {
   flex-direction: column;
   height: calc(100dvh - var(--app-chrome-h));
   min-height: 400px;
-  width: min(1220px, 100%);
+  width: min(920px, 100%);
   margin-inline: auto;
 }
 
@@ -1148,7 +1145,8 @@ button.tab:focus-visible {
 .chat-messages {
   flex: 1 1 0;
   overflow-y: auto;
-  padding: 16px 20px 24px;
+  padding: 16px 4px 32px;
+  mask-image: linear-gradient(180deg, #000 calc(100% - 28px), transparent);
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -1234,7 +1232,8 @@ button.tab:focus-visible {
   padding: 0;
 }
 
-.chat-message.command .chat-role {
+.chat-message.command .chat-role,
+.chat-message.assistant .chat-role {
   display: none;
 }
 
@@ -1849,7 +1848,7 @@ button.tab:focus-visible {
   display: flex;
   gap: 6px;
   font-size: 11.5px;
-  color: var(--dim);
+  color: var(--muted);
 }
 
 .chat-sidebar-provider.pill {
@@ -1857,7 +1856,7 @@ button.tab:focus-visible {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--dim);
+  color: var(--muted);
 }
 
 /* Phase 4 W4.5: workflow-linked conversations get their own pill instead of
@@ -1968,7 +1967,7 @@ button.tab:focus-visible {
 .chat-sidebar-group-label {
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--dim);
+  color: var(--muted);
   padding: 10px 10px 4px;
 }
 
@@ -2154,7 +2153,7 @@ button.tab:focus-visible {
    silently fall back to the default color. */
 .markdown-content ol li::marker,
 .markdown-content ul li::marker {
-  color: var(--accent);
+  color: var(--muted);
   font-weight: 600;
 }
 
@@ -9818,7 +9817,7 @@ a.cvb-card-title::after {
 /* Workflow card — catalog grid item. */
 .catalog-grid {
   display: grid; gap: 14px;
-  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
 }
 .workflow-card {
   background: var(--card); border: 1px solid var(--border);
@@ -9832,10 +9831,11 @@ a.cvb-card-title::after {
 }
 .wc-head { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; }
 .wc-icon {
+  --c: var(--accent);
   width: 32px; height: 32px; border-radius: 9px;
   display: flex; align-items: center; justify-content: center;
-  background: var(--pick);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--c) 13%, transparent);
+  color: var(--c);
   font-size: 12px; font-weight: 650; letter-spacing: 0.02em;
   flex-shrink: 0;
 }
@@ -9859,8 +9859,8 @@ a.cvb-card-title::after {
 .wc-section-body {
   color: var(--muted);
   display: -webkit-box;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -9894,15 +9894,15 @@ a.cvb-card-title::after {
 .wc-type-pill.prompt { --c: var(--cyan); }
 .wc-type-pill.approval { --c: var(--magenta); }
 .btn-run {
-  background: var(--pick); color: var(--accent);
-  border: 1px solid transparent; padding: 5px 13px; border-radius: 8px;
+  background: var(--card); color: var(--accent);
+  border: 1px solid var(--pick-line); padding: 5px 13px; border-radius: 8px;
   cursor: pointer; font-size: 12.5px; font-weight: 600;
   display: inline-flex; align-items: center; gap: 5px;
   font-family: inherit; white-space: nowrap; flex: none;
   transition: background-color 120ms ease, color 120ms ease;
 }
 .btn-run:hover,
-.workflow-card:hover .btn-run { background: var(--accent); color: var(--card); }
+.workflow-card:hover .btn-run { background: var(--accent); border-color: var(--accent); color: var(--card); }
 
 /* Empty state — used by catalog and recent-runs panel. Scoped under
    `.page` so it doesn't clobber the global `.empty-state` rule (line
@@ -10608,7 +10608,7 @@ a.cvb-card-title::after {
 .memory-notebook {
   display: block;
   width: 100%;
-  min-height: 420px;
+  min-height: max(360px, calc(100dvh - var(--app-chrome-h) - 190px));
   padding: 18px 20px;
   background: var(--card);
   color: var(--fg);
@@ -10620,26 +10620,28 @@ a.cvb-card-title::after {
   outline: none;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
-.memory-notebook::placeholder { color: var(--dim); }
+.memory-notebook::placeholder { color: var(--muted); opacity: 0.85; }
 .memory-notebook:focus { border-color: var(--pick-line); box-shadow: 0 0 0 3px var(--pick); }
 
 .memory-subtabs {
-  display: flex; gap: 4px;
-  margin-bottom: 14px;
-  border-bottom: 1px solid var(--border-soft);
+  display: inline-flex; gap: 2px; align-self: flex-start;
+  padding: 3px; margin-bottom: 16px;
+  background: var(--bg-soft);
+  box-shadow: inset 0 0 0 1px var(--border-soft);
+  border-radius: 9px;
 }
 .memory-subtab {
   background: transparent; border: none;
-  padding: 8px 2px; margin-right: 18px;
-  color: var(--muted); font-size: 13px; font-weight: 500;
+  padding: 4px 11px; border-radius: 6px;
+  color: var(--muted); font-size: 12.5px; font-weight: 500;
   font-family: inherit; cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  transition: background 120ms ease, color 120ms ease;
 }
 .memory-subtab:hover { color: var(--fg); }
 .memory-subtab.is-active {
   color: var(--fg-strong);
-  border-bottom-color: var(--accent);
+  background: var(--card);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 0 0 1px var(--border-soft);
 }
 
 .memory-filters {
@@ -11264,6 +11266,7 @@ a.cvb-card-title::after {
   margin-top: 16px;
 }
 .usage-mono { font-family: var(--font-mono); }
+.usage-stat-sub .usage-mono { font-family: inherit; font-variant-numeric: tabular-nums; }
 
 .usage-stats {
   display: grid;
@@ -11347,9 +11350,10 @@ a.cvb-card-title::after {
   stroke-width: 1;
 }
 .usage-axis-label {
-  font-size: 10px;
-  fill: var(--dim);
-  font-family: var(--font-mono);
+  font-size: 11px;
+  fill: var(--muted);
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
 }
 .usage-stack-chart {
   position: relative;

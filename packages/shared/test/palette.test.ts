@@ -87,10 +87,9 @@ describe("validateCategoricalPalette", () => {
   });
 
   test("low contrast against the surface warns but does not fail", () => {
-    // Dark identity olive sits at 2.90:1 on the dark card — the accompaniment
-    // rule (name beside the color) is the documented mitigation, so it must
+    // A tone under 3:1 on the card needs a visible label beside it, so it must
     // report as a warn requiring secondary encoding, never a hard fail.
-    const report = validateCategoricalPalette(Object.values(DESIGN_TOKENS.dark.identity), {
+    const report = validateCategoricalPalette(["#4f7df0", "#c27718", "#5a6408"], {
       mode: "dark",
       pairs: "all",
     });
