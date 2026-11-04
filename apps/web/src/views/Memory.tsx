@@ -250,7 +250,7 @@ function NotebookPanel() {
           </button>
           <button
             type="button"
-            className="memory-refresh"
+            className="memory-refresh memory-save"
             disabled={loading || !dirty || saving || tidying}
             onClick={handleSave}
           >

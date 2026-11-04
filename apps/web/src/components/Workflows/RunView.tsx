@@ -53,6 +53,11 @@ export interface RunViewProps {
 // the single-pane modes for focused reading.
 type Layout = "split" | "trace" | "graph";
 
+// Taller graphs get a taller stage; the run body otherwise sizes to the trace.
+function dagStageHeight(nodeCount: number): number {
+  return Math.min(640, Math.max(320, nodeCount * 120 + 80));
+}
+
 export function RunView({
   workflow,
   runId,
@@ -455,7 +460,7 @@ export function RunView({
         <div className="run-body">
           <div className="pane">
             <div className="pane-header">DAG · {workflow.name}</div>
-            <div className="dag-stage">
+            <div className="dag-stage" style={{ minHeight: dagStageHeight(workflow.nodes.length) }}>
               <DagGraph
                 nodes={workflow.nodes}
                 statusByNode={statusByNode}

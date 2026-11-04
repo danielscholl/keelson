@@ -57,7 +57,7 @@ function DagGraphInner({ nodes, statusByNode, durationByNode }: DagGraphProps) {
       panOnScroll
       proOptions={{ hideAttribution: true }}
     >
-      <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--border-soft)" />
+      <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--border)" />
       <Controls showInteractive={false} />
     </ReactFlow>
   );
