@@ -137,6 +137,19 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
   return (
     <>
       <div className="toolbar">
+        <div className="chip-row">
+          <span className="chip-row-label">Type</span>
+          {(["all", "bash", "prompt", "mixed"] as const).map((k) => (
+            <button
+              type="button"
+              key={k}
+              className={`chip${filter === k ? " active" : ""}`}
+              onClick={() => setFilter(k)}
+            >
+              {k}
+            </button>
+          ))}
+        </div>
         <div className="search">
           <span className="search-icon" aria-hidden="true">
             <svg
@@ -159,18 +172,6 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-        </div>
-        <div className="chip-row">
-          {(["all", "bash", "prompt", "mixed"] as const).map((k) => (
-            <button
-              type="button"
-              key={k}
-              className={`chip${filter === k ? " active" : ""}`}
-              onClick={() => setFilter(k)}
-            >
-              {k}
-            </button>
-          ))}
         </div>
       </div>
       {(ribs.list.length > 0 || ribs.hasProject) && (

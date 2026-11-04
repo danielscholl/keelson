@@ -223,7 +223,7 @@ function NotebookPanel() {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
-          margin: "12px 0",
+          margin: "0 0 12px",
         }}
       >
         <span className="page-sub" style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -384,7 +384,7 @@ function LedgerPanel() {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
-          margin: "12px 0",
+          margin: "0 0 12px",
         }}
       >
         <div className="memory-subtabs" role="tablist">

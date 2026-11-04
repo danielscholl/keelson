@@ -270,7 +270,10 @@ function UsageHeader({
           data-streaming={live || undefined}
           title={live ? "Live — pulse streaming" : "Pulse not yet connected"}
           aria-label={live ? "Live, pulse streaming" : "Pulse not connected"}
-        />
+          data-off={live ? undefined : true}
+        >
+          {live ? "Live" : "Offline"}
+        </span>
         <div className="layout-toggle" role="radiogroup" aria-label="Window">
           {WINDOWS.map((w) => (
             <label key={w} className={`layout-toggle-btn${w === range ? " active" : ""}`}>

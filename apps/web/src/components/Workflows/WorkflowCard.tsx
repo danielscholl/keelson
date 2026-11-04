@@ -98,7 +98,7 @@ export function WorkflowCard({ workflow, detail, onRun }: WorkflowCardProps) {
         {parsed.notFor && (
           <div className="wc-section">
             <div className="wc-section-label">Not for</div>
-            <div className="wc-section-body" title={parsed.notFor}>
+            <div className="wc-section-body wc-not-for" title={parsed.notFor}>
               {parsed.notFor}
             </div>
           </div>
