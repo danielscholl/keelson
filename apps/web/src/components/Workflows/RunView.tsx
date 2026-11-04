@@ -55,7 +55,7 @@ type Layout = "split" | "trace" | "graph";
 
 // Taller graphs get a taller stage; the run body otherwise sizes to the trace.
 function dagStageHeight(nodeCount: number): number {
-  return Math.min(640, Math.max(256, nodeCount * 88 + 72));
+  return Math.min(640, Math.max(224, nodeCount * 88 + 48));
 }
 
 export function RunView({

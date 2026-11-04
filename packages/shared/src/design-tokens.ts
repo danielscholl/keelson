@@ -59,8 +59,8 @@ export interface DesignThemeTokens {
 const DARK: DesignThemeTokens = {
   bg: "#0e1220",
   bgSoft: "#121726",
-  card: "#161b2c",
-  card2: "#1d2336",
+  card: "#191f33",
+  card2: "#20273b",
   border: "#2a3046",
   borderSoft: "#20263a",
   fg: "#d8def0",
