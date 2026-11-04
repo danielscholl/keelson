@@ -14,7 +14,7 @@ import {
   usagePulseSnapshotSchema,
 } from "@keelson/shared";
 import type { CSSProperties } from "react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import {
   getUsageBreakdown,
   getUsageEvents,
@@ -24,6 +24,7 @@ import {
   type UsageSeriesBucket,
   type UsageWindow,
 } from "../api.ts";
+import { useMeasuredWidth } from "../hooks/useMeasuredWidth.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { formatProviderModel } from "../lib/formatProvenance.ts";
 import {
@@ -357,7 +358,6 @@ function PulseSection({
           <span className="surface-region-title">Pulse</span>
         </span>
         <span className="surface-region-spacer" />
-        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
         {error ? (
@@ -468,6 +468,7 @@ function PulseSparkline({ pulse }: { pulse: unknown }) {
   const minuteSeries = parsed.success ? parsed.data.minuteSeries : [];
 
   const values = useMemo(() => minuteSeries.map((m) => allTokens(m)), [minuteSeries]);
+  const [svgRef, width] = useMeasuredWidth<SVGSVGElement>(560);
 
   const hasSignal = values.some((v) => v > 0);
   const last = values.at(-1) ?? 0;
@@ -481,7 +482,6 @@ function PulseSparkline({ pulse }: { pulse: unknown }) {
     );
   }
 
-  const width = 560;
   const height = 44;
   const n = values.length;
   const max = Math.max(...values, 1) * 1.15;
@@ -497,6 +497,7 @@ function PulseSparkline({ pulse }: { pulse: unknown }) {
     <div className="usage-pulse-strip">
       <span className="usage-pulse-label">Now · tokens/min</span>
       <svg
+        ref={svgRef}
         className="usage-pulse-svg"
         viewBox={`0 0 ${width} ${height}`}
         role="img"
@@ -659,7 +660,6 @@ function OverTimeSection({ range }: { range: UsageWindow }) {
         </span>
         <span className="surface-region-spacer" />
         <MetricToggle value={metric} onChange={setMetric} />
-        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
         {error ? (
@@ -706,23 +706,7 @@ function StackChart({
 }) {
   const format = formatMetric(metric);
   const measure = metric === "tokens" ? "Tokens" : "Cost";
-  // The viewBox tracks the rendered width so the plot keeps a fixed height and
-  // its labels stay at their CSS size instead of scaling with the window.
-  const chartRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(960);
-  useEffect(() => {
-    const root = chartRef.current;
-    if (!root) return;
-    const measureWidth = () => {
-      const measured = Math.round(root.getBoundingClientRect().width);
-      if (measured > 0) setWidth(measured);
-    };
-    measureWidth();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measureWidth);
-    observer.observe(root);
-    return () => observer.disconnect();
-  }, []);
+  const [chartRef, width] = useMeasuredWidth<HTMLDivElement>(960);
   const height = 300;
   const padL = 46;
   const padR = 8;
@@ -1231,7 +1215,6 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
           <span className="surface-region-title">Model roster</span>
         </span>
         <span className="surface-region-spacer" />
-        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
         {error ? (
@@ -1381,7 +1364,6 @@ function FlowSection({ range }: { range: UsageWindow }) {
         </span>
         <span className="surface-region-spacer" />
         <MetricToggle value={metric} onChange={setMetric} />
-        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
         {error ? (
@@ -1582,7 +1564,6 @@ function JobsSection({ range }: { range: UsageWindow }) {
           <span className="surface-region-title">Jobs</span>
         </span>
         <span className="surface-region-spacer" />
-        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
         {error ? (
@@ -1786,7 +1767,6 @@ function LedgerSection({ range }: { range: UsageWindow }) {
           <span className="surface-region-title">Ledger</span>
         </span>
         <span className="surface-region-spacer" />
-        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
         <fieldset className="usage-ledger-filters">

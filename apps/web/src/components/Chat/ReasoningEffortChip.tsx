@@ -4,7 +4,7 @@
 
 import type { ReasoningEffortLevel } from "@keelson/shared";
 
-import { LightbulbIcon } from "./icons.tsx";
+import { ChevronDownIcon, LightbulbIcon } from "./icons.tsx";
 
 const EFFORT_LABEL: Record<ReasoningEffortLevel, string> = {
   none: "No",
@@ -39,7 +39,7 @@ export function ReasoningEffortChip({ level, popoverId, disabled }: ReasoningEff
       <LightbulbIcon />
       <span className="chat-reasoning-effort-chip-label">{label}</span>
       <span className="chat-reasoning-effort-chip-caret" aria-hidden="true">
-        ▾
+        <ChevronDownIcon />
       </span>
     </button>
   );

@@ -523,7 +523,9 @@ function SurfaceRegion({
             data-streaming={streaming || undefined}
             title={streaming ? "Live — streaming now" : "Live region"}
             aria-label={streaming ? "Live, streaming now" : "Live region, idle"}
-          />
+          >
+            Live
+          </span>
         )}
         {freshness.label && (
           <span

@@ -2307,7 +2307,12 @@ export function Chat({
                   </div>
                 )}
                 {!hydrating && visibleMessages.length === 0 && (
-                  <div className="empty-state">Send a message to start a conversation.</div>
+                  <div className="empty-state chat-empty">
+                    <div className="chat-empty-title">Start a conversation</div>
+                    <div className="chat-empty-sub">
+                      Ask about this project, or type / for commands and workflows.
+                    </div>
+                  </div>
                 )}
                 {visibleMessages.map((m) => {
                   const canvasResult =

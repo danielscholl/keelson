@@ -2,6 +2,8 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { ChevronDownIcon } from "./icons.tsx";
+
 interface ModelChipProps {
   // Display label for the active provider (e.g., "GitHub Copilot",
   // "Claude"). Drives the chip's prefix so the chip is self-descriptive
@@ -45,7 +47,7 @@ export function ModelChip({
       </span>
       <span className="chat-model-chip-name">{display}</span>
       <span className="chat-model-chip-caret" aria-hidden="true">
-        ▾
+        <ChevronDownIcon />
       </span>
     </button>
   );

@@ -299,6 +299,7 @@ function InstrumentsPopover({
             <span className="instruments-theme-label">Palette</span>
             <PalettePicker value={palettePreference} onChange={onPaletteChange} />
           </div>
+          <div className="instruments-sep" />
           <div className="instruments-heading">Panel controls</div>
           {REGION_ACTIONS.map((item) => {
             const shown = !isRegionActionHidden(item.value);
