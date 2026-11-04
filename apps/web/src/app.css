@@ -581,8 +581,10 @@ body {
 .theme-picker {
   display: inline-flex;
   gap: 2px;
+  box-sizing: border-box;
+  height: 32px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 9px;
   padding: 2px;
   background: var(--bg-soft);
   margin-left: 12px;
@@ -592,7 +594,7 @@ body {
   align-items: center;
   justify-content: center;
   width: 28px;
-  height: 24px;
+  height: 26px;
   background: transparent;
   border: 0;
   border-radius: 6px;
@@ -1158,7 +1160,6 @@ button.tab:focus-visible {
   overflow-y: auto;
   padding: 20px 17px 28px;
   scroll-padding-bottom: 28px;
-  mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 20px), transparent 100%);
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -1746,6 +1747,15 @@ button.tab:focus-visible {
   animation: tool-call-pulse 1.2s ease-in-out infinite;
 }
 
+.chat-messages[data-fade-top] {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 10px);
+}
+.chat-messages[data-fade-bottom] {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent 100%);
+}
+.chat-messages[data-fade-top][data-fade-bottom] {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 16px), transparent 100%);
+}
 /* The scroll sentinel is the last child; it shouldn't add a full message gap. */
 .chat-messages > div:last-child:empty { margin-top: -28px; }
 .chat-messages > .chat-empty {

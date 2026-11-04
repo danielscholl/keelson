@@ -53,9 +53,9 @@ export interface RunViewProps {
 // the single-pane modes for focused reading.
 type Layout = "split" | "trace" | "graph";
 
-// Taller graphs get a taller stage; the run body otherwise sizes to the trace.
+// Sized for a straight chain at 1x zoom (dagre slot height plus rank gap, plus fit padding).
 function dagStageHeight(nodeCount: number): number {
-  return Math.min(640, Math.max(224, nodeCount * 88 + 48));
+  return Math.min(640, Math.max(240, Math.round((nodeCount * 124 - 44) * 1.3)));
 }
 
 export function RunView({

@@ -613,6 +613,14 @@ export function Chat({
   // forward-declaring abortActiveStream (which depends on later state).
   const abortActiveStreamRef = useRef<(() => void) | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  // Edge fades only show where there is more transcript beyond that edge.
+  const updateEdgeFade = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    el.toggleAttribute("data-fade-top", el.scrollTop > 2);
+    el.toggleAttribute("data-fade-bottom", el.scrollTop + el.clientHeight < el.scrollHeight - 2);
+  }, []);
+  useEffect(() => updateEdgeFade(scrollerRef.current));
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Don't pin a default here; hydration may have already pinned the stored
@@ -2292,7 +2300,11 @@ export function Chat({
           {providerError && <span className="chat-error">{providerError}</span>}
         </div>
 
-        <div className="chat-messages">
+        <div
+          className="chat-messages"
+          ref={scrollerRef}
+          onScroll={(e) => updateEdgeFade(e.currentTarget)}
+        >
           {/* Skeleton + empty state key off VISIBLE message count. A lane-
               seeded chat that lost its assistant turn (auth failure, abort)
               persists only the hidden kickoff; without this, the pane would

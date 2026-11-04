@@ -50,7 +50,7 @@ function DagGraphInner({ nodes, statusByNode, durationByNode }: DagGraphProps) {
       edges={decorated}
       nodeTypes={nodeTypes}
       fitView
-      fitViewOptions={{ padding: 0.2, includeHiddenNodes: false, maxZoom: 1 }}
+      fitViewOptions={{ padding: 0.15, includeHiddenNodes: false, maxZoom: 1 }}
       nodesDraggable={false}
       nodesConnectable={false}
       elementsSelectable={false}

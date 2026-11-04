@@ -49,7 +49,7 @@ export function layoutWithDagre(
   try {
     const g = new dagre.graphlib.Graph();
     g.setDefaultEdgeLabel(() => ({}));
-    g.setGraph({ rankdir: "TB", ranksep: 80, nodesep: 40 });
+    g.setGraph({ rankdir: "TB", ranksep: 44, nodesep: 40 });
 
     for (const node of nodes) {
       g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
