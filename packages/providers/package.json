@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@github/copilot": "1.0.103",
+    "@github/copilot": "1.0.105",
     "@github/copilot-sdk": "1.0.26",
     "@keelson/shared": "workspace:*",
     "zod": "^4.4.3"
